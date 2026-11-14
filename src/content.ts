@@ -148,12 +148,17 @@ export interface Tech {
   auto?: string;
   /** Hidden and not researchable until the demo has ended (first Lens). */
   needsEnd?: boolean;
+  /**
+   * Hidden and not researchable until demand has shown itself: something has sold over its demand
+   * (g.seenSurplus), or the save already owns Market Lens from before that rule (demandShown in src/economy.ts).
+   */
+  needsSurplus?: boolean;
 }
 
 const T = (
   id: string, name: string, branch: Branch, col: number, row: number,
   cost: Partial<Record<DataTier, number>>, requires: string[], desc: string, unlocks: string[],
-  extra: Pick<Tech, 'auto' | 'needsEnd'> = {},
+  extra: Pick<Tech, 'auto' | 'needsEnd' | 'needsSurplus'> = {},
 ): Tech => ({ id, name, branch, col, row, cost, requires, desc, unlocks, ...extra });
 
 /**
@@ -172,9 +177,14 @@ const T = (
  *    the first Glyph, and at 200 α it cost a fast player most of a minute there.
  *  - Anything that only matters after the demo costs γ, which does not exist before the first Lens, and the
  *    late Processing techs need all three kinds of Data, so studying Tier 1 items never stops paying.
- * P1, R1, L1, C1 and S1 are goal rewards (src/goals.ts) and cannot be bought. S1 (Bulk Upgrade) comes with
+ * P1, R1, L1 and S1 are goal rewards (src/goals.ts) and cannot be bought. S1 (Bulk Upgrade) comes with
  * "Fill three orders", just before the save for the Fabricator, so nobody has to press Upgrade a hundred
  * times on a phone; upgrades are not balanced around dozens of tiny purchases.
+ *
+ * The Commerce branch is about demand, and demand stays out of sight until it bites: selling over demand
+ * did not happen before the first Lens in 60 scripted runs, so a price gauge handed out at minute 7 was a
+ * reward for nothing. C1 (Market Lens) cannot be bought either: the game grants it the first time something
+ * sells over its demand (g.seenSurplus, src/sim.ts), and until then the whole branch is hidden (`needsSurplus`).
  */
 export const TECHS: Record<string, Tech> = Object.fromEntries([
   // Processing
@@ -199,10 +209,10 @@ export const TECHS: Record<string, Tech> = Object.fromEntries([
   T('L2', 'Merger', 'logistics', 2, 2, { a: 40 }, ['L1'], 'A junction node that gathers many wires into one tidy stream.', ['Merger node']),
   T('L5', 'Silo', 'logistics', 3, 2, { b: 15 }, ['L2'], 'A large buffer that keeps machines fed through uneven supply.', ['Silo node']),
   // Commerce
-  T('C1', 'Market Lens', 'commerce', 1, 0, {}, ['R1'], 'See live prices and how much of each material your Markets buy at full price.', ['Price gauges on Markets'], { auto: 'Reward for the goal “Fill your first order”' }),
-  T('C2', 'Wider Demand', 'commerce', 2, 0, { b: 40 }, ['C1'], 'Markets buy 50% more of everything at full price.', ['+50% demand, all materials']),
-  T('C4', 'Luxury Buyers', 'commerce', 3, 0, { b: 300 }, ['C2'], 'Tier 2 and Tier 3 items sell for 25% more.', ['+25% value on T2 and T3']),
-  T('C5', 'Exports', 'commerce', 4, 0, { g: 80 }, ['C4'], 'Markets buy twice as much of everything at full price.', ['+100% demand, all materials']),
+  T('C1', 'Market Lens', 'commerce', 1, 0, {}, ['R1'], 'See live prices and how much of each material your Markets buy at full price.', ['Price gauges on Markets'], { auto: 'Yours the first time something sells over its demand', needsSurplus: true }),
+  T('C2', 'Wider Demand', 'commerce', 2, 0, { b: 40 }, ['C1'], 'Markets buy 50% more of everything at full price.', ['+50% demand, all materials'], { needsSurplus: true }),
+  T('C4', 'Luxury Buyers', 'commerce', 3, 0, { b: 300 }, ['C2'], 'Tier 2 and Tier 3 items sell for 25% more.', ['+25% value on T2 and T3'], { needsSurplus: true }),
+  T('C5', 'Exports', 'commerce', 4, 0, { g: 80 }, ['C4'], 'Markets buy twice as much of everything at full price.', ['+100% demand, all materials'], { needsSurplus: true }),
   // Research
   T('R1', 'Lab', 'research', 0, 0, {}, [], 'Send items to a Lab instead of a Market to earn Data, the currency of this tree.', ['Lab node', 'Tech tree'], { auto: 'Reward for the goal “Sell your first Shard”' }),
   T('R2', 'Lab Speed', 'research', 1, 0, { a: 50 }, ['R1'], 'Labs study items twice as fast.', ['Labs 2× speed']),
@@ -302,7 +312,8 @@ export const RULES = {
     minBurst: 1,
     /**
      * The first time a material keeps selling over its demand for `seconds` (surplus sales no more than `gap`
-     * apart), g.seenSurplus is set and a 'surplus' event raised: the interface introduces the demand gauge then.
+     * apart), g.seenSurplus is set, Market Lens is granted and a 'surplus' event raised: the interface
+     * introduces the demand gauge then, and the Commerce branch appears in the tech tree.
      * The gap is longer than the slowest craft (a Paradox takes 12 s): a machine hands over whole items, so a
      * line that is over demand makes one surplus sale per craft, seconds apart, for as long as it runs.
      */

@@ -5,9 +5,11 @@
 // reward (event 'goal-claimed'), moves on, and checks the next goal at once, so a goal the player has
 // already met is ready the moment it is reached. Rewards are not undoable.
 //
-// Reward sizes are in the GOALS table below, tuned with `npm run pacing`. Five techs are goal rewards and
-// cannot be bought: Refining, Lab, Routing, Market Lens and Bulk Upgrade. Through "Build a Lab and feed it"
-// the credits paid so far always cover the next purchase the card asks for (tests/playthrough.test.ts).
+// Reward sizes are in the GOALS table below, tuned with `npm run pacing`. Four techs are goal rewards and
+// cannot be bought: Refining, Lab, Routing and Bulk Upgrade. (Market Lens used to come with the first order;
+// it now arrives by itself the first time something sells over its demand, see noteSurplus in src/sim.ts.)
+// Through "Build a Lab and feed it" the credits paid so far always cover the next purchase the card asks for
+// (tests/playthrough.test.ts).
 //
 // The hints are what a newcomer does, to the letter. So every card that has the player make something new
 // also says to sell it (Ink, Spark, Glyph, Mist, Prism): a player who is never told leaves their dearest
@@ -255,7 +257,9 @@ export const GOALS: Goal[] = [
     ),
     done: (g) => g.stats.ordersFilled >= 1,
     progress: (g) => (g.order ? [Math.floor(g.order.got + 1e-9), g.order.need, MATERIALS[g.order.mat].name] : null),
-    reward: { techs: ['L1', 'C1'] },
+    // Routing, and credits for what the next two cards ask the player to buy with it: a Router and the board's
+    // first expansion. (It used to pay Market Lens: price gauges for a rule that does not bite before the Lens.)
+    reward: { credits: 200, techs: ['L1'] },
   },
   {
     id: 'route-lab', title: 'Route more to a Lab than to the Market',

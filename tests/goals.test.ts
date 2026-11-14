@@ -64,7 +64,7 @@ describe('goal chain: the table (2.4)', () => {
     expect(reward('upgrade-well')).toEqual({ credits: 50 });
     expect(reward('feed-lab')).toEqual({ a: 15 });
     expect(reward('make-spark')).toEqual({ a: 25, unlock: 'orders' });
-    expect(reward('first-order')).toEqual({ techs: ['L1', 'C1'] });
+    expect(reward('first-order')).toEqual({ credits: 200, techs: ['L1'] });
     expect(reward('make-glyph')).toEqual({ credits: 150, unlock: 'flow' });
     expect(reward('hold-flow')).toEqual({ credits: 150 });
     expect(reward('make-prism')).toEqual({ credits: 600, b: 40 });
@@ -80,14 +80,15 @@ describe('goal chain: the table (2.4)', () => {
     expect(GOALS.filter((x) => x.big).map((x) => x.id)).toEqual(['sell-shard', 'feed-lab', 'make-glyph', 'make-lens']);
   });
 
-  it('is the only way to get Refining, Lab, Routing, Market Lens and Bulk Upgrade', () => {
+  it('is the only way to get Refining, Lab, Routing and Bulk Upgrade', () => {
     const granted = GOALS.flatMap((x) => x.reward.techs ?? []).sort();
-    expect(granted).toEqual(['C1', 'L1', 'P1', 'R1', 'S1']);
+    expect(granted).toEqual(['L1', 'P1', 'R1', 'S1']);
+    // The one other tech that cannot be bought is Market Lens: it comes with the first sale over demand (tests/rules.test.ts).
     const auto = Object.values(TECHS).filter((t) => t.auto).map((t) => t.id).sort();
-    expect(auto).toEqual(granted);
+    expect(auto).toEqual(['C1', ...granted]);
     const g = fresh();
     g.data = { a: 1e6, b: 1e6, g: 1e6 };
-    for (const id of granted) expect(research(g, id)).toBe(false);
+    for (const id of auto) expect(research(g, id)).toBe(false);
     // The tech tree says which goal grants each of them.
     for (const goal of GOALS) for (const id of goal.reward.techs ?? []) expect(TECHS[id].auto).toContain(goal.title);
   });

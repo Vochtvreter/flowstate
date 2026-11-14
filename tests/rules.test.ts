@@ -2,9 +2,10 @@ import { describe, expect, it } from 'vitest';
 import { connect, cutWire, deleteNode, expandBoard, placeNode, setMode, setRecipe, upgrade, upgradeWire } from '../src/actions';
 import { MATERIALS, MAT_IDS, MatId, NODE_DEFS, NodeType, PIPES, RECIPES, RULES, TECHS } from '../src/content';
 import {
-  cycleTime, dataYield, demandBurst, demandInfo, expansionCost, flowMult, nodeCostAt, price, research, saturation, sellValue, techAvailable,
-  upgradeCostAt, wellRate,
+  cycleTime, dataYield, demandBurst, demandInfo, demandShown, expansionCost, flowMult, nodeCostAt, price, research, saturation, sellValue,
+  techAvailable, techHidden, upgradeCostAt, wellRate,
 } from '../src/economy';
+import { GOALS } from '../src/goals';
 import { countsForFlow, flowInfo, flowProducers, inFlowState, isFlowing, worstProducer } from '../src/flow';
 import { tick } from '../src/sim';
 import { Game, START, deserialize, newGame, serialize } from '../src/state';
@@ -530,14 +531,20 @@ describe('demand with two prices (2.2)', () => {
     run(g, 8);
     expect(g.seenSurplus).toBe(false);
     expect(take(g, 'surplus').length).toBe(0);
+    expect(g.techs).not.toContain('C1');
+    g.events = [];
     run(g, 20);
     expect(g.seenSurplus).toBe(true);
+    // Market Lens arrives with it, announced just before: the gauges exist by the time the notice is read.
+    expect(g.techs).toContain('C1');
+    expect(g.events.filter((e) => e.kind === 'tech' || e.kind === 'surplus').map((e) => (e.kind === 'tech' ? e.id : e.kind))).toEqual(['C1', 'surplus']);
     const events = take(g, 'surplus');
     expect(events.length).toBe(1);
     expect(events[0].mat).toBe('glint');
     expect(events[0].text).toBe('Glint is selling faster than Markets want it: the extra goes for 25% of the price.');
     run(g, 60);
     expect(take(g, 'surplus').length).toBe(0); // one-off
+    expect(g.techs.filter((id) => id === 'C1')).toEqual(['C1']);
     // The flag is saved, so a reload does not announce it again.
     const copy = deserialize(serialize(g))!;
     expect(copy.seenSurplus).toBe(true);
@@ -609,6 +616,66 @@ describe('demand with two prices (2.2)', () => {
     const g = fresh();
     g.techs.push('C2');
     expect(demandInfo(g, 'glint').demand).toBe(3);
+  });
+
+  it('demand stays hidden until it bites: no Market Lens from a goal, and no Commerce branch before the first surplus', () => {
+    const commerce = ['C1', 'C2', 'C4', 'C5'];
+    expect(Object.values(TECHS).filter((t) => t.branch === 'commerce').map((t) => t.id).sort()).toEqual(commerce);
+    expect(commerce.every((id) => TECHS[id].needsSurplus)).toBe(true);
+    // Market Lens is never bought and never paid by a goal.
+    expect(TECHS.C1.auto).toBeTruthy();
+    expect(GOALS.some((x) => x.reward.techs?.includes('C1'))).toBe(false);
+    const g = rich();
+    g.data = { a: 1e6, b: 1e6, g: 1e6 };
+    for (const id of commerce) {
+      expect(techHidden(g, TECHS[id]), id).toBe(true);
+      expect(techAvailable(g, TECHS[id]), id).toBe(false);
+      expect(research(g, id), id).toBe(false);
+    }
+    expect(demandShown(g)).toBe(false);
+    // The first sale over demand: Market Lens is granted, and Wider Demand can be researched.
+    connect(g, well(g).id, 0, market(g).id);
+    for (let i = 0; i < 6; i++) upgrade(g, well(g).id, 'speed');
+    run(g, 40);
+    expect(g.seenSurplus).toBe(true);
+    expect(demandShown(g)).toBe(true);
+    expect(g.techs).toContain('C1');
+    for (const id of commerce) expect(techHidden(g, TECHS[id]), id).toBe(false);
+    expect(techAvailable(g, TECHS.C1)).toBe(false); // owned
+    expect(techAvailable(g, TECHS.C2)).toBe(true);
+    expect(techAvailable(g, TECHS.C4)).toBe(false); // behind Wider Demand, as before
+    expect(research(g, 'C2')).toBe(true);
+    expect(research(g, 'C4')).toBe(true);
+    // Saved and loaded, it stays that way.
+    const copy = deserialize(serialize(g))!;
+    expect(copy.techs).toContain('C1');
+    expect(techHidden(copy, TECHS.C5)).toBe(false);
+  });
+
+  it('a save that already owns Market Lens or Wider Demand keeps them, and keeps the branch in view', () => {
+    // Before this rule "Fill your first order" paid Market Lens, with no surplus ever seen.
+    const old = JSON.parse(serialize(fresh()));
+    old.techs = ['P1', 'R1', 'L1', 'C1'];
+    old.seenSurplus = false;
+    const g = deserialize(JSON.stringify(old))!;
+    g.data = { a: 1e6, b: 1e6, g: 1e6 };
+    run(g, 1);
+    expect(g.techs).toContain('C1');
+    expect(g.seenSurplus).toBe(false);
+    for (const id of ['C1', 'C2', 'C4', 'C5']) expect(techHidden(g, TECHS[id]), id).toBe(false);
+    expect(research(g, 'C2')).toBe(true);
+    const again = deserialize(serialize(g))!;
+    expect(again.techs).toContain('C2');
+    expect(demandInfo(again, 'glint').demand).toBe(3);
+    expect(techAvailable(again, TECHS.C4)).toBe(true);
+    // A save that had seen a surplus before Market Lens came with it is given Market Lens on load.
+    const seen = JSON.parse(serialize(fresh()));
+    seen.techs = ['P1', 'R1'];
+    seen.seenSurplus = true;
+    const h = deserialize(JSON.stringify(seen))!;
+    expect(h.techs).toEqual(['P1', 'R1', 'C1']);
+    run(h, 1);
+    expect(take(h, 'surplus')).toEqual([]);
   });
 });
 

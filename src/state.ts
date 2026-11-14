@@ -156,7 +156,8 @@ export type GameEvent =
   | { kind: 'demo-end'; text: string }
   /**
    * A material has been selling over its demand for a few seconds, for the first time in this save
-   * (g.seenSurplus): the moment to introduce the demand gauge. Raised once per save.
+   * (g.seenSurplus): the moment to introduce the demand gauge. Raised once per save, right after the 'tech'
+   * event that grants Market Lens (C1).
    */
   | { kind: 'surplus'; mat: MatId; text: string };
 
@@ -204,7 +205,7 @@ export interface Game {
   orderSeed: number;
   /** The first Lens has been made. Set once. */
   ended: boolean;
-  /** Something has sold over its demand for a few seconds (RULES.demand.notice). Set once, with a 'surplus' event. */
+  /** Something has sold over its demand for a few seconds (RULES.demand.notice). Set once, with Market Lens and a 'surplus' event. */
   seenSurplus: boolean;
   stats: Stats;
   // --- not saved ---
@@ -401,6 +402,8 @@ export function deserialize(json: string): Game | null {
     // A save from before the `ended` flag that already has a Lens is past the demo.
     g.ended = typeof raw.ended === 'boolean' ? raw.ended : !!g.made[RULES.capstone];
     g.seenSurplus = !!raw.seenSurplus;
+    // Market Lens comes with the first sale over demand (src/sim.ts). A save that saw one before that rule gets it now.
+    if (g.seenSurplus && !g.techs.includes('C1')) g.techs.push('C1');
     // The build before this one let the last Well be deleted. A board with no Well and no money for one is stuck: pay for one.
     if (!g.nodes.some((n) => n.type === 'well')) g.credits = Math.max(g.credits, NODE_DEFS.well.base);
     return g;

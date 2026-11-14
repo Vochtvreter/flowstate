@@ -162,7 +162,7 @@ describe('scripted playthrough', () => {
 
 const on = (run: CardRun, id: string) => run.spent.find((x) => x.id === id)!;
 const lens = (r: CardRun) => r.g.stats.firstLensAt!;
-const SPINE = ['C1', 'L1', 'P1', 'P2', 'P3', 'P4', 'P5', 'P7', 'R1', 'S1']; // what the goal chain grants or asks for
+const SPINE = ['L1', 'P1', 'P2', 'P3', 'P4', 'P5', 'P7', 'R1', 'S1']; // what the goal chain grants or asks for
 
 // Without tips a wait can last twenty minutes: the prices are set for a player who follows them. (One run,
 // shared by both groups of tests: it is an hour of game time.)

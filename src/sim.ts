@@ -1,7 +1,8 @@
 // Deterministic, DOM-free simulation. tick(game, dt) advances everything.
 import { DataTier, MATERIALS, MatId, RULES, Recipe } from './content';
 import {
-  bufMult, cycleTime, dataYield, demandBurst, effEvery, endDemo, labRate, offlineCap, pipeCap, recipeOf, refillDemand, research, sellValue, wellRate,
+  bufMult, cycleTime, dataYield, demandBurst, effEvery, endDemo, grantTech, labRate, offlineCap, pipeCap, recipeOf, refillDemand, research,
+  sellValue, wellRate,
 } from './economy';
 import { updateFlow } from './flow';
 import { tickGoal } from './goals';
@@ -193,7 +194,8 @@ const surplusRuns = new WeakMap<Game, Map<MatId, { since: number; last: number }
 
 /**
  * Called with every sale that went (partly) over demand. The first material to keep that up for a few
- * seconds sets g.seenSurplus and raises the one-off 'surplus' event (RULES.demand.notice).
+ * seconds sets g.seenSurplus, grants Market Lens (a 'tech' event) and raises the one-off 'surplus' event
+ * (RULES.demand.notice).
  */
 function noteSurplus(g: Game, m: MatId) {
   if (g.seenSurplus) return;
@@ -209,6 +211,8 @@ function noteSurplus(g: Game, m: MatId) {
   if (g.time - run.since < N.seconds) return;
   g.seenSurplus = true;
   surplusRuns.delete(g);
+  // Demand has shown itself: Market Lens (the price gauges) arrives with it, and the Commerce branch appears.
+  grantTech(g, 'C1');
   const share = Math.round(RULES.demand.surplusShare * 100);
   g.events.push({
     kind: 'surplus', mat: m,

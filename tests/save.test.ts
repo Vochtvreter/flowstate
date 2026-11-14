@@ -501,7 +501,7 @@ describe('damaged and old saves cannot poison the game', () => {
     expect(g.flowOn).toBe(true);
     expect(g.ordersOn).toBe(true);
     expect(g.order).not.toBeNull();
-    expect([...g.techs].sort()).toEqual(['C1', 'L1', 'P1', 'R1']);
+    expect([...g.techs].sort()).toEqual(['L1', 'P1', 'R1']); // Market Lens is no longer a goal's to give
     expect(g.ended).toBe(false); // nothing beyond the goals already claimed
     expect(g.credits).toBeCloseTo(321.5, 0); // and no reward is paid again
     expect(g.stats.fromGoals).toBe(0);

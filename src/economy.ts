@@ -175,8 +175,17 @@ export const offlineCap = (g: Game) => (has(g, 'R4') ? RULES.away.capHoursLong :
 
 // ---------- tech ----------
 
-/** Not shown in the tree yet: Long Absence stays hidden until the demo has ended. */
-export const techHidden = (g: Game, t: Tech) => !!t.needsEnd && !g.ended;
+/**
+ * Demand has shown itself: something has sold over its demand, which is when Market Lens is granted. A save
+ * from before that rule that was given Market Lens by a goal (or went on to buy Wider Demand) counts too:
+ * nothing a player has seen in the tree is taken away again.
+ */
+export const demandShown = (g: Game) => g.seenSurplus || g.techs.includes('C1') || g.techs.includes('C2');
+/**
+ * Not shown in the tree yet: Long Absence stays hidden until the demo has ended, and the Commerce branch
+ * (Market Lens, Wider Demand and what hangs on it) until demand has shown itself.
+ */
+export const techHidden = (g: Game, t: Tech) => (!!t.needsEnd && !g.ended) || (!!t.needsSurplus && !demandShown(g));
 /** Can be researched now if affordable. Goal-granted techs (`auto`) are never purchasable. */
 export const techAvailable = (g: Game, t: Tech) =>
   !g.techs.includes(t.id) && !t.auto && !techHidden(g, t) && t.requires.every((r) => g.techs.includes(r));
