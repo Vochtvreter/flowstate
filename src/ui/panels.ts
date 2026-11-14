@@ -179,9 +179,10 @@ let creditsNum: HTMLElement;
 const ROLL = 0.3;
 let shownCredits = NaN;
 let shownInt = NaN;
-let rollFrom = 0;
-let rollTo = NaN;
+/** How far the shown number was from the real one when the roll began. */
+let rollGap = 0;
 let rollT = ROLL;
+let lastCredits = NaN;
 let sinceWrite = 0;
 let rolledGame: Game | null = null;
 
@@ -195,7 +196,9 @@ function creditsItem(): TopItem {
 
 /**
  * Roll the credits number to its real value over ROLL seconds (ease-out). Call every frame.
- * Changes of a credit or two are shown at once, so slow early income still ticks on the beat.
+ * A roll starts when the real value jumps (a purchase, a refund, a reward). Income that trickles in
+ * is added as it comes, during a roll too, so a roll always takes ROLL seconds and lands exactly,
+ * however fast the factory is earning.
  * The text is written at most ~20 times a second during a roll and ~10 times a second while it
  * simply ticks up with income: each write costs the browser a full rendering pass, and the eye
  * cannot tell the difference.
@@ -206,25 +209,23 @@ export function tickPanels(dt: number) {
   if (g !== rolledGame || !isFinite(shownCredits)) {
     // First frame, or a different game (reset): no roll.
     rolledGame = g;
-    shownCredits = rollTo = target;
+    shownCredits = lastCredits = target;
     rollT = ROLL;
     sinceWrite = 1;
-  } else if (target !== rollTo) {
-    if (Math.abs(target - shownCredits) < 2) {
-      shownCredits = target;
-      rollT = ROLL;
-    } else {
-      rollFrom = shownCredits;
-      rollT = 0;
-    }
-    rollTo = target;
+  }
+  const moved = Math.abs(target - lastCredits);
+  lastCredits = target;
+  // A jump is anything clearly bigger than a moment's income (and never just a credit or two).
+  if (moved >= Math.max(2, g.creditRate * 0.25)) {
+    rollGap = shownCredits - target;
+    rollT = 0;
   }
   const rolling = rollT < ROLL;
   if (rolling) {
     rollT = Math.min(ROLL, rollT + dt);
     const left = 1 - rollT / ROLL;
-    shownCredits = rollTo + (rollFrom - rollTo) * left * left * left;
-  }
+    shownCredits = target + rollGap * left * left * left;
+  } else shownCredits = target;
   const landed = rolling && rollT >= ROLL; // the exact value is always shown the moment a roll ends
   sinceWrite += dt;
   const whole = Math.floor(shownCredits);
