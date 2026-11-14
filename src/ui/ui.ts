@@ -59,21 +59,32 @@ export function toast(html: string, kind: 'info' | 'good' | 'bad' = 'info', ms =
   }, ms);
 }
 
+/**
+ * Call `fn` when something inside `root` is pressed.
+ * A mouse acts on pointerdown, so nothing that happens between press and release can swallow it.
+ * Touch and pen act on click, so a finger that lands on a button while scrolling does not fire it.
+ * Keyboard activation (and script-made clicks) arrive as a click with detail 0.
+ */
+export function onPress(root: HTMLElement, fn: (ev: Event) => void) {
+  let lastType = '';
+  root.addEventListener('pointerdown', (ev) => {
+    lastType = ev.pointerType;
+    if (ev.pointerType === 'touch' || ev.pointerType === 'pen') return;
+    if (ev.button === 0) fn(ev);
+  });
+  root.addEventListener('click', (ev) => {
+    const pe = ev as PointerEvent;
+    const type = pe.pointerType || (pe.detail === 0 ? '' : lastType);
+    if (pe.detail === 0 || type === 'touch' || type === 'pen') fn(ev);
+  });
+}
+
 /** One delegated handler per container: data-act="name:arg1:arg2" on any element. */
 export function delegate(root: HTMLElement, handler: (act: string, args: string[], el: HTMLElement, ev: Event) => void) {
-  const run = (ev: Event) => {
+  onPress(root, (ev) => {
     const el = (ev.target as HTMLElement).closest<HTMLElement>('[data-act]');
     if (!el || !root.contains(el) || (el as HTMLButtonElement).disabled) return;
     const [act, ...args] = el.dataset.act!.split(':');
     handler(act, args, el, ev);
-  };
-  // pointerdown so a re-render between press and release cannot swallow the click
-  root.addEventListener('pointerdown', (ev) => {
-    if (ev.button !== 0) return;
-    run(ev);
-  });
-  // keyboard activation arrives as a click with detail 0
-  root.addEventListener('click', (ev) => {
-    if ((ev as MouseEvent).detail === 0) run(ev);
   });
 }
