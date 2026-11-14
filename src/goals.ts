@@ -5,7 +5,8 @@
 // reward (event 'goal-claimed'), moves on, and checks the next goal at once, so a goal the player has
 // already met is ready the moment it is reached. Rewards are not undoable.
 //
-// Reward sizes are in the GOALS table below, tuned with `npm run pacing`. Through "Build a Lab and feed it"
+// Reward sizes are in the GOALS table below, tuned with `npm run pacing`. Five techs are goal rewards and
+// cannot be bought: Refining, Lab, Routing, Market Lens and Bulk Upgrade. Through "Build a Lab and feed it"
 // the credits paid so far always cover the next purchase the card asks for (tests/playthrough.test.ts).
 import { MATERIALS, MatId, NodeType, RULES, TECHS } from './content';
 import { endDemo, expansionCost, grantTech, has, nodeCost, nodeCount, upgradeCost } from './economy';
@@ -298,7 +299,8 @@ export const GOALS: Goal[] = [
     hint: hint('Keep an eye on the order card: send what it asks for to a Market, then claim it.'),
     done: (g) => g.stats.ordersFilled >= 3,
     progress: (g) => [Math.min(g.stats.ordersFilled, 3), 3, 'orders'],
-    reward: { credits: 1200, b: 60 },
+    // Bulk Upgrade arrives here, just before the long save for the Fabricator.
+    reward: { credits: 1200, b: 60, techs: ['S1'] },
   },
   {
     id: 'build-fabricator', title: 'Build a Fabricator',

@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { claimGoal, connect, cutWire, expandBoard, placeNode, setMode, setWeight, upgrade } from '../src/actions';
+import { claimGoal, connect, cutWire, expandBoard, placeNode, setMode, setWeight, undo, upgrade, upgradeAll } from '../src/actions';
 import { TECHS } from '../src/content';
 import { has, nodeCost, research } from '../src/economy';
 import { GOALS, MAIN_GOALS, activeGoal, goalById, goalView, rewardText, routerFavoursLab } from '../src/goals';
@@ -68,20 +68,21 @@ describe('goal chain: the table (2.4)', () => {
     expect(reward('make-glyph')).toEqual({ credits: 300, unlock: 'flow' });
     expect(reward('hold-flow')).toEqual({ credits: 300 });
     expect(reward('make-prism')).toEqual({ credits: 600, b: 40 });
-    expect(reward('three-orders')).toEqual({ credits: 1200, b: 60 });
+    expect(reward('three-orders')).toEqual({ credits: 1200, b: 60, techs: ['S1'] });
     expect(reward('build-fabricator')).toEqual({ b: 40 });
     expect(reward('make-lens')).toEqual({ unlock: 'end' });
     expect(rewardText(reward('wire-all-wells'))).toBe('Refining + 50¢');
     expect(rewardText(reward('make-spark'))).toBe('Orders + 25α');
+    expect(rewardText(reward('three-orders'))).toBe('Bulk Upgrade + 1200¢ + 60β');
   });
 
   it('flags four goals as big celebrations (the fifth is the first Flow State)', () => {
     expect(GOALS.filter((x) => x.big).map((x) => x.id)).toEqual(['sell-shard', 'feed-lab', 'make-glyph', 'make-lens']);
   });
 
-  it('is the only way to get Refining, Lab, Routing and Market Lens', () => {
+  it('is the only way to get Refining, Lab, Routing, Market Lens and Bulk Upgrade', () => {
     const granted = GOALS.flatMap((x) => x.reward.techs ?? []).sort();
-    expect(granted).toEqual(['C1', 'L1', 'P1', 'R1']);
+    expect(granted).toEqual(['C1', 'L1', 'P1', 'R1', 'S1']);
     const auto = Object.values(TECHS).filter((t) => t.auto).map((t) => t.id).sort();
     expect(auto).toEqual(granted);
     const g = fresh();
@@ -169,6 +170,37 @@ describe('goal chain: ready, claim, skip ahead', () => {
     expect(ev.big).toBe(true);
     expect(ev.reward.techs).toEqual(['R1']);
     expect(has(g, 'R1')).toBe(true);
+  });
+
+  it('hands over Bulk Upgrade with "Fill three orders", before the Fabricator has to be saved for', () => {
+    expect(indexOf('three-orders')).toBe(indexOf('build-fabricator') - 1);
+    const g = rich();
+    g.techs = ['P1', 'R1', 'L1', 'C1'];
+    g.credits = 1000;
+    const second = placeNode(g, 'well', 0, 0, { depositId: 2 })!;
+    expect(has(g, 'S1')).toBe(false);
+    expect(upgradeAll(g, 'well', 'speed')).toBe(2); // the action itself has never needed the tech; the button does
+    at(g, 'three-orders');
+    g.stats.ordersFilled = 3;
+    run(g, 0.1);
+    expect(claimGoal(g)).toBe(true);
+    expect(has(g, 'S1')).toBe(true);
+    expect(take(g, 'tech').map((e) => e.id)).toEqual(['S1']);
+    expect(take(g, 'goal-claimed')[0].reward.techs).toEqual(['S1']);
+    // One press now upgrades every Well by a level, cheapest first, as one undo step.
+    const before = g.credits;
+    expect(upgradeAll(g, 'well', 'speed')).toBe(2);
+    expect([well(g).lv.speed, second.lv.speed]).toEqual([2, 2]);
+    expect(before - g.credits).toBe(80 + 80);
+    expect(undo(g)).toBe(true);
+    expect([well(g).lv.speed, g.nodes.find((n) => n.id === second.id)!.lv.speed]).toEqual([1, 1]);
+    expect(g.credits).toBe(before);
+    // It cannot be bought, by anyone, at any price.
+    const poor = fresh();
+    poor.techs = ['R1', 'L1'];
+    poor.data = { a: 1e6, b: 1e6, g: 1e6 };
+    expect(research(poor, 'S1')).toBe(false);
+    expect(TECHS.S1.cost).toEqual({});
   });
 
   it('unlocks Orders, the Flow meter and the end of the demo', () => {

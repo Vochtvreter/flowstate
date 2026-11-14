@@ -318,7 +318,7 @@ describe('the whole demo, by the card', () => {
     expect(g.credits).toBeGreaterThanOrEqual(0);
     // Nothing the card did not ask for: one Lab, no side techs, one upgrade.
     expect(g.nodes.filter((n) => n.type === 'lab').length).toBe(1);
-    expect([...g.techs].sort()).toEqual(['C1', 'L1', 'P1', 'P2', 'P3', 'P4', 'P5', 'P7', 'R1']);
+    expect([...g.techs].sort()).toEqual(['C1', 'L1', 'P1', 'P2', 'P3', 'P4', 'P5', 'P7', 'R1', 'S1']); // S1 is a goal reward
     expect(g.nodes.reduce((s, n) => s + n.lv.speed + n.lv.eff + n.lv.buffer, 0)).toBe(1);
   });
 

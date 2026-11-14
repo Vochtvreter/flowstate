@@ -29,7 +29,7 @@ describe('numbers (2.6)', () => {
 
   it('side techs are impulse buys: none costs more than a third of the spine tech it competes with', () => {
     // Before the first Glyph only α exists, and every α side tech is small next to Assembly.
-    for (const id of ['R2', 'L2', 'L3', 'S1', 'C2']) {
+    for (const id of ['R2', 'L2', 'L3', 'C2']) {
       expect(Object.keys(TECHS[id].cost), id).toEqual(['a']);
       expect(TECHS[id].cost.a!, id).toBeLessThanOrEqual(0.35 * TECHS.P4.cost.a!);
     }

@@ -162,7 +162,9 @@ const T = (
  *    picks them up along the way. α for what is useful before the first Glyph, β after it.
  *  - Anything that only matters after the demo costs γ, which does not exist before the first Lens, and the
  *    late Processing techs need all three kinds of Data, so studying Tier 1 items never stops paying.
- * P1, R1, L1 and C1 are goal rewards (src/goals.ts) and cannot be bought.
+ * P1, R1, L1, C1 and S1 are goal rewards (src/goals.ts) and cannot be bought. S1 (Bulk Upgrade) comes with
+ * "Fill three orders", just before the long save for the Fabricator, so nobody has to press Upgrade a hundred
+ * times on a phone; upgrades are not balanced around dozens of tiny purchases.
  *
  * Retuned once after rule 2.1 was fixed for machine-to-machine wires (machines are fed properly now, so
  * everything past the first Assembler earns more): Fabricator 6,600 → 7,800¢, Fabrication 150 → 100β,
@@ -201,7 +203,7 @@ export const TECHS: Record<string, Tech> = Object.fromEntries([
   T('R3', 'Deep Analysis', 'research', 2, 0, { b: 80 }, ['R2'], 'Every item studied yields 50% more Data.', ['+50% Data per item']),
   T('R4', 'Long Absence', 'research', 1, 1, { a: 210 }, ['R1'], 'Your supply line keeps earning for up to 8 hours while you are away, instead of 2.', ['Offline cap 2h → 8h'], { needsEnd: true }),
   // Scale tools
-  T('S1', 'Bulk Upgrade', 'scale', 1, 0, { a: 60 }, ['L1'], 'Upgrade every node of the same kind with one click.', ['"Upgrade all" button']),
+  T('S1', 'Bulk Upgrade', 'scale', 1, 0, {}, ['L1'], 'Upgrade every node of the same kind with one click.', ['"Upgrade all" button'], { auto: 'Reward for the goal “Fill three orders”' }),
   T('S3', 'Auto-balance', 'scale', 2, 0, { b: 50 }, ['S1', 'L4'], 'One click sets a Router\'s weights to match what each destination can actually use.', ['Router: Auto-balance']),
 ].map((t) => [t.id, t]));
 
