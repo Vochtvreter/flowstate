@@ -6,7 +6,7 @@ import {
   recipeUnlocked, trackAvailable, upgradeCost, upgradeValue,
 } from './economy';
 import { graph, isMachine, isPass, isSink, outPortCount } from './sim';
-import { Game, GNode, RouterMode, Snapshot, Wire, isLookahead, makeNode, makeWire, restore, shelve, snap, snapshot } from './state';
+import { Game, GNode, RouterMode, Snapshot, Wire, isLookahead, makeNode, makeWire, nodeNoun, noteEdit, restore, shelve, snap, snapshot } from './state';
 
 export { claimGoal } from './goals';
 export { claimOrder } from './orders';
@@ -96,6 +96,7 @@ export function undo(g: Game): boolean {
   redoStack.push({ state: snapshot(g), spent: e.spent });
   restore(g, e.state);
   g.credits += e.spent;
+  noteEdit(g, 'edit');
   return true;
 }
 
@@ -110,6 +111,7 @@ export function redo(g: Game): boolean {
   undoStack.push({ state: snapshot(g), spent: e.spent });
   restore(g, e.state);
   g.credits -= e.spent;
+  noteEdit(g, 'edit');
   return true;
 }
 
@@ -176,6 +178,15 @@ export function refundOf(g: Game, n: GNode): number {
 
 export interface PlaceOpts { recipe?: string | null; depositId?: number }
 
+// What each kind of change is noted as (noteEdit): the adviser builds the same words for what a tip would do,
+// and so knows a tip that would only repeat what the player has just done.
+export const buildNote = (type: NodeType, material: MatId | null) => `build:${type}${material ? ':' + material : ''}`;
+export const upgradeNote = (n: GNode, track: Track) => `upgrade:${track}:${nodeNoun(n)}`;
+export const upgradeAllNote = (type: NodeType, track: Track) => `upgrade-all:${track}:${type}`;
+export const wireNote = (from: GNode, to: GNode) => `wire:${nodeNoun(from)}>${nodeNoun(to)}`;
+export const cutNote = (from: GNode, to: GNode) => `cut:${nodeNoun(from)}>${nodeNoun(to)}`;
+export const favourNote = (to: GNode) => `favour:${nodeNoun(to)}`;
+
 export function placeNode(g: Game, type: NodeType, x: number, y: number, opts: PlaceOpts = {}): GNode | null {
   if (!nodeUnlocked(g, type)) return null;
   const cost = nodeCost(g, type);
@@ -200,7 +211,10 @@ export function placeNode(g: Game, type: NodeType, x: number, y: number, opts: P
     node = n;
     return cost;
   });
-  if (ok) g.stats.nodesBuilt++;
+  if (ok) {
+    g.stats.nodesBuilt++;
+    noteEdit(g, buildNote(type, (node as GNode | null)?.material ?? null));
+  }
   return ok ? node : null;
 }
 
@@ -211,7 +225,7 @@ export function deleteNode(g: Game, id: number): boolean {
     g.events.push({ kind: 'toast', text: 'You need at least one Well' });
     return false;
   }
-  return act(g, () => {
+  const ok = act(g, () => {
     const refund = refundOf(g, n);
     g.wires = g.wires.filter((w) => w.from !== id && w.to !== id);
     g.nodes = g.nodes.filter((o) => o.id !== id);
@@ -219,6 +233,8 @@ export function deleteNode(g: Game, id: number): boolean {
     g.credits += refund;
     return -refund;
   });
+  if (ok) noteEdit(g, 'edit');
+  return ok;
 }
 
 export function upgrade(g: Game, id: number, track: Track): boolean {
@@ -226,12 +242,14 @@ export function upgrade(g: Game, id: number, track: Track): boolean {
   if (!n || !trackAvailable(g, n, track) || n.lv[track] >= maxLevel(g, track)) return false;
   const cost = upgradeCost(n, track);
   if (cost > g.credits + 1e-6) return false;
-  return act(g, () => {
+  const ok = act(g, () => {
     n.lv[track]++;
     n.paid += cost;
     g.credits -= cost;
     return cost;
   });
+  if (ok) noteEdit(g, upgradeNote(n, track));
+  return ok;
 }
 
 /** Upgrade every node of the same type by one level on a track, cheapest first, while credits last. */
@@ -242,6 +260,7 @@ export function upgradeAll(g: Game, type: NodeType, track: Track): number {
     for (const n of nodes) if (upgrade(g, n.id, track)) count++;
     return count ? 0 : false;
   });
+  if (count) noteEdit(g, upgradeAllNote(type, track));
   return count;
 }
 
@@ -267,6 +286,7 @@ export function setRecipe(g: Game, id: number, recipeId: string): boolean {
     n.grace = 6;
     n.born = g.time; // a re-tooled machine is new again as far as Flow is concerned
     g.credits += refund;
+    noteEdit(g, 'edit');
     return -refund;
   });
 }
@@ -276,6 +296,7 @@ export function setMode(g: Game, id: number, mode: RouterMode): boolean {
   if (!n || n.type !== 'router' || n.mode === mode) return false;
   return act(g, () => {
     n.mode = mode;
+    noteEdit(g, 'edit');
     return 0;
   });
 }
@@ -285,6 +306,7 @@ export function setWeight(g: Game, wireId: number, weight: number): boolean {
   if (!w) return false;
   return act(g, () => {
     w.weight = Math.max(0, Math.min(99, Math.round(weight)));
+    noteEdit(g, 'edit');
     return 0;
   });
 }
@@ -294,6 +316,7 @@ export function setFilter(g: Game, wireId: number, filter: MatId | null): boolea
   if (!w) return false;
   return act(g, () => {
     w.filter = filter;
+    noteEdit(g, 'edit');
     return 0;
   });
 }
@@ -339,9 +362,11 @@ export function favour(g: Game, routerId: number, wireId: number): boolean {
   if (!canFavour(g, routerId, wireId)) return false;
   const n = nodeById(g, routerId)!;
   const wires = routerWires(g, routerId);
+  const to = nodeById(g, wires.find((w) => w.id === wireId)!.to);
   return act(g, () => {
     n.mode = 'ratio';
     for (const w of wires) w.weight = w.id === wireId ? RULES.router.favour : RULES.router.rest;
+    noteEdit(g, to ? favourNote(to) : 'edit');
     return 0;
   });
 }
@@ -356,6 +381,7 @@ export function raisePriority(g: Game, wireId: number): boolean {
   if (j < 0) return false;
   return act(g, () => {
     [g.wires[i], g.wires[j]] = [g.wires[j], g.wires[i]];
+    noteEdit(g, 'edit');
     return 0;
   });
 }
@@ -379,6 +405,7 @@ export function autoBalance(g: Game, id: number): boolean {
     const min = Math.min(...needs);
     wires.forEach((w, i) => (w.weight = Math.max(1, Math.round(needs[i] / min))));
     n.mode = 'ratio';
+    noteEdit(g, 'edit');
     return 0;
   });
 }
@@ -413,6 +440,7 @@ export function connect(g: Game, fromId: number, port: number, toId: number): Wi
     const a = nodeById(g, fromId)!;
     a.grace = Math.max(a.grace, 3);
     a.fBlocked = 0;
+    noteEdit(g, wireNote(a, b));
     return 0;
   });
   if (wire) g.stats.wiresMade++;
@@ -422,9 +450,12 @@ export function connect(g: Game, fromId: number, port: number, toId: number): Wi
 export function cutWire(g: Game, id: number): boolean {
   const w = g.wires.find((x) => x.id === id);
   if (!w) return false;
+  const from = nodeById(g, w.from);
+  const to = nodeById(g, w.to);
   return act(g, () => {
     g.wires = g.wires.filter((x) => x.id !== id);
     g.credits += w.paid;
+    noteEdit(g, from && to ? cutNote(from, to) : 'edit');
     return -w.paid;
   });
 }
@@ -446,6 +477,7 @@ export function upgradeWire(g: Game, id: number): boolean {
     w.tier++;
     w.paid += cost;
     g.credits -= cost;
+    noteEdit(g, 'edit');
     return cost;
   });
 }
@@ -523,6 +555,7 @@ export function expandBoard(g: Game): boolean {
   else g.board.h += 320;
   g.board.expansions++;
   g.rev++;
+  noteEdit(g, 'edit');
   return true;
 }
 

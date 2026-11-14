@@ -83,6 +83,13 @@ export interface Deposit {
   mat: MatId;
 }
 
+/**
+ * A change the player made to the board, as the adviser needs to remember it: when, and what kind of thing was
+ * done to what kind of node ("upgrade:speed:Lab", "wire:Ink Refiner>Lab", "build:well:glint", "research:R2",
+ * or plain "edit" for anything no tip ever asks for).
+ */
+export interface Edit { at: number; what: string }
+
 /** Credits and Data paid out by a goal or an order. */
 export interface Reward { credits?: number; a?: number; b?: number; g?: number }
 
@@ -218,10 +225,33 @@ export interface Game {
   /** Something has sold over its demand for a few seconds (RULES.demand.notice). Set once, with Market Lens and a 'surplus' event. */
   seenSurplus: boolean;
   stats: Stats;
+  /**
+   * The player's last changes to the board, oldest first (noteEdit below; nothing older than
+   * RULES.tips.repeatAfter is kept). The adviser reads it: it says nothing for a while after a change and does
+   * not ask again for what has just been done. Part of the save, so the adviser gives the same answer on a
+   * copy of the game as on the game itself (a look-ahead copy, or one handed to a worker).
+   */
+  edits?: Edit[];
   // --- not saved ---
   rev: number;
   events: GameEvent[];
   tickAcc: { credits: number; data: Record<DataTier, number>; sold: Bag };
+}
+
+/** "Glint Well", "Ink Refiner", "Lab": what a node is called in a sentence. */
+export function nodeNoun(n: GNode): string {
+  if (n.type === 'well') return `${n.material ? MATERIALS[n.material].name + ' ' : ''}Well`;
+  const r = n.recipe ? RECIPES[n.recipe] : null;
+  return `${r ? r.name + ' ' : ''}${NODE_DEFS[n.type].name}`;
+}
+
+/** Remember a change the player has just made to the board (see Game.edits). */
+export function noteEdit(g: Game, what: string) {
+  const keep = RULES.tips.repeatAfter;
+  const list = (g.edits ?? []).filter((e) => g.time - e.at < keep && e.at <= g.time);
+  list.push({ at: g.time, what });
+  if (list.length > 32) list.splice(0, list.length - 32);
+  g.edits = list;
 }
 
 export const GRID = 20;
@@ -281,7 +311,7 @@ export function newGame(): Game {
     goal: { i: 0, ready: false }, goalAt: { i: 0, t: 0 },
     ordersOn: false, order: null, orderSeed: RULES.orders.seed >>> 0,
     ended: false, seenSurplus: false,
-    stats: newStats(),
+    stats: newStats(), edits: [],
     rev: 1, events: [],
     tickAcc: { credits: 0, data: { a: 0, b: 0, g: 0 }, sold: {} },
   };
@@ -419,6 +449,11 @@ export function deserialize(json: string): Game | null {
     g.seenSurplus = !!raw.seenSurplus;
     // Market Lens comes with the first sale over demand (src/sim.ts). A save that saw one before that rule gets it now.
     if (g.seenSurplus && !g.techs.includes('C1')) g.techs.push('C1');
+    // The adviser's memory of the last changes: plain notes, none from the future.
+    g.edits = (Array.isArray(raw.edits) ? raw.edits : [])
+      .filter((e: Partial<Edit> | null) => !!e && typeof e.what === 'string' && typeof e.at === 'number' && isFinite(e.at) && e.at <= g.time)
+      .map((e: Edit) => ({ at: e.at, what: e.what.slice(0, 80) }))
+      .slice(-32);
     // The build before this one let the last Well be deleted. A board with no Well and no money for one is stuck: pay for one.
     if (!g.nodes.some((n) => n.type === 'well')) g.credits = Math.max(g.credits, NODE_DEFS.well.base);
     return g;

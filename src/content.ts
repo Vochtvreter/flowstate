@@ -410,6 +410,23 @@ export const RULES = {
     staleSeconds: 120,
   },
 
+  /**
+   * The adviser's manners (src/advice.ts): what it owes to a player who is busy. The numbers that decide
+   * whether a tip is worth saying at all are in ADVICE there.
+   */
+  tips: {
+    /** After the player changes the board (by following a tip or in any other way), no tip for this many seconds. */
+    quiet: 20,
+    /**
+     * For this many seconds after a change, no tip that asks for the same thing again on the same kind of node
+     * ("buy Speed on a Lab" straight after buying Speed on a Lab). The board's last changes are remembered
+     * this long (g.edits).
+     */
+    repeatAfter: 60,
+    /** No tip sentence, and no "while you wait" line of a goal card, is longer than this: it has to fit the card on a phone. */
+    maxLength: 90,
+  },
+
   /** 2.7 Time away. Pays nothing until the demo has ended. */
   away: {
     /** Share of the live rate that is paid. */

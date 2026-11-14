@@ -1,7 +1,7 @@
 import {
   DATA_YIELD, DataTier, MATERIALS, MatId, NODE_DEFS, NodeType, PIPES, RECIPES, RULES, Recipe, TECHS, Tech, Track,
 } from './content';
-import { Game, GNode } from './state';
+import { Game, GNode, noteEdit } from './state';
 
 export const has = (g: Game, tech: string | undefined) => !tech || g.techs.includes(tech);
 
@@ -223,6 +223,7 @@ export function research(g: Game, id: string): boolean {
   if (!t || !techAvailable(g, t) || !techAffordable(g, t)) return false;
   for (const k of Object.keys(t.cost) as DataTier[]) g.data[k] -= t.cost[k] ?? 0;
   grantTech(g, id);
+  noteEdit(g, `research:${id}`);
   return true;
 }
 
