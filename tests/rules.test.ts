@@ -14,17 +14,17 @@ describe('numbers (2.6)', () => {
   it('Shard is lime; machine and tech prices are the ones tuned with the pacing bot', () => {
     expect(MATERIALS.shard.color).toBe('#B8F26B');
     expect(NODE_DEFS.assembler.base).toBe(600);
-    expect(NODE_DEFS.fabricator.base).toBe(6600);
+    expect(NODE_DEFS.fabricator.base).toBe(7800);
     // The Processing spine the goal chain asks for.
     expect(TECHS.P2.cost).toEqual({ a: 45 });
     expect(TECHS.P3.cost).toEqual({ a: 180 });
     expect(TECHS.P4.cost).toEqual({ a: 800 });
     expect(TECHS.P5.cost).toEqual({ a: 850 });
-    expect(TECHS.P7.cost).toEqual({ a: 700, b: 150 });
+    expect(TECHS.P7.cost).toEqual({ a: 700, b: 100 });
     // Free play needs all three kinds of Data, and Reclamation cannot be had before the first Lens.
     expect(TECHS.P6.cost).toEqual({ a: 300, g: 25 });
     expect(TECHS.P8.cost).toEqual({ a: 1200, b: 300, g: 100 });
-    expect(TECHS.P9.cost).toEqual({ a: 2500, b: 500, g: 400 });
+    expect(TECHS.P9.cost).toEqual({ a: 2500, b: 500, g: 450 });
   });
 
   it('side techs are impulse buys: none costs more than a third of the spine tech it competes with', () => {
