@@ -2,6 +2,8 @@
 //
 // Hidden until the Flow meter is unlocked. The arc is stepped with the panels (four times a second)
 // and only written when its whole-percent value changes: no transition, nothing per frame.
+// The arc starts at twelve o'clock through a rotation inside the SVG, so the ring element itself
+// carries no CSS transform and an effect may pulse it (pulseAnchor) without turning it.
 // #app carries the class `flow-state` while Flow State is on; the feel module styles the rest.
 import { NODE_DEFS, RECIPES, MATERIALS } from '../content';
 import { flowInfo, inFlowState, worstProducer } from '../flow';
@@ -24,7 +26,7 @@ export function initFlowRing() {
   const coin = chip?.querySelector<HTMLElement>('.sym');
   if (!chip || !coin) return;
   btn = el(`<button class="flowbtn" type="button" tabindex="-1" aria-label="Flow">
-    <svg class="flowring" viewBox="0 0 36 36" width="36" height="36" aria-hidden="true" hidden><circle class="fr-trk" cx="18" cy="18" r="16"/><circle class="fr-val" cx="18" cy="18" r="16" pathLength="100"/></svg></button>`);
+    <svg class="flowring" viewBox="0 0 36 36" width="36" height="36" aria-hidden="true" hidden><circle class="fr-trk" cx="18" cy="18" r="16"/><circle class="fr-val" cx="18" cy="18" r="16" pathLength="100" transform="rotate(-90 18 18)"/></svg></button>`);
   chip.insertBefore(btn, coin);
   btn.appendChild(coin);
   ringEl = btn.querySelector<SVGElement>('.flowring')!;

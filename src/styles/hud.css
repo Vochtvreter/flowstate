@@ -96,7 +96,7 @@ div.gc-rewards { justify-content: flex-start; margin-top: 2px; }
 .flowbtn { flex: none; position: relative; display: flex; align-items: center; justify-content: center; width: 26px; height: 26px; padding: 0; border: 0; border-radius: 50%; background: none; cursor: default; }
 .flowbtn.on { cursor: pointer; }
 .flowbtn.on::after { content: ''; position: absolute; inset: -9px; border-radius: 50%; }
-.flowring { position: absolute; left: -5px; top: -5px; transform: rotate(-90deg); pointer-events: none; }
+.flowring { position: absolute; left: -5px; top: -5px; pointer-events: none; }
 .fr-trk { fill: none; stroke: #2a3550; stroke-width: 3; }
 /* The arc is stepped with the panels, never eased: see hud-flow.ts. */
 .fr-val { fill: none; stroke: #5ce1ff; stroke-width: 3; stroke-linecap: round; stroke-dasharray: 0 100; }
