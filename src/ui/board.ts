@@ -206,6 +206,14 @@ export function initBoard(root: HTMLElement) {
   boardEl.addEventListener('pointermove', onMove);
   boardEl.addEventListener('pointerup', onUp);
   boardEl.addEventListener('pointercancel', abortDrag);
+  // The board never scrolls natively (touch-action: none), but unless the touch moves are also
+  // claimed here Chromium still counts a quick drag as the start of a fling, and then swallows the
+  // click of any tap in the next half second, wherever on the page it lands. Controls act on click
+  // for touch (see onPress), so a build-menu slot or a hotbar button tapped straight after a flick
+  // would be ignored.
+  boardEl.addEventListener('touchmove', (e) => {
+    if (e.cancelable) e.preventDefault();
+  }, { passive: false });
   boardEl.addEventListener('wheel', (e) => {
     e.preventDefault();
     if (radial) closeRadial();
