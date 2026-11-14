@@ -76,11 +76,21 @@ export const screenOpen = () => !started || summaryOpen || modalOpen;
  * whatever another module adds there is covered too.
  */
 function coverBehind() {
-  const covered = screenOpen();
-  for (const e of Array.from(app.children)) {
-    if (e !== startEl && e !== summaryEl && e !== modalEl) e.toggleAttribute('inert', covered);
-  }
+  const set = (covered: boolean) => {
+    for (const e of Array.from(app.children)) {
+      if (e !== startEl && e !== summaryEl && e !== modalEl) e.toggleAttribute('inert', covered);
+    }
+  };
+  clearTimeout(uncoverTimer);
+  if (screenOpen()) set(true);
+  // The game comes back a moment after the card has gone: the second press of a double press on
+  // Start or Keep playing must not land on whatever lies under the button.
+  else uncoverTimer = window.setTimeout(() => set(false), UNCOVER_DELAY);
 }
+/** Shorter than the start screen's fade (START_FADE), so the board answers by the time `#start` is hidden. */
+const UNCOVER_DELAY = 240;
+const START_FADE = 260;
+let uncoverTimer = 0;
 
 export function initScreens(h: ScreenHooks) {
   hooks = h;
@@ -158,7 +168,7 @@ function begin() {
     const gone = startEl;
     setTimeout(() => {
       if (started) gone.hidden = true;
-    }, 260);
+    }, START_FADE);
   }
   if (document.activeElement instanceof HTMLElement && startEl.contains(document.activeElement)) document.activeElement.blur();
   pendingAway = hooks.begin();
