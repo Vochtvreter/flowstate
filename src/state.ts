@@ -364,6 +364,14 @@ export function deserialize(json: string): Game | null {
     }
     const ids = new Set(g.nodes.map((n) => n.id));
     g.wires = (Array.isArray(g.wires) ? g.wires : []).filter((w) => ids.has(w.from) && ids.has(w.to));
+    for (const w of g.wires) {
+      // The rate and its bookkeeping are display only: anything odd is dropped and measured afresh.
+      w.rate = pos(w.rate);
+      const u = w.gulp;
+      const sound = !!u && typeof u === 'object' && Array.isArray(u.past) && u.past.length % 2 === 0
+        && [u.n, u.t, u.on, u.idle, u.est, u.max, ...u.past].every((v) => typeof v === 'number' && isFinite(v) && v >= 0);
+      if (!sound) delete w.gulp;
+    }
     const known = (list: unknown) => [...new Set(Array.isArray(list) ? list : [])].filter((id) => typeof id === 'string' && !!TECHS[id]) as string[];
     g.techs = known(g.techs);
     g.queue = known(g.queue).filter((id) => !g.techs.includes(id));

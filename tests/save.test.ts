@@ -295,6 +295,30 @@ describe('loading saves', () => {
     expect(Number.isFinite(half.credits)).toBe(true);
   });
 
+  it('a wire\'s rate bookkeeping from a save is checked too: junk is dropped and measured afresh', () => {
+    const g = rich();
+    upgrade(g, well(g).id, 'speed');
+    const r = placeNode(g, 'refiner', 400, 100)!;
+    const feed = connect(g, well(g).id, 0, r.id)!;
+    connect(g, well(g).id, 0, market(g).id);
+    connect(g, r.id, 0, market(g).id);
+    run(g, 30);
+    const raw = JSON.parse(serialize(g));
+    expect(raw.wires[0].gulp.past.length).toBeGreaterThan(0);
+    raw.wires[0].gulp = { n: 'many', t: null, past: 'gone' };
+    raw.wires[0].rate = 'fast';
+    raw.wires[1].gulp = { n: 1, t: 1, on: 0, idle: 0, armed: true, past: [1, 2, 3], est: 1, max: 2 }; // an odd number of entries
+    raw.wires[2].gulp = 7;
+    const copy = deserialize(JSON.stringify(raw))!;
+    expect(copy.wires.every((w) => w.gulp === undefined)).toBe(true);
+    expect(copy.wires[0].rate).toBe(0);
+    const before = copy.credits;
+    run(copy, 20); // nothing throws, and the readings settle again
+    expect(copy.wires.find((w) => w.id === feed.id)!.rate).toBeCloseTo(1, 1);
+    expect(copy.credits).toBeGreaterThan(before);
+    for (const w of copy.wires) expect(Number.isFinite(w.rate)).toBe(true);
+  });
+
   it('still rejects other save versions', () => {
     expect(deserialize(JSON.stringify({ ...oldSave(), v: 2 }))).toBeNull();
     expect(deserialize('not json')).toBeNull();
