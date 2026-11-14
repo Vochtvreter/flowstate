@@ -338,6 +338,80 @@ function transferFrom(g: Game, c: Graph, n: GNode) {
   }
 }
 
+/**
+ * The rate over a run of whole gulps (items, seconds, items, seconds..., oldest first), and the longest of them.
+ * If the gulps repeat in rounds of k, the newest k are one round of the pattern and its rate is exact: a
+ * Refiner feeding an Assembler and a Market hands over items every 4, 2, 4, 2 seconds. With no repeat, the
+ * most recent gulps lasting RULES.wires.rate.window together are averaged.
+ */
+function gulpRate(past: number[], dt: number): { est: number; max: number } {
+  const R = RULES.wires.rate;
+  const m = past.length / 2;
+  let max = 0;
+  for (let i = 1; i < past.length; i += 2) max = Math.max(max, past[i]);
+  const same = (a: number, b: number) =>
+    Math.abs(past[2 * a] - past[2 * b]) <= 0.02 * past[2 * a] + 1e-6 && Math.abs(past[2 * a + 1] - past[2 * b + 1]) <= 2 * dt + 1e-6;
+  // A round of k gulps must repeat at least once, and hold over the last six gulps: two equal gulps in a
+  // row are not yet a pattern of one.
+  let take = 0;
+  for (let k = 1; k <= m / 2 && !take; k++) {
+    const back = Math.min(m, Math.max(2 * k, 6));
+    let repeats = true;
+    for (let i = m - back + k; i < m && repeats; i++) repeats = same(i, i - k);
+    if (repeats) take = k;
+  }
+  let items = 0;
+  let seconds = 0;
+  for (let i = m - 1; i >= 0 && (take ? i >= m - take : seconds < R.window); i--) {
+    items += past[2 * i];
+    seconds += past[2 * i + 1];
+  }
+  return { est: seconds > 0 ? items / seconds : 0, max };
+}
+
+/**
+ * Update a wire's displayed rate from what it carried this tick (w.flow). Display only: nothing reads it back.
+ *
+ * Steady flow is smoothed directly, as it always was. Flow that comes in gulps (a machine taking two inputs
+ * per craft, a Refiner handing over one whole item) is measured gulp by gulp instead: from one start of flow
+ * to the next, and the rate is the items over the seconds of one round of the pattern (gulpRate). For a
+ * pattern that repeats that is exactly the long-run rate, with no swing; it settles one gulp after the
+ * pattern starts and lets go when the next gulp is overdue (the flow stopped, or stopped pausing).
+ */
+function measureWire(w: Wire, dt: number) {
+  const R = RULES.wires.rate;
+  const u = (w.gulp ??= { n: 0, t: 0, on: 0, idle: 1, armed: false, past: [], est: 0, max: 0 });
+  const flowing = w.flow > EPS;
+  if (flowing) {
+    if (u.idle > 0) {
+      // Flow starts after a pause: the gulp that began at the last start is whole.
+      if (u.armed && u.t <= R.longest) {
+        u.past.push(u.n, u.t);
+        if (u.past.length > 2 * R.gulps) u.past.splice(0, u.past.length - 2 * R.gulps);
+        const r = gulpRate(u.past, dt);
+        u.est = r.est;
+        u.max = r.max;
+      } else u.past.length = 0;
+      u.armed = true;
+      u.n = 0;
+      u.t = 0;
+      u.on = 0;
+    }
+    u.on += dt;
+    u.idle = 0;
+  } else u.idle += dt;
+  u.n += w.flow;
+  u.t += dt;
+  if (u.on > R.steadyAfter) {
+    // No pause for a long while: steady flow. Whatever comes after the next pause is not a whole gulp.
+    u.past.length = 0;
+    u.armed = false;
+  }
+  // The next gulp is overdue: the pattern is gone, measure directly again.
+  if (u.past.length && u.t > R.overdue * u.max + dt) u.past.length = 0;
+  w.rate = ema(w.rate, u.past.length ? u.est : w.flow / dt, dt, R.smooth);
+}
+
 /** Ticks run per game, so the order nodes hand items on rotates the same way for every game. */
 const tickCount = new WeakMap<Game, number>();
 
@@ -383,7 +457,7 @@ export function tick(g: Game, dt: number) {
     }
   }
 
-  for (const w of g.wires) w.rate = ema(w.rate, w.flow / dt, dt, 1.5);
+  for (const w of g.wires) measureWire(w, dt);
 
   for (const k in MATERIALS) {
     const m = k as MatId;

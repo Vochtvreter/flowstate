@@ -2,8 +2,9 @@ import { describe, expect, it } from 'vitest';
 import { connect, cutWire, deleteNode, placeNode, redo, setMode, setWeight, undo, upgrade } from '../src/actions';
 import { nodeCost, price, research, techAvailable } from '../src/economy';
 import { TECHS } from '../src/content';
-import { deserialize, serialize } from '../src/state';
-import { fresh as newGame, market, rich, run, well } from './helpers';
+import { tick } from '../src/sim';
+import { Game, deserialize, serialize } from '../src/state';
+import { fresh as newGame, market, rich, run, well, wire } from './helpers';
 
 describe('simulation', () => {
   it('a well wired to a market earns a clean 1¢ per second', () => {
@@ -184,5 +185,164 @@ describe('editing', () => {
     expect(g2.credits).toBe(g.credits);
     expect(g2.goal).toEqual(g.goal);
     expect(g2.stats).toEqual(g.stats);
+  });
+});
+
+describe('wire rates are steady when a machine takes its inputs in gulps', () => {
+  /** Run for `seconds`; for each wire return the true throughput, the lowest and highest rate shown, and how far a plain moving average of the flow swings. */
+  function watch(g: Game, seconds: number, ids: number[], dt = 0.05) {
+    const out = ids.map(() => ({ real: 0, lo: Infinity, hi: -Infinity, naiveLo: Infinity, naiveHi: -Infinity }));
+    const naive = ids.map((id) => g.wires.find((w) => w.id === id)!.rate);
+    const steps = Math.round(seconds / dt);
+    for (let i = 0; i < steps; i++) {
+      tick(g, dt);
+      ids.forEach((id, k) => {
+        const w = g.wires.find((x) => x.id === id)!;
+        const o = out[k];
+        o.real += w.flow / (steps * dt);
+        o.lo = Math.min(o.lo, w.rate);
+        o.hi = Math.max(o.hi, w.rate);
+        naive[k] += (w.flow / dt - naive[k]) * (1 - Math.exp(-dt / 1.5)); // how the rate used to be measured
+        o.naiveLo = Math.min(o.naiveLo, naive[k]);
+        o.naiveHi = Math.max(o.naiveHi, naive[k]);
+      });
+    }
+    return out;
+  }
+
+  it('a Refiner that is kept full takes two Glint every two seconds: its wire reads a flat 1.0/s, the leftover wire 0.25/s', () => {
+    const g = rich();
+    upgrade(g, well(g).id, 'speed'); // 1.25 Glint/s, the Refiner takes 1
+    const r = placeNode(g, 'refiner', 400, 100)!;
+    const feed = connect(g, well(g).id, 0, r.id)!;
+    const sell = connect(g, well(g).id, 0, market(g).id)!;
+    const out = connect(g, r.id, 0, market(g).id)!; // one whole Shard every two seconds
+    run(g, 30);
+    const [toRefiner, toMarket, shard] = watch(g, 120, [feed.id, sell.id, out.id]);
+    // The flow really does come in gulps: measured the old way these numbers swing by a quarter and more.
+    expect(toRefiner.naiveHi - toRefiner.naiveLo).toBeGreaterThan(0.2);
+    expect((toMarket.naiveHi - toMarket.naiveLo) / 0.25).toBeGreaterThan(0.5);
+    expect((shard.naiveHi - shard.naiveLo) / 0.5).toBeGreaterThan(0.5);
+    // The long-run value is exact...
+    expect(toRefiner.real).toBeCloseTo(1, 6);
+    expect(toMarket.real).toBeCloseTo(0.25, 6);
+    expect(shard.real).toBeCloseTo(0.5, 6);
+    // ...and what is shown sits on it, without moving.
+    for (const [w, real] of [[toRefiner, 1], [toMarket, 0.25], [shard, 0.5]] as const) {
+      expect(w.lo).toBeCloseTo(real, 4);
+      expect(w.hi).toBeCloseTo(real, 4);
+    }
+  });
+
+  it('a pattern of uneven gulps is exact too: Ink shared by an Assembler and the Market', () => {
+    // One Ink every 2 s; the Assembler takes one every 3 s, so it is handed Ink after 4 s, 2 s, 4 s, 2 s...
+    // and Spark (one every 2.5 s) after 2.5, 2.5, 2.5, 2.5 and 5 s.
+    const g = rich();
+    const m = market(g);
+    const ink = placeNode(g, 'refiner', 400, 400)!;
+    const spark = placeNode(g, 'refiner', 400, 540)!;
+    connect(g, placeNode(g, 'well', 0, 0, { depositId: 3 })!.id, 0, ink.id);
+    connect(g, placeNode(g, 'well', 0, 0, { depositId: 4 })!.id, 0, spark.id);
+    connect(g, ink.id, 1, placeNode(g, 'void', 700, 650)!.id);
+    const glyph = placeNode(g, 'assembler', 700, 450, { recipe: 'glyph' })!;
+    const ids = [
+      connect(g, ink.id, 0, glyph.id)!.id, connect(g, ink.id, 0, m.id)!.id,
+      connect(g, spark.id, 0, glyph.id)!.id, connect(g, spark.id, 0, m.id)!.id,
+      connect(g, glyph.id, 0, m.id)!.id,
+    ];
+    run(g, 90);
+    const seen = watch(g, 120, ids);
+    const real = [1 / 3, 1 / 6, 1 / 3, 1 / 15, 1 / 3];
+    seen.forEach((w, i) => {
+      expect(w.real).toBeCloseTo(real[i], 6);
+      expect(w.lo).toBeCloseTo(real[i], 3);
+      expect(w.hi).toBeCloseTo(real[i], 3);
+    });
+    expect(seen[0].naiveHi - seen[0].naiveLo).toBeGreaterThan(0.2); // 0.33/s used to read anywhere from 0.2 to 0.5
+  });
+
+  it('still follows a change within seconds: starting, speeding up, stopping', () => {
+    const g = rich();
+    upgrade(g, well(g).id, 'speed');
+    const r = placeNode(g, 'refiner', 400, 100)!;
+    const feed = connect(g, well(g).id, 0, r.id)!;
+    connect(g, well(g).id, 0, market(g).id);
+    const out = connect(g, r.id, 0, market(g).id)!;
+    run(g, 6);
+    expect(wire(g, feed.id).rate).toBeGreaterThan(0.8); // already close after a few seconds
+    run(g, 24);
+    expect(wire(g, feed.id).rate).toBeCloseTo(1, 3);
+    // Two Speed levels on the Refiner: it can take 1.38/s now, so it gets all 1.25 the Well makes, steadily.
+    upgrade(g, r.id, 'speed');
+    upgrade(g, r.id, 'speed');
+    run(g, 10);
+    expect(wire(g, feed.id).rate).toBeCloseTo(1.25, 2);
+    expect(wire(g, out.id).rate).toBeGreaterThan(0.6); // it works through what its buffer held first, a little faster
+    run(g, 30);
+    expect(wire(g, out.id).rate).toBeCloseTo(0.625, 3);
+    // Cut the Shard wire: the Refiner fills up and stops taking Glint. The reading falls away instead of sticking.
+    cutWire(g, out.id);
+    run(g, 20);
+    expect(wire(g, feed.id).rate).toBeLessThan(0.02);
+  });
+
+  it('steady flow is measured as before, and a wire at capacity still reads its capacity', () => {
+    const g = rich();
+    for (let i = 0; i < 8; i++) upgrade(g, well(g).id, 'speed'); // 5.96 Glint/s into a Mk I wire
+    const direct = connect(g, well(g).id, 0, market(g).id)!;
+    run(g, 20);
+    expect(wire(g, direct.id).rate).toBeCloseTo(4, 3);
+    expect(wire(g, direct.id).rate).toBeGreaterThanOrEqual(4 * 0.97); // what "Upgrade saturated wires" looks for
+    expect(wire(g, direct.id).gulp!.past.length).toBe(0); // no pauses, so no gulps
+  });
+
+  it('is display only: scrambling every wire\'s reading changes nothing else', () => {
+    const build = () => {
+      const g = rich();
+      g.credits = 5000;
+      upgrade(g, well(g).id, 'speed');
+      const r = placeNode(g, 'refiner', 400, 100)!;
+      const lab = placeNode(g, 'lab', 700, 300)!;
+      connect(g, well(g).id, 0, r.id);
+      connect(g, well(g).id, 0, market(g).id);
+      connect(g, r.id, 0, market(g).id);
+      connect(g, r.id, 0, lab.id);
+      return g;
+    };
+    const a = build();
+    const b = build();
+    for (let i = 0; i < 1200; i++) {
+      tick(a, 0.05);
+      tick(b, 0.05);
+      for (const w of b.wires) {
+        w.rate = (i * 7919) % 13;
+        delete w.gulp;
+      }
+    }
+    expect(b.credits).toBe(a.credits);
+    expect(b.data).toEqual(a.data);
+    expect(b.sold).toEqual(a.sold);
+    expect(b.nodes.map((n) => [n.util, n.rate, n.inb, n.outb])).toEqual(a.nodes.map((n) => [n.util, n.rate, n.inb, n.outb]));
+  });
+
+  it('the measurement survives a save, so a reloaded game shows the same numbers', () => {
+    const g = rich();
+    upgrade(g, well(g).id, 'speed');
+    const r = placeNode(g, 'refiner', 400, 100)!;
+    const feed = connect(g, well(g).id, 0, r.id)!;
+    connect(g, well(g).id, 0, market(g).id);
+    connect(g, r.id, 0, market(g).id);
+    run(g, 31.3);
+    const copy = deserialize(serialize(g))!;
+    expect(wire(copy, feed.id).gulp).toEqual(wire(g, feed.id).gulp);
+    run(g, 10);
+    run(copy, 10);
+    expect(wire(copy, feed.id).rate).toBeCloseTo(wire(g, feed.id).rate, 9);
+    // A wire from a save made before this existed just starts measuring afresh.
+    const old = JSON.parse(serialize(g));
+    for (const w of old.wires) delete w.gulp;
+    const loaded = deserialize(JSON.stringify(old))!;
+    run(loaded, 10);
+    expect(wire(loaded, feed.id).rate).toBeCloseTo(1, 2);
   });
 });

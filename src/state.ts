@@ -51,11 +51,29 @@ export interface Wire {
   weight: number;
   filter: MatId | null;
   // --- runtime ---
+  /** Items per second, smoothed. Steady and exact when the wire carries its items in regular gulps (measureWire in src/sim.ts). */
   rate: number;
   mat: MatId | null;
   mixed: boolean;
   budget: number;
   flow: number;
+  /**
+   * Bookkeeping for `rate` (absent on a wire from an older save, which simply starts measuring afresh):
+   * the gulp in progress, and the last few whole gulps. A gulp runs from the moment items start moving after a
+   * pause to the next such moment.
+   */
+  gulp?: {
+    /** Items and seconds since the gulp in progress began. */
+    n: number; t: number;
+    /** Seconds it has flowed without a pause, and seconds since anything last moved (0 while flowing). */
+    on: number; idle: number;
+    /** A start has been seen, so the next start completes a whole gulp. */
+    armed: boolean;
+    /** Whole gulps, oldest first: items, seconds, items, seconds... Empty while the flow is steady or unknown. */
+    past: number[];
+    /** Worked out from `past` each time a gulp completes: the rate over the pattern, and the longest gulp in it. */
+    est: number; max: number;
+  };
 }
 
 export interface Deposit {

@@ -238,7 +238,30 @@ export const RULES = {
    * the Market on the same port, which left that machine starved although everything it needed was being made
    * (2.1: machines are fed first). The long-run rate through a wire is still its capacity.
    */
-  wires: { burstSeconds: 1 },
+  wires: {
+    burstSeconds: 1,
+    /**
+     * How a wire's displayed rate (wire.rate) is measured. Nothing in the simulation reads it.
+     * A machine takes its inputs in gulps, so a plain moving average of what passes swings by a third around
+     * the true rate. Instead whole gulps are measured, from one start of flow to the next, and the rate shown
+     * is items over seconds across the gulps that make up one round of the pattern: exact for any pattern
+     * that repeats, close for one that does not.
+     */
+    rate: {
+      /** Seconds of smoothing on the displayed number. */
+      smooth: 1.5,
+      /** How many whole gulps are remembered. A pattern that repeats within half of them is measured exactly. */
+      gulps: 12,
+      /** With no repeat found, average over the most recent gulps that together last at least this long. */
+      window: 8,
+      /** Flow that has not paused for this long is steady, not a gulp: it is measured directly. */
+      steadyAfter: 8,
+      /** A gulp longer than this is not a pattern worth waiting for. */
+      longest: 30,
+      /** The next gulp is overdue after this many times the longest remembered one: the pattern is dropped. */
+      overdue: 1.5,
+    },
+  },
 
   /**
    * 2.1 Fan-out: "machines are fed first; what is left goes on to selling and study".
