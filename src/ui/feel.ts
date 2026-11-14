@@ -65,33 +65,34 @@ const coinCount = (amount: number) => Math.max(3, Math.min(9, 2 + Math.round(Mat
 /**
  * Send a reward from where it was earned to where it is counted: coins to the credits counter,
  * Data to its chip, and a spark to each hotbar button a new tech has just added. Each lands with a
- * pulse on the counter and a short rising run of ticks. With `say`, the amounts are also written
- * where they came from (a big celebration's card already says them).
+ * pulse on the counter, the amount written over it, and a short rising run of ticks.
+ *
+ * The coins are ordinary ones (fx.fly without `top`): over the stage they are drawn on the board
+ * layer, so they come out from under the goal card rather than over it, and the big top layer stays
+ * idle. That is deliberate: see the note on cost at the top of fx.ts.
  */
-function payout(from: Pt, r: GoalReward, say = false) {
+function payout(from: Pt, r: GoalReward) {
   if (reduced()) return;
   let ticked = false;
-  const land = (anchor: string, n: number) => () => {
+  const land = (anchor: string, to: Pt, text: string, color: string, n: number) => () => {
     pulseAnchor(anchor);
+    // The amount pops up just under the counter it has been added to.
+    floater({ x: to.x + 12, y: to.y + 60 }, text, color, 13, { top: true, life: 0.95, rise: 18 });
     if (!ticked) cuePayout(Math.min(6, n));
     ticked = true;
   };
   const quick = { ttl: 0.3, stagger: 0.035 };
-  let line = 0;
-  const write = (text: string, color: string) => {
-    if (say) floater({ x: from.x, y: from.y - 12 - 22 * line++ }, text, color, 15, { top: true, life: 0.9, rise: 26 });
-  };
   if (r.credits) {
     const n = coinCount(r.credits);
-    fly(from, creditsPt(), GOLD, n, land('credits', n), quick);
-    write(`+${fmt(r.credits)}¢`, GOLD);
+    const to = creditsPt();
+    fly(from, to, GOLD, n, land('credits', to, `+${fmt(r.credits)}¢`, GOLD, n), quick);
   }
   for (const k of ['a', 'b', 'g'] as DataTier[]) {
     const amount = r[k];
     if (!amount) continue;
     const n = coinCount(amount);
-    fly(from, dataPt(k), DATA_COLORS[k], n, land(`data-${k}`, n), { ...quick, shape: 'diamond', size: 4.6 });
-    write(`+${fmt(amount)}${k === 'a' ? 'α' : k === 'b' ? 'β' : 'γ'}`, DATA_COLORS[k]);
+    const to = dataPt(k);
+    fly(from, to, DATA_COLORS[k], n, land(`data-${k}`, to, `+${fmt(amount)}${k === 'a' ? 'α' : k === 'b' ? 'β' : 'γ'}`, DATA_COLORS[k], n), { ...quick, shape: 'diamond', size: 4.6 });
   }
   // A new machine in the hotbar: show the player where it has appeared.
   for (const id of r.techs ?? []) {
@@ -104,14 +105,15 @@ function payout(from: Pt, r: GoalReward, say = false) {
 }
 
 /** The quick celebration: a reward flies off, a chime, a light buzz. About a third of a second, and nothing is blocked. */
-function smallCelebration(name: string, from: Pt, r: GoalReward, color = GOLD) {
+function smallCelebration(name: string, from: Pt, r: GoalReward, color = GOLD, onTop = false) {
   record('celebrate', 'small:' + name);
   cueClaim();
   buzz('claim', 15);
   if (reduced()) return;
-  burst(from, color, 8, { top: true });
-  ring(from, color, { top: true });
-  payout(from, r, true);
+  // On the board layer: sparks that clear the card they came from are seen, the rest are not missed.
+  burst(from, color, 10, { top: onTop, power: 1.2 });
+  ring(from, color, { top: onTop, size: 44 });
+  payout(from, r);
 }
 
 // ---------- simulation events ----------
@@ -149,23 +151,19 @@ function handleEvents(events: GameEvent[]) {
         break;
       case 'tech':
         // Granted by the goal just claimed: part of that celebration. Researched: its own small one, where the player pressed.
-        if (!claimed) smallCelebration('tech', lastPress ?? centre(), {}, DATA_COLORS.a);
+        // (That one is above the panels: the tech tree covers the board.)
+        if (!claimed) smallCelebration('tech', lastPress ?? centre(), {}, DATA_COLORS.a, true);
         break;
       case 'unlock':
         if (!claimed) smallCelebration('unlock', anchorPt(ev.what === 'flow' ? 'flow' : 'order') ?? centre(), {}, UNLOCK);
         break;
       case 'goal-ready':
       case 'order-ready': {
-        const anchor = ev.kind === 'goal-ready' ? 'goal' : 'order';
-        // Straight after a claim the chime is still ringing: a big one says enough, a small one gets its "ready" a beat later.
+        // The Claim button lighting up is the HUD's to show; this is only its sound. Straight after a claim
+        // the chime is still ringing: a big one says enough, a small one gets its "ready" a beat later.
         if (claimed === 'big') break;
-        const ready = () => {
-          cueReady();
-          const at = anchorPt(anchor);
-          if (at && !reduced()) ring(at, ev.kind === 'goal-ready' ? '#4ADE80' : GOLD, { top: true, size: 40 });
-        };
-        if (claimed) setTimeout(ready, 450);
-        else ready();
+        if (claimed) setTimeout(cueReady, 450);
+        else cueReady();
         break;
       }
       case 'flow-state':
@@ -364,10 +362,8 @@ export function initFeel() {
   onSignal('sale', onSale);
   onSignal('connect', onConnect);
   onSignal('place', onPlace);
-  onSignal('afford', (d) => {
-    cueAfford();
-    if (!reduced()) ring(d.at, GOLD, { top: true, size: 34 });
-  });
+  // (The hotbar button's own pulse is the phone track's; this is the bell that goes with it.)
+  onSignal('afford', () => cueAfford());
 
   onFrame(() => {
     if (batch.length) handleEvents(batch.splice(0));

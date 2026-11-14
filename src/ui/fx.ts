@@ -1,8 +1,8 @@
 // Everything that moves every frame is drawn here, on three canvases:
 //  - the board layer (`#fx`, over the stage and under the HUD): the dots travelling along flowing
 //    wires, the pulse on open ports, and particles that belong to the board (sale floaters, sparks);
-//  - the bar layer (`#fx-bar`, made here, a strip over the top bar): whatever has to be seen up
-//    there, such as a coin on the last stretch of its way to the credits counter;
+//  - the bar layer (`#fx-bar`, made here, a strip over the top bar and a little below it): whatever
+//    has to be seen up there, such as a coin on the last stretch of its way to the credits counter;
 //  - the top layer (`#fx-top`, made here, over the whole app and above every panel): particles that
 //    must be seen above the HUD in the middle of the screen, such as a celebration's sparks.
 // Nothing here touches the DOM after init, and nothing here knows about the game: the board hands
@@ -127,6 +127,8 @@ const BOARD = 0, TOP = 1, BAR = 2, AUTO = -1;
  * small moving shapes, and at full ratio on a phone it would be the largest canvas on the page.
  */
 const TOP_RATIO = 1;
+/** How far the bar layer reaches below the top bar, in px. */
+const BAR_SKIRT = 44;
 let appEl: HTMLElement | null = null;
 let top: Surface | null = null;
 let bar: Surface | null = null;
@@ -207,8 +209,10 @@ function resize() {
   if (!appEl || !top || !bar) return;
   const a = appEl.getBoundingClientRect();
   place(top, a.left, a.top, Math.max(1, Math.round(a.width)), Math.max(1, Math.round(a.height)), TOP_RATIO);
-  // The strip between the top of the app and the top of the stage: the top bar, in every layout.
-  place(bar, a.left, a.top, Math.max(1, Math.round(a.width)), Math.max(0, Math.round(r.top - a.top)), d);
+  // The strip from the top of the app to a little below the top of the stage: the top bar, in every
+  // layout, and room under it for a number to pop up beneath a counter. No strip when there is no bar.
+  const barH = Math.round(r.top - a.top);
+  place(bar, a.left, a.top, Math.max(1, Math.round(a.width)), barH > 0 ? barH + BAR_SKIRT : 0, d);
 }
 
 const inStage = (x: number, y: number, m = 0) => x >= originX - m && x <= originX + W + m && y >= originY - m && y <= originY + H + m;
@@ -433,7 +437,10 @@ function drawFlows(c: CanvasRenderingContext2D, view: { x: number; y: number; k:
 
 const SPARK = 1, COIN = 2, TEXT = 3, RING = 4, POP = 5;
 const POOL = 360;
-/** Floating text is drawn this much larger than asked: moving text reads smaller than still text of the same size. */
+/**
+ * Floating text is drawn this much larger than asked (moving text reads smaller than still text of
+ * the same size), and in the bold display face rather than the HUD's mono.
+ */
 const TEXT_SCALE = 1.2;
 
 interface Particle {
@@ -634,12 +641,13 @@ function stepParticles(dt: number) {
     }
     if (p.layer !== AUTO) p.mask = 1 << p.layer;
     else {
+      // On the strip when it is under it, else on the board when it is over the stage; near the line
+      // between the two, on both. Over neither (the hotbar, the inspector) only the big layer can show it.
       const x = p.vx, y = p.vy;
-      let m = 0;
-      if (inStage(x, y, EDGE)) m |= 1 << BOARD;
-      if (inBar(x, y, EDGE)) m |= 1 << BAR;
-      // Over neither (the hotbar, the inspector): only the big layer can show it.
-      if (!inStage(x, y) && !inBar(x, y)) m |= 1 << TOP;
+      const onBar = inBar(x, y), onStage = inStage(x, y);
+      let m = onBar ? 1 << BAR : onStage ? 1 << BOARD : 1 << TOP;
+      if (onBar && onStage && !inBar(x, y, -EDGE)) m |= 1 << BOARD;
+      else if (!onBar && onStage && inBar(x, y, EDGE)) m |= 1 << BAR;
       p.mask = m;
     }
     if (p.mask & 1) liveBy[0]++;
@@ -697,7 +705,7 @@ function drawParticles(c: CanvasRenderingContext2D, layer: number) {
       }
       case TEXT: {
         const rise = p.vy * (1 - (1 - u) * (1 - u));
-        const f = `600 ${p.size}px "JetBrains Mono", ui-monospace, Menlo, monospace`;
+        const f = `700 ${p.size}px "Space Grotesk", Inter, system-ui, sans-serif`;
         if (f !== font) c.font = font = f;
         c.textAlign = 'center';
         c.textBaseline = 'alphabetic';
@@ -716,9 +724,7 @@ function drawParticles(c: CanvasRenderingContext2D, layer: number) {
           x = y = 0;
         }
         c.strokeText(p.text, x, y);
-        // Filled twice, a hair apart: the heaviest weight the page loads is 600, and this reads as bold.
-        c.fillText(p.text, x - 0.3, y);
-        c.fillText(p.text, x + 0.3, y);
+        c.fillText(p.text, x, y);
         if (s !== 1) c.restore();
         break;
       }
