@@ -404,7 +404,6 @@ export function tickGoal(g: Game) {
   if (!goal || !goal.done(g)) return;
   g.goal.ready = true;
   g.events.push({ kind: 'goal-ready', goal: goal.id, index: g.goal.i, text: `Goal complete: ${goal.title}` });
-  g.rev++;
 }
 
 /** Pay out the ready goal and move to the next one. Returns false when there is nothing to claim. */
@@ -432,7 +431,6 @@ export function claimGoal(g: Game): boolean {
     g.flowOn = true;
     g.events.push({ kind: 'unlock', what: 'flow', text: 'Flow meter unlocked: the more of your line runs flat out, the better your prices.' });
   } else if (r.unlock === 'end') endDemo(g);
-  g.rev++;
   // A goal the player has already met is ready at once.
   tickGoal(g);
   return true;

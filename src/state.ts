@@ -275,6 +275,17 @@ export function serialize(g: Game): string {
 
 const num = (v: unknown, fallback: number) => (typeof v === 'number' && isFinite(v) ? v : fallback);
 
+/** A saved order, with every field checked. null if it is missing or asks for something that no longer exists. */
+function loadOrder(o: Partial<Order> | null | undefined): Order | null {
+  if (!o || typeof o !== 'object' || !MATERIALS[o.mat as MatId] || !(num(o.need, 0) > 0)) return null;
+  const r: Reward = o.reward ?? {};
+  return {
+    mat: o.mat as MatId, need: num(o.need, 0), base: num(o.base, 0), got: num(o.got, 0),
+    reward: { credits: num(r.credits, 0), a: num(r.a, 0), b: num(r.b, 0), g: num(r.g, 0) },
+    created: num(o.created, 0), lastProgress: num(o.lastProgress, 0), ready: !!o.ready,
+  };
+}
+
 /** Load a save. Saves from before goals, orders and Flow load too: every missing field gets its new-game default. */
 export function deserialize(json: string): Game | null {
   try {
@@ -305,7 +316,7 @@ export function deserialize(json: string): Game | null {
     g.flowBest = num(raw.flowBest, 0);
     g.flowHold = num(raw.flowHold, 0);
     g.orderSeed = num(raw.orderSeed, base.orderSeed) >>> 0;
-    g.order = raw.order && MATERIALS[raw.order.mat as MatId] ? raw.order : null;
+    g.order = loadOrder(raw.order);
     // A save from before the `ended` flag that already has a Lens is past the demo.
     g.ended = raw.ended ?? !!g.made[RULES.capstone];
     return g;

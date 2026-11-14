@@ -233,6 +233,41 @@ export function endDemo(g: Game) {
   g.rev++;
 }
 
+export interface EndStats {
+  /** Seconds played (game time; time away is not counted). */
+  playTime: number;
+  /** Game time of the first Lens, or null before it. */
+  firstLensAt: number | null;
+  /** Credits earned, by source. */
+  fromSales: number;
+  fromOrders: number;
+  fromGoals: number;
+  fromAway: number;
+  totalEarned: number;
+  nodesBuilt: number;
+  wiresMade: number;
+  ordersFilled: number;
+  /** Longest unbroken time at 100% Flow, in seconds, and how often Flow State was reached. */
+  bestFlowStreak: number;
+  flowStates: number;
+  techs: number;
+  /** Different materials made so far. */
+  materials: number;
+}
+
+/** Everything the end-of-demo summary shows. */
+export function endStats(g: Game): EndStats {
+  const s = g.stats;
+  return {
+    playTime: g.time, firstLensAt: s.firstLensAt,
+    fromSales: s.fromSales, fromOrders: s.fromOrders, fromGoals: s.fromGoals, fromAway: s.fromAway,
+    totalEarned: s.fromSales + s.fromOrders + s.fromGoals + s.fromAway,
+    nodesBuilt: s.nodesBuilt, wiresMade: s.wiresMade, ordersFilled: s.ordersFilled,
+    bestFlowStreak: g.flowBest, flowStates: s.flowStates,
+    techs: g.techs.length, materials: Object.values(g.made).filter(Boolean).length,
+  };
+}
+
 // ---------- formatting ----------
 
 export function fmt(n: number): string {

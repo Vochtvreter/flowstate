@@ -159,7 +159,7 @@ const T = (
  */
 export const TECHS: Record<string, Tech> = Object.fromEntries([
   // Processing
-  T('P1', 'Refining', 'processing', 0, 0, {}, [], 'Your first machine. Turn raw Glint into Shard, which sells for more.', ['Refiner', 'Recipe: 2 Glint → Shard'], { auto: 'Goal reward: wire every Well' }),
+  T('P1', 'Refining', 'processing', 0, 0, {}, [], 'Your first machine. Turn raw Glint into Shard, which sells for more.', ['Refiner', 'Recipe: 2 Glint → Shard'], { auto: 'Reward for the goal “Wire it to the Market too”' }),
   T('P2', 'Murk Deposits', 'processing', 1, 0, { a: 45 }, ['R1'], 'Extract Murk and refine it into Ink. It leaves Silt behind, so you also get the Void to dump it.', ['Murk Wells', 'Recipe: 2 Murk → Ink + Silt', 'Void node']),
   T('P3', 'Ember Deposits', 'processing', 2, 0, { a: 150 }, ['P2'], 'Extract Ember and refine it into Spark.', ['Ember Wells', 'Recipe: 2 Ember → Spark']),
   T('P4', 'Assembly', 'processing', 3, 0, { a: 1000 }, ['P3'], 'Machines with two inputs. Ink and Spark make Glyph, your first Tier 2 item and the source of β Data.', ['Assembler', 'Recipe: Ink + Spark → Glyph']),
@@ -171,7 +171,7 @@ export const TECHS: Record<string, Tech> = Object.fromEntries([
   T('P6', 'Reclamation', 'processing', 4, 1, { a: 300, b: 30 }, ['P4'], 'Turn Silt, the byproduct clogging your Ink line, into Clay, then into Coil.', ['Recipe: 3 Silt → Clay', 'Recipe: Spark + 2 Clay → Coil']),
   T('P8', 'Dynamo', 'processing', 5, 1, { b: 400, g: 80 }, ['P6', 'P7'], 'Coil, Glyph and Prism spin up a Dynamo.', ['Recipe: 2 Coil + Glyph + Prism → Dynamo']),
   // Logistics
-  T('L1', 'Routing', 'logistics', 1, 0, {}, ['R1'], 'A Router splits one stream across several wires by weight, when an even split is not what you want.', ['Router node', 'Ratio mode'], { auto: 'Goal reward: fill your first order' }),
+  T('L1', 'Routing', 'logistics', 1, 0, {}, ['R1'], 'A Router splits one stream across several wires by weight, when an even split is not what you want.', ['Router node', 'Ratio mode'], { auto: 'Reward for the goal “Fill your first order”' }),
   T('L3', 'Pipes Mk II', 'logistics', 2, 0, { a: 190 }, ['L1'], 'Wires can be upgraded to carry 8 items per second.', ['Mk II wires (8/s)']),
   T('L7', 'Pipes Mk III', 'logistics', 3, 0, { b: 150 }, ['L3'], 'Wires can be upgraded to carry 16 items per second.', ['Mk III wires (16/s)']),
   T('L8', 'Pipes Mk IV', 'logistics', 4, 0, { g: 200 }, ['L7'], 'Wires can be upgraded to carry 32 items per second.', ['Mk IV wires (32/s)']),
@@ -180,12 +180,12 @@ export const TECHS: Record<string, Tech> = Object.fromEntries([
   T('L2', 'Merger', 'logistics', 2, 2, { a: 100 }, ['L1'], 'A junction node that gathers many wires into one tidy stream.', ['Merger node']),
   T('L5', 'Silo', 'logistics', 3, 2, { a: 170 }, ['L2'], 'A large buffer that keeps machines fed through uneven supply.', ['Silo node']),
   // Commerce
-  T('C1', 'Market Lens', 'commerce', 1, 0, {}, ['R1'], 'See live prices and how much of each material your Markets buy at full price.', ['Price gauges on Markets'], { auto: 'Goal reward: fill your first order' }),
+  T('C1', 'Market Lens', 'commerce', 1, 0, {}, ['R1'], 'See live prices and how much of each material your Markets buy at full price.', ['Price gauges on Markets'], { auto: 'Reward for the goal “Fill your first order”' }),
   T('C2', 'Wider Demand', 'commerce', 2, 0, { a: 240 }, ['C1'], 'Markets buy 50% more of everything at full price.', ['+50% demand, all materials']),
   T('C4', 'Luxury Buyers', 'commerce', 3, 0, { b: 200 }, ['C2'], 'Tier 2 and Tier 3 items sell for 25% more.', ['+25% value on T2 and T3']),
   T('C5', 'Exports', 'commerce', 4, 0, { g: 60 }, ['C4'], 'Markets buy twice as much of everything at full price.', ['+100% demand, all materials']),
   // Research
-  T('R1', 'Lab', 'research', 0, 0, {}, [], 'Send items to a Lab instead of a Market to earn Data, the currency of this tree.', ['Lab node', 'Tech tree'], { auto: 'Goal reward: sell your first Shard' }),
+  T('R1', 'Lab', 'research', 0, 0, {}, [], 'Send items to a Lab instead of a Market to earn Data, the currency of this tree.', ['Lab node', 'Tech tree'], { auto: 'Reward for the goal “Sell your first Shard”' }),
   T('R2', 'Lab Speed', 'research', 1, 0, { a: 80 }, ['R1'], 'Labs study items twice as fast.', ['Labs 2× speed']),
   T('R3', 'Deep Analysis', 'research', 2, 0, { b: 100 }, ['R2'], 'Every item studied yields 50% more Data.', ['+50% Data per item']),
   T('R4', 'Long Absence', 'research', 1, 1, { a: 210 }, ['R1'], 'Your supply line keeps earning for up to 8 hours while you are away, instead of 2.', ['Offline cap 2h → 8h'], { needsEnd: true }),

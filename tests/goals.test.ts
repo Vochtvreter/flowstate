@@ -84,6 +84,8 @@ describe('goal chain: the table (2.4)', () => {
     const g = fresh();
     g.data = { a: 1e6, b: 1e6, g: 1e6 };
     for (const id of granted) expect(research(g, id)).toBe(false);
+    // The tech tree says which goal grants each of them.
+    for (const goal of GOALS) for (const id of goal.reward.techs ?? []) expect(TECHS[id].auto).toContain(goal.title);
   });
 });
 

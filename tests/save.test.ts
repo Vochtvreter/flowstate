@@ -1,7 +1,7 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import { claimGoal, connect, placeNode, upgrade } from '../src/actions';
+import { claimGoal, claimOrder, connect, placeNode, upgrade } from '../src/actions';
 import { RULES, TECHS } from '../src/content';
-import { endDemo, offlineCap, research, techAvailable, techHidden } from '../src/economy';
+import { endDemo, endStats, offlineCap, research, techAvailable, techHidden } from '../src/economy';
 import { activeGoal } from '../src/goals';
 import { offlineGains } from '../src/sim';
 import { Game, deserialize, newGame, serialize } from '../src/state';
@@ -163,7 +163,7 @@ describe('the end of the demo (2.7)', () => {
     expect(take(g, 'demo-end').length).toBe(0);
   });
 
-  it('keeps credits from sales, goals and orders apart', () => {
+  it('keeps credits from sales, goals and orders apart, and sums them up for the end screen', () => {
     const g = fresh();
     connect(g, well(g).id, 0, market(g).id);
     run(g, 10);
@@ -171,6 +171,12 @@ describe('the end of the demo (2.7)', () => {
     expect(g.stats.fromGoals).toBe(12);
     expect(g.stats.fromSales).toBeCloseTo(g.credits - 12, 6);
     expect(g.stats.fromSales + g.stats.fromGoals + g.stats.fromOrders + g.stats.fromAway).toBeCloseTo(g.lifetime, 6);
+    g.flowBest = 42;
+    const end = endStats(g);
+    expect(end.playTime).toBeCloseTo(10, 6);
+    expect(end.firstLensAt).toBeNull();
+    expect(end.totalEarned).toBeCloseTo(g.lifetime, 6);
+    expect(end).toMatchObject({ fromGoals: 12, fromOrders: 0, nodesBuilt: 0, wiresMade: 1, ordersFilled: 0, bestFlowStreak: 42, techs: 0, materials: 1 });
   });
 });
 
@@ -274,6 +280,11 @@ describe('loading saves', () => {
     expect(g.flow).toBe(0);
     expect(g.orderSeed).toBe(RULES.orders.seed >>> 0);
     run(g, 1);
+    // A half-written order is repaired rather than trusted.
+    const half = deserialize(JSON.stringify({ ...oldSave(), ordersOn: true, order: { mat: 'shard', need: 10, ready: true } }))!;
+    expect(half.order).toEqual({ mat: 'shard', need: 10, base: 0, got: 0, reward: { credits: 0, a: 0, b: 0, g: 0 }, created: 0, lastProgress: 0, ready: true });
+    expect(claimOrder(half)).toBe(true);
+    expect(Number.isFinite(half.credits)).toBe(true);
   });
 
   it('still rejects other save versions', () => {

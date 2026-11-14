@@ -118,7 +118,6 @@ function roll(g: Game, avoid: MatId | null, quiet: boolean) {
   const order = makeOrder(g, avoid);
   g.order = order;
   g.events.push({ kind: 'order-new', order, quiet, text: `New order: ${orderText(order)}` });
-  g.rev++;
 }
 
 /** Make sure an order exists. Called when Orders are unlocked. */
@@ -141,7 +140,6 @@ export function tickOrders(g: Game) {
     o.got = o.need;
     o.ready = true;
     g.events.push({ kind: 'order-ready', order: o, text: `Order filled: ${orderText(o)}` });
-    g.rev++;
   } else if (g.time - o.lastProgress >= O.staleSeconds) roll(g, o.mat, true);
 }
 
