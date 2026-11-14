@@ -9,6 +9,10 @@
 #hud-strip { z-index: 10; display: flex; flex-direction: column; align-items: center; gap: 8px; width: 100%; min-width: 0; }
 #hud-row { display: flex; flex-wrap: wrap; justify-content: center; align-items: flex-start; gap: 8px 10px; width: 100%; min-width: 0; }
 #goal, #order, #hud-alert { pointer-events: auto; }
+/* Nothing in the HUD is text to select. A second quick press on Claim lands on the card after the
+   button has gone, and would otherwise leave the title highlighted for good; a finger held on the
+   card would bring up the copy menu. */
+#top, #hud-strip, #start, #summary { user-select: none; -webkit-user-select: none; -webkit-touch-callout: none; }
 /* Toasts are centred by the column, not by a half-width offset, so they can use the whole stage on a narrow screen. */
 #hud #toasts { left: 12px; right: 12px; transform: none; }
 /* While the tech tree covers the board, a goal that is ready rides above it (the tree is 40, toasts
@@ -178,6 +182,28 @@ div.gc-rewards { justify-content: flex-start; margin-top: 2px; }
   .start-card h1 { font-size: 40px; }
 }
 
+/* A short screen (a phone on its side): the whole summary fits without scrolling, buttons included. */
+@media (max-height: 520px) {
+  #summary { padding: 10px; }
+  .sum-card { padding: 14px 20px 10px; border-radius: 18px; }
+  .sum-ico { display: none; }
+  .sum-top h2 { margin-top: 0; font-size: 24px; }
+  .sum-top p { font-size: 13px; }
+  .sum-grid { gap: 6px; margin: 10px 0 8px; }
+  .sum-stat, .sum-stat.big { gap: 2px; padding: 7px 4px 6px; border-radius: 10px; }
+  .sum-stat b { font-size: 17px; }
+  .sum-stat.big b { font-size: 21px; }
+  .sum-actions { flex-direction: row; justify-content: center; gap: 6px; }
+  .sum-go { min-width: 200px; height: 48px; font-size: 17px; }
+  .sum-over { margin-top: 0; }
+}
+
+/* ---------- time-away card ---------- */
+/* It never touches the edges of a narrow screen, and what was earned wraps as whole amounts. */
+#modal .card { width: min(380px, calc(100% - 32px)); }
+#modal .gains { display: flex; flex-wrap: wrap; justify-content: center; gap: 4px 16px; }
+#modal button { min-height: 44px; }
+
 /* ---------- touch ----------
    A finger gets 44px targets, and is never shown a key. */
 html[data-input='touch'] #hints, html[data-input='touch'] .kbd { display: none; }
@@ -201,6 +227,9 @@ html[data-input='touch'] #insp .link::after { content: ''; position: absolute; i
   #hud { padding: 8px 8px 0; }
   #goal { flex-wrap: wrap; gap: 10px; padding: 10px 12px 11px; }
   #goal .claim { flex: 1 1 100%; }
+  /* A full-width button breathes less across, or its halo would reach far outside the card. */
+  #goal .claim::before { animation-name: claim-breathe-wide; }
+  #goal .claim::after { animation-name: claim-halo-wide; }
   .gc-title { font-size: 15.5px; line-height: 19px; }
 }
 

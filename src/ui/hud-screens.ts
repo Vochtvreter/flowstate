@@ -220,7 +220,7 @@ export function showAway(seconds: number, gains: AwayGains) {
   if (gains.b >= 1) parts.push(`<span style="color:#C4A1FF">+${fmt(gains.b)}β</span>`);
   if (gains.g >= 1) parts.push(`<span style="color:#FF8FB1">+${fmt(gains.g)}γ</span>`);
   modalEl.innerHTML = `<div class="card"><h2>While you were away</h2><p>Your supply line kept running for <b>${fmtTime(seconds)}</b>.</p>
-    <div class="gains mono">${parts.join(' · ')}</div><button id="collect">Collect</button></div>`;
+    <div class="gains mono">${parts.join('')}</div><button id="collect">Collect</button></div>`;
   modalEl.classList.add('open');
   modalOpen = true;
   const btn = modalEl.querySelector<HTMLElement>('#collect')!;
