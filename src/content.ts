@@ -264,6 +264,11 @@ export const RULES = {
     burstSeconds: 8,
     /** ...and never for fewer items than this (one Paradox every 12 s must still sell whole at full price). */
     minBurst: 1,
+    /**
+     * The first time a material keeps selling over its demand for `seconds` (surplus sales no more than `gap`
+     * apart), g.seenSurplus is set and a 'surplus' event raised: the interface introduces the demand gauge then.
+     */
+    notice: { seconds: 3, gap: 5 },
   },
 
   /** 2.3 Flow. */

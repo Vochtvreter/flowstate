@@ -476,6 +476,58 @@ describe('demand with two prices (2.2)', () => {
     expect(demandBurst(g, 'paradox')).toBeGreaterThanOrEqual(1);
   });
 
+  it('notes the first time something keeps selling over demand, once per save', () => {
+    const g = fresh();
+    g.credits = 1000;
+    connect(g, well(g).id, 0, market(g).id);
+    run(g, 60);
+    expect(g.seenSurplus).toBe(false); // 1/s of Glint against a demand of 2/s
+    for (let i = 0; i < 5; i++) upgrade(g, well(g).id, 'speed'); // 3.05/s
+    // The bank of unused demand (8 s worth) has to run dry first, then the surplus has to last a few seconds.
+    run(g, 8);
+    expect(g.seenSurplus).toBe(false);
+    expect(take(g, 'surplus').length).toBe(0);
+    run(g, 20);
+    expect(g.seenSurplus).toBe(true);
+    const events = take(g, 'surplus');
+    expect(events.length).toBe(1);
+    expect(events[0].mat).toBe('glint');
+    expect(events[0].text).toBe('Glint is selling faster than Markets want it: the extra goes for 25% of the price.');
+    run(g, 60);
+    expect(take(g, 'surplus').length).toBe(0); // one-off
+    // The flag is saved, so a reload does not announce it again.
+    const copy = deserialize(serialize(g))!;
+    expect(copy.seenSurplus).toBe(true);
+    run(copy, 30);
+    expect(take(copy, 'surplus').length).toBe(0);
+    // A save from before the flag starts without it.
+    const old = JSON.parse(serialize(fresh()));
+    delete old.seenSurplus;
+    expect(deserialize(JSON.stringify(old))!.seenSurplus).toBe(false);
+  });
+
+  it('does not mistake one burst over the bank for a surplus, nor a machine that delivers whole items under demand', () => {
+    // A Silo emptied into the Market at once: more than the bank holds for a moment, then nothing.
+    const g = rich();
+    const silo = placeNode(g, 'silo', 400, 100)!;
+    const fill = connect(g, well(g).id, 0, silo.id)!;
+    run(g, 30); // about 30 Glint stored; the bank holds 16
+    cutWire(g, fill.id);
+    const out = connect(g, silo.id, 0, market(g).id)!;
+    upgradeWire(g, out.id); // Mk II: 8/s, so it empties in a few seconds
+    run(g, 2);
+    expect(g.sold.glint).toBeGreaterThan(16);
+    run(g, 30);
+    expect(g.seenSurplus).toBe(false);
+    // Shard at 0.5/s in whole items against a demand of 1.5/s never touches the surplus price.
+    const r = placeNode(g, 'refiner', 400, 300)!;
+    connect(g, well(g).id, 0, r.id);
+    connect(g, r.id, 0, market(g).id);
+    run(g, 120);
+    expect(g.seenSurplus).toBe(false);
+    expect(take(g, 'surplus').length).toBe(0);
+  });
+
   it('Wider Demand raises the full-price rate', () => {
     const g = fresh();
     g.techs.push('C2');

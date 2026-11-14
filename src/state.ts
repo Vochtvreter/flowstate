@@ -135,7 +135,12 @@ export type GameEvent =
   /** Flow State reached (once per streak). `first` = the first time ever: a big celebration. */
   | { kind: 'flow-state'; text: string; first: boolean }
   /** The first Lens was made: the demo is complete. Raised once per save. */
-  | { kind: 'demo-end'; text: string };
+  | { kind: 'demo-end'; text: string }
+  /**
+   * A material has been selling over its demand for a few seconds, for the first time in this save
+   * (g.seenSurplus): the moment to introduce the demand gauge. Raised once per save.
+   */
+  | { kind: 'surplus'; mat: MatId; text: string };
 
 export interface Game {
   v: 1;
@@ -181,6 +186,8 @@ export interface Game {
   orderSeed: number;
   /** The first Lens has been made. Set once. */
   ended: boolean;
+  /** Something has sold over its demand for a few seconds (RULES.demand.notice). Set once, with a 'surplus' event. */
+  seenSurplus: boolean;
   stats: Stats;
   // --- not saved ---
   rev: number;
@@ -244,7 +251,7 @@ export function newGame(): Game {
     flow: 0, flowOn: false, flowStreak: 0, flowBest: 0, flowHold: 0,
     goal: { i: 0, ready: false },
     ordersOn: false, order: null, orderSeed: RULES.orders.seed >>> 0,
-    ended: false,
+    ended: false, seenSurplus: false,
     stats: newStats(),
     rev: 1, events: [],
     tickAcc: { credits: 0, data: { a: 0, b: 0, g: 0 }, sold: {} },
@@ -367,6 +374,7 @@ export function deserialize(json: string): Game | null {
     g.order = loadOrder(raw.order);
     // A save from before the `ended` flag that already has a Lens is past the demo.
     g.ended = typeof raw.ended === 'boolean' ? raw.ended : !!g.made[RULES.capstone];
+    g.seenSurplus = !!raw.seenSurplus;
     // The build before this one let the last Well be deleted. A board with no Well and no money for one is stuck: pay for one.
     if (!g.nodes.some((n) => n.type === 'well')) g.credits = Math.max(g.credits, NODE_DEFS.well.base);
     return g;

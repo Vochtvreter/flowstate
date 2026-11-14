@@ -1,7 +1,7 @@
 // Deterministic, DOM-free simulation. tick(game, dt) advances everything.
 import { DataTier, MATERIALS, MatId, RULES, Recipe } from './content';
 import {
-  bufMult, cycleTime, dataYield, effEvery, endDemo, labRate, offlineCap, pipeCap, recipeOf, refillDemand, research, sellValue, wellRate,
+  bufMult, cycleTime, dataYield, demandBurst, effEvery, endDemo, labRate, offlineCap, pipeCap, recipeOf, refillDemand, research, sellValue, wellRate,
 } from './economy';
 import { updateFlow } from './flow';
 import { tickGoal } from './goals';
@@ -188,6 +188,34 @@ function produceLab(g: Game, n: GNode, dt: number, hasInputs: boolean) {
   if (n.status === 'starved') n.status = n.rate > 0.01 ? 'working' : hasInputs ? 'starved' : 'idle';
 }
 
+/** Per game: for each material, when its current run of over-demand sales began and when the latest one was. */
+const surplusRuns = new WeakMap<Game, Map<MatId, { since: number; last: number }>>();
+
+/**
+ * Called with every sale that went (partly) over demand. The first material to keep that up for a few
+ * seconds sets g.seenSurplus and raises the one-off 'surplus' event (RULES.demand.notice).
+ */
+function noteSurplus(g: Game, m: MatId) {
+  if (g.seenSurplus) return;
+  const N = RULES.demand.notice;
+  let runs = surplusRuns.get(g);
+  if (!runs) surplusRuns.set(g, (runs = new Map()));
+  const run = runs.get(m);
+  if (!run || g.time - run.last > N.gap) {
+    runs.set(m, { since: g.time, last: g.time });
+    return;
+  }
+  run.last = g.time;
+  if (g.time - run.since < N.seconds) return;
+  g.seenSurplus = true;
+  surplusRuns.delete(g);
+  const share = Math.round(RULES.demand.surplusShare * 100);
+  g.events.push({
+    kind: 'surplus', mat: m,
+    text: `${MATERIALS[m].name} is selling faster than Markets want it: the extra goes for ${share}% of the price.`,
+  });
+}
+
 function deliver(g: Game, w: Wire, dest: GNode, m: MatId, amt: number) {
   w.budget -= amt;
   w.flow += amt;
@@ -195,6 +223,7 @@ function deliver(g: Game, w: Wire, dest: GNode, m: MatId, amt: number) {
   w.mat = m;
   if (dest.type === 'market') {
     // The one place sales are paid: full price up to demand, the surplus price beyond, times the Flow bonus.
+    if (!g.seenSurplus && amt > (g.demandLeft[m] ?? demandBurst(g, m)) + EPS) noteSurplus(g, m);
     const earned = sellValue(g, m, amt);
     g.credits += earned;
     g.lifetime += earned;
