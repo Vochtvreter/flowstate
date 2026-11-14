@@ -17,7 +17,7 @@ import { fx, initFx } from './ui/fx';
 import { hotbarTypes, initPanels, renderPanels, tickPanels } from './ui/panels';
 import { closeTech, initTech, openTech, renderTech } from './ui/tech';
 import { initFeel } from './ui/feel';
-import { adviserStats, holdAdviser } from './ui/advice-client';
+import { adviserStats, boardKey, holdAdviser } from './ui/advice-client';
 import { TIP, offerTip, tipShown } from './ui/advice-tip';
 import { markedControl } from './ui/advice-show';
 import { hudAnchors, initHud } from './ui/hud';
@@ -102,7 +102,7 @@ function boot() {
   (window as unknown as Record<string, unknown>).flowstate = {
     ui, tick, fx, view: { fit: fitView, zoomBy, jumpTo }, onSignal, hud: { ...screensApi, anchors: hudAnchors },
     // The adviser: how it is run and what it cost; the tip on the card and its timing; the control "Show me" ringed.
-    adviser: { stats: adviserStats, hold: holdAdviser, tip: tipShown, offer: (a: Parameters<typeof offerTip>[1]) => { offerTip(ui.g, a); renderPanels(true); }, marked: markedControl, TIP },
+    adviser: { stats: adviserStats, hold: holdAdviser, key: () => boardKey(ui.g), tip: tipShown, offer: (a: Parameters<typeof offerTip>[1]) => { offerTip(ui.g, a); renderPanels(true); }, marked: markedControl, TIP },
   };
   requestAnimationFrame(frame);
 }

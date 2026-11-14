@@ -190,9 +190,12 @@ export const tipShown = (): Advice | null => shown;
 export function offerTip(g: Game, a: Advice) {
   quietKey = `${builtRev(g)}|${g.goal.i}`;
   quietFrom = g.time - TIP.delay;
-  put(g, a, actOf(a));
+  // With a tip already there it takes its place as a change of mind does: a cross-fade, and no new signal.
+  const swap = !!shown;
+  if (shown && !calmMotion()) fading = { text: sentence(shown), until: performance.now() + TIP.fade };
+  put(g, a, actOf(a), swap);
   pinned = true;
-  announce = 'shown';
+  if (!swap) announce = 'shown';
 }
 
 /** The row's HTML, or '' when there is no tip to show. */

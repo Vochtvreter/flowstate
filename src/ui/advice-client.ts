@@ -154,9 +154,10 @@ function fail(why: string) {
 const copy = <T>(v: T): T => (typeof structuredClone === 'function' ? structuredClone(v) : (JSON.parse(JSON.stringify(v)) as T));
 
 async function runInline(req: AdviceRequest) {
-  // The copy is taken now: by the time the page is idle the game has moved on.
-  const mine = copy(req);
+  let mine: AdviceRequest;
   try {
+    // The copy is taken now: by the time the page is idle the game has moved on.
+    mine = copy(req);
     inline ??= (await import('./advice-core')).answer;
   } catch (err) {
     // Not even the code can be had: no tips.
