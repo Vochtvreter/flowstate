@@ -4,7 +4,7 @@
 // and attributes (see addTopItem). The other panels still describe themselves as an HTML string;
 // makePanel() skips the write when the string is unchanged, patches the existing elements in
 // place when it is not, and holds off while the player is pressing or touch-scrolling the panel.
-import { DATA_COLORS, DATA_NAMES, DataTier, HOTBAR, MATERIALS, MatId, NODE_DEFS, PIPES, RECIPES, TECHS, Track } from '../content';
+import { DATA_COLORS, DATA_NAMES, DataTier, HOTBAR, MATERIALS, MatId, NODE_DEFS, NodeType, PIPES, RECIPES, TECHS, Track } from '../content';
 import {
   autoBalance, canRedo, canUndo, cutWire, deleteNode, materialsAt, nodeById, raisePriority, recipesFor, redo, refundOf,
   setFilter, setMode, setRecipe, setWeight, undo, upgrade, upgradeAll, upgradeSaturatedWires, upgradeWire,
@@ -19,8 +19,9 @@ import { boardRect, jumpTo, startPlacing, fitView, zoomBy } from './board';
 import { Panel, el, invalidateLayout, makePanel, setAnchor, setAttr, setClass, setHTML, setHidden, setText } from './dom';
 import { nodeSize } from './geom';
 import { esc, icon, matGlyph, nodeIcon } from './icons';
+import { env } from './phone-env';
 import { diagnose, matName } from './status';
-import { delegate, select, toast, touch, ui } from './ui';
+import { delegate, select, signal, toast, touch, ui } from './ui';
 
 let topEl: HTMLElement;
 let hotEl: HTMLElement;
@@ -46,7 +47,10 @@ export function initPanels(refs: {
   mini = refs.mini;
   zoomEl = refs.zoom;
   hotPanel = makePanel(hotEl);
-  inspPanel = makePanel(inspEl);
+  // The inspector's own frame: a grab handle (shown when it is a bottom sheet) and the body that
+  // is patched. The frame is never rebuilt, so the sheet can be dragged while its contents refresh.
+  inspEl.innerHTML = `<div class="grab" aria-hidden="true"></div><div class="insp-body"></div>`;
+  inspPanel = makePanel(inspEl.querySelector<HTMLElement>('.insp-body')!);
   objPanel = makePanel(objEl);
   alertPanel = makePanel(alertEl);
   buildTop();
@@ -314,8 +318,23 @@ function renderTop() {
 
 // ---------- hotbar ----------
 
+/** How long a hotbar button carries the `afford` class after it becomes affordable. */
+const AFFORD_MS = 650;
+/** Whether each unlocked item was out of reach the last time the bar was drawn. Nothing is recorded before its first sighting. */
+const outOfReach = new Map<NodeType, boolean>();
+const affordUntil = new Map<NodeType, number>();
+let hotGame: Game | null = null;
+
 function renderHot(force: boolean) {
   const g = ui.g;
+  if (g !== hotGame) {
+    // A different game (first frame, reset, loaded save): nothing has "become" affordable yet.
+    hotGame = g;
+    outOfReach.clear();
+    affordUntil.clear();
+  }
+  const now = performance.now();
+  const became: NodeType[] = [];
   let key = 0;
   let shownLocked = 0;
   const items = HOTBAR.map((type) => {
@@ -326,16 +345,33 @@ function renderHot(force: boolean) {
       shownLocked++;
       const t = TECHS[def.tech!];
       if (!t) return '';
-      return `<button class="hb locked" data-act="locked:${t.id}" title="${def.name}: research ${t.name}" aria-label="${def.name}, locked">${nodeIcon(type)}<span class="p">${costText(t) || 'locked'}</span></button>`;
+      return `<button class="hb locked" data-act="locked:${t.id}" title="${def.name}: research ${t.name}" aria-label="${def.name}, locked. Research ${t.name}">${nodeIcon(type)}<span class="n">${def.name}</span><span class="p">${costText(t) || 'locked'}</span></button>`;
     }
     key++;
     const cost = nodeCost(g, type);
     const ok = g.credits + 1e-6 >= cost;
+    // The moment an item comes within reach it pulses once, and anyone listening is told.
+    if (ok && outOfReach.get(type) === true) {
+      affordUntil.set(type, now + AFFORD_MS);
+      became.push(type);
+    }
+    outOfReach.set(type, !ok);
+    const pulse = (affordUntil.get(type) ?? 0) > now;
     const k = key <= 9 ? key : 0;
-    return `<button class="hb${ok ? '' : ' poor'}${ui.placing?.type === type ? ' on' : ''}" data-act="place:${type}" data-testid="hot-${type}" title="${def.name}: ${def.blurb}" aria-label="${def.name}, key ${k}, ${cost} credits">
-      ${ok ? '' : `<span class="fill" style="height:${pct(g.credits / Math.max(1, cost))}%"></span>`}<span class="k mono">${k}</span>${nodeIcon(type)}<span class="p mono">${cost === 0 ? 'free' : fmt(cost) + '¢'}</span></button>`;
+    const price = cost === 0 ? 'free' : fmt(cost) + '¢';
+    const label = env.touch ? `${def.name}, ${price}${ok ? '' : ', not enough credits yet'}` : `${def.name}, key ${k}, ${cost} credits`;
+    return `<button class="hb${ok ? '' : ' poor'}${ui.placing?.type === type ? ' on' : ''}${pulse ? ' afford' : ''}" data-act="place:${type}" data-testid="hot-${type}" title="${def.name}: ${def.blurb}" aria-label="${label}">
+      ${ok ? '' : `<span class="fill" style="height:${pct(g.credits / Math.max(1, cost))}%"></span>`}<span class="k mono">${k}</span>${nodeIcon(type)}<span class="n">${def.name}</span><span class="p mono">${price}</span></button>`;
   }).join('');
-  hotPanel.render(`${items}<div class="grow"></div><div class="hb tip" title="Select a node and press Delete. Everything is refunded in full.">${icon('trash')}<span class="p">Del = refund</span></div>`, force);
+  // The key hint is for keyboards: with a finger, Delete is a button in the inspector.
+  const tip = env.touch ? '' : `<div class="grow"></div><div class="hb tip" title="Select a node and press Delete. Everything is refunded in full.">${icon('trash')}<span class="p">Del = refund</span></div>`;
+  hotPanel.render(items + tip, force);
+  for (const type of became) {
+    const btn = hotEl.querySelector<HTMLElement>(`[data-testid="hot-${type}"]`);
+    if (!btn) continue;
+    const r = btn.getBoundingClientRect();
+    signal('afford', { type, at: { x: r.left + r.width / 2, y: r.top + r.height / 2 } });
+  }
 }
 
 /** Hotbar node types in key order (unlocked only). */
@@ -547,9 +583,22 @@ function renderInspector(force: boolean) {
   }
   if (!html && sel) ui.sel = null;
   // Opening or closing changes the width of the stage, so cached screen positions are thrown away.
+  // (As a bottom sheet on a phone it lies over the stage instead, and nothing moves.)
   if (setClass(inspEl, 'open', !!html)) invalidateLayout();
-  inspPanel.render(html, force);
+  if (html || !env.phone) {
+    clearTimeout(inspEmpty);
+    inspEmpty = 0;
+    inspPanel.render(html, force);
+  } else if (!inspEmpty) {
+    // The sheet slides away with its contents still in it; they are cleared once it is out of sight.
+    inspEmpty = window.setTimeout(() => {
+      inspEmpty = 0;
+      if (!inspEl.classList.contains('open')) inspPanel.render('', true);
+    }, 280);
+  }
 }
+
+let inspEmpty = 0;
 
 // ---------- objective + alert ----------
 
