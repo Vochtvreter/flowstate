@@ -1,6 +1,6 @@
 // The adviser (src/advice.ts): what it says, and above all that what it says is true.
 import { describe, expect, it } from 'vitest';
-import { canRedo, canUndo, claimOrder, clearHistory, connect, cutWire, favour, placeNode, redo, setMode, undo, upgrade } from '../src/actions';
+import { canRedo, canUndo, claimOrder, clearHistory, connect, cutWire, deleteNode, expandBoard, favour, placeNode, redo, setMode, undo, upgrade } from '../src/actions';
 import { ADVICE, Advice, advice, adviceTrials, applyAdvice, waitInfo, waitKind } from '../src/advice';
 import { MAT_IDS, RULES, TECHS } from '../src/content';
 import { demandInfo, nodeCost, research, techAffordable } from '../src/economy';
@@ -88,6 +88,46 @@ function midGame(): Game {
   connect(g, ink.id, 1, placeNode(g, 'void', 700, 600)!.id);
   connect(g, placeNode(g, 'well', 0, 0, { depositId: 4 })!.id, 0, m.id);
   run(g, 40);
+  g.events = [];
+  return g;
+}
+
+/** The whole demo line after the first Lens: everything refined is assembled, everything assembled is fabricated, Lens is sold. One Lab studies Shard. */
+function lensLine(): Game {
+  const g = rich();
+  g.techs = ['P1', 'R1', 'P2', 'P3', 'P4', 'P5', 'P7', 'L1', 'C1', 'S1'];
+  g.credits = 1e6;
+  expandBoard(g);
+  const m = market(g);
+  const line = (dep: number, recipe: string, y: number) => {
+    const w = dep === 1 ? well(g) : placeNode(g, 'well', 0, 0, { depositId: dep })!;
+    const r = placeNode(g, 'refiner', 300, y, { recipe })!;
+    connect(g, w.id, 0, r.id);
+    return r;
+  };
+  const shard = line(1, 'shard', 100);
+  const shard2 = line(2, 'shard', 200);
+  const ink = line(3, 'ink', 300);
+  const spark = line(4, 'spark', 400);
+  const mist = line(5, 'mist', 500);
+  connect(g, ink.id, 1, placeNode(g, 'void', 500, 650)!.id);
+  const glyph = placeNode(g, 'assembler', 600, 300, { recipe: 'glyph' })!;
+  const prism = placeNode(g, 'assembler', 600, 500, { recipe: 'prism' })!;
+  connect(g, ink.id, 0, glyph.id);
+  connect(g, spark.id, 0, glyph.id);
+  connect(g, shard.id, 0, prism.id);
+  connect(g, shard2.id, 0, prism.id);
+  connect(g, mist.id, 0, prism.id);
+  const fab = placeNode(g, 'fabricator', 900, 400, { recipe: 'lens' })!;
+  connect(g, glyph.id, 0, fab.id);
+  connect(g, prism.id, 0, fab.id);
+  connect(g, fab.id, 0, m.id);
+  connect(g, shard.id, 0, placeNode(g, 'lab', 900, 100)!.id);
+  for (const mat of ['murk', 'ember', 'breeze', 'shard', 'ink', 'silt', 'spark', 'mist', 'glyph', 'prism', 'lens'] as const) g.made[mat] = true;
+  g.ended = true;
+  g.flowOn = true;
+  g.credits = 3000;
+  run(g, 60);
   g.events = [];
   return g;
 }
@@ -489,6 +529,154 @@ describe('advice: the repertoire, one board at a time', () => {
     run(g, 30);
     expect(flowInfo(g)).toMatchObject({ producers: 3, flowing: 3 });
     expect(g.goal.ready).toBe(true);
+  });
+
+  it('Flow goal: a machine starved through a Router is given the bigger share, or its input straight from the source', () => {
+    // The Ink goes into a Router that favours the Lab (goal 13), and the Assembler was wired from the Router:
+    // it gets a fifth of the Ink. No Well is short, so "buy Speed" would not help.
+    const g = rich();
+    g.techs = ['P1', 'R1', 'P2', 'P3', 'P4', 'L1'];
+    g.flowOn = true;
+    const m = market(g);
+    connect(g, well(g).id, 0, m.id);
+    const ink = placeNode(g, 'refiner', 400, 400, { recipe: 'ink' })!;
+    const spark = placeNode(g, 'refiner', 400, 540, { recipe: 'spark' })!;
+    const murk = placeNode(g, 'well', 0, 0, { depositId: 3 })!;
+    const ember = placeNode(g, 'well', 0, 0, { depositId: 4 })!;
+    upgrade(g, ember.id, 'speed');
+    connect(g, murk.id, 0, ink.id);
+    connect(g, ember.id, 0, spark.id);
+    connect(g, ink.id, 1, placeNode(g, 'void', 700, 650)!.id);
+    connect(g, spark.id, 0, m.id);
+    const router = placeNode(g, 'router', 600, 400)!;
+    const lab = placeNode(g, 'lab', 800, 300)!;
+    connect(g, ink.id, 0, router.id);
+    const toLab = connect(g, router.id, 0, lab.id)!;
+    connect(g, router.id, 0, m.id);
+    favour(g, router.id, toLab.id);
+    const glyph = placeNode(g, 'assembler', 800, 500, { recipe: 'glyph' })!;
+    const fromRouter = connect(g, router.id, 0, glyph.id)!;
+    connect(g, spark.id, 0, glyph.id);
+    connect(g, glyph.id, 0, m.id);
+    run(g, 60);
+    expect(isFlowing(glyph)).toBe(false);
+    at(g, 'hold-flow');
+    run(g, 1);
+    // Press Favour on the Assembler's wire, wire the Ink Refiner to it directly, or both: either alone gets
+    // the Assembler to 90% of the Ink it needs here, which is a step and not yet the goal.
+    const said: string[] = [];
+    for (let i = 0; i < 3 && !g.goal.ready; i++) {
+      const a = advice(g)!;
+      expect(a, 'a tip for the starved Assembler').not.toBeNull();
+      expect(a.culprit).toBe(glyph.id);
+      checkWording(a);
+      expect(a.text.mouse).toMatch(/^The Glyph Assembler is holding Flow back because it is short of Ink: /);
+      expect(!!a.favour || !!a.wire).toBe(true);
+      if (a.favour) expect(a.favour).toEqual({ router: router.id, wire: fromRouter.id });
+      if (a.wire) expect(a.wire).toMatchObject({ from: ink.id, to: glyph.id });
+      const before = glyph.util;
+      expect(applyAdvice(g, a)).toBe(true);
+      said.push(a.text.mouse);
+      run(g, 40);
+      // Each step leaves it working more of the time: the first by a lot, the second all the time.
+      expect(g.nodes.find((n) => n.id === glyph.id)!.util).toBeGreaterThan(Math.min(0.995, before + 0.1));
+    }
+    expect(said.length).toBeLessThanOrEqual(2);
+    expect(new Set(said).size).toBe(said.length);
+    expect(g.goal.ready).toBe(true);
+  });
+
+  it('Flow goal: a machine placed without a recipe and wired to the Market is told what to wire into it', () => {
+    const g = rich();
+    g.techs = ['P1', 'R1'];
+    g.flowOn = true;
+    const m = market(g);
+    connect(g, well(g).id, 0, m.id);
+    const second = placeNode(g, 'well', 0, 0, { depositId: 2 })!;
+    connect(g, second.id, 0, m.id);
+    const blank = placeNode(g, 'refiner', 400, 300)!; // from the hotbar: no recipe yet
+    connect(g, blank.id, 0, m.id);
+    run(g, 40);
+    expect(blank.recipe).toBeNull();
+    expect(flowInfo(g)).toMatchObject({ producers: 3, flowing: 2 }); // it counts, and can never flow as it is
+    at(g, 'hold-flow');
+    run(g, 1);
+    const a = advice(g)!;
+    expect(a, 'a tip for the machine with no recipe').not.toBeNull();
+    expect(a.culprit).toBe(blank.id);
+    expect(a.wire).toMatchObject({ to: blank.id });
+    expect(a.text.mouse).toMatch(/^The Refiner is holding Flow back because nothing it can work on is wired into it: drag from a Glint Well's port to the Refiner\.$/);
+    checkWording(a);
+    expect(applyAdvice(g, a)).toBe(true);
+    expect(g.nodes.find((n) => n.id === blank.id)!.recipe).toBe('shard');
+    run(g, 60);
+    expect(g.goal.ready).toBe(true);
+  });
+
+  it('a wait that can never end is never met with silence: no Lab, no Market, two kinds of Data with nothing coming in', () => {
+    // No Lab at all (the player deleted it): the card waits for α that cannot come.
+    const noLab = midGame();
+    deleteNode(noLab, noLab.nodes.find((n) => n.type === 'lab')!.id);
+    at(noLab, 'make-glyph');
+    run(noLab, 10);
+    expect(waitInfo(noLab)).toMatchObject({ unit: 'α', eta: Infinity });
+    const lab = advice(noLab)!;
+    expect(lab, 'a tip with no Lab on the board').not.toBeNull();
+    expect(lab.build).toBe('lab');
+    expect(lab.text.mouse).toMatch(/^Drag from the \w+ Refiner's (\w+ )?port into empty space and pick Lab \(100¢\): you have no Lab, and a Lab turns \w+ into α\.$/);
+    checkWording(lab);
+    expect(lab.saves).toBe(Infinity);
+    const rescue = trial(noLab, lab, 3000, 0.25);
+    expect(rescue.tip).toBeLessThan(Infinity);
+    expect(rescue.idle).toBe(Infinity);
+
+    // No Market (it can be deleted; the first one is free): the card waits for credits that cannot come.
+    const noMarket = midGame();
+    noMarket.techs.push('P4');
+    deleteNode(noMarket, market(noMarket).id);
+    noMarket.credits = 0;
+    at(noMarket, 'make-glyph');
+    run(noMarket, 10);
+    expect(waitInfo(noMarket)).toMatchObject({ unit: '¢', eta: Infinity });
+    const shop = advice(noMarket)!;
+    expect(shop, 'a tip with no Market on the board').not.toBeNull();
+    expect(shop.build).toBe('market');
+    expect(shop.cost).toBe(0);
+    expect(shop.text.mouse).toMatch(/^Drag from the \w+ Refiner's (\w+ )?port into empty space and pick Market: you have no Market, and \w+ sells for \d+¢ each\.$/);
+    expect(shop.text.touch).toMatch(/^Tap the \w+ Refiner's (\w+ )?port, tap an empty spot and pick Market: /);
+    checkWording(shop);
+    expect(applyAdvice(noMarket, shop)).toBe(true);
+    run(noMarket, 30);
+    expect(noMarket.credits).toBeGreaterThan(10);
+
+    // Free play: Dynamo costs α, β and γ. Glyph and Prism all go into the Fabricator and Lens is only sold, so
+    // neither β nor γ comes in. No one action ends that wait, and the adviser used to say nothing at all;
+    // now it gets one kind of Data moving, then the other.
+    const g = lensLine();
+    g.techs.push('P6');
+    g.data = { a: 5000, b: 0, g: 0 };
+    at(g, 'make-dynamo');
+    run(g, 20);
+    expect(g.dataRate.b + g.dataRate.g).toBe(0);
+    expect(waitInfo(g)!.eta).toBe(Infinity);
+    const first = advice(g)!;
+    expect(first, 'a tip while two kinds of Data are stuck').not.toBeNull();
+    expect(first.kind).toBe('data');
+    expect(first.saves).toBeUndefined(); // it does not end the wait on its own: the other kind is still stuck
+    expect(first.eta).toBe(Infinity);
+    checkWording(first);
+    expect(applyAdvice(g, first)).toBe(true);
+    run(g, 20);
+    expect(Number(g.dataRate.b > 0) + Number(g.dataRate.g > 0)).toBe(1);
+    const second = advice(g)!;
+    expect(second, 'a tip for the kind of Data that is still stuck').not.toBeNull();
+    expect(second.text.mouse).not.toBe(first.text.mouse);
+    expect(second.saves).toBe(Infinity); // this one does end it
+    expect(applyAdvice(g, second)).toBe(true);
+    run(g, 30);
+    expect(g.dataRate.b).toBeGreaterThan(0);
+    expect(g.dataRate.g).toBeGreaterThan(0);
+    expect(isFinite(waitInfo(g)!.eta)).toBe(true);
   });
 
   it('with Bulk Upgrade, offers "Upgrade all" where every node of a kind is the bottleneck', () => {

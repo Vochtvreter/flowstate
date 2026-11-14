@@ -25,7 +25,7 @@
 import {
   act, connect, cutWire, favour, favouredWire, freeDeposits, materialsAt, pickRecipe, placeNode, upgrade, upgradeAll,
 } from './actions';
-import { DATA_NAMES, DATA_WORTH, DATA_YIELD, DataTier, MATERIALS, MAT_IDS, MatId, NODE_DEFS, NodeType, TECHS, Track } from './content';
+import { DATA_NAMES, DATA_WORTH, DATA_YIELD, DataTier, MATERIALS, MAT_IDS, MatId, NODE_DEFS, NodeType, RULES, TECHS, Track } from './content';
 import {
   costText, dataYield, demandInfo, has, labRate, maxLevel, nodeCost, recipeOf, research, techAffordable, techAvailable, trackAvailable,
   upgradeCost, wellRate,
@@ -33,7 +33,7 @@ import {
 import { countsForFlow, isFlowing } from './flow';
 import { Forecast, forecast, lookahead } from './forecast';
 import { activeGoal } from './goals';
-import { graph, isMachine } from './graph';
+import { graph, isMachine, isPass } from './graph';
 import { claimOrder, orderReachesMarket } from './orders';
 import { tick } from './sim';
 import { Game, GNode, Wire } from './state';
@@ -51,8 +51,10 @@ export interface Advice {
   eta: number;
   /**
    * Seconds the tip saves on the current wait, as measured (Infinity when the wait would not end without it).
-   * Absent for a Flow tip that gets its producer flowing without finishing the goal on its own: a board
-   * with two or three things wrong takes a tip for each.
+   * Absent for a tip that is one step of several: a Flow tip that gets its producer flowing without finishing
+   * the goal on its own (a board with two or three things wrong takes a tip for each), and a tip that gets one
+   * kind of Data coming in while another the same research needs still has nothing coming in (`eta` is
+   * Infinity then, with the tip and without).
    */
   saves?: number;
   /** Credits the action costs (0 for a wire or a Router setting; a tech's price is in its text). */
@@ -74,7 +76,7 @@ export interface Advice {
   research?: string;
   /** Remove this wire (it runs from `from` to `to`; `node` is `from`). */
   cut?: { wire: number; from: number; to: number };
-  /** A Flow tip: the Well or machine that is holding Flow back, which the tip gets flowing (`node` is what to act on). */
+  /** A Flow tip: the Well or machine that is holding Flow back, which the tip gets flowing, or a good deal closer to it (`node` is what to act on). */
   culprit?: number;
   /** Gestures the tip takes: 1, or 2 when something is built and then wired on. */
   steps?: number;
@@ -113,6 +115,10 @@ export const ADVICE = {
   horizon: 300,
   /** Flow tips are judged over this long: a fix, 20 s for anything new to count, and the goal's 10 s. */
   flowScreen: 50,
+  /** A Flow tip that does not get its producer all the way to flowing must raise its utilisation by at least this much. */
+  flowStep: 0.15,
+  /** For the Flow goal the board is watched this long on a copy: a producer that dips under the mark in that time is one to fix. */
+  flowWatch: 20,
   /** No tip for a wait that ends within this time anyway. */
   minWait: 12,
   /**
@@ -532,6 +538,18 @@ function labCand(g: Game, p: Port, hope: number, why: string): Cand | null {
   };
 }
 
+/** A Market built from a port, on a board that has none (the first one is free): one gesture. */
+function marketCand(g: Game, p: Port, hope: number, why: string): Cand | null {
+  const cost = nodeCost(g, 'market');
+  if (cost > g.credits + 1e-6) return null;
+  const tag = cost > 0 ? ` (${price(cost)})` : '';
+  return {
+    act: { t: 'build', type: 'market', from: p.n.id, port: p.port }, cost, hope, show: p.n.id, why,
+    mouse: `Drag from ${portName(g, p)} into empty space and pick Market${tag}`,
+    touch: `Tap ${portName(g, p)}, tap an empty spot and pick Market${tag}`,
+  };
+}
+
 /** A Well on a free deposit, wired to something that wants what it gives: two gestures. */
 function wellCand(g: Game, deposit: { id: number; mat: MatId }, to: GNode, hope: number, why: string): Cand | null {
   const cost = nodeCost(g, 'well');
@@ -648,6 +666,11 @@ function dataCands(g: Game, w: Wait): Cand[] {
       }
     }
     list.push(...top(wires, 4));
+    if (!labs.length) {
+      // No Lab on the board at all: nothing can become Data until there is one. From the port with the most to give.
+      const best = [...mine].sort((a, b) => dataYield(g, b.mat).amount * spare(g, b) - dataYield(g, a.mat).amount * spare(g, a))[0];
+      if (best) push(list, labCand(g, best, 5, `you have no Lab, and a Lab turns ${MATERIALS[best.mat].name} into ${unit}`));
+    }
     const fed = labs.filter((lab) => studied(lab).length > 0);
     for (const lab of fed) {
       if (lab.util >= ADVICE.full) push(list, speedCand(g, lab, lab.rate, `it is full, and studying faster brings the ${unit} sooner`));
@@ -713,6 +736,12 @@ function creditCands(g: Game): Cand[] {
       .sort((a, b) => spare(g, b) - spare(g, a))[0];
     if (raw) push(list, refinerCand(g, raw, market, spare(g, raw)));
   }
+  if (!market) {
+    // No Market on the board at all: nothing can be sold until there is one. From the port with the most to sell.
+    const best = [...all].filter((p) => MATERIALS[p.mat].value > 0)
+      .sort((a, b) => MATERIALS[b.mat].value * Math.max(0.05, spare(g, b)) - MATERIALS[a.mat].value * Math.max(0.05, spare(g, a)))[0];
+    if (best) push(list, marketCand(g, best, 5, `you have no Market, and ${MATERIALS[best.mat].name} sells for ${MATERIALS[best.mat].value}¢ each`));
+  }
   for (const r of g.nodes) {
     if (r.type !== 'router') continue;
     const toMarket = outs(g, r).find((x) => node(g, x.to)?.type === 'market');
@@ -743,23 +772,69 @@ function flowCands(g: Game): Cand[] {
   const list: Cand[] = [];
   const market = g.nodes.find((n) => n.type === 'market');
   const all = ports(g);
-  const slow = g.nodes.filter((n) => countsForFlow(g, n) && !isFlowing(n)).sort((a, b) => a.util - b.util).slice(0, 4);
+  // Not flowing, or about to stop: a producer that hovers at the mark drops under it for a moment every few
+  // seconds, and the goal's ten seconds never run out. So the board is watched for a while on a copy, and a
+  // producer is judged by its lowest moment there, and by what it stopped for.
+  const seen = new Map<number, { low: number; starved: number; blocked: number; missing: MatId | null }>();
+  const watch = lookahead(g);
+  for (let t = 0; watch && t < ADVICE.flowWatch; t += ADVICE.step) {
+    tick(watch, ADVICE.step);
+    for (const n of watch.nodes) {
+      if (!countsForFlow(watch, n)) continue;
+      const was = seen.get(n.id);
+      seen.set(n.id, {
+        low: Math.min(was?.low ?? 1, n.util), starved: Math.max(was?.starved ?? 0, n.fStarved), blocked: Math.max(was?.blocked ?? 0, n.fBlocked),
+        missing: was?.missing ?? n.missing,
+      });
+    }
+  }
+  const low = (n: GNode) => Math.min(n.util, seen.get(n.id)?.low ?? 1);
+  const slow = g.nodes.filter((n) => countsForFlow(g, n) && low(n) < RULES.flow.flowing).sort((a, b) => low(a) - low(b)).slice(0, 4);
   slow.forEach((n, i) => {
     const hope = 10 - i;
     const lead = `${cap(the(g, n))} is holding Flow back`;
     const add = (c: Cand | null) => push(list, c && { ...c, lead, culprit: n.id });
-    const starved = isMachine(n) && n.status !== 'blocked' && !n.blockedOn && (n.status === 'starved' || !!n.missing);
+    if (isMachine(n) && !recipeOf(n)) {
+      // Placed without a recipe, and counted because its port is wired on: it takes its recipe from the first
+      // thing wired into it that it can work on.
+      const usable = all.filter((p) => p.n !== n && !wired(g, p, n) && !!pickRecipe(g, n.type, [p.mat])).sort((a, b) => spare(g, b) - spare(g, a));
+      for (const p of usable.slice(0, 2)) add(wireCand(g, p, n, hope, 'nothing it can work on is wired into it'));
+      return;
+    }
+    // Short of an input: flagged as starved, or (hovering near the mark, which is not flagged) seen to stop
+    // for want of input more than for want of room.
+    const ahead = seen.get(n.id);
+    const starved = isMachine(n) && n.status !== 'blocked' && !n.blockedOn
+      && (n.status === 'starved' || !!n.missing || (!!ahead && ahead.starved > 0.01 && ahead.starved > ahead.blocked));
     if (starved) {
-      const m = n.missing ?? recipeOf(n)?.inputs[0][0] ?? null;
+      // What it is short of: what it stopped for, or else the input it holds the least of.
+      const inputs = recipeOf(n)?.inputs ?? [];
+      const least = [...inputs].sort((a, b) => (n.inb[a[0]] ?? 0) / a[1] - (n.inb[b[0]] ?? 0) / b[1])[0];
+      const m = n.missing ?? ahead?.missing ?? least?.[0] ?? null;
       if (!m) return;
       const name = MATERIALS[m].name;
-      const sources = ins(g, n).filter((w) => materialsAt(g, w.from, w.port).includes(m)).map((w) => node(g, w.from)!);
-      if (!sources.length) {
+      const feeds = ins(g, n).filter((w) => materialsAt(g, w.from, w.port).includes(m));
+      if (!feeds.length) {
         const from = all.find((p) => p.mat === m && p.n !== n);
         if (from) add(wireCand(g, from, n, hope, `it gets no ${name}`));
       }
-      for (const s of sources) {
-        if (s.util >= 0.9) add(speedCand(g, s, hope, `it is short of ${name}`));
+      let junction = false;
+      for (const w of feeds) {
+        const s = node(g, w.from)!;
+        if (!isPass(s)) {
+          if (s.util >= 0.9) add(speedCand(g, s, hope, `it is short of ${name}`));
+          continue;
+        }
+        // It is fed through a Router, Merger or Silo. A Router that sends most of what passes elsewhere: Favour.
+        junction = true;
+        if (s.type === 'router' && outs(g, s).length > 1 && favouredWire(g, s.id) !== w.id) add(favourCand(g, s, w, hope, `it is short of ${name}`));
+      }
+      if (junction) {
+        // ...or its input straight from what makes it, and more of that if the maker is flat out.
+        for (const p of all.filter((x) => x.mat === m && x.n !== n)) {
+          if (!wired(g, p, n)) add(wireCand(g, p, n, hope - 0.5, `it is short of ${name}`));
+          if (p.n.util >= 0.9) add(speedCand(g, p.n, hope - 1, `it is short of ${name}`));
+        }
       }
       const d = freeDeposits(g).find((x) => x.mat === m);
       if (d) add(wellCand(g, d, n, hope - 0.5, `it is short of ${name}`));
@@ -794,6 +869,8 @@ interface Outcome {
   t: number;
   /** Lower is better: `t` when it ended, otherwise an estimate of when it will (or of how far off it is). */
   score: number;
+  /** A wait for credits or Data that did not end: how many of the things it needs have nothing at all coming in. */
+  stalled?: number;
 }
 
 /**
@@ -862,7 +939,9 @@ function tryOut(copy: Game, w: Wait, seconds: number, step = ADVICE.step): Outco
   };
   const plain = until(null);
   const withOrder = o && orderIn < plain ? Math.max(orderIn, until(o.reward)) : plain;
-  return { t: Infinity, score: seconds + Math.min(plain, withOrder) };
+  let stalled = 0;
+  for (const k of KEYS) if (need[k] - have(copy, k) > 1e-9 && !(sampled > 0 && earned[k] / sampled > 1e-9)) stalled++;
+  return { t: Infinity, score: seconds + Math.min(plain, withOrder), stalled };
 }
 
 /**
@@ -882,6 +961,8 @@ const flows = (g: Game, id: number) => {
   const n = node(g, id);
   return !!n && countsForFlow(g, n) && isFlowing(n);
 };
+/** The share of the last few seconds this producer spent working. */
+const busy = (g: Game, id: number) => node(g, id)?.util ?? 0;
 
 /**
  * The Flow goal. A tip is about one producer, and it is true when that producer flows with the fix and would
@@ -907,7 +988,10 @@ function judgeFlow(g: Game, w: Wait, cands: Cand[]): Verdict | null {
     const o = tryOut(copy, w, isFinite(base.t) ? base.t : ADVICE.flowScreen);
     const finishes = isFinite(o.t) && (!isFinite(base.t) || base.t - o.t >= ADVICE.minSaves);
     const fixed = c.culprit != null && flows(copy, c.culprit) && !flows(idle, c.culprit);
-    if (finishes || (fixed && !isFinite(base.t))) tried.push({ c, o, rank });
+    // Not flowing yet, but working much more of the time than it would have: one step of two. (A machine fed
+    // through a Router that favours a Lab needs the Router turned and, often, a wire of its own as well.)
+    const closer = c.culprit != null && !flows(idle, c.culprit) && busy(copy, c.culprit) - busy(idle, c.culprit) >= ADVICE.flowStep;
+    if (finishes || ((fixed || closer) && !isFinite(base.t))) tried.push({ c, o, rank: fixed || finishes ? rank : rank + 1000 });
   });
   if (!tried.length) return null;
   tried.sort((a, b) => (a.o.score === b.o.score ? a.rank - b.rank : a.o.score - b.o.score));
@@ -941,6 +1025,8 @@ function judge(g: Game, w: Wait, cands: Cand[], keep: string | null = null): Ver
   const base = tryOut(idle, w, screen);
   if (base.t <= ADVICE.minWait) return null;
   const tried: { c: Cand; o: Outcome; copy: Game; rest: number }[] = [];
+  /** Tips that do not end a wait which would never end, but leave fewer things with nothing coming in. */
+  const unstuck: { c: Cand; o: Outcome }[] = [];
   // The same action can be proposed twice (a wire to the Market for the credits and for the order).
   const seen = new Set<string>();
   for (const c of top(cands, cands.length)) {
@@ -951,8 +1037,16 @@ function judge(g: Game, w: Wait, cands: Cand[], keep: string | null = null): Ver
     if (!copy || !perform(copy, c.act)) continue;
     const o = tryOut(copy, w, isFinite(base.t) ? base.t : screen);
     if (good(c, base.score, o.score)) tried.push({ c, o, copy, rest: purse(copy, w) });
+    else if (!isFinite(base.score) && !isFinite(o.score) && (o.stalled ?? 0) < (base.stalled ?? 0)) unstuck.push({ c, o });
   }
-  if (!tried.length) return null;
+  if (!tried.length) {
+    // Nothing ends the wait. If it could never end as things are (two kinds of Data with nothing coming in,
+    // say), a tip that gets one of them moving is still the next step: like a Flow tip, it is true of what it
+    // names and need not finish the job. The first of the most helpful, in the order they were hoped for.
+    if (!unstuck.length) return null;
+    const best = unstuck.reduce((a, b) => ((b.o.stalled ?? 0) < (a.o.stalled ?? 0) ? b : a));
+    return { cand: best.c, base: Infinity, tip: Infinity };
+  }
   tried.sort(sooner);
   if (isFinite(base.t)) {
     // Everything that matters happened inside the first run: nothing was estimated.
@@ -1090,7 +1184,8 @@ export function adviceTrials(g: Game): { kind: string; idle: { ends: number; sco
     // A Flow tip is worth saying when it ends the goal, or gets its producer flowing (judgeFlow).
     const good = w.kind !== 'flow' ? worth(base.score, o.score)
       : isFinite(o.t) ? !isFinite(base.t) || base.t - o.t >= ADVICE.minSaves
-        : !isFinite(base.t) && c.culprit != null && flows(copy, c.culprit) && !flows(idle, c.culprit);
+        : !isFinite(base.t) && c.culprit != null && !flows(idle, c.culprit)
+          && (flows(copy, c.culprit) || busy(copy, c.culprit) - busy(idle, c.culprit) >= ADVICE.flowStep);
     return { text, cost: c.cost, doable: true, ends: o.t, score: o.score, worth: good };
   });
   return { kind: w.kind, idle: { ends: base.t, score: base.score }, trials };
