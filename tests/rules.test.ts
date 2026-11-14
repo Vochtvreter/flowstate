@@ -1,9 +1,9 @@
 import { describe, expect, it } from 'vitest';
-import { connect, cutWire, placeNode, setMode, setRecipe, upgrade } from '../src/actions';
+import { connect, cutWire, deleteNode, expandBoard, placeNode, setMode, setRecipe, upgrade, upgradeWire } from '../src/actions';
 import { MATERIALS, MatId, NODE_DEFS, NodeType, PIPES, RECIPES, RULES, TECHS } from '../src/content';
 import { cycleTime, demandBurst, demandInfo, expansionCost, flowMult, price, saturation, sellValue, upgradeCostAt, wellRate } from '../src/economy';
 import { countsForFlow, flowInfo, flowProducers, inFlowState, isFlowing, worstProducer } from '../src/flow';
-import { Game, START, newGame } from '../src/state';
+import { Game, START, deserialize, newGame, serialize } from '../src/state';
 import { fresh, market, rich, run, take, throughput, well, wire } from './helpers';
 
 describe('numbers (2.6)', () => {
@@ -164,16 +164,18 @@ describe('machines-first fan-out (2.1)', () => {
     expect(well(g).status).toBe('working');
   });
 
-  it('pass-through nodes are served before sinks too', () => {
+  it('a junction on the way to a machine is served before the sinks', () => {
     const g = rich();
-    const m2 = placeNode(g, 'market', 700, 500)!;
     const merger = placeNode(g, 'merger', 400, 100)!;
+    const refiner = placeNode(g, 'refiner', 700, 100)!;
     const direct = connect(g, well(g).id, 0, market(g).id)!;
     const viaMerger = connect(g, well(g).id, 0, merger.id)!;
-    connect(g, merger.id, 0, m2.id);
-    run(g, 30);
-    expect(wire(g, viaMerger.id).rate).toBeCloseTo(1, 1);
-    expect(wire(g, direct.id).rate).toBeLessThan(0.03);
+    connect(g, merger.id, 0, refiner.id);
+    connect(g, refiner.id, 0, market(g).id);
+    run(g, 20);
+    const [junction, sold] = throughput(g, 40, [viaMerger.id, direct.id]);
+    expect(junction).toBeCloseTo(1, 1);
+    expect(sold).toBeLessThan(0.03);
   });
 
   it('Markets, Labs and Voids share the remainder evenly', () => {
@@ -274,38 +276,119 @@ describe('machines-first fan-out (2.1)', () => {
     expect(steady).toBeLessThanOrEqual(4.001);
   });
 
-  it('by the plan\'s rule a Router to a Lab and a Market, on a machine\'s port, takes half of what the machine needs', () => {
-    // KNOWN TRAP, left as the plan words it: goal 13 has the player build exactly this Router, and the Assembler
-    // of goal 15 then shares its Ink with it. RULES.fanOut.deadEndJunctionsLast is the switch (next test).
-    expect(RULES.fanOut.deadEndJunctionsLast).toBe(false);
+  it('a Router to a Lab and a Market on a machine\'s port waits for the machine', () => {
+    // Goal 13 has the player build exactly this Router; the Assembler of goal 15 then lands on the same port.
+    expect(RULES.fanOut.deadEndJunctionsLast).toBe(true);
     const { glyph, viaRouter, toGlyph, g } = routerOnAMachinePort();
     const [routed, fed] = throughput(g, 120, [viaRouter, toGlyph]);
-    expect(routed).toBeCloseTo(0.25, 1);
-    expect(fed).toBeCloseTo(0.25, 1); // it needs 0.33
-    expect(glyph.util).toBeLessThan(0.85);
+    expect(fed).toBeCloseTo(1 / 3, 1); // all it needs
+    expect(routed).toBeCloseTo(0.5 - 1 / 3, 1); // the Router gets what is left
+    expect(glyph.util).toBeGreaterThan(0.97);
+    expect(glyph.status).toBe('working');
   });
 
-  it('with the switch on, a junction that leads to no machine waits with the Markets', () => {
-    RULES.fanOut.deadEndJunctionsLast = true;
+  /** A Well making 1.95 Glint/s whose port feeds a Refiner (takes 1/s), a Market, and whatever `build` hangs on it. */
+  function sharedPort(build: (g: Game, port: (to: number) => number) => number) {
+    const g = rich();
+    for (let i = 0; i < 3; i++) upgrade(g, well(g).id, 'speed');
+    const refiner = placeNode(g, 'refiner', 400, 100)!;
+    const port = (to: number) => connect(g, well(g).id, 0, to)!.id;
+    const toMarket = port(market(g).id);
+    const toJunction = build(g, port);
+    const toRefiner = port(refiner.id);
+    connect(g, refiner.id, 0, market(g).id);
+    run(g, 30);
+    const [fed, junction, sold] = throughput(g, 60, [toRefiner, toJunction, toMarket]);
+    return { g, fed, junction, sold, refiner };
+  }
+  const SPARE = Math.pow(1.25, 3) - 1; // what the Refiner leaves: 0.95/s
+
+  it('junction → junction → Market is a dead end: it shares the leftovers with the Market', () => {
+    const { fed, junction, sold, refiner } = sharedPort((g, port) => {
+      const a = placeNode(g, 'merger', 400, 300)!;
+      const b = placeNode(g, 'router', 600, 300)!;
+      connect(g, a.id, 0, b.id);
+      connect(g, b.id, 0, placeNode(g, 'market', 800, 300)!.id);
+      return port(a.id);
+    });
+    expect(fed).toBeCloseTo(1, 1);
+    expect(refiner.util).toBeGreaterThan(0.97);
+    expect(junction).toBeCloseTo(SPARE / 2, 1);
+    expect(sold).toBeCloseTo(SPARE / 2, 1);
+  });
+
+  it('junction → machine and Market counts as a machine: it is served with the Refiner, evenly', () => {
+    const { fed, junction, sold, refiner } = sharedPort((g, port) => {
+      const router = placeNode(g, 'router', 400, 300)!;
+      const second = placeNode(g, 'refiner', 600, 300)!;
+      connect(g, router.id, 0, second.id);
+      connect(g, router.id, 0, placeNode(g, 'market', 800, 300)!.id);
+      connect(g, second.id, 0, market(g).id);
+      return port(router.id);
+    });
+    // 1.95/s shared evenly by the Refiner and the Router: neither gets the 1/s it could take, nothing is left to sell.
+    expect(fed).toBeCloseTo(Math.pow(1.25, 3) / 2, 1);
+    expect(junction).toBeCloseTo(Math.pow(1.25, 3) / 2, 1);
+    expect(sold).toBeLessThan(0.03);
+    expect(refiner.util).toBeGreaterThan(0.95);
+  });
+
+  it('a loop of junctions leads nowhere by itself, and leads to a machine when one hangs off it', () => {
+    // Merger → Router → back to the Merger, and on to a Market: a dead end.
+    const loop = sharedPort((g, port) => {
+      const a = placeNode(g, 'merger', 400, 300)!;
+      const b = placeNode(g, 'router', 600, 300)!;
+      connect(g, a.id, 0, b.id);
+      connect(g, b.id, 0, a.id);
+      connect(g, b.id, 0, placeNode(g, 'market', 800, 300)!.id);
+      return port(a.id);
+    });
+    expect(loop.fed).toBeCloseTo(1, 1);
+    expect(loop.junction).toBeCloseTo(SPARE / 2, 1);
+    expect(loop.sold).toBeCloseTo(SPARE / 2, 1);
+    expect(Number.isFinite(loop.g.credits)).toBe(true);
+    // The same loop with a Refiner hanging off the Router: now it is on the way to a machine.
+    const feeding = sharedPort((g, port) => {
+      const a = placeNode(g, 'merger', 400, 300)!;
+      const b = placeNode(g, 'router', 600, 300)!;
+      const second = placeNode(g, 'refiner', 800, 300, { recipe: 'shard' })!;
+      connect(g, a.id, 0, b.id);
+      connect(g, b.id, 0, a.id);
+      connect(g, b.id, 0, second.id);
+      connect(g, second.id, 0, market(g).id);
+      return port(a.id);
+    });
+    expect(feeding.fed).toBeCloseTo(Math.pow(1.25, 3) / 2, 1);
+    expect(feeding.junction).toBeCloseTo(Math.pow(1.25, 3) / 2, 1);
+    expect(feeding.sold).toBeLessThan(0.03);
+  });
+
+  it('a Silo follows the same rule: a store with no machine behind it waits, one that feeds a machine does not', () => {
+    const store = sharedPort((g, port) => port(placeNode(g, 'silo', 400, 300)!.id));
+    expect(store.fed).toBeCloseTo(1, 1);
+    // It took its share of the leftovers until it was full (200 items), so the Market sold the other half.
+    expect(store.sold).toBeCloseTo(SPARE / 2, 1);
+    const buffer = sharedPort((g, port) => {
+      const silo = placeNode(g, 'silo', 400, 300)!;
+      const second = placeNode(g, 'refiner', 600, 300)!;
+      connect(g, silo.id, 0, second.id);
+      connect(g, second.id, 0, market(g).id);
+      return port(silo.id);
+    });
+    expect(buffer.fed).toBeCloseTo(Math.pow(1.25, 3) / 2, 1);
+    expect(buffer.sold).toBeLessThan(0.03);
+  });
+
+  it('with the switch off, every junction is served with the machines (the first reading of the plan)', () => {
+    RULES.fanOut.deadEndJunctionsLast = false;
     try {
       const { glyph, viaRouter, toGlyph, g } = routerOnAMachinePort();
       const [routed, fed] = throughput(g, 120, [viaRouter, toGlyph]);
-      expect(fed).toBeCloseTo(1 / 3, 1);
-      expect(routed).toBeCloseTo(0.5 - 1 / 3, 1); // the Router gets what is left
-      expect(glyph.util).toBeGreaterThan(0.97);
-      // A junction on the way to a machine is still fed before a Market.
-      const merger = placeNode(g, 'merger', 300, 250)!;
-      const refiner = placeNode(g, 'refiner', 600, 250)!;
-      const direct = connect(g, well(g).id, 0, market(g).id)!;
-      const viaMerger = connect(g, well(g).id, 0, merger.id)!;
-      connect(g, merger.id, 0, refiner.id);
-      connect(g, refiner.id, 0, market(g).id);
-      run(g, 20);
-      const [junction, sold] = throughput(g, 40, [viaMerger.id, direct.id]);
-      expect(junction).toBeCloseTo(1, 1);
-      expect(sold).toBeLessThan(0.03);
+      expect(routed).toBeCloseTo(0.25, 1);
+      expect(fed).toBeCloseTo(0.25, 1); // it needs 0.33
+      expect(glyph.util).toBeLessThan(0.85);
     } finally {
-      RULES.fanOut.deadEndJunctionsLast = false;
+      RULES.fanOut.deadEndJunctionsLast = true;
     }
   });
 

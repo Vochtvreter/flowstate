@@ -239,17 +239,20 @@ export const RULES = {
   wires: { burstSeconds: 1 },
 
   /**
-   * 2.1 Fan-out. A plain port feeds machines, Routers, Mergers and Silos first; Markets, Labs and Voids share
-   * what is left. That is the plan's rule and the default.
+   * 2.1 Fan-out: "machines are fed first; what is left goes on to selling and study".
+   * A plain port feeds machines first. A Router, Merger or Silo counts as a machine when any path from it
+   * leads to one; a junction whose every path ends at Markets, Labs, Silos, Voids or nowhere waits with the
+   * Markets, Labs and Voids and shares what the machines leave.
    *
-   * `deadEndJunctionsLast` is a switch for the designer, off by default. On, a Router, Merger or Silo that leads
-   * only to Markets, Labs and Voids (or nowhere) waits with them for what the machines leave. Why it exists: the
-   * goal chain has the player hang a Router to a Lab and a Market on a machine's port; served first, it takes
-   * half of what an Assembler built on that port later needs, and that Assembler shows as starved. Why it is
-   * off: that same half is what keeps a Lab fed once machines want everything, and without it a player who only
-   * follows the goal card waits much longer for Data (tests/playthrough.test.ts measures both).
+   * `deadEndJunctionsLast` is that last clause. It is on: the goal chain has the player hang a Router to a
+   * Lab and a Market on a machine's port, and served first it took half of what the Assembler built on that
+   * port later needed. Off gives the first reading of the plan (every junction is served with the machines);
+   * it is kept as a switch for what-if runs (`npm run pacing -- --set=rules.fanOut.deadEndJunctionsLast=0`).
    */
-  fanOut: { deadEndJunctionsLast: false },
+  fanOut: { deadEndJunctionsLast: true },
+
+  /** The one-press Router preset (favour() in src/actions.ts): Ratio mode, this weight on the chosen wire and `rest` on the others. */
+  router: { favour: 3, rest: 1 },
 
   /** 2.2 Demand: full price up to a material's demand rate, a flat share of it for the surplus. */
   demand: {

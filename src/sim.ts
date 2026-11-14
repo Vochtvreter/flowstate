@@ -5,7 +5,7 @@ import {
 } from './economy';
 import { updateFlow } from './flow';
 import { tickGoal } from './goals';
-import { Graph, graph, isMachine, isPass, isSink } from './graph';
+import { Graph, graph, isMachine, isPass, isSink, leadsToMachine } from './graph';
 import { tickOrders } from './orders';
 import { Bag, Game, GNode, Status, Wire, cloneGame } from './state';
 
@@ -240,29 +240,11 @@ function share(
   return remaining;
 }
 
-/** Per graph: does this pass-through node lead on to a machine (through any number of Routers, Mergers and Silos)? */
-const leadsOn = new WeakMap<Graph, Map<number, boolean>>();
-
-function leadsToMachine(c: Graph, id: number, seen = new Set<number>()): boolean {
-  let known = leadsOn.get(c);
-  if (!known) leadsOn.set(c, (known = new Map()));
-  const cached = known.get(id);
-  if (cached != null) return cached;
-  if (seen.has(id)) return false; // a loop of junctions leads nowhere by itself
-  seen.add(id);
-  let found = false;
-  for (const wires of c.outs.get(id) ?? []) {
-    for (const w of wires ?? []) {
-      const d = c.byId.get(w.to);
-      if (d && (isMachine(d) || (isPass(d) && leadsToMachine(c, d.id, seen)))) found = true;
-    }
-  }
-  // Only cache answers that did not depend on cutting a loop short.
-  if (found || seen.size === 1) known.set(id, found);
-  return found;
-}
-
-/** Is this destination served before Markets, Labs and Voids on a plain port? (RULES.fanOut) */
+/**
+ * Is this destination served before Markets, Labs and Voids on a plain port? (RULES.fanOut)
+ * Machines always are. A Router, Merger or Silo is when it leads on to a machine; one whose every path ends
+ * at Markets, Labs, Voids or nowhere waits with them (unless RULES.fanOut.deadEndJunctionsLast is off).
+ */
 function fedFirst(c: Graph, d: GNode): boolean {
   if (isMachine(d)) return true;
   if (!isPass(d)) return false;
@@ -272,9 +254,9 @@ function fedFirst(c: Graph, d: GNode): boolean {
 /**
  * Split `avail` of material m across the wires of one output port. Returns the amount moved.
  *
- * A plain port (anything but a Router) feeds machines and pass-through nodes first, evenly, and lets
- * Markets, Labs and Voids share whatever is left (with RULES.fanOut.deadEndJunctionsLast, a pass-through
- * node that leads to no machine waits with them). A Router follows its mode; its Even mode is truly even.
+ * A plain port (anything but a Router) feeds machines first, evenly, together with any Router, Merger or
+ * Silo that leads on to a machine; Markets, Labs, Voids and the junctions that only lead to those share
+ * whatever is left. A Router follows its mode; its Even mode is truly even.
  */
 function distribute(g: Game, c: Graph, src: GNode, wires: Wire[], m: MatId, avail: number): number {
   const router = src.type === 'router';
