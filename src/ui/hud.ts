@@ -68,6 +68,7 @@ export function initHud() {
     tipKey = '';
     tip = null;
     anchorKey = '';
+    alertNode = -1;
   });
 }
 
@@ -101,12 +102,14 @@ function rewardChips(r: GoalReward | Reward): string {
 function progressHtml(p: GoalProgress): string {
   const [cur, target, unit] = p;
   const share = target > 0 ? cur / target : 0;
+  // Saving up, in credits or in Data: "Saving 7 / 12¢", then "Saved 12 / 12¢" once there is enough.
+  const saving = cur + 1e-6 >= target ? 'Saved' : 'Saving';
   if (unit === '¢') {
-    return `${bar(share, '#FFC857')}<span class="gc-num">Saving <b class="mono">${fmt(Math.floor(cur))} / ${fmt(target)}¢</b></span>`;
+    return `${bar(share, '#FFC857')}<span class="gc-num">${saving} <b class="mono">${fmt(Math.floor(cur))} / ${fmt(target)}¢</b></span>`;
   }
   const tier = DATA_OF[unit];
   if (tier) {
-    return `${bar(share, DATA_COLORS[tier])}<span class="gc-num">Saving <b class="mono" style="color:${DATA_COLORS[tier]}">${fmt(Math.floor(cur))} / ${fmt(target)}${unit}</b></span>`;
+    return `${bar(share, DATA_COLORS[tier])}<span class="gc-num">${saving} <b class="mono" style="color:${DATA_COLORS[tier]}">${fmt(Math.floor(cur))} / ${fmt(target)}${unit}</b></span>`;
   }
   if (unit === 's') {
     // Seconds count down.
@@ -219,21 +222,33 @@ function nodeName(n: GNode): string {
   return `${NODE_DEFS[n.type].name}${n.recipe && RECIPES[n.recipe] ? ` (${RECIPES[n.recipe].name})` : ''}`;
 }
 
+/** What is wrong with a node, in words that say what to do. null when it is fine, or only suffering from a problem elsewhere. */
+function problemText(g: Game, n: GNode): string | null {
+  const dx = diagnose(g, n);
+  if (!dx.problem || dx.victim || dx.problem === 'idle') return null;
+  if (n.type === 'well' && !dx.openPort) return null;
+  const name = `<b>${esc(nodeName(n))}</b>`;
+  if (dx.problem === 'starved') return `${name} needs more ${matName(dx.mat)}`;
+  return dx.openPort ? `${name}: give its ${matName(dx.mat)} somewhere to go` : `${name} is backed up`;
+}
+
+/** The node the chip is about. It keeps pointing at the same node until that one is fixed. */
+let alertNode = -1;
+
 /** The single worst root-cause problem on the board, or null. Nothing is flagged before the first wire. */
 function worstProblem(g: Game): { n: GNode; text: string } | null {
   if (!g.wires.length && g.stats.wiresMade === 0) return null;
+  // Two machines that are about as badly off would otherwise swap places four times a second.
+  const held = alertNode >= 0 ? nodeById(g, alertNode) : null;
+  const heldText = held ? problemText(g, held) : null;
+  if (held && heldText) return { n: held, text: heldText };
   let worst: { n: GNode; text: string } | null = null;
   for (const n of g.nodes) {
-    const dx = diagnose(g, n);
-    if (!dx.problem || dx.victim || dx.problem === 'idle') continue;
-    if (n.type === 'well' && !dx.openPort) continue;
     if (worst && worst.n.util <= n.util) continue;
-    const name = `<b>${esc(nodeName(n))}</b>`;
-    const text = dx.problem === 'starved' ? `${name} needs more ${matName(dx.mat)}`
-      : dx.openPort ? `${name}: give its ${matName(dx.mat)} somewhere to go`
-        : `${name} is backed up`;
-    worst = { n, text };
+    const text = problemText(g, n);
+    if (text) worst = { n, text };
   }
+  alertNode = worst ? worst.n.id : -1;
   return worst;
 }
 
