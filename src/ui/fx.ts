@@ -535,6 +535,7 @@ export function frameFx(dt: number, view: { x: number; y: number; k: number }, p
       }
     }
   }
+  if (!total) dotCount = 0;
   if (!total && !live && !pulsing) {
     if (!wasBlank) {
       ctx.setTransform(1, 0, 0, 1, 0, 0);

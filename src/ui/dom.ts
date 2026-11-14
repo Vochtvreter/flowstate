@@ -142,6 +142,8 @@ export interface Panel {
 }
 
 const HOLD_AFTER_SCROLL = 300;
+/** A press with no sign of life for this long is taken to have ended without telling us (a lost pointerup). */
+const HOLD_LIMIT = 8000;
 
 export function makePanel(root: HTMLElement): Panel {
   let shown = '';
@@ -149,9 +151,13 @@ export function makePanel(root: HTMLElement): Panel {
   let fingers = 0;
   let touchSession = false;
   let lastScroll = -1e9;
+  let lastInput = -1e9;
 
+  // Only real input holds the panel: a script-made pointerdown has no matching release.
   root.addEventListener('pointerdown', (e) => {
-    if (e.pointerType !== 'touch') down.add(e.pointerId);
+    if (!e.isTrusted || e.pointerType === 'touch') return;
+    down.add(e.pointerId);
+    lastInput = performance.now();
   }, true);
   const release = (e: PointerEvent) => down.delete(e.pointerId);
   window.addEventListener('pointerup', release, true);
@@ -161,22 +167,30 @@ export function makePanel(root: HTMLElement): Panel {
   // The browser cancels the pointer stream when it starts a touch scroll, so fingers are counted
   // with touch events, which keep coming until the finger lifts.
   const touches = (e: TouchEvent) => {
+    if (!e.isTrusted) return;
     fingers = e.targetTouches.length;
     touchSession = true;
+    lastInput = performance.now();
   };
   root.addEventListener('touchstart', touches, { passive: true, capture: true });
+  root.addEventListener('touchmove', touches, { passive: true, capture: true });
   root.addEventListener('touchend', touches, { passive: true, capture: true });
   root.addEventListener('touchcancel', touches, { passive: true, capture: true });
   // Scroll events do not bubble; capture catches the inner scrollers. Momentum after the finger
   // lifts keeps sending them, which keeps the hold alive until the panel has come to rest.
   root.addEventListener('scroll', () => {
-    if (touchSession) lastScroll = performance.now();
+    if (touchSession) lastScroll = lastInput = performance.now();
   }, { passive: true, capture: true });
 
   const busy = () => {
-    if (down.size > 0 || fingers > 0) return true;
+    const now = performance.now();
+    if (down.size > 0 || fingers > 0) {
+      if (now - lastInput < HOLD_LIMIT) return true;
+      down.clear();
+      fingers = 0;
+    }
     if (!touchSession) return false;
-    if (performance.now() - lastScroll < HOLD_AFTER_SCROLL) return true;
+    if (now - lastScroll < HOLD_AFTER_SCROLL) return true;
     touchSession = false;
     return false;
   };

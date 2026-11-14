@@ -205,7 +205,7 @@ export function initBoard(root: HTMLElement) {
   boardEl.addEventListener('pointerdown', onDown);
   boardEl.addEventListener('pointermove', onMove);
   boardEl.addEventListener('pointerup', onUp);
-  boardEl.addEventListener('pointercancel', () => endDrag());
+  boardEl.addEventListener('pointercancel', abortDrag);
   boardEl.addEventListener('wheel', (e) => {
     e.preventDefault();
     if (radial) closeRadial();
@@ -447,6 +447,15 @@ function nodeBoxes(skip?: number): Box[] {
   return out;
 }
 
+/** Deposits with no Well on them, as boxes. */
+function depositBoxes(): Box[] {
+  const g = ui.g;
+  const used = new Set(g.nodes.map((n) => n.depositId));
+  const out: Box[] = [];
+  for (const d of g.deposits) if (!used.has(d.id)) out.push({ x0: d.x, y0: d.y, x1: d.x + 172, y1: d.y + 72 });
+  return out;
+}
+
 const CHIP_SPOTS = [0.5, 0.4, 0.6, 0.3, 0.7, 0.22, 0.78];
 
 /**
@@ -455,6 +464,8 @@ const CHIP_SPOTS = [0.5, 0.4, 0.6, 0.3, 0.7, 0.22, 0.78];
  */
 function layoutWires() {
   const boxes = nodeBoxes();
+  // Chips also keep off empty deposits, whose labels they would otherwise cover.
+  const avoid = boxes.concat(depositBoxes());
   for (const refs of wireEls.values()) {
     const f = refs.flow;
     const hw = Math.max(24, refs.cChip.length * 3.3 + 9), hh = 11;
@@ -462,7 +473,7 @@ function layoutWires() {
     for (const t of CHIP_SPOTS) {
       const p = flowPoint(f, f.len * t);
       let clear = true;
-      for (const b of boxes) {
+      for (const b of avoid) {
         if (p.x + hw > b.x0 && p.x - hw < b.x1 && p.y + hh > b.y0 && p.y - hh < b.y1) {
           clear = false;
           break;
@@ -881,10 +892,7 @@ function clampToBoard(x: number, y: number, w: number, h: number): Pt {
  * `skip` is the node being moved, if any.
  */
 function freeSpot(x: number, y: number, w: number, h: number, skip?: number): Pt {
-  const g = ui.g;
-  const boxes = nodeBoxes(skip);
-  const used = new Set(g.nodes.map((n) => n.depositId));
-  for (const d of g.deposits) if (!used.has(d.id)) boxes.push({ x0: d.x, y0: d.y, x1: d.x + 172, y1: d.y + 72 });
+  const boxes = nodeBoxes(skip).concat(depositBoxes());
   const fits = (px: number, py: number) => {
     for (const b of boxes) {
       if (px < b.x1 + GAP_X && px + w + GAP_X > b.x0 && py < b.y1 + GAP_Y && py + h + GAP_Y > b.y0) return false;
@@ -1265,6 +1273,22 @@ function endDrag() {
   knifeLine.classList.remove('on');
 }
 
+/** Give up on the gesture in progress. A node that was being moved goes back to where it started. */
+function abortDrag() {
+  if (drag?.kind === 'node' && drag.moved) {
+    const n = nodeById(ui.g, drag.id);
+    const refs = nodeEls.get(drag.id);
+    if (n && refs) {
+      n.x = refs.x = drag.x0;
+      n.y = refs.y = drag.y0;
+      refs.el.style.left = n.x + 'px';
+      refs.el.style.top = n.y + 'px';
+      relayoutNode(n);
+    }
+  }
+  endDrag();
+}
+
 /** Finish moving a node: settle it on a free spot and record one undo step for the move. */
 function dropNode(d: Extract<Drag, { kind: 'node' }>) {
   const g = ui.g;
@@ -1504,9 +1528,10 @@ export function pickRadial(i: number) {
   if (made) select({ kind: 'node', id: (made as GNode).id });
 }
 
+/** Close the build menu and abandon any drag in progress, leaving the board as it was before it started. */
 export function cancelGesture() {
   if (radial) closeRadial();
-  if (drag) endDrag();
+  if (drag) abortDrag();
 }
 
 /**
