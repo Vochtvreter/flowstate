@@ -2,9 +2,9 @@
 import { describe, expect, it } from 'vitest';
 import { claimOrder, connect, cutWire, favour, placeNode, setMode, upgrade } from '../src/actions';
 import { ADVICE, Advice, advice, adviceTrials, applyAdvice, waitInfo, waitKind } from '../src/advice';
-import { RULES, TECHS } from '../src/content';
-import { nodeCost, techAffordable } from '../src/economy';
-import { flowInfo } from '../src/flow';
+import { MAT_IDS, RULES, TECHS } from '../src/content';
+import { demandInfo, nodeCost, research, techAffordable } from '../src/economy';
+import { countsForFlow, flowInfo, isFlowing } from '../src/flow';
 import { lookahead } from '../src/forecast';
 import { GOALS, activeGoal } from '../src/goals';
 import { makeOrder, orderReward, orderView, startOrders } from '../src/orders';
@@ -25,8 +25,17 @@ function waitEnds(copy: Game, limit: number, dt = 0.1): number {
   const kind = waitKind(copy);
   const goal = copy.goal.i;
   const filled = copy.stats.ordersFilled;
-  const over = () => copy.goal.i !== goal || copy.goal.ready
-    || (kind === 'order' ? copy.stats.ordersFilled > filled : kind === 'flow' ? false : waitKind(copy) !== kind);
+  // A wait for credits or Data is over when waitInfo has nothing left to count. Where the card asks for a
+  // research and then a machine, the research is done the moment it can be (it is what the card says to do),
+  // and the wait goes on until the machine can be paid for too.
+  const over = () => {
+    if (copy.goal.i !== goal || copy.goal.ready) return true;
+    if (kind === 'order') return copy.stats.ordersFilled > filled;
+    if (kind === 'flow') return false;
+    const step = activeGoal(copy)?.step?.(copy) ?? null;
+    if (step && 'tech' in step && techAffordable(copy, TECHS[step.tech])) research(copy, step.tech);
+    return waitInfo(copy) === null;
+  };
   if (over()) return 0;
   for (let t = dt; t <= limit; t += dt) {
     tick(copy, dt);
@@ -115,22 +124,38 @@ describe('waitInfo: what the card is waiting for', () => {
     expect(waitInfo(g)).toEqual({ unit: 'α', have: 0, need: 45, eta: Infinity });
   });
 
-  it('for a tech with two prices, names the one that takes longest', () => {
+  it('for a tech with two prices, and for a research followed by a machine, names whatever takes longest', () => {
     const g = midGame();
     g.techs.push('P4', 'P5');
     at(g, 'build-fabricator');
     g.data = { a: 100, b: 90, g: 0 };
+    g.credits = 1e6; // the Fabricator itself is paid for: only Fabrication's two prices are in the way
     // α is coming in (Shard is studied), β is not: β is what the player is really waiting for.
     let w = waitInfo(g)!;
     expect(waitKind(g)).toBe('data');
     expect(w).toMatchObject({ unit: 'β', have: 90, need: 100, eta: Infinity });
     g.data.b = 100;
     w = waitInfo(g)!;
+    const alpha = TECHS.P7.cost.a!;
     expect(w.unit).toBe('α');
-    expect(w.need).toBe(700);
-    expect(w.eta).toBeGreaterThan(600 / 0.75 - 40); // 0.25 Shard/s at 3 α each: about 800 s
-    expect(w.eta).toBeLessThan(600 / 0.75 + 40);
-    // Researched: the same goal now waits for the Fabricator's price.
+    expect(w.need).toBe(alpha);
+    expect(w.eta).toBeGreaterThan((alpha - 100) / 0.75 - 60); // 0.25 Shard/s at 3 α each
+    expect(w.eta).toBeLessThan((alpha - 100) / 0.75 + 60);
+    // The card asks for the Fabricator straight after the research. While its price is further off than the
+    // α, the wait is for credits, and so are the tips: the card is still counting α.
+    g.data.a = alpha - 150;
+    g.credits = 400;
+    w = waitInfo(g)!;
+    expect(w).toMatchObject({ unit: '¢', have: 400, need: nodeCost(g, 'fabricator') });
+    expect(w.eta).toBeGreaterThan(150 / 0.75 + 60);
+    expect(waitKind(g)).toBe('credits');
+    expect(activeGoal(g)!.progress!(g)![2]).toBe('α');
+    expect(activeGoal(g)!.step!(g)).toEqual({ tech: 'P7', then: nodeCost(g, 'fabricator') });
+    // With the α and β in hand the card asks for an action (research): no wait, whatever the credits.
+    g.data.a = alpha;
+    expect(waitInfo(g)).toBeNull();
+    expect(waitKind(g)).toBeNull();
+    // Researched: the same goal now waits for the Fabricator's price alone.
     g.techs.push('P7');
     g.credits = 100;
     w = waitInfo(g)!;
@@ -145,7 +170,7 @@ describe('waitInfo: what the card is waiting for', () => {
     const g = midGame();
     at(g, 'study-glyph');
     g.data.b = 4;
-    expect(waitInfo(g)).toMatchObject({ unit: 'β', have: 4, need: 10 });
+    expect(waitInfo(g)).toMatchObject({ unit: 'β', have: 4, need: RULES.goals.studyBeta });
     at(g, 'hold-flow');
     expect(waitInfo(g)).toBeNull();
     expect(waitKind(g)).toBe('flow');
@@ -173,21 +198,26 @@ describe('advice: the repertoire, one board at a time', () => {
 
   it('Data wait: wire something better into the Lab, and say why', () => {
     const g = midGame();
-    at(g, 'make-glyph'); // Assembly: 800 α
+    at(g, 'make-glyph'); // Assembly
+    g.credits = 1e6; // the Assembler is paid for: the wait is for α alone
     const a = advice(g)!;
     expect(a.kind).toBe('data');
     expect(a.wire).toBeDefined();
-    // Silt is thrown away and Ink is sold; both are worth 3 α in the Lab and save the same time. Silt costs no sales.
-    expect(a.text.mouse).toBe('Drag from the Ink Refiner\'s Silt port to the Lab: Silt is worth 3 α each in a Lab, and you are throwing it away.');
-    expect(a.text.touch).toBe('Tap the Ink Refiner\'s Silt port, then tap the Lab: Silt is worth 3 α each in a Lab, and you are throwing it away.');
+    // Ink is sold and Silt is thrown away. Ink is worth 3 α in the Lab, Silt (a by-product) only 1: Ink first.
+    expect(a.text.mouse).toBe('Drag from the Ink Refiner\'s Ink port to the Lab: Ink is worth 3 α each in a Lab.');
+    expect(a.text.touch).toBe('Tap the Ink Refiner\'s Ink port, then tap the Lab: Ink is worth 3 α each in a Lab.');
     expect(a.cost).toBe(0);
     expect(a.steps).toBe(1);
     expect(a.saves!).toBeGreaterThan(60);
     expect(a.eta).toBeGreaterThan(a.saves!);
     checkWording(a);
-    const t = trial(g, a);
+    const t = trial(g, a, 3000);
     expect(t.applied).toBe(true);
     expect(t.tip).toBeLessThan(t.idle);
+    // The Silt that is being dumped is on the list too, for what it is worth.
+    const silt = adviceTrials(g)!.trials.find((x) => /Silt port/.test(x.text))!;
+    expect(silt.text).toBe('Drag from the Ink Refiner\'s Silt port to the Lab: Silt is worth 1 α each in a Lab, and you are throwing it away.');
+    expect(silt.doable).toBe(true);
     // "Worth more Data than": a Lab that studies raw Glint is offered Shard.
     const h = rich();
     h.techs = ['P1', 'R1'];
@@ -237,13 +267,17 @@ describe('advice: the repertoire, one board at a time', () => {
   it('Data wait: a tech that pays for itself inside the wait is worth its price', () => {
     const g = midGame();
     const lab = g.nodes.find((n) => n.type === 'lab')!;
-    for (const n of g.nodes) if ((n.recipe === 'ink' || n.type === 'well') && n.id !== well(g).id) connect(g, n.id, 0, lab.id);
-    connect(g, g.nodes.find((n) => n.recipe === 'ink')!.id, 1, lab.id);
+    // Far more on offer than one Lab can study, and nowhere else for it to go: Ink, and two Wells that feed only the Lab.
+    connect(g, g.nodes.find((n) => n.recipe === 'ink')!.id, 0, lab.id);
+    const ember = g.nodes.find((n) => n.material === 'ember')!;
+    cutWire(g, g.wires.find((w) => w.from === ember.id)!.id);
+    connect(g, ember.id, 0, lab.id);
+    connect(g, placeNode(g, 'well', 0, 0, { depositId: 2 })!.id, 0, lab.id);
     run(g, 30);
-    expect(lab.util).toBeGreaterThan(0.95); // far more on offer than one Lab can study
-    at(g, 'make-glyph'); // 800 α
+    expect(lab.util).toBeGreaterThan(0.95);
+    at(g, 'make-glyph'); // Assembly, then the Assembler
     run(g, 0.1);
-    g.credits = 0; // nothing can be bought with credits
+    g.credits = 600; // the Assembler's price is in hand, and nothing else can be bought with credits
     g.data.a = 60;
     const a = advice(g)!;
     expect(a.kind).toBe('data');
@@ -252,7 +286,7 @@ describe('advice: the repertoire, one board at a time', () => {
     expect(a.text.touch).toBe('Tap Tech and research Lab Speed (50α): your Lab is full, and this doubles how fast Labs study.');
     expect(a.cost).toBe(0);
     checkWording(a);
-    const t = trial(g, a, 2000);
+    const t = trial(g, a, 3000);
     expect(t.tip).toBeLessThan(t.idle - 20); // although it spends 50 of the α being saved
     expect(applyAdvice(g, a)).toBe(true);
     expect(g.techs).toContain('R2');
@@ -397,16 +431,19 @@ describe('advice: the repertoire, one board at a time', () => {
       }
     }
     run(g, 40);
-    expect(flowInfo(g)).toMatchObject({ producers: 8, flowing: 5 }); // 63%: under the goal's 75%
+    expect(flowInfo(g)).toMatchObject({ producers: 8, flowing: 5 }); // 63%: the goal asks for 95%, which on a board this size is all of them
     at(g, 'hold-flow');
     run(g, 1);
     expect(g.goal.ready).toBe(false);
     expect(waitKind(g)).toBe('flow');
     const fixes: string[] = [];
-    for (let i = 0; i < 3 && !g.goal.ready; i++) {
+    for (let i = 0; i < 4 && !g.goal.ready; i++) {
       const a = advice(g)!;
       expect(a, 'a Flow tip').not.toBeNull();
       expect(a.kind).toBe('flow');
+      // The tip names the Well it gets flowing, and what to act on (here the same Well).
+      expect(a.culprit).toBe(a.node);
+      expect(isFlowing(g.nodes.find((n) => n.id === a.culprit)!)).toBe(false);
       expect(a.text.mouse).toMatch(/^(The|A|An) \w+ Well is holding Flow back because it makes more \w+ than its machines take: drag from (the|a|an) \w+ Well's port to the Market\.$/);
       expect(a.text.touch).toMatch(/is holding Flow back because .*: tap (the|a|an) \w+ Well's port, then tap the Market\.$/);
       checkWording(a);
@@ -420,9 +457,9 @@ describe('advice: the repertoire, one board at a time', () => {
       expect(flowInfo(g).flowing).toBeGreaterThan(before);
       expect(flowInfo(g).flowing).toBeGreaterThan(flowInfo(idle).flowing);
     }
-    // One or two deliberate fixes and the goal is done.
-    expect(fixes.length).toBeGreaterThanOrEqual(1);
-    expect(fixes.length).toBeLessThanOrEqual(2);
+    // Three Wells back up: three deliberate fixes, one tip each, and the goal is done.
+    expect(fixes.length).toBe(3);
+    expect(new Set(fixes).size).toBe(3);
     expect(g.goal.ready).toBe(true);
     expect(advice(g)).toBeNull();
   });
@@ -524,9 +561,12 @@ describe('advice: a long save, followed tip by tip', () => {
     const built = said.find((x) => /pick Refiner/.test(x))!;
     expect(built).toMatch(/^Drag from (the|a|an) \w+ Well's port into empty space, pick Refiner \(\d+¢\) and wire it to the Market: \w+ sells for more than the \w+ it is made of\.$/);
     expect(g.nodes.filter((n) => n.type === 'refiner').every((n) => n.util > 0.5)).toBe(true);
-    // By now raw Glint sells over its demand, and the adviser knows: Wider Demand is on its list.
+    // Along the way raw Glint sold over its demand. Whenever something still does, the adviser knows: its
+    // sentences say so (the unit test above pins the wording).
+    expect(g.seenSurplus).toBe(true);
+    const glutted = MAT_IDS.some((m) => demandInfo(g, m).surplusRate * demandInfo(g, m).unitPrice > 0.05);
     const glut = adviceTrials(g)!.trials.filter((x) => /over demand/.test(x.text));
-    if (g.seenSurplus) expect(glut.length).toBeGreaterThan(0);
+    if (glutted) expect(glut.length).toBeGreaterThan(0);
   });
 });
 
@@ -606,13 +646,14 @@ function collect(): Case[] {
   const cases: Case[] = [];
   const seen = new Set<string>();
   const runs: { tips: boolean; seed: number; hands?: number; studyAll?: boolean }[] = [
-    { tips: false, seed: 0 }, { tips: false, seed: 2, studyAll: true },
-    { tips: true, seed: 0 }, { tips: true, seed: 1 }, { tips: true, seed: 3, hands: 10 },
+    { tips: false, seed: 2, studyAll: true },
+    { tips: true, seed: 0 }, { tips: true, seed: 1 }, { tips: true, seed: 2 }, { tips: true, seed: 3, hands: 10 },
   ];
   for (const o of runs) {
     let idle = 0;
     playByTheCard({
       ...o,
+      wall: 30 * 60, // without tips a wait can take twenty minutes
       onIdle: (g) => {
         if (idle++ % 4) return;
         const a = advice(g);
@@ -651,7 +692,9 @@ describe('every tip on a real board is affordable, can be done, and is true', ()
       if (a.research) expect(techAffordable(g, TECHS[a.research]), from).toBe(true);
       checkWording(a);
       expect(a.eta, from).toBeGreaterThan(ADVICE.minWait);
-      if (a.kind !== 'flow') expect(a.saves, from).toBeGreaterThanOrEqual(ADVICE.minSaves);
+      // A tip is given for at least minSaves, and kept while it still saves keepSaves.
+      if (a.kind !== 'flow') expect(a.saves, from).toBeGreaterThanOrEqual(ADVICE.keepSaves);
+      else expect(a.culprit, from).toBeDefined();
     }
   });
 
@@ -662,11 +705,27 @@ describe('every tip on a real board is affordable, can be done, and is true', ()
     let rescued = 0;
     for (const { g, a, from } of cases) {
       const before = state(g);
-      const t = trial(g, a);
+      // Without tips a wait can be most of an hour: follow it to its end, within reason (and at a coarser step).
+      const limit = Math.min(4500, Math.max(900, 1.3 * (isFinite(a.eta) ? a.eta : 0)));
+      const t = trial(g, a, limit, limit > 900 ? 0.25 : 0.1);
       expect(state(g), from).toBe(before); // trying it changed nothing
       expect(t.applied, `${from}: ${a.text.mouse}`).toBe(true);
       const line = `${from}: with ${isFinite(t.tip) ? t.tip.toFixed(0) : '∞'}s, without ${isFinite(t.idle) ? t.idle.toFixed(0) : '∞'}s, promised ${a.saves?.toFixed(0)}s :: ${a.text.mouse}`;
       report.push(line);
+      if (a.kind === 'flow' && a.saves == null) {
+        // A Flow tip that does not finish the goal on its own: the producer it names flows with it, and not without.
+        const withTip = lookahead(g)!;
+        const without = lookahead(g)!;
+        expect(applyAdvice(withTip, a), line).toBe(true);
+        for (let i = 0; i < 500; i++) {
+          tick(withTip, 0.1);
+          tick(without, 0.1);
+        }
+        const flows = (x: Game) => x.nodes.some((n) => n.id === a.culprit && countsForFlow(x, n) && isFlowing(n));
+        expect(flows(withTip), line).toBe(true);
+        expect(flows(without), line).toBe(false);
+        continue;
+      }
       expect(isFinite(t.tip), line).toBe(true);
       expect(t.tip, line).toBeLessThan(t.idle);
       // The saving it promised is real: at least half of it, give or take a couple of seconds.

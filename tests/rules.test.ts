@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import { connect, cutWire, deleteNode, expandBoard, placeNode, setMode, setRecipe, upgrade, upgradeWire } from '../src/actions';
-import { MATERIALS, MatId, NODE_DEFS, NodeType, PIPES, RECIPES, RULES, TECHS } from '../src/content';
-import { cycleTime, demandBurst, demandInfo, expansionCost, flowMult, price, saturation, sellValue, upgradeCostAt, wellRate } from '../src/economy';
+import { MATERIALS, MAT_IDS, MatId, NODE_DEFS, NodeType, PIPES, RECIPES, RULES, TECHS } from '../src/content';
+import { cycleTime, dataYield, demandBurst, demandInfo, expansionCost, flowMult, nodeCostAt, price, saturation, sellValue, upgradeCostAt, wellRate } from '../src/economy';
 import { countsForFlow, flowInfo, flowProducers, inFlowState, isFlowing, worstProducer } from '../src/flow';
 import { Game, START, deserialize, newGame, serialize } from '../src/state';
 import { fresh, market, rich, run, take, throughput, well, wire } from './helpers';
@@ -14,13 +14,18 @@ describe('numbers (2.6)', () => {
   it('Shard is lime; machine and tech prices are the ones tuned with the pacing bot', () => {
     expect(MATERIALS.shard.color).toBe('#B8F26B');
     expect(NODE_DEFS.assembler.base).toBe(600);
-    expect(NODE_DEFS.fabricator.base).toBe(7800);
+    expect(NODE_DEFS.fabricator.base).toBe(7100);
+    // The second Assembler (Prism) is a purchase in its own right: 1,500¢, so that part of what the Fabricator
+    // used to ask for is paid before the Fabricator goal begins. The other machines grow gently.
+    expect([0, 1, 2].map((n) => nodeCostAt('assembler', n))).toEqual([600, 1500, 3750]);
+    expect([0, 1].map((n) => nodeCostAt('fabricator', n))).toEqual([7100, 8165]);
+    expect([0, 1, 2].map((n) => nodeCostAt('refiner', n))).toEqual([50, 57, 66]);
     // The Processing spine the goal chain asks for.
     expect(TECHS.P2.cost).toEqual({ a: 45 });
-    expect(TECHS.P3.cost).toEqual({ a: 180 });
-    expect(TECHS.P4.cost).toEqual({ a: 800 });
-    expect(TECHS.P5.cost).toEqual({ a: 850 });
-    expect(TECHS.P7.cost).toEqual({ a: 700, b: 100 });
+    expect(TECHS.P3.cost).toEqual({ a: 215 });
+    expect(TECHS.P4.cost).toEqual({ a: 1140 });
+    expect(TECHS.P5.cost).toEqual({ a: 1420 });
+    expect(TECHS.P7.cost).toEqual({ a: 1180, b: 100 });
     // Free play needs all three kinds of Data, and Reclamation cannot be had before the first Lens.
     expect(TECHS.P6.cost).toEqual({ a: 300, g: 25 });
     expect(TECHS.P8.cost).toEqual({ a: 1200, b: 300, g: 100 });
@@ -28,19 +33,40 @@ describe('numbers (2.6)', () => {
   });
 
   it('side techs are impulse buys: none costs more than a third of the spine tech it competes with', () => {
-    // Before the first Glyph only α exists, and every α side tech is small next to Assembly.
-    for (const id of ['R2', 'L2', 'L3', 'C2']) {
+    // Before the first Glyph only α exists, and every α side tech is small next to Assembly: together they
+    // cost less than a seventh of it. (Wider Demand used to be among them at 200 α; nothing sells over
+    // demand that early, and an expert who bought it on impulse reached Glyph most of a minute later.)
+    for (const id of ['R2', 'L2', 'L3']) {
       expect(Object.keys(TECHS[id].cost), id).toEqual(['a']);
       expect(TECHS[id].cost.a!, id).toBeLessThanOrEqual(0.35 * TECHS.P4.cost.a!);
     }
+    expect(['R2', 'L2', 'L3'].reduce((sum, id) => sum + TECHS[id].cost.a!, 0)).toBeLessThan(TECHS.P4.cost.a! / 7);
     // After it, the β side techs are either small next to Fabrication's β price or dearer than it.
-    for (const id of ['L5', 'L4', 'L6', 'U1', 'S3', 'L7', 'R3', 'C4']) {
+    for (const id of ['L5', 'L4', 'L6', 'U1', 'S3', 'L7', 'R3', 'C2', 'C4']) {
       expect(Object.keys(TECHS[id].cost), id).toEqual(['b']);
       const b = TECHS[id].cost.b!;
       expect(b <= 90 || b > TECHS.P7.cost.b!, `${id} at ${b}β`).toBe(true);
     }
     // Nothing that is only useful after the demo can be bought before γ exists.
     for (const id of ['P6', 'P8', 'P9', 'U2', 'C5', 'L8']) expect(TECHS[id].cost.g, id).toBeGreaterThan(0);
+  });
+
+  it('a Lab makes Data by tier, except from Silt: a by-product is worth 1 α, not 3', () => {
+    const g = fresh();
+    const made = (m: MatId) => dataYield(g, m);
+    expect(made('glint')).toEqual({ tier: 'a', amount: 1 });
+    expect(made('shard')).toEqual({ tier: 'a', amount: 3 });
+    expect(made('ink')).toEqual({ tier: 'a', amount: 3 });
+    expect(made('silt')).toEqual({ tier: 'a', amount: 1 });
+    expect(made('clay')).toEqual({ tier: 'a', amount: 3 }); // three Silt make one Clay: the same α either way
+    expect(made('glyph')).toEqual({ tier: 'b', amount: 5 });
+    expect(made('lens')).toEqual({ tier: 'g', amount: 8 });
+    // Deep Analysis multiplies Silt's amount like any other.
+    g.techs.push('R3');
+    expect(made('silt').amount).toBe(1.5);
+    expect(made('shard').amount).toBe(4.5);
+    // Silt is the only material with an amount of its own.
+    expect(MAT_IDS.filter((m) => MATERIALS[m].study != null)).toEqual(['silt']);
   });
 
   it('prices board expansions at 200 × 2.5ⁿ', () => {
@@ -742,21 +768,28 @@ describe('Flow (2.3)', () => {
     expect(g.flowStreak).toBe(0);
   });
 
-  it('times how long Flow has been held at 75% or more', () => {
+  it('times how long Flow has been held at 95% or more: on a board of under nineteen producers, all of them', () => {
+    expect(RULES.flow.holdShare).toBe(0.95);
     const { g, wells } = humming();
     g.flowOn = true;
     run(g, 40);
     expect(g.flowHold).toBeGreaterThan(10);
-    // Two of six producers back up: 67% is not enough.
-    cutWire(g, g.wires.find((w) => w.from === wells[3])!.id);
-    cutWire(g, g.wires.find((w) => w.from === wells[4])!.id);
-    for (const [id, y] of [[wells[3], 300], [wells[4], 500]]) {
+    // One of six producers backs up: 83% is not enough any more...
+    const stall = (id: number, y: number) => {
+      cutWire(g, g.wires.find((w) => w.from === id)!.id);
       const dead = placeNode(g, 'assembler', 900, y)!;
       connect(g, id, 0, dead.id);
       connect(g, dead.id, 0, market(g).id);
-    }
+    };
+    stall(wells[3], 300);
+    run(g, 15); // (the machine it now starves is too new to count yet)
+    expect(g.flow).toBeGreaterThan(0.8);
+    expect(g.flow).toBeLessThan(0.86);
+    expect(g.flowHold).toBe(0);
+    // ...and with a second one stalled, and both starved machines counted, Flow is at a half.
+    stall(wells[4], 500);
     run(g, 30);
-    expect(g.flow).toBeLessThan(0.74);
+    expect(g.flow).toBeLessThan(0.55);
     expect(g.flowHold).toBe(0);
   });
 });

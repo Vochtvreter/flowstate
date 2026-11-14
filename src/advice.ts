@@ -11,6 +11,15 @@
 //   advice(g)         one tip, or null
 //   applyAdvice(g, a) do what the tip says, through the normal actions (for bots and tests)
 //
+// Four things about how it judges, each learnt from a newcomer's run (`npm run pacing -- --policy=newcomer --trials`):
+//  - A goal that asks for a research and then a machine is one wait. While the machine's price is further
+//    off than the Data, the tips are about credits, from the first second of the goal: a newcomer who only
+//    heard about selling once the research was done saved for the Fabricator for four minutes longer.
+//  - A Flow tip is about one producer, and is true when that producer flows with the fix and would not have
+//    without it. It need not finish the goal: a board with three things wrong takes a tip for each.
+//  - The look-ahead uses a coarse step, so a small saving is checked again at a fine one before it is given.
+//  - A tip that has been given stays while it still helps at all: it must not blink on and off.
+//
 // In the copies nobody plays: nothing is bought or researched, the order the game has is claimed the moment
 // it fills, and no new order is rolled (what the next one asks for is luck).
 import {
@@ -42,7 +51,8 @@ export interface Advice {
   eta: number;
   /**
    * Seconds the tip saves on the current wait, as measured (Infinity when the wait would not end without it).
-   * Absent for a Flow tip that helps without finishing the goal on its own.
+   * Absent for a Flow tip that gets its producer flowing without finishing the goal on its own: a board
+   * with two or three things wrong takes a tip for each.
    */
   saves?: number;
   /** Credits the action costs (0 for a wire or a Router setting; a tech's price is in its text). */
@@ -64,12 +74,18 @@ export interface Advice {
   research?: string;
   /** Remove this wire (it runs from `from` to `to`; `node` is `from`). */
   cut?: { wire: number; from: number; to: number };
+  /** A Flow tip: the Well or machine that is holding Flow back, which the tip gets flowing (`node` is what to act on). */
+  culprit?: number;
   /** Gestures the tip takes: 1, or 2 when something is built and then wired on. */
   steps?: number;
 }
 
 export interface WaitInfo {
-  /** What is being waited for: credits or one kind of Data. For a tech with two prices, the one that takes longest. */
+  /**
+   * What is being waited for: credits or one kind of Data, whichever takes longest. That covers a tech with two
+   * prices, and a goal that asks for a research and then a machine: while the machine's price is further off
+   * than the Data, the wait is for credits, even though the card is still counting Data toward the research.
+   */
   unit: '¢' | 'α' | 'β' | 'γ';
   have: number;
   need: number;
@@ -79,8 +95,18 @@ export interface WaitInfo {
 
 /** Tunables of the adviser. Times are game seconds. */
 export const ADVICE = {
-  /** Step of the look-ahead copies. The simulation gives the same totals at any step up to a second. */
+  /**
+   * Step of the look-ahead copies. Coarse on purpose: a dozen candidates are tried on every verdict. The
+   * simulation gives nearly the same totals at any step up to a second, but only nearly: a saving of a few
+   * seconds, or of a few per cent of a long wait, can be an artefact of the step. So unless a tip saves both
+   * `checkBelow` seconds and `checkShare` of the wait, it is tried once more against doing nothing at `fine`,
+   * close to the game's own pace: it is only given if the saving is still there, and that is the saving it
+   * is given with.
+   */
   step: 0.5,
+  fine: 0.1,
+  checkBelow: 10,
+  checkShare: 0.2,
   /** Every candidate is tried for this long; the best two are then run on until the wait ends... */
   screen: 40,
   /** ...or until this long has passed. Beyond it the end of the wait is worked out from the income at that point. */
@@ -89,11 +115,32 @@ export const ADVICE = {
   flowScreen: 50,
   /** No tip for a wait that ends within this time anyway. */
   minWait: 12,
-  /** A tip must save at least this many seconds, and this share of the wait. */
-  minSaves: 5,
-  minShare: 0.03,
-  /** A verdict (a tip, or none) is kept this long while the board does not change. */
+  /**
+   * A tip must save at least this many seconds, and this share of the wait. That low a bar is for a wait
+   * whose end was reached in the look-ahead, with the tip and without: then the saving is measured, not
+   * estimated, and a newcomer with credits to spare is better off told about a small true gain than left
+   * with nothing to do.
+   */
+  minSaves: 2,
+  minShare: 0.01,
+  /**
+   * When the wait outlasts the look-ahead its end is worked out from the income at the horizon, which is good
+   * to a few per cent: a tip then has to save this much, or the estimate could be promising what is not there.
+   */
+  estSaves: 5,
+  estShare: 0.04,
+  /**
+   * A tip that has been given stays on offer, while the board does not change, for as long as it still saves
+   * at least this many seconds: a tip worth a few seconds must not blink on and off as its saving drifts
+   * across `minSaves`.
+   */
+  keepSaves: 1,
+  /**
+   * A verdict (a tip, or none) is kept this long while the board does not change, and never for more than
+   * `refreshShare` of the wait it was worked out for: near the end of a wait a tip goes stale in seconds.
+   */
   refresh: 15,
+  refreshShare: 0.15,
   /** At most this many candidates are tried. */
   candidates: 14,
   /** A Lab or machine at this utilisation or more is "full": faster would help. */
@@ -121,23 +168,28 @@ interface Wait {
 
 const have = (g: Game, k: keyof Purse) => (k === 'credits' ? g.credits : g.data[k]);
 
-/** The wait the active goal is in, or null: it is ready, asks for an action, or can be paid for right now. */
-function currentWait(g: Game): Wait | null {
+/**
+ * What the active goal still needs in hand before the card's purchases can be made: the Data for its research
+ * and the credits for what is bought next. null when it needs nothing saved up, or everything is there, or
+ * the research can be done right now (the card asks for an action then, not a wait).
+ */
+function needOf(g: Game): Purse | null {
   const goal = activeGoal(g);
   if (!goal || g.goal.ready) return null;
   const need: Purse = { credits: 0, a: 0, b: 0, g: 0 };
-  const base = { goal: g.goal.i, need, filled: g.stats.ordersFilled };
   const step = goal.step?.(g) ?? null;
   if (step) {
     if ('tech' in step) {
       const t = TECHS[step.tech];
       if (!t || techAffordable(g, t)) return null;
       for (const k of TIERS) need[k] = t.cost[k] ?? 0;
-      return { kind: 'data', ...base };
+      // The machine the card asks for straight after the research: its price is part of the same wait.
+      if ((step.then ?? 0) > g.credits + 1e-6) need.credits = step.then!;
+      return need;
     }
     if (g.credits >= step.credits - 1e-6) return null;
     need.credits = step.credits;
-    return { kind: 'credits', ...base };
+    return need;
   }
   // A goal that counts credits or Data without a purchase behind it ("Study Glyph for β").
   const p = goal.progress?.(g) ?? null;
@@ -145,11 +197,46 @@ function currentWait(g: Game): Wait | null {
     const k = KEYS.find((x) => UNIT[x] === p[2]);
     if (k) {
       need[k] = p[1];
-      return { kind: k === 'credits' ? 'credits' : 'data', ...base };
+      return need;
     }
   }
-  if (goal.id === 'hold-flow') return { kind: 'flow', ...base };
-  if ((goal.id === 'first-order' || goal.id === 'three-orders') && g.ordersOn && g.order && !g.order.ready) return { kind: 'order', ...base };
+  return null;
+}
+
+/** Seconds until every part of `need` is in hand at the given income, and the part that takes longest. */
+function longest(g: Game, need: Purse, f: Forecast): { key: keyof Purse; eta: number } {
+  let worst: { key: keyof Purse; eta: number } | null = null;
+  let worstShare = Infinity;
+  for (const k of KEYS) {
+    if (need[k] <= 0) continue;
+    const got = Math.min(have(g, k), need[k]);
+    const rate = k === 'credits' ? f.credits : f.data[k];
+    const missing = need[k] - got;
+    const eta = missing <= 1e-9 ? 0 : rate > 1e-6 ? missing / rate : Infinity;
+    const share = got / need[k];
+    if (!worst || eta > worst.eta || (eta === worst.eta && share < worstShare)) {
+      worst = { key: k, eta };
+      worstShare = share;
+    }
+  }
+  return worst ?? { key: 'credits', eta: 0 };
+}
+
+/** The wait the active goal is in, or null: it is ready, asks for an action, or can be paid for right now. */
+function currentWait(g: Game): Wait | null {
+  const goal = activeGoal(g);
+  if (!goal || g.goal.ready) return null;
+  const base = { goal: g.goal.i, filled: g.stats.ordersFilled };
+  const need = needOf(g);
+  if (need) {
+    const data = TIERS.some((k) => need[k] > 0);
+    // Credits and Data both: the wait is for whichever is further off.
+    const kind = !data ? 'credits' : need.credits <= 0 ? 'data' : longest(g, need, income(g)).key === 'credits' ? 'credits' : 'data';
+    return { kind, need, ...base };
+  }
+  const none: Purse = { credits: 0, a: 0, b: 0, g: 0 };
+  if (goal.id === 'hold-flow') return { kind: 'flow', need: none, ...base };
+  if ((goal.id === 'first-order' || goal.id === 'three-orders') && g.ordersOn && g.order && !g.order.ready) return { kind: 'order', need: none, ...base };
   return null;
 }
 
@@ -162,13 +249,15 @@ export function waitKind(g: Game): 'credits' | 'data' | 'flow' | 'order' | null 
   return currentWait(g)?.kind ?? null;
 }
 
-/** Has this wait ended in `g` (a copy that has been run forward)? */
-function over(g: Game, w: Wait): boolean {
+/**
+ * Has this wait ended in `g` (a copy that has been run forward)? `need` is what the copy has to have in hand:
+ * nobody plays in a copy, so nothing is researched or bought there.
+ */
+function over(g: Game, w: Wait, need: Purse): boolean {
   if (g.goal.i !== w.goal || g.goal.ready) return true;
   if (w.kind === 'order') return g.stats.ordersFilled > w.filled;
   if (w.kind === 'flow') return false;
-  const now = currentWait(g);
-  return !now || now.kind !== w.kind;
+  return KEYS.every((k) => need[k] <= 0 || have(g, k) >= need[k] - 1e-6);
 }
 
 /** The income a wait is measured against, kept for a while so that a card showing the ETA does not pay for a forecast per frame. */
@@ -186,24 +275,10 @@ function income(g: Game): Forecast {
  * the current income. null when the goal is ready, asks for something else, or can be paid for now.
  */
 export function waitInfo(g: Game): WaitInfo | null {
-  const w = currentWait(g);
-  if (!w || (w.kind !== 'credits' && w.kind !== 'data')) return null;
-  const f = income(g);
-  let worst: WaitInfo | null = null;
-  let worstShare = Infinity;
-  for (const k of KEYS) {
-    if (w.need[k] <= 0) continue;
-    const got = Math.min(have(g, k), w.need[k]);
-    const rate = k === 'credits' ? f.credits : f.data[k];
-    const missing = w.need[k] - got;
-    const eta = missing <= 1e-9 ? 0 : rate > 1e-6 ? missing / rate : Infinity;
-    const share = got / w.need[k];
-    if (!worst || eta > worst.eta || (eta === worst.eta && share < worstShare)) {
-      worst = { unit: UNIT[k], have: got, need: w.need[k], eta };
-      worstShare = share;
-    }
-  }
-  return worst;
+  const need = needOf(g);
+  if (!need) return null;
+  const { key, eta } = longest(g, need, income(g));
+  return { unit: UNIT[key], have: Math.min(have(g, key), need[key]), need: need[key], eta };
 }
 
 // =====================================================================================
@@ -327,6 +402,8 @@ interface Cand {
   lead?: string;
   /** The node the tip points at. */
   show?: number;
+  /** A Flow tip: the producer it is meant to get flowing. */
+  culprit?: number;
 }
 
 /** Do what a candidate says. A build with its wires is one undo step and is rolled back if any part fails. */
@@ -575,6 +652,8 @@ function dataCands(g: Game, w: Wait): Cand[] {
     for (const lab of fed) {
       if (lab.util >= ADVICE.full) push(list, speedCand(g, lab, lab.rate, `it is full, and studying faster brings the ${unit} sooner`));
     }
+    // Several full Labs: with Bulk Upgrade, one press speeds them all up (each alone may be too little to be worth saying).
+    if (fed.filter((lab) => lab.util >= ADVICE.full).length >= 2) push(list, bulkCand(g, 'lab', 1.5, `they are full, and studying faster brings the ${unit} sooner`));
     // Every Lab that gets this Data is full: a second Lab from the port with the most to give, or Labs twice as fast.
     if (fed.length && fed.every((lab) => lab.util >= ADVICE.full)) {
       const best = [...mine].sort((a, b) => dataYield(g, b.mat).amount * spare(g, b) - dataYield(g, a.mat).amount * spare(g, a))[0];
@@ -668,7 +747,7 @@ function flowCands(g: Game): Cand[] {
   slow.forEach((n, i) => {
     const hope = 10 - i;
     const lead = `${cap(the(g, n))} is holding Flow back`;
-    const add = (c: Cand | null) => push(list, c && { ...c, lead });
+    const add = (c: Cand | null) => push(list, c && { ...c, lead, culprit: n.id });
     const starved = isMachine(n) && n.status !== 'blocked' && !n.blockedOn && (n.status === 'starved' || !!n.missing);
     if (starved) {
       const m = n.missing ?? recipeOf(n)?.inputs[0][0] ?? null;
@@ -733,9 +812,10 @@ function sooner(a: { o: Outcome; rest: number }, b: { o: Outcome; rest: number }
 }
 
 /** Run a copy until the wait ends or `seconds` pass, claiming its order when it fills, and say how it went. */
-function tryOut(copy: Game, w: Wait, seconds: number): Outcome {
-  const step = ADVICE.step;
+function tryOut(copy: Game, w: Wait, seconds: number, step = ADVICE.step): Outcome {
   const half = seconds / 2;
+  // What this copy has to have in hand. Read from the copy: a tip that builds a Refiner makes the next one dearer.
+  const need = needOf(copy) ?? w.need;
   // Income over the second half of the run, for the estimate if the wait does not end.
   const earned: Purse = { credits: 0, a: 0, b: 0, g: 0 };
   let sampled = 0;
@@ -744,7 +824,7 @@ function tryOut(copy: Game, w: Wait, seconds: number): Outcome {
   for (let t = step; t <= seconds + 1e-9; t += step) {
     tick(copy, step);
     if (copy.order?.ready) claimOrder(copy);
-    if (over(copy, w)) return { t, score: t };
+    if (over(copy, w, need)) return { t, score: t };
     if (t > half) {
       earned.credits += copy.tickAcc.credits;
       for (const k of TIERS) earned[k] += copy.tickAcc.data[k];
@@ -770,7 +850,6 @@ function tryOut(copy: Game, w: Wait, seconds: number): Outcome {
   const orderIn = o && orderRate > 1e-9 ? (o.need - o.got) / orderRate : Infinity;
   if (w.kind === 'order') return { t: Infinity, score: seconds + orderIn };
   // Credits or Data: when will everything be in hand at this income, counting the order's pay when it lands?
-  const need = currentWait(copy)?.need ?? w.need;
   const until = (bonus: Purse | null) => {
     let worst = 0;
     for (const k of KEYS) {
@@ -786,20 +865,79 @@ function tryOut(copy: Game, w: Wait, seconds: number): Outcome {
   return { t: Infinity, score: seconds + Math.min(plain, withOrder) };
 }
 
-/** Is `tip` enough better than `base` to be worth saying? */
-function worth(base: number, tip: number): boolean {
+/**
+ * Is `tip` enough better than `base` to be worth saying? `measured`: both times are ends that were reached in
+ * the look-ahead, not estimates from the income at its horizon.
+ */
+function worth(base: number, tip: number, measured = true): boolean {
   if (!isFinite(tip)) return false;
   if (!isFinite(base)) return true;
-  return base - tip >= Math.max(ADVICE.minSaves, ADVICE.minShare * base);
+  return base - tip >= (measured ? Math.max(ADVICE.minSaves, ADVICE.minShare * base) : Math.max(ADVICE.estSaves, ADVICE.estShare * base));
 }
 
 interface Verdict { cand: Cand; base: number; tip: number; cut?: { wire: number; from: number; to: number } }
 
-/** Try the candidates against doing nothing and return the one that ends the wait soonest, if any is worth saying. */
-function judge(g: Game, w: Wait, cands: Cand[]): Verdict | null {
+/** Is this producer counted and flowing in `g`? */
+const flows = (g: Game, id: number) => {
+  const n = node(g, id);
+  return !!n && countsForFlow(g, n) && isFlowing(n);
+};
+
+/**
+ * The Flow goal. A tip is about one producer, and it is true when that producer flows with the fix and would
+ * not have without it. Finishing the goal is better still, but is not asked of every tip: on a board with
+ * two or three things wrong the first fix cannot finish it, and a fix can even push another producer under
+ * (a faster Spark Refiner fills the Lab that a Well was feeding), which the next tip then deals with.
+ * Best first: the fix that completes the goal soonest, then the one that leaves the fewest producers short,
+ * then the one for the producer furthest from flowing.
+ */
+function judgeFlow(g: Game, w: Wait, cands: Cand[]): Verdict | null {
   const idle = lookahead(g);
   if (!idle || !cands.length) return null;
-  const screen = w.kind === 'flow' ? ADVICE.flowScreen : ADVICE.screen;
+  const base = tryOut(idle, w, ADVICE.flowScreen);
+  if (base.t <= ADVICE.minWait) return null;
+  const tried: { c: Cand; o: Outcome; rank: number }[] = [];
+  const seen = new Set<string>();
+  cands.forEach((c, rank) => {
+    const key = JSON.stringify(c.act);
+    if (seen.has(key) || seen.size >= ADVICE.candidates) return;
+    seen.add(key);
+    const copy = lookahead(g);
+    if (!copy || !perform(copy, c.act)) return;
+    const o = tryOut(copy, w, isFinite(base.t) ? base.t : ADVICE.flowScreen);
+    const finishes = isFinite(o.t) && (!isFinite(base.t) || base.t - o.t >= ADVICE.minSaves);
+    const fixed = c.culprit != null && flows(copy, c.culprit) && !flows(idle, c.culprit);
+    if (finishes || (fixed && !isFinite(base.t))) tried.push({ c, o, rank });
+  });
+  if (!tried.length) return null;
+  tried.sort((a, b) => (a.o.score === b.o.score ? a.rank - b.rank : a.o.score - b.o.score));
+  return { cand: tried[0].c, base: base.t, tip: tried[0].o.t };
+}
+
+/** Try the candidates against doing nothing and return the one that ends the wait soonest, if any is worth saying. */
+function judge(g: Game, w: Wait, cands: Cand[], keep: string | null = null): Verdict | null {
+  if (w.kind === 'flow') return judgeFlow(g, w, cands);
+  /** The tip already on offer only has to go on saving a little (ADVICE.keepSaves) to stay, if that much is measured. */
+  const good = (c: Cand, base: number, tip: number, measured = true) =>
+    worth(base, tip, measured) || (measured && keep != null && JSON.stringify(c.act) === keep && isFinite(tip) && (!isFinite(base) || base - tip >= ADVICE.keepSaves));
+  /**
+   * The last word on a small saving: the tip against doing nothing once more, at a fine step, until both waits
+   * end. A bigger saving, or one that is only an estimate (and so had to be large to count), is taken as it is.
+   */
+  const checked = (c: Cand, v: Verdict, measured: boolean): Verdict | null => {
+    if (!measured || !isFinite(v.base) || v.base - v.tip >= Math.max(ADVICE.checkBelow, ADVICE.checkShare * v.base)) return v;
+    const idle = lookahead(g);
+    const copy = lookahead(g);
+    if (!idle || !copy || !perform(copy, c.act)) return null;
+    const limit = v.base * 1.2 + 5;
+    const base = tryOut(idle, w, limit, ADVICE.fine);
+    const tip = tryOut(copy, w, isFinite(base.t) ? base.t : limit, ADVICE.fine);
+    if (!isFinite(base.t) || !isFinite(tip.t) || !good(c, base.t, tip.t)) return null;
+    return { cand: c, base: base.t, tip: tip.t };
+  };
+  const idle = lookahead(g);
+  if (!idle || !cands.length) return null;
+  const screen = ADVICE.screen;
   const base = tryOut(idle, w, screen);
   if (base.t <= ADVICE.minWait) return null;
   const tried: { c: Cand; o: Outcome; copy: Game; rest: number }[] = [];
@@ -812,33 +950,43 @@ function judge(g: Game, w: Wait, cands: Cand[]): Verdict | null {
     const copy = lookahead(g);
     if (!copy || !perform(copy, c.act)) continue;
     const o = tryOut(copy, w, isFinite(base.t) ? base.t : screen);
-    if (worth(base.score, o.score)) tried.push({ c, o, copy, rest: purse(copy, w) });
+    if (good(c, base.score, o.score)) tried.push({ c, o, copy, rest: purse(copy, w) });
   }
   if (!tried.length) return null;
   tried.sort(sooner);
-  if (w.kind === 'flow' || isFinite(base.t)) {
+  if (isFinite(base.t)) {
     // Everything that matters happened inside the first run: nothing was estimated.
-    return { cand: tried[0].c, base: base.t, tip: tried[0].o.t };
+    for (const x of tried.slice(0, 3)) {
+      const v = checked(x.c, { cand: x.c, base: base.t, tip: x.o.t }, true);
+      if (v) return v;
+    }
+    return null;
   }
   // The wait outlasts the first look: run the untouched copy and the best two on until it ends.
   const rest = ADVICE.horizon - screen;
   const baseOn = tryOut(idle, w, rest);
   const baseTime = screen + baseOn.score;
-  const finals: { c: Cand; o: Outcome; rest: number }[] = [];
+  const finals: { c: Cand; o: Outcome; rest: number; measured: boolean }[] = [];
   for (const x of tried.slice(0, 2)) {
-    const time = isFinite(x.o.t) ? x.o.t : screen + tryOut(x.copy, w, isFinite(baseOn.t) ? baseOn.t : rest).score;
-    if (worth(baseTime, time)) finals.push({ c: x.c, o: { t: time, score: time }, rest: purse(x.copy, w) });
+    const on = isFinite(x.o.t) ? null : tryOut(x.copy, w, isFinite(baseOn.t) ? baseOn.t : rest);
+    const time = on ? screen + on.score : x.o.t;
+    // Measured when the tip's copy reached the end of the wait, and the untouched one did too (or never would have).
+    const measured = (!on || isFinite(on.t)) && (isFinite(baseOn.t) || !isFinite(baseTime));
+    if (good(x.c, baseTime, time, measured)) finals.push({ c: x.c, o: { t: time, score: time }, rest: purse(x.copy, w), measured });
   }
-  if (!finals.length) return null;
   finals.sort(sooner);
-  return { cand: finals[0].c, base: baseTime, tip: finals[0].o.score };
+  for (const x of finals) {
+    const v = checked(x.c, { cand: x.c, base: baseTime, tip: x.o.score }, x.measured);
+    if (v) return v;
+  }
+  return null;
 }
 
 // =====================================================================================
 // The public face
 // =====================================================================================
 
-const verdicts = new WeakMap<Game, { key: string; time: number; advice: Advice | null }>();
+const verdicts = new WeakMap<Game, { key: string; time: number; until: number; advice: Advice | null; act: string | null }>();
 
 function toAdvice(w: Wait, v: Verdict): Advice {
   const c = v.cand;
@@ -854,6 +1002,7 @@ function toAdvice(w: Wait, v: Verdict): Advice {
   };
   if (isFinite(v.tip)) a.saves = isFinite(v.base) ? Math.max(0, v.base - v.tip) : Infinity;
   if (c.show != null) a.node = c.show;
+  if (c.culprit != null) a.culprit = c.culprit;
   const x = c.act;
   if (x.t === 'upgrade') {
     a.node = x.node;
@@ -893,16 +1042,19 @@ export function advice(g: Game): Advice | null {
   if (!w) return null;
   const key = `${g.rev}|${g.goal.i}|${w.kind}|${g.order?.created ?? -1}|${g.order?.ready ?? ''}`;
   const hit = verdicts.get(g);
-  if (hit && hit.key === key && g.time >= hit.time && g.time - hit.time < ADVICE.refresh) return hit.advice;
+  if (hit && hit.key === key && g.time >= hit.time && g.time < hit.until) return hit.advice;
   const cands = w.kind === 'data' ? dataCands(g, w) : w.kind === 'credits' ? creditCands(g) : w.kind === 'flow' ? flowCands(g) : orderCands(g);
-  const v = judge(g, w, cands);
+  // The tip given last time, if the board and the wait are still the same: it stays while it still helps.
+  const v = judge(g, w, cands, hit && hit.key === key ? hit.act : null);
   if (v && v.cand.act.t === 'cut') {
     const id = v.cand.act.wire;
     const wire = g.wires.find((x) => x.id === id);
     if (wire) v.cut = { wire: id, from: wire.from, to: wire.to };
   }
   const a = v ? toAdvice(w, v) : null;
-  verdicts.set(g, { key, time: g.time, advice: a });
+  // A tip for a wait of a minute is looked at again within ten seconds; no verdict is kept for less than two.
+  const life = v && isFinite(v.base) ? Math.min(ADVICE.refresh, Math.max(2, ADVICE.refreshShare * v.base)) : ADVICE.refresh;
+  verdicts.set(g, { key, time: g.time, until: g.time + life, advice: a, act: v ? JSON.stringify(v.cand.act) : null });
   return a;
 }
 
@@ -935,7 +1087,11 @@ export function adviceTrials(g: Game): { kind: string; idle: { ends: number; sco
     const text = c.lead ? `${c.lead} because ${c.why}: ${low(c.mouse)}.` : `${c.mouse}: ${c.why}.`;
     if (!copy || !perform(copy, c.act)) return { text, cost: c.cost, doable: false, ends: Infinity, score: Infinity, worth: false };
     const o = tryOut(copy, w, isFinite(base.t) ? base.t : screen);
-    return { text, cost: c.cost, doable: true, ends: o.t, score: o.score, worth: worth(base.score, o.score) };
+    // A Flow tip is worth saying when it ends the goal, or gets its producer flowing (judgeFlow).
+    const good = w.kind !== 'flow' ? worth(base.score, o.score)
+      : isFinite(o.t) ? !isFinite(base.t) || base.t - o.t >= ADVICE.minSaves
+        : !isFinite(base.t) && c.culprit != null && flows(copy, c.culprit) && !flows(idle, c.culprit);
+    return { text, cost: c.cost, doable: true, ends: o.t, score: o.score, worth: good };
   });
   return { kind: w.kind, idle: { ends: base.t, score: base.score }, trials };
 }

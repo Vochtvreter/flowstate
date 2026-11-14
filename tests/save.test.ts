@@ -2,7 +2,7 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 import { claimGoal, claimOrder, connect, deleteNode, placeNode, upgrade } from '../src/actions';
 import { RULES, TECHS } from '../src/content';
 import { endDemo, endStats, offlineCap, research, techAvailable, techHidden } from '../src/economy';
-import { GOALS, activeGoal, goalView } from '../src/goals';
+import { GOALS, activeGoal, goalById, goalView } from '../src/goals';
 import { startOrders } from '../src/orders';
 import { offlineGains } from '../src/sim';
 import { Game, cloneGame, deserialize, newGame, serialize } from '../src/state';
@@ -355,6 +355,7 @@ function midGame(): Game {
   const ink = line(3, 400);
   connect(g, ink.id, 1, placeNode(g, 'void', 700, 600)!.id);
   line(4, 540);
+  upgrade(g, g.nodes.find((n) => n.material === 'ember')!.id, 'speed'); // or the Spark Refiner is short of Ember and holds Flow back
   for (let i = 0; i < 6; i++) upgrade(g, well(g).id, 'speed'); // the surplus Glint is sold over demand
   connect(g, well(g).id, 0, m.id);
   g.flowOn = true;
@@ -406,7 +407,7 @@ describe('save → load → save, mid-goal and mid-order', () => {
     expect(goalView(copy)!.ready).toBe(true);
     const credits = copy.credits;
     expect(claimGoal(copy)).toBe(true);
-    expect(copy.credits).toBe(credits + 300);
+    expect(copy.credits).toBe(credits + goalById('hold-flow')!.reward.credits!);
     expect(claimGoal(g)).toBe(true);
     expect(copy.goal).toEqual(g.goal);
     // Saved after the claim, it stays claimed: a reload cannot pay the same goal again.

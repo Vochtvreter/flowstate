@@ -321,7 +321,19 @@ describe('orders (2.5)', () => {
     expect(neededTier(g)).toBe('b');
     const rb = orderReward(g, 'spark', 30);
     expect(rb.a).toBe(0);
-    expect(rb.b).toBe(23); // 90 α-worth is 22.5 β
+    // 90 α-worth is 22.5 β, and a quarter of it survives the conversion: Spark is α in a Lab, not β.
+    expect(RULES.orders.convertShare).toBe(0.25);
+    expect(rb.b).toBe(6);
+    // The other way round as well: Glyph is 5 β each in a Lab. Paid in β that is the whole 50 β for ten;
+    // paid in α (to a player who is short of α) it is a quarter of the 200 α they would be worth.
+    expect(orderReward(g, 'glyph', 10).b).toBe(50);
+    g.data.a = 0;
+    g.data.b = 1e6;
+    expect(neededTier(g)).toBe('a');
+    expect(orderReward(g, 'glyph', 10)).toMatchObject({ a: 50, b: 0, credits: 100 });
+    expect(orderReward(g, 'spark', 30).a).toBe(90); // its own kind of Data: nothing is lost
+    g.data.a = 1e6;
+    g.data.b = 0;
     // A tier the player has never produced is not paid, even if it is needed.
     g.data.b = 1e6;
     for (const id of ['P5', 'P7']) g.techs.push(id);

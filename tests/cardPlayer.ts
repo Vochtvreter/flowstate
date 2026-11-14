@@ -5,6 +5,12 @@
 //
 // With `tips` the same player also follows the adviser (src/advice.ts): when they are waiting and a tip has
 // been on offer for `tipDelay` seconds, they do what it says (one action), and nothing else unprompted.
+// One goal needs the adviser either way: "Hold 95% Flow" sends the player to the Flow ring to find what is
+// holding Flow back, and what the ring leads them to is the fix the adviser names. So on that goal even the
+// player without tips takes it.
+//
+// The pacing tool has its own newcomer (tools/pacing.ts), who also claims 8–16 s late; that one is judged
+// against the targets. This one is the tests' fixture.
 //
 // Used by tests/playthrough.test.ts (every goal can be done; how long each takes) and tests/advice.test.ts
 // (real game states to check tips against).
@@ -35,6 +41,8 @@ export interface CardOptions {
   tendOrders?: 'always' | 'asked';
   /** Called once a second while the player has nothing to do but wait. */
   onIdle?: (g: Game) => void;
+  /** Seconds one wait may take before the run fails: longer than this is a wall. */
+  wall?: number;
 }
 
 export interface GoalTime {
@@ -66,6 +74,7 @@ export function playByTheCard(opts: CardOptions = {}): CardRun {
   const g = fresh();
   const HANDS = opts.hands ?? 6;
   const TIP_DELAY = opts.tipDelay ?? 15;
+  const WALL = opts.wall ?? 900;
   const tend = opts.tendOrders ?? (opts.tips ? 'asked' : 'always');
   g.orderSeed = (g.orderSeed + (opts.seed ?? 0) * 7919) >>> 0;
   const spent: GoalTime[] = [];
@@ -112,7 +121,7 @@ export function playByTheCard(opts: CardOptions = {}): CardRun {
     tickSurplus();
     tendOrder();
     opts.onIdle?.(g);
-    const tip = opts.tips ? advice(g) : null;
+    const tip = opts.tips || activeGoal(g)?.id === 'hold-flow' ? advice(g) : null;
     if (!tip) {
       offered = 0;
       tipless++;
@@ -131,12 +140,12 @@ export function playByTheCard(opts: CardOptions = {}): CardRun {
     }
     offered = 0;
   };
-  /** Let the game run until `ready()`. Fails after 15 minutes: that would be a wall. */
+  /** Let the game run until `ready()`. Fails after 15 minutes (or `wall`): that would be a wall. */
   const wait = (what: string, ready: () => boolean) => {
     const from = g.time;
     offered = 0;
     while (!ready()) {
-      expect(g.time - from, `still waiting for ${what} after 15 minutes`).toBeLessThan(900);
+      expect(g.time - from, `still waiting for ${what} after ${WALL / 60} minutes`).toBeLessThan(WALL);
       idle();
     }
     tipless = 0;
@@ -208,6 +217,7 @@ export function playByTheCard(opts: CardOptions = {}): CardRun {
   study('P3');
   const spark = from(buy('well', { depositId: 4 }), 'refiner');
   expect(spark.recipe).toBe('spark');
+  wire(spark, m); // "...and sell the Spark"
   claim('make-spark');
   if (opts.studyAll) wire(spark, lab);
   // 12–14: orders, the Router, the board.
@@ -227,6 +237,7 @@ export function playByTheCard(opts: CardOptions = {}): CardRun {
   const glyph = buy('assembler', { recipe: 'glyph' });
   wire(ink, glyph);
   wire(spark, glyph);
+  wire(glyph, m); // "...and sell its Glyph at the Market"
   claim('make-glyph');
   claim('hold-flow');
   wire(glyph, lab); // "Drag from the Assembler's port to a Lab"
@@ -235,11 +246,13 @@ export function playByTheCard(opts: CardOptions = {}): CardRun {
   study('P5');
   const mist = from(buy('well', { depositId: 5 }), 'refiner');
   expect(mist.recipe).toBe('mist');
+  wire(mist, m); // "...and sell the Mist"
   claim('make-mist');
   if (opts.studyAll) wire(mist, lab);
   const prism = buy('assembler', { recipe: 'prism' });
   wire(shard, prism);
   wire(mist, prism);
+  wire(prism, m); // "...and sell its Prism at the Market"
   claim('make-prism');
   claim('three-orders');
   // 21–22: the Fabricator and the Lens.

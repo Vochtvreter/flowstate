@@ -96,7 +96,8 @@ export function orderReward(g: Game, mat: MatId, need: number): Required<Reward>
   const tier = neededTier(g);
   if (tier) {
     const y = DATA_YIELD[MATERIALS[mat].tier];
-    reward[tier] = Math.max(1, Math.round((need * y.amount * DATA_WORTH[y.tier] * O.dataShare) / DATA_WORTH[tier]));
+    const share = O.dataShare * (y.tier === tier ? 1 : O.convertShare);
+    reward[tier] = Math.max(1, Math.round((need * y.amount * DATA_WORTH[y.tier] * share) / DATA_WORTH[tier]));
   }
   reward.credits = Math.max(1, Math.round(worth * (tier ? O.creditShare : O.creditShareNoData)));
   return reward;
