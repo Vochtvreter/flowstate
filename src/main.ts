@@ -207,8 +207,9 @@ function onKey(e: KeyboardEvent) {
   }
   if (mod || e.altKey) return;
   if (k === 'escape') {
-    if (radialOpen()) cancelGesture();
-    else if (ui.techOpen) closeTech();
+    // Escape first backs out of whatever the pointer is in the middle of.
+    if (cancelGesture()) return renderPanels();
+    if (ui.techOpen) closeTech();
     else if (ui.menuOpen) { ui.menuOpen = false; touch(); }
     else if (ui.placing) { ui.placing = null; touch(); }
     else if (ui.sel) select(null);

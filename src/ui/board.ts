@@ -1580,10 +1580,17 @@ export function pickRadial(i: number) {
   }
 }
 
-/** Close the build menu and abandon any drag in progress, leaving the board as it was before it started. */
-export function cancelGesture() {
+/**
+ * Close the build menu and abandon a wire, a cut or a node move in progress, leaving the board as
+ * it was before it started. Returns false when there was nothing to cancel.
+ */
+export function cancelGesture(): boolean {
+  const d = drag;
+  const busy = !!d && (d.kind === 'wire' || d.kind === 'wireIn' || d.kind === 'knife' || (d.kind === 'node' && d.moved));
+  if (!radial && !busy) return false;
   if (radial) closeRadial();
-  if (drag) abortDrag();
+  if (busy) abortDrag();
+  return true;
 }
 
 /**
