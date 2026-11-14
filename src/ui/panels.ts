@@ -45,7 +45,7 @@ export const onPanels = (fn: (force: boolean) => void) => void extraRenders.push
 
 export function initPanels(refs: {
   top: HTMLElement; hot: HTMLElement; insp: HTMLElement; mini: HTMLCanvasElement; zoom: HTMLElement;
-}, hooks: { openTech: (id?: string) => void; reset: () => void }) {
+}, hooks: { openTech: (id?: string) => void; closeTech?: () => void; reset: () => void }) {
   topEl = refs.top;
   hotEl = refs.hot;
   inspEl = refs.insp;
@@ -67,7 +67,8 @@ export function initPanels(refs: {
     if (a === 'undo') undo(g);
     else if (a === 'redo') redo(g);
     else if (a === 'pause') { g.paused = !g.paused; touch(); }
-    else if (a === 'tech') hooks.openTech();
+    // The Tech button opens the tree, and closes it again: on a desktop the top bar stays in view above it.
+    else if (a === 'tech') { if (ui.techOpen && hooks.closeTech) hooks.closeTech(); else hooks.openTech(); }
     else if (a === 'menu') { ui.menuOpen = !ui.menuOpen; touch(); }
     else if (a === 'reset') {
       ui.menuOpen = false;

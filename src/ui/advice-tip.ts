@@ -45,6 +45,8 @@ export const TIP = {
 let shown: Advice | null = null;
 /** What it asks for, as a string: two answers with the same action are the same tip. */
 let shownAct = '';
+/** g.nextId when it was put there: any node with this id or more was built since. */
+let shownMark = 0;
 /** The saving the row quotes. Kept until the measured one has moved well away from it, so the number does not flicker. */
 let quoted: number | undefined;
 /** The sentence that is fading out, during a cross-fade. */
@@ -86,6 +88,7 @@ function drop(g: Game) {
 function put(g: Game, a: Advice, act: string, swap = false) {
   shown = a;
   shownAct = act;
+  shownMark = g.nextId;
   quoted = a.saves;
   turn++;
   changedAt = g.time;
@@ -117,9 +120,15 @@ export function tendTips(g: Game) {
   // The player did something, or the goal moved on: whatever was on offer is about a board that is gone.
   const idle = `${builtRev(g)}|${g.goal.i}`;
   if (idle !== quietKey || g.time < quietFrom) {
+    // A tip of two steps ("place a Well on the free deposit and drag from its port to a Lab") whose first
+    // step has just been done: the player is in the middle of following it. The adviser's next tip is the
+    // second step (it was, in every case tried), and it is shown as soon as it arrives, not after the wait
+    // that precedes a tip nobody asked for.
+    const midway = !!shown && shown.steps === 2 && !!shown.build && g.nodes.some((n) => n.id >= shownMark && n.type === shown!.build);
     quietKey = idle;
-    quietFrom = g.time;
+    quietFrom = midway ? g.time - TIP.delay : g.time;
     drop(g);
+    if (midway) changedAt = -1e9;
   }
   if (!activeGoal(g) || g.goal.ready) {
     quietFrom = g.time;

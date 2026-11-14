@@ -76,7 +76,7 @@ function boot() {
   initTech($('tech'));
   initPanels(
     { top: $('top'), hot: $('hot'), insp: $('insp'), mini: $<HTMLCanvasElement>('mini'), zoom: $('zoom') },
-    { openTech, reset: resetGame },
+    { openTech, closeTech, reset: resetGame },
   );
   initScreens({ reset: resetGame, begin });
   // Feature modules: each owns its own file and subscribes through the hooks in ui/ui.ts.

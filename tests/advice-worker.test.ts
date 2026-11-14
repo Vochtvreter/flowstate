@@ -159,3 +159,20 @@ describe('what counts as "the board changed" for a tip', () => {
     expect(boardKey(g)).not.toBe(withOrder);
   });
 });
+
+describe('times in words', () => {
+  test('round, human numbers; nothing for a wait that never ends', async () => {
+    const { aboutTime } = await import('../src/ui/hud-words');
+    expect(aboutTime(3)).toBe('a few seconds');
+    expect(aboutTime(8)).toBe('about 10 s');
+    expect(aboutTime(12)).toBe('about 10 s');
+    expect(aboutTime(38)).toBe('about 40 s');
+    expect(aboutTime(54)).toBe('about 50 s');
+    expect(aboutTime(55)).toBe('about 1 min');
+    expect(aboutTime(89)).toBe('about 1 min');
+    expect(aboutTime(95)).toBe('about 2 min');
+    expect(aboutTime(218)).toBe('about 4 min');
+    expect(aboutTime(3600)).toBe('over an hour');
+    expect(aboutTime(Infinity)).toBe('');
+  });
+});

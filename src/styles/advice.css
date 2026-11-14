@@ -3,9 +3,9 @@
 
 /* ---------- the tip row ----------
    One suggestion, under the progress line: the sentence, what it costs and saves, and Show me.
-   On a narrow card the button drops under the text. */
+   Only on a very narrow card (under about 290px of room) does the button drop under the text. */
 .gc-tip { display: flex; flex-wrap: wrap; align-items: center; gap: 6px 10px; margin-top: 3px; padding-top: 7px; border-top: 1px dashed #2a3a63; font-size: 12px; line-height: 16px; color: #c9d3e8; animation: tip-in 0.35s ease-out; }
-.gc-tipbody { flex: 1 1 230px; min-width: 0; position: relative; display: flex; flex-direction: column; gap: 3px; }
+.gc-tipbody { flex: 1 1 170px; min-width: 0; position: relative; display: flex; flex-direction: column; gap: 3px; }
 .gc-tiptxt { display: block; }
 .gc-tiptxt b, .gc-tipold b { display: inline-block; margin-right: 7px; padding: 0 6px; border-radius: 5px; font-size: 10px; font-weight: 700; letter-spacing: 0.07em; line-height: 16px; text-transform: uppercase; color: #0b1430; background: #9db8ff; }
 /* What it costs and what it saves. */
