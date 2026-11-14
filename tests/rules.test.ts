@@ -115,6 +115,31 @@ describe('starting board (2.7)', () => {
   });
 });
 
+/** An Ink Refiner (0.5/s) whose port feeds a Glyph Assembler (needs 0.33/s) and a Router that leads to a Lab and a Market. */
+function routerOnAMachinePort() {
+  const g = rich();
+  const m = market(g);
+  const ink = placeNode(g, 'refiner', 400, 400)!;
+  const spark = placeNode(g, 'refiner', 400, 540)!;
+  connect(g, placeNode(g, 'well', 0, 0, { depositId: 3 })!.id, 0, ink.id);
+  connect(g, placeNode(g, 'well', 0, 0, { depositId: 4 })!.id, 0, spark.id);
+  for (let i = 0; i < 2; i++) upgrade(g, g.nodes.find((n) => n.material === 'ember')!.id, 'speed'); // plenty of Spark
+  connect(g, ink.id, 1, placeNode(g, 'void', 700, 650)!.id);
+  const router = placeNode(g, 'router', 650, 380)!;
+  const viaRouter = connect(g, ink.id, 0, router.id)!;
+  const toLab = connect(g, router.id, 0, placeNode(g, 'lab', 900, 300)!.id)!;
+  connect(g, router.id, 0, m.id);
+  setMode(g, router.id, 'ratio');
+  toLab.weight = 3;
+  const glyph = placeNode(g, 'assembler', 700, 500, { recipe: 'glyph' })!;
+  const toGlyph = connect(g, ink.id, 0, glyph.id)!;
+  connect(g, spark.id, 0, glyph.id);
+  connect(g, spark.id, 0, m.id);
+  connect(g, glyph.id, 0, m.id);
+  run(g, 60);
+  return { g, glyph, viaRouter: viaRouter.id, toGlyph: toGlyph.id };
+}
+
 describe('machines-first fan-out (2.1)', () => {
   it('a plain port feeds the machine first and sells only what is left', () => {
     const g = rich();
@@ -169,6 +194,119 @@ describe('machines-first fan-out (2.1)', () => {
     expect(studied).toBeCloseTo(rest, 1);
     expect(dumped).toBeCloseTo(rest, 1);
     expect(sold).toBeCloseTo(rest, 1);
+  });
+
+  it('a machine that hands over whole items feeds the next machine first as well', () => {
+    // A Refiner finishes one Shard at a time. A wire used to take a fifth of an item per tick, so the rest of
+    // each Shard spilled to the Market on the same port and the Assembler starved at 60%.
+    const g = rich();
+    const m = market(g);
+    const shard = placeNode(g, 'refiner', 400, 100)!;
+    const mist = placeNode(g, 'refiner', 400, 600)!;
+    connect(g, well(g).id, 0, shard.id);
+    connect(g, placeNode(g, 'well', 0, 0, { depositId: 5 })!.id, 0, mist.id);
+    const prism = placeNode(g, 'assembler', 700, 300, { recipe: 'prism' })!; // 2 Shard per 4 s: all the Refiner makes
+    const sell = connect(g, shard.id, 0, m.id)!; // "sell the rest" was wired first
+    const feed = connect(g, shard.id, 0, prism.id)!;
+    connect(g, mist.id, 0, prism.id);
+    connect(g, mist.id, 0, m.id);
+    connect(g, prism.id, 0, m.id);
+    run(g, 40);
+    const [fed, sold] = throughput(g, 120, [feed.id, sell.id]);
+    expect(fed).toBeCloseTo(0.5, 2);
+    expect(sold).toBeLessThan(0.01);
+    expect(prism.util).toBeGreaterThan(0.97);
+    expect(prism.status).toBe('working');
+    // The Mist Refiner makes 0.4/s and the Assembler needs 0.25: the rest of the Mist is sold.
+    expect(g.soldRate.mist).toBeCloseTo(0.15, 1);
+  });
+
+  it('the first Assembler runs flat out when it is wired onto two Refiners that already sell and study', () => {
+    // What goal 15 asks for, on the board goals 9 to 11 leave behind.
+    const g = rich();
+    const m = market(g);
+    const lab = placeNode(g, 'lab', 900, 100)!;
+    const line = (deposit: number, y: number) => {
+      const r = placeNode(g, 'refiner', 400, y)!;
+      connect(g, placeNode(g, 'well', 0, 0, { depositId: deposit })!.id, 0, r.id);
+      connect(g, r.id, 0, m.id);
+      connect(g, r.id, 0, lab.id);
+      return r;
+    };
+    const ink = line(3, 400);
+    const spark = line(4, 540);
+    connect(g, ink.id, 1, placeNode(g, 'void', 700, 650)!.id);
+    run(g, 30);
+    const glyph = placeNode(g, 'assembler', 700, 450, { recipe: 'glyph' })!;
+    connect(g, ink.id, 0, glyph.id);
+    connect(g, spark.id, 0, glyph.id);
+    connect(g, glyph.id, 0, m.id);
+    run(g, 60);
+    expect(glyph.util).toBeGreaterThan(0.97); // needs a third of an Ink and of a Spark per second; 0.5 and 0.4 are made
+    expect(glyph.status).toBe('working');
+    expect(glyph.rate).toBeCloseTo(1 / 3, 1);
+  });
+
+  it('a wire still carries no more than its capacity over time, and what does not fit is sold', () => {
+    const g = rich();
+    const m = market(g);
+    for (let i = 0; i < 8; i++) upgrade(g, well(g).id, 'speed'); // 5.96 Glint/s
+    const r = placeNode(g, 'refiner', 400, 100)!;
+    for (let i = 0; i < 10; i++) upgrade(g, r.id, 'speed'); // could take 5.08 Glint/s
+    const feed = connect(g, well(g).id, 0, r.id)!; // Mk I: 4/s
+    const sell = connect(g, well(g).id, 0, m.id)!;
+    connect(g, r.id, 0, m.id);
+    run(g, 30);
+    const [fed, sold] = throughput(g, 60, [feed.id, sell.id]);
+    expect(fed).toBeCloseTo(4, 1);
+    expect(fed).toBeLessThanOrEqual(4.001);
+    expect(sold).toBeCloseTo(Math.pow(1.25, 8) - 4, 1);
+    // A stockpile released down an idle wire: one second's worth passes at once, then the steady 4/s.
+    const silo = placeNode(g, 'silo', 400, 500)!;
+    const fill = connect(g, placeNode(g, 'well', 0, 0, { depositId: 3 })!.id, 0, silo.id)!;
+    run(g, 100);
+    cutWire(g, fill.id);
+    const out = connect(g, silo.id, 0, placeNode(g, 'void', 800, 500)!.id)!;
+    const [burst] = throughput(g, 1, [out.id]);
+    expect(burst).toBeLessThanOrEqual(4 * (1 + RULES.wires.burstSeconds) + 1e-6);
+    const [steady] = throughput(g, 10, [out.id]);
+    expect(steady).toBeCloseTo(4, 1);
+    expect(steady).toBeLessThanOrEqual(4.001);
+  });
+
+  it('by the plan\'s rule a Router to a Lab and a Market, on a machine\'s port, takes half of what the machine needs', () => {
+    // KNOWN TRAP, left as the plan words it: goal 13 has the player build exactly this Router, and the Assembler
+    // of goal 15 then shares its Ink with it. RULES.fanOut.deadEndJunctionsLast is the switch (next test).
+    expect(RULES.fanOut.deadEndJunctionsLast).toBe(false);
+    const { glyph, viaRouter, toGlyph, g } = routerOnAMachinePort();
+    const [routed, fed] = throughput(g, 120, [viaRouter, toGlyph]);
+    expect(routed).toBeCloseTo(0.25, 1);
+    expect(fed).toBeCloseTo(0.25, 1); // it needs 0.33
+    expect(glyph.util).toBeLessThan(0.85);
+  });
+
+  it('with the switch on, a junction that leads to no machine waits with the Markets', () => {
+    RULES.fanOut.deadEndJunctionsLast = true;
+    try {
+      const { glyph, viaRouter, toGlyph, g } = routerOnAMachinePort();
+      const [routed, fed] = throughput(g, 120, [viaRouter, toGlyph]);
+      expect(fed).toBeCloseTo(1 / 3, 1);
+      expect(routed).toBeCloseTo(0.5 - 1 / 3, 1); // the Router gets what is left
+      expect(glyph.util).toBeGreaterThan(0.97);
+      // A junction on the way to a machine is still fed before a Market.
+      const merger = placeNode(g, 'merger', 300, 250)!;
+      const refiner = placeNode(g, 'refiner', 600, 250)!;
+      const direct = connect(g, well(g).id, 0, market(g).id)!;
+      const viaMerger = connect(g, well(g).id, 0, merger.id)!;
+      connect(g, merger.id, 0, refiner.id);
+      connect(g, refiner.id, 0, market(g).id);
+      run(g, 20);
+      const [junction, sold] = throughput(g, 40, [viaMerger.id, direct.id]);
+      expect(junction).toBeCloseTo(1, 1);
+      expect(sold).toBeLessThan(0.03);
+    } finally {
+      RULES.fanOut.deadEndJunctionsLast = false;
+    }
   });
 
   it('a Router in Even mode still splits evenly across everything', () => {

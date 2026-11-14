@@ -240,11 +240,41 @@ function share(
   return remaining;
 }
 
+/** Per graph: does this pass-through node lead on to a machine (through any number of Routers, Mergers and Silos)? */
+const leadsOn = new WeakMap<Graph, Map<number, boolean>>();
+
+function leadsToMachine(c: Graph, id: number, seen = new Set<number>()): boolean {
+  let known = leadsOn.get(c);
+  if (!known) leadsOn.set(c, (known = new Map()));
+  const cached = known.get(id);
+  if (cached != null) return cached;
+  if (seen.has(id)) return false; // a loop of junctions leads nowhere by itself
+  seen.add(id);
+  let found = false;
+  for (const wires of c.outs.get(id) ?? []) {
+    for (const w of wires ?? []) {
+      const d = c.byId.get(w.to);
+      if (d && (isMachine(d) || (isPass(d) && leadsToMachine(c, d.id, seen)))) found = true;
+    }
+  }
+  // Only cache answers that did not depend on cutting a loop short.
+  if (found || seen.size === 1) known.set(id, found);
+  return found;
+}
+
+/** Is this destination served before Markets, Labs and Voids on a plain port? (RULES.fanOut) */
+function fedFirst(c: Graph, d: GNode): boolean {
+  if (isMachine(d)) return true;
+  if (!isPass(d)) return false;
+  return !RULES.fanOut.deadEndJunctionsLast || leadsToMachine(c, d.id);
+}
+
 /**
  * Split `avail` of material m across the wires of one output port. Returns the amount moved.
  *
  * A plain port (anything but a Router) feeds machines and pass-through nodes first, evenly, and lets
- * Markets, Labs and Voids share whatever is left. A Router follows its mode; its Even mode is truly even.
+ * Markets, Labs and Voids share whatever is left (with RULES.fanOut.deadEndJunctionsLast, a pass-through
+ * node that leads to no machine waits with them). A Router follows its mode; its Even mode is truly even.
  */
 function distribute(g: Game, c: Graph, src: GNode, wires: Wire[], m: MatId, avail: number): number {
   const router = src.type === 'router';
@@ -273,8 +303,9 @@ function distribute(g: Game, c: Graph, src: GNode, wires: Wire[], m: MatId, avai
   const given: number[] = new Array(n).fill(0);
   if (router) remaining = share(wires, demand, given, remaining, mode === 'ratio', () => true);
   else {
-    remaining = share(wires, demand, given, remaining, false, (i) => !isSink(dests[i]));
-    remaining = share(wires, demand, given, remaining, false, (i) => isSink(dests[i]));
+    const first = dests.map((d) => fedFirst(c, d));
+    remaining = share(wires, demand, given, remaining, false, (i) => first[i]);
+    remaining = share(wires, demand, given, remaining, false, (i) => !first[i]);
   }
   for (let i = 0; i < n; i++) if (given[i] > EPS) deliver(g, wires[i], dests[i], m, given[i]);
   return avail - remaining;
@@ -311,7 +342,9 @@ export function tick(g: Game, dt: number) {
   refillDemand(g, dt);
 
   for (const w of g.wires) {
-    w.budget = pipeCap(w.tier) * dt;
+    // What the wire may carry this tick: its capacity for the tick, plus what it left unused over the last moment.
+    const cap = pipeCap(w.tier);
+    w.budget = Math.min(cap * Math.max(dt, RULES.wires.burstSeconds), Math.max(0, w.budget || 0) + cap * dt);
     w.flow = 0;
     w.mixed = false;
   }

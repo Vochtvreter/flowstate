@@ -225,6 +225,28 @@ export const RULES = {
   /** Making this material for the first time ends the demo. */
   capstone: 'lens' as MatId,
 
+  /**
+   * Wires. A wire's capacity (PIPES) is items per second averaged over this many seconds, not a hard limit
+   * per tick: unused capacity carries over for that long. A machine hands over whole items at once; with a
+   * per-tick limit only a sliver of each item fitted down the wire to the next machine and the rest spilled to
+   * the Market on the same port, which left that machine starved although everything it needed was being made
+   * (2.1: machines are fed first). The long-run rate through a wire is still its capacity.
+   */
+  wires: { burstSeconds: 1 },
+
+  /**
+   * 2.1 Fan-out. A plain port feeds machines, Routers, Mergers and Silos first; Markets, Labs and Voids share
+   * what is left. That is the plan's rule and the default.
+   *
+   * `deadEndJunctionsLast` is a switch for the designer, off by default. On, a Router, Merger or Silo that leads
+   * only to Markets, Labs and Voids (or nowhere) waits with them for what the machines leave. Why it exists: the
+   * goal chain has the player hang a Router to a Lab and a Market on a machine's port; served first, it takes
+   * half of what an Assembler built on that port later needs, and that Assembler shows as starved. Why it is
+   * off: that same half is what keeps a Lab fed once machines want everything, and without it a player who only
+   * follows the goal card waits much longer for Data (tests/playthrough.test.ts measures both).
+   */
+  fanOut: { deadEndJunctionsLast: false },
+
   /** 2.2 Demand: full price up to a material's demand rate, a flat share of it for the surplus. */
   demand: {
     /** Surplus price as a share of the full price. */
