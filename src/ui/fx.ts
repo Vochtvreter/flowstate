@@ -388,16 +388,19 @@ export function burst(at: Pt, color: string, count = 10) {
 
 /**
  * Send `count` coin-like particles from one point to another along slightly different arcs.
- * `onArrive` runs once, when the first of them lands.
+ * `onArrive` runs once, when the first of them lands (or at once, if the pool is full and nothing
+ * could be sent), so it is safe to hang a counter update or a sound on it.
  */
 export function fly(from: Pt, to: Pt, color: string, count = 3, onArrive?: () => void) {
   const done = { fn: onArrive ?? null };
   const dx = to.x - from.x, dy = to.y - from.y;
   const dist = Math.hypot(dx, dy) || 1;
   const nx = -dy / dist, ny = dx / dist;
+  let sent = 0;
   for (let i = 0; i < count; i++) {
     const p = spawn(COIN);
     if (!p) break;
+    sent++;
     const bend = (Math.random() * 0.5 + 0.15) * dist * (i % 2 ? -0.45 : 0.45);
     p.x = from.x - originX + (Math.random() * 12 - 6);
     p.y = from.y - originY + (Math.random() * 12 - 6);
@@ -411,7 +414,7 @@ export function fly(from: Pt, to: Pt, color: string, count = 3, onArrive?: () =>
     p.color = color;
     p.done = done;
   }
-  if (!count && onArrive) onArrive();
+  if (!sent && onArrive) onArrive();
 }
 
 /** Text that rises and fades. */
