@@ -1,10 +1,26 @@
-// One canvas over the stage for everything that moves every frame: the dots travelling along
-// flowing wires, and a small pooled particle system (bursts, coins that fly somewhere, floating
-// text, rings). Nothing here touches the DOM after init, and nothing here knows about the game:
-// the board hands over wire geometry as `Flow` objects, everyone else calls the particle functions.
+// Everything that moves every frame is drawn here, on three canvases:
+//  - the board layer (`#fx`, over the stage and under the HUD): the dots travelling along flowing
+//    wires, the pulse on open ports, and particles that belong to the board (sale floaters, sparks);
+//  - the bar layer (`#fx-bar`, made here, a strip over the top bar and a little below it): whatever
+//    has to be seen up there, such as a coin on the last stretch of its way to the credits counter;
+//  - the top layer (`#fx-top`, made here, above every panel): a small window, about the size of a
+//    celebration card, through which particles are seen above the HUD. A particle that asks to be
+//    on top is drawn there while it is inside the window and on the board or the strip once it has
+//    left, so a spark can start over the card and fly off across the board. The window is moved to
+//    wherever the next effect is whenever it is empty.
+// Nothing here touches the DOM after init, and nothing here knows about the game: the board hands
+// over wire geometry as `Flow` objects, everyone else calls the particle functions or adds an
+// overlay (a function that draws its own thing each frame).
 //
 // Points passed to the particle functions are in client pixels (the same space as pointer events
 // and getBoundingClientRect), so any HUD element or board position can be a source or a target.
+//
+// Why three canvases rather than one big one. Wire dots must stay under the goal card, the build
+// menu and the phone's sheets, while coins must fly over the top bar: one canvas cannot be both.
+// And a canvas costs by its size on every frame it changes (the browser hands the whole of it to
+// the compositor each time; measured, that is the largest single cost in a frame here). The board
+// layer changes every frame anyway (the dots), a strip hardly costs at all, and the top layer is
+// kept to a small window that is only touched for the second or two of a celebration.
 
 export interface Pt { x: number; y: number }
 
@@ -90,12 +106,40 @@ const DRAIN_SPEED = 60;
 const MAX_GAP = 240;
 /** Dots shown per item carried. More than one keeps slow wires looking alive; density still follows rate. */
 const DOTS_PER_ITEM = 2.5;
+/** At full mood (Flow State) dots travel this much faster and are drawn this much larger. */
+const MOOD_SPEED = 0.3;
+const MOOD_SIZE = 0.1;
 
 let canvas: HTMLCanvasElement | null = null;
 let ctx: CanvasRenderingContext2D | null = null;
 let host: HTMLElement | null = null;
 let W = 0, H = 0, dpr = 1;
 let originX = 0, originY = 0;
+
+/** One of the two canvases above the panels. `x`, `y`, `w`, `h` are its place on screen, in client px. */
+interface Surface {
+  canvas: HTMLCanvasElement; ctx: CanvasRenderingContext2D | null;
+  x: number; y: number; w: number; h: number;
+  /** Canvas pixels per CSS pixel. */
+  ratio: number;
+  blank: boolean;
+}
+/** Layer numbers. A particle is on one of them, or on AUTO: wherever it happens to be this frame. */
+const BOARD = 0, TOP = 1, BAR = 2, AUTO = -1;
+/**
+ * The top layer is drawn at one canvas pixel per CSS pixel whatever the screen (it only ever holds
+ * small moving shapes), and is this large at most, in CSS px.
+ */
+const TOP_RATIO = 1;
+const TOP_W = 520, TOP_H = 420;
+/** How far the bar layer reaches below the top bar, in px. */
+const BAR_SKIRT = 44;
+let appEl: HTMLElement | null = null;
+let appX = 0, appY = 0, appW = 0, appH = 0;
+/** Live particles that belong to the top layer. While there are none it may be moved. */
+let topCount = 0;
+let top: Surface | null = null;
+let bar: Surface | null = null;
 let sizeDirty = true;
 let flows: Flow[] = [];
 let stale = true;
@@ -103,30 +147,113 @@ let wasBlank = true;
 let lastKey = '';
 let thin = 1;
 let dotCount = 0;
+/** 0..1: how "in the zone" the factory is. Eased toward `moodTarget`; dots run a little faster and larger with it. */
+let mood = 0;
+let moodTarget = 0;
+
+function makeSurface(id: string, z: number): Surface {
+  const c = document.createElement('canvas');
+  c.id = id;
+  c.setAttribute('aria-hidden', 'true');
+  // Inline, so the layer can never take input or push the layout about even if a stylesheet is missing.
+  c.style.cssText = `position:absolute;left:0;top:0;pointer-events:none;z-index:${z}`;
+  appEl!.appendChild(c);
+  return { canvas: c, ctx: c.getContext('2d'), x: 0, y: 0, w: 0, h: 0, ratio: 1, blank: true };
+}
 
 export function initFx(c: HTMLCanvasElement) {
   canvas = c;
   host = c.parentElement;
   ctx = c.getContext('2d');
-  if (typeof ResizeObserver !== 'undefined' && host) new ResizeObserver(() => (sizeDirty = true)).observe(host);
-  window.addEventListener('resize', () => (sizeDirty = true));
+  // The two upper layers are made here rather than in index.html, so the page needs no extra
+  // elements and the three can never get out of step.
+  appEl = (c.closest('#app') as HTMLElement | null) ?? document.body;
+  top = makeSurface('fx-top', 56);
+  bar = makeSurface('fx-bar', 56);
+  const dirty = () => (sizeDirty = true);
+  if (typeof ResizeObserver !== 'undefined') {
+    const ro = new ResizeObserver(dirty);
+    if (host) ro.observe(host);
+    ro.observe(appEl);
+  }
+  window.addEventListener('resize', dirty);
+}
+
+function place(s: Surface, x: number, y: number, w: number, h: number, ratio: number) {
+  const moved = x !== s.x || y !== s.y;
+  s.x = x;
+  s.y = y;
+  if (w === s.w && h === s.h && ratio === s.ratio) {
+    if (moved) s.blank = false; // what is on it was drawn for the old position: have it redrawn or wiped
+    return;
+  }
+  s.w = w; s.h = h; s.ratio = ratio;
+  s.canvas.width = Math.max(1, Math.round(w * ratio));
+  s.canvas.height = Math.max(1, Math.round(h * ratio));
+  s.canvas.style.width = w + 'px';
+  s.canvas.style.height = h + 'px';
+  s.canvas.style.display = w && h ? '' : 'none';
+  s.blank = true; // setting the size cleared it
 }
 
 function resize() {
   if (!canvas || !host) return;
   sizeDirty = false;
+  const d = Math.min(MAX_DPR, window.devicePixelRatio || 1);
+  const ratioChanged = d !== dpr;
+  dpr = d;
   const r = host.getBoundingClientRect();
   originX = r.left;
   originY = r.top;
-  const d = Math.min(MAX_DPR, window.devicePixelRatio || 1);
   const w = Math.max(1, Math.round(r.width)), h = Math.max(1, Math.round(r.height));
-  if (w === W && h === H && d === dpr) return;
-  W = w; H = h; dpr = d;
-  canvas.width = Math.round(w * d);
-  canvas.height = Math.round(h * d);
-  canvas.style.width = w + 'px';
-  canvas.style.height = h + 'px';
-  stale = true;
+  if (w !== W || h !== H || ratioChanged) {
+    W = w; H = h;
+    canvas.width = Math.round(w * d);
+    canvas.height = Math.round(h * d);
+    canvas.style.width = w + 'px';
+    canvas.style.height = h + 'px';
+    stale = true;
+  }
+  if (!appEl || !top || !bar) return;
+  const a = appEl.getBoundingClientRect();
+  appX = a.left; appY = a.top;
+  appW = Math.max(1, Math.round(a.width)); appH = Math.max(1, Math.round(a.height));
+  // The top layer: a window in the middle until an effect asks for it somewhere else (see aimTop).
+  const tw = Math.min(appW, TOP_W), th = Math.min(appH, TOP_H);
+  place(top, appX + Math.round((appW - tw) / 2), appY + Math.round((appH - th) / 2), tw, th, TOP_RATIO);
+  moveTop();
+  // The strip from the top of the app to a little below the top of the stage: the top bar, in every
+  // layout, and room under it for a number to pop up beneath a counter. No strip when there is no bar.
+  const barH = Math.round(r.top - a.top);
+  place(bar, a.left, a.top, Math.max(1, Math.round(a.width)), barH > 0 ? barH + BAR_SKIRT : 0, d);
+}
+
+function moveTop() {
+  if (top) top.canvas.style.transform = `translate(${top.x - appX}px, ${top.y - appY}px)`;
+}
+
+/** Centre the top layer on a point (as far as the app's edges allow), unless something is still being drawn on it. */
+function aimTop(x: number, y: number) {
+  if (sizeDirty) resize();
+  if (!top || topCount > 0) return;
+  const nx = Math.max(appX, Math.min(appX + appW - top.w, Math.round(x - top.w / 2)));
+  const ny = Math.max(appY, Math.min(appY + appH - top.h, Math.round(y - top.h / 2)));
+  if (nx === top.x && ny === top.y) return;
+  top.x = nx;
+  top.y = ny;
+  moveTop();
+}
+
+const inStage = (x: number, y: number, m = 0) => x >= originX - m && x <= originX + W + m && y >= originY - m && y <= originY + H + m;
+const inBar = (x: number, y: number, m = 0) => !!bar && bar.h > 0 && x >= bar.x - m && x <= bar.x + bar.w + m && y >= bar.y - m && y <= bar.y + bar.h + m;
+const inTop = (x: number, y: number, m = 0) => !!top && x >= top.x - m && x <= top.x + top.w + m && y >= top.y - m && y <= top.y + top.h + m;
+
+/**
+ * How lively the wires look, 0..1. The feel module raises it in Flow State: dots then run a little
+ * faster and a touch larger. It eases, so the change is felt rather than seen.
+ */
+export function setMood(level: number) {
+  moodTarget = Math.max(0, Math.min(1, level));
 }
 
 /** The wires to draw dots on. Call again whenever wires are added or removed. */
@@ -135,6 +262,8 @@ export function setFlows(list: Flow[]) {
   flows = list.slice().sort((a, b) => (a.color + a.shape < b.color + b.shape ? -1 : a.color + a.shape > b.color + b.shape ? 1 : 0));
   stale = true;
 }
+
+const calm = typeof matchMedia === 'function' ? matchMedia('(prefers-reduced-motion: reduce)') : null;
 
 /** A spot on the board that should pulse gently to invite a click (an output port with nothing attached). */
 export interface Beacon { x: number; y: number; r: number }
@@ -155,7 +284,8 @@ const onScreen = (b: Beacon, view: { x: number; y: number; k: number }) => {
 function drawBeacons(c: CanvasRenderingContext2D, view: { x: number; y: number; k: number }) {
   const k = view.k;
   // One breath every 1.6 s: a soft white ring that swells from the port's edge and settles back.
-  const s = 0.5 - 0.5 * Math.cos((beaconClock / 1.6) * Math.PI * 2);
+  // (A steady ring for players who have asked for less motion.)
+  const s = calm?.matches ? 0.6 : 0.5 - 0.5 * Math.cos((beaconClock / 1.6) * Math.PI * 2);
   const spread = (1 + 5 * s) * k;
   c.beginPath();
   for (const b of beacons) {
@@ -247,6 +377,8 @@ function stepFlows(dt: number, view: { x: number; y: number; k: number }, paused
       gap = Math.max(minGap, Math.min(MAX_GAP, speed / (f.rate * DOTS_PER_ITEM)));
       wanted += f.len / gap;
       gap *= thin;
+      // In the zone the same dots simply travel faster: spacing is unchanged, so more pass each second.
+      speed *= 1 + MOOD_SPEED * mood;
     }
     const dots = f.dots;
     if (f.cold) {
@@ -297,7 +429,7 @@ function drawFlows(c: CanvasRenderingContext2D, view: { x: number; y: number; k:
       key = fk;
       open = true;
     }
-    const base = Math.max(1.5, (3.6 + Math.min(2.4, f.rate * 0.5)) * k);
+    const base = Math.max(1.5, (3.6 + Math.min(2.4, f.rate * 0.5)) * k) * (1 + MOOD_SIZE * mood);
     const pts = f.pts, cum = f.cum, occ = f.occ, len = f.len;
     let seg = 0;
     for (let i = dots.length - 1; i >= 0 && budget > 0; i--) {
@@ -327,34 +459,62 @@ function drawFlows(c: CanvasRenderingContext2D, view: { x: number; y: number; k:
   dotCount = HARD_DOTS - budget;
 }
 
-// ---------- particles ----------
 
-const SPARK = 1, COIN = 2, TEXT = 3, RING = 4;
+// ---------- particles ----------
+// One pool for all three layers. Positions are kept in client pixels and shifted to the layer when drawn.
+
+const SPARK = 1, COIN = 2, TEXT = 3, RING = 4, POP = 5;
 const POOL = 360;
+/**
+ * Floating text is drawn this much larger than asked (moving text reads smaller than still text of
+ * the same size), and in the bold display face rather than the HUD's mono.
+ */
+const TEXT_SCALE = 1.2;
+/** One bit per layer, for `Particle.mask`. */
+const B_BOARD = 1 << BOARD, B_TOP = 1 << TOP, B_BAR = 1 << BAR;
 
 interface Particle {
   kind: number;
+  /**
+   * Where it may be drawn. BOARD: the board layer only. AUTO: whichever of the board and the bar it
+   * is over. TOP: above the panels, i.e. in the top layer's window while it is inside it, and
+   * otherwise like AUTO.
+   */
+  layer: number;
+  /** The layers it is drawn on this frame, one bit each (worked out by stepParticles). */
+  mask: number;
   t: number; ttl: number;
-  x: number; y: number; vx: number; vy: number;
+  /** Where it is (sparks, text, rings) or where it set off from (coins). */
+  x: number; y: number;
+  /** Velocity (sparks), or where a coin is right now. For text, `vy` is how far it rises. */
+  vx: number; vy: number;
   cx: number; cy: number; tx: number; ty: number;
   size: number; color: string; text: string;
+  shape: DotShape | '';
   done: { fn: (() => void) | null } | null;
 }
 
 const pool: Particle[] = [];
 for (let i = 0; i < POOL; i++) {
-  pool.push({ kind: 0, t: 0, ttl: 1, x: 0, y: 0, vx: 0, vy: 0, cx: 0, cy: 0, tx: 0, ty: 0, size: 1, color: '#fff', text: '', done: null });
+  pool.push({ kind: 0, layer: 0, mask: 0, t: 0, ttl: 1, x: 0, y: 0, vx: 0, vy: 0, cx: 0, cy: 0, tx: 0, ty: 0, size: 1, color: '#fff', text: '', shape: '', done: null });
 }
 let live = 0;
+/** Particles to draw on each layer this frame, and how many of those are shared with the top layer's window. */
+const liveBy = [0, 0, 0];
+const splitBy = [0, 0, 0];
 let cursor = 0;
 
-function spawn(kind: number): Particle | null {
+function spawn(kind: number, layer: number): Particle | null {
   for (let i = 0; i < POOL; i++) {
     const p = pool[(cursor + i) % POOL];
     if (p.kind === 0) {
       cursor = (cursor + i + 1) % POOL;
       p.kind = kind;
+      p.layer = layer;
+      if (layer === TOP) topCount++;
+      p.mask = 0;
       p.t = 0;
+      p.shape = '';
       p.done = null;
       live++;
       return p;
@@ -367,168 +527,407 @@ function kill(p: Particle) {
   p.kind = 0;
   p.done = null;
   live--;
+  if (p.layer === TOP) topCount--;
+}
+
+/**
+ * `top` draws above every panel instead of only on the board (where the HUD covers it).
+ * Above the panels means: on the strip over the top bar when it is up there, and otherwise through
+ * the top layer's window, about 520 by 420 px, which is centred on the first effect that uses it and
+ * stays there until it is empty again. Outside the window the particle is drawn on the board as usual.
+ */
+export interface LayerOpt { top?: boolean }
+export interface BurstOpts extends LayerOpt {
+  /** 1 = the usual spray; 2 flies about twice as far and lives a little longer. */
+  power?: number;
+  shape?: DotShape;
+}
+export interface FlyOpts extends LayerOpt {
+  /** Draw each one as this outline instead of a coin. */
+  shape?: DotShape;
+  /** Seconds each one takes; by default it follows the distance (0.4 to 0.9 s). */
+  ttl?: number;
+  size?: number;
+  /** Seconds between one leaving and the next. */
+  stagger?: number;
+  /** How far from `from` each one may start, in px. */
+  spread?: number;
+}
+export interface FloaterOpts extends LayerOpt { life?: number; rise?: number }
+export interface RingOpts extends LayerOpt { size?: number; life?: number }
+
+/** The layer value for a particle at this point, bringing the top layer's window here if it is wanted and free. */
+function layerFor(o: LayerOpt | undefined, x: number, y: number): number {
+  if (!o?.top) return BOARD;
+  if (!inBar(x, y)) aimTop(x, y);
+  return TOP;
 }
 
 /** A spray of sparks. */
-export function burst(at: Pt, color: string, count = 10) {
+export function burst(at: Pt, color: string, count = 10, o?: BurstOpts) {
+  const pw = o?.power ?? 1;
+  const layer = layerFor(o, at.x, at.y);
   for (let i = 0; i < count; i++) {
-    const p = spawn(SPARK);
+    const p = spawn(SPARK, layer);
     if (!p) return;
     const a = Math.random() * Math.PI * 2;
-    const v = 70 + Math.random() * 150;
-    p.x = at.x - originX;
-    p.y = at.y - originY;
+    const v = (70 + Math.random() * 150) * pw;
+    p.x = at.x;
+    p.y = at.y;
     p.vx = Math.cos(a) * v;
-    p.vy = Math.sin(a) * v - 40;
-    p.ttl = 0.4 + Math.random() * 0.3;
-    p.size = 1.6 + Math.random() * 1.8;
+    p.vy = Math.sin(a) * v - 40 * pw;
+    p.ttl = (0.4 + Math.random() * 0.3) * (0.7 + 0.3 * pw);
+    p.size = (1.6 + Math.random() * 1.8) * (0.75 + 0.25 * pw);
     p.color = color;
+    p.shape = o?.shape ?? '';
   }
 }
 
 /**
  * Send `count` coin-like particles from one point to another along slightly different arcs.
+ * Each is drawn on whichever layer it is passing over: on the board while it is over the stage
+ * (where the HUD may hide it for a moment), on the strip once it is over the top bar; over anything
+ * else (the hotbar, the inspector) it is not drawn. With `top` it is also seen above the panels
+ * around where it is going (see LayerOpt).
  * `onArrive` runs once, when the first of them lands (or at once, if the pool is full and nothing
  * could be sent), so it is safe to hang a counter update or a sound on it.
  */
-export function fly(from: Pt, to: Pt, color: string, count = 3, onArrive?: () => void) {
+export function fly(from: Pt, to: Pt, color: string, count = 3, onArrive?: () => void, o?: FlyOpts) {
   const done = { fn: onArrive ?? null };
   const dx = to.x - from.x, dy = to.y - from.y;
   const dist = Math.hypot(dx, dy) || 1;
   const nx = -dy / dist, ny = dx / dist;
+  const spread = o?.spread ?? 12;
+  const stagger = o?.stagger ?? 0.06;
+  const layer = o?.top ? layerFor(o, to.x, to.y) : AUTO;
   let sent = 0;
   for (let i = 0; i < count; i++) {
-    const p = spawn(COIN);
+    const p = spawn(COIN, layer);
     if (!p) break;
     sent++;
     const bend = (Math.random() * 0.5 + 0.15) * dist * (i % 2 ? -0.45 : 0.45);
-    p.x = from.x - originX + (Math.random() * 12 - 6);
-    p.y = from.y - originY + (Math.random() * 12 - 6);
-    p.tx = to.x - originX;
-    p.ty = to.y - originY;
+    p.x = from.x + (Math.random() - 0.5) * spread;
+    p.y = from.y + (Math.random() - 0.5) * spread;
+    p.tx = to.x;
+    p.ty = to.y;
     p.cx = (p.x + p.tx) / 2 + nx * bend;
     p.cy = (p.y + p.ty) / 2 + ny * bend;
-    p.t = -i * 0.06; // staggered start
-    p.ttl = Math.min(0.9, 0.38 + dist / 2600) + Math.random() * 0.08;
-    p.size = 4.2;
+    p.vx = p.x;
+    p.vy = p.y;
+    p.t = -i * stagger; // staggered start
+    p.ttl = (o?.ttl ?? Math.min(0.9, 0.38 + dist / 2600)) + Math.random() * 0.08;
+    p.size = o?.size ?? 4.2;
     p.color = color;
+    p.shape = o?.shape ?? '';
     p.done = done;
   }
   if (!sent && onArrive) onArrive();
 }
 
-/** Text that rises and fades. */
-export function floater(at: Pt, text: string, color: string, size = 13) {
-  const p = spawn(TEXT);
+/** Text that pops in, rises and fades. */
+export function floater(at: Pt, text: string, color: string, size = 13, o?: FloaterOpts) {
+  const p = spawn(TEXT, layerFor(o, at.x, at.y));
   if (!p) return;
-  p.x = at.x - originX;
-  p.y = at.y - originY;
-  p.ttl = 0.95;
-  p.size = size;
+  p.x = at.x;
+  p.y = at.y;
+  p.ttl = o?.life ?? 1.05;
+  p.vy = o?.rise ?? 34;
+  p.size = size * TEXT_SCALE;
   p.color = color;
   p.text = text;
 }
 
 /** An expanding ring. */
-export function ring(at: Pt, color: string) {
-  const p = spawn(RING);
+export function ring(at: Pt, color: string, o?: RingOpts) {
+  const p = spawn(RING, layerFor(o, at.x, at.y));
   if (!p) return;
-  p.x = at.x - originX;
-  p.y = at.y - originY;
-  p.ttl = 0.45;
-  p.size = 30;
+  p.x = at.x;
+  p.y = at.y;
+  p.ttl = o?.life ?? 0.45;
+  p.size = o?.size ?? 30;
   p.color = color;
 }
 
-function drawParticles(c: CanvasRenderingContext2D, dt: number) {
-  let font = '';
+/** A disc of radius `r` that swells and fades: the after-image of something popping (a coin on a sale). */
+export function pop(at: Pt, color: string, r = 13, o?: LayerOpt) {
+  const p = spawn(POP, layerFor(o, at.x, at.y));
+  if (!p) return;
+  p.x = at.x;
+  p.y = at.y;
+  p.ttl = 0.3;
+  p.size = r;
+  p.color = color;
+}
+
+const easeInOut = (u: number) => (u < 0.5 ? 2 * u * u : 1 - ((2 - 2 * u) * (2 - 2 * u)) / 2);
+/** A small particle this near the edge of a layer is drawn on both sides of it, so it is never cut in half. */
+const EDGE = 12;
+
+/** Advance every particle once per frame, and work out which layers each is drawn on. */
+function stepParticles(dt: number) {
+  liveBy[0] = liveBy[1] = liveBy[2] = 0;
+  splitBy[0] = splitBy[1] = splitBy[2] = 0;
   for (const p of pool) {
     if (p.kind === 0) continue;
     p.t += dt;
     if (p.t < 0) continue; // still waiting for its staggered start
-    const u = p.t / p.ttl;
-    if (u >= 1) {
-      if (p.kind === COIN && p.done?.fn) {
-        const fn = p.done.fn;
-        p.done.fn = null;
-        fn();
-      }
+    if (p.t >= p.ttl) {
+      const fn = p.kind === COIN ? p.done?.fn : null;
+      if (fn) p.done!.fn = null;
       kill(p);
+      if (fn) fn();
       continue;
     }
-    switch (p.kind) {
-      case SPARK: {
-        p.vx *= 1 - 3.2 * dt;
-        p.vy = p.vy * (1 - 3.2 * dt) + 320 * dt;
-        p.x += p.vx * dt;
-        p.y += p.vy * dt;
-        c.globalAlpha = 1 - u * u;
-        c.fillStyle = p.color;
-        c.beginPath();
-        c.arc(p.x, p.y, p.size * (1 - u * 0.6), 0, Math.PI * 2);
-        c.fill();
-        break;
-      }
-      case COIN: {
-        const e = u < 0.5 ? 2 * u * u : 1 - (2 - 2 * u) * (2 - 2 * u) / 2;
-        const a = 1 - e;
-        const x = a * a * p.x + 2 * a * e * p.cx + e * e * p.tx;
-        const y = a * a * p.y + 2 * a * e * p.cy + e * e * p.ty;
-        const r = p.size * (u < 0.15 ? 0.5 + u / 0.3 : u > 0.85 ? 1 - (u - 0.85) * 3 : 1);
-        c.globalAlpha = u < 0.1 ? u * 10 : 1;
-        c.fillStyle = p.color;
-        c.beginPath();
-        c.arc(x, y, r, 0, Math.PI * 2);
-        c.fill();
-        c.globalAlpha *= 0.55;
-        c.fillStyle = '#fff';
-        c.beginPath();
-        c.arc(x - r * 0.3, y - r * 0.3, r * 0.38, 0, Math.PI * 2);
-        c.fill();
-        break;
-      }
-      case TEXT: {
-        const rise = 30 * (1 - (1 - u) * (1 - u));
-        const f = `600 ${p.size}px "JetBrains Mono", ui-monospace, Menlo, monospace`;
-        if (f !== font) c.font = font = f;
-        c.textAlign = 'center';
-        c.textBaseline = 'alphabetic';
-        c.globalAlpha = u < 0.6 ? 1 : 1 - (u - 0.6) / 0.4;
-        c.lineWidth = 3;
-        c.lineJoin = 'round';
-        c.strokeStyle = 'rgba(11, 15, 23, 0.85)';
-        c.strokeText(p.text, p.x, p.y - rise);
-        c.fillStyle = p.color;
-        c.fillText(p.text, p.x, p.y - rise);
-        break;
-      }
-      case RING: {
-        const e = 1 - (1 - u) * (1 - u);
-        c.globalAlpha = (1 - u) * 0.9;
-        c.strokeStyle = p.color;
-        c.lineWidth = 2.5 * (1 - u) + 0.5;
-        c.beginPath();
-        c.arc(p.x, p.y, 5 + (p.size - 5) * e, 0, Math.PI * 2);
-        c.stroke();
-        break;
+    // Where it is now, and how far it reaches from there.
+    let x = p.x, y = p.y, reach = EDGE;
+    if (p.kind === SPARK) {
+      p.vx *= 1 - 3.2 * dt;
+      p.vy = p.vy * (1 - 3.2 * dt) + 320 * dt;
+      x = p.x += p.vx * dt;
+      y = p.y += p.vy * dt;
+    } else if (p.kind === COIN) {
+      const e = easeInOut(p.t / p.ttl), a = 1 - e;
+      x = p.vx = a * a * p.x + 2 * a * e * p.cx + e * e * p.tx;
+      y = p.vy = a * a * p.y + 2 * a * e * p.cy + e * e * p.ty;
+    } else if (p.kind === TEXT) {
+      y -= p.vy / 2;
+      reach = 90;
+    } else reach = p.size * 1.8 + 4;
+    let m: number;
+    if (p.layer === BOARD) m = B_BOARD;
+    else {
+      // Through the window if it is inside it; under it (bar first, then board) for any part that is not.
+      const windowed = p.layer === TOP && inTop(x, y, reach);
+      m = windowed ? B_TOP : 0;
+      if (!windowed || !inTop(x, y, -reach)) {
+        const onBar = inBar(x, y), onStage = inStage(x, y);
+        if (onBar) m |= B_BAR;
+        else if (onStage) m |= B_BOARD;
+        // A coin or a spark near the line between the strip and the board is drawn on both.
+        if (reach > EDGE) { /* larger things stay on one side */ }
+        else if (onBar && onStage && !inBar(x, y, -reach)) m |= B_BOARD;
+        else if (!onBar && onStage && inBar(x, y, reach)) m |= B_BAR;
       }
     }
+    p.mask = m;
+    const shared = m & B_TOP;
+    if (m & B_BOARD) { liveBy[BOARD]++; if (shared) splitBy[BOARD]++; }
+    if (m & B_TOP) liveBy[TOP]++;
+    if (m & B_BAR) { liveBy[BAR]++; if (shared) splitBy[BAR]++; }
+  }
+}
+
+// ---------- text ----------
+
+interface Sprite { canvas: HTMLCanvasElement; w: number; h: number; base: number; used: number }
+const sprites = new Map<string, Sprite>();
+const SPRITE_MAX = 40;
+let spriteClock = 0;
+let fontsWatched = false;
+
+/**
+ * A floater's text as a picture: bold, in its colour, with a dark outline. `w`, `h` and `base`
+ * (how far the baseline is below the top) are in CSS px; the picture is `ratio` times that.
+ * Kept while in use, so the "+1¢" of every Market each second is drawn once.
+ */
+function textSprite(text: string, color: string, size: number, ratio: number): Sprite {
+  const key = `${text}|${color}|${size}|${ratio}`;
+  let s = sprites.get(key);
+  if (s) {
+    s.used = ++spriteClock;
+    return s;
+  }
+  if (!fontsWatched && typeof document !== 'undefined' && document.fonts) {
+    // A picture made before the web font arrived shows the fallback face: start again when fonts load.
+    fontsWatched = true;
+    document.fonts.addEventListener('loadingdone', () => sprites.clear());
+  }
+  const canvas = document.createElement('canvas');
+  const c = canvas.getContext('2d')!;
+  const font = `700 ${size}px "Space Grotesk", Inter, system-ui, sans-serif`;
+  const pad = 4;
+  c.font = font;
+  const w = Math.ceil(c.measureText(text).width) + pad * 2, h = Math.ceil(size * 1.45) + pad * 2;
+  canvas.width = Math.ceil(w * ratio);
+  canvas.height = Math.ceil(h * ratio);
+  c.setTransform(ratio, 0, 0, ratio, 0, 0);
+  c.font = font;
+  c.textAlign = 'center';
+  c.textBaseline = 'alphabetic';
+  c.lineWidth = 3.5;
+  c.lineJoin = 'round';
+  c.strokeStyle = 'rgba(11, 15, 23, 0.9)';
+  c.fillStyle = color;
+  const base = pad + size * 1.08;
+  c.strokeText(text, w / 2, base);
+  c.fillText(text, w / 2, base);
+  s = { canvas, w, h, base, used: ++spriteClock };
+  sprites.set(key, s);
+  if (sprites.size > SPRITE_MAX) {
+    let oldest = '', when = Infinity;
+    for (const [k, v] of sprites) if (v.used < when) { when = v.used; oldest = k; }
+    sprites.delete(oldest);
+  }
+  return s;
+}
+
+function drawOne(c: CanvasRenderingContext2D, p: Particle, ratio: number) {
+  const u = p.t / p.ttl;
+  switch (p.kind) {
+    case SPARK: {
+      c.globalAlpha = 1 - u * u;
+      c.fillStyle = p.color;
+      c.beginPath();
+      const r = p.size * (1 - u * 0.6);
+      if (p.shape) addShape(c, p.shape, p.x, p.y, r * 1.5);
+      else c.arc(p.x, p.y, r, 0, Math.PI * 2);
+      c.fill();
+      break;
+    }
+    case COIN: {
+      const x = p.vx, y = p.vy;
+      const r = p.size * (u < 0.15 ? 0.5 + u / 0.3 : u > 0.85 ? 1 - (u - 0.85) * 3 : 1);
+      const alpha = u < 0.1 ? u * 10 : 1;
+      // Two fading echoes just behind it, so the eye reads direction as well as position.
+      c.fillStyle = p.color;
+      for (let g = 1; g <= 2 && u > 0.05; g++) {
+        const e0 = easeInOut(u - 0.022 * g), a0 = 1 - e0;
+        c.globalAlpha = alpha * (0.34 - 0.12 * g);
+        c.beginPath();
+        c.arc(a0 * a0 * p.x + 2 * a0 * e0 * p.cx + e0 * e0 * p.tx, a0 * a0 * p.y + 2 * a0 * e0 * p.cy + e0 * e0 * p.ty, r * (1 - 0.22 * g), 0, Math.PI * 2);
+        c.fill();
+      }
+      c.globalAlpha = alpha;
+      c.fillStyle = p.color;
+      c.beginPath();
+      if (p.shape) {
+        addShape(c, p.shape, x, y, r);
+        c.fill();
+        break;
+      }
+      c.arc(x, y, r, 0, Math.PI * 2);
+      c.fill();
+      c.globalAlpha = alpha * 0.55;
+      c.fillStyle = '#fff';
+      c.beginPath();
+      c.arc(x - r * 0.3, y - r * 0.3, r * 0.38, 0, Math.PI * 2);
+      c.fill();
+      break;
+    }
+    case TEXT: {
+      // Drawn once into a small picture of its own, then stamped each frame: stroking text is the
+      // dearest thing a canvas does, and a floater lives for sixty frames.
+      const sp = textSprite(p.text, p.color, p.size, ratio);
+      const rise = p.vy * (1 - (1 - u) * (1 - u));
+      // It pops in a little too big and settles, then rises.
+      const s = u < 0.1 ? 0.6 + u * 6 : u < 0.22 ? 1.2 - ((u - 0.1) / 0.12) * 0.2 : 1;
+      c.globalAlpha = u < 0.65 ? 1 : 1 - (u - 0.65) / 0.35;
+      c.drawImage(sp.canvas, p.x - (sp.w * s) / 2, p.y - rise - sp.base * s, sp.w * s, sp.h * s);
+      break;
+    }
+    case RING: {
+      const e = 1 - (1 - u) * (1 - u);
+      c.globalAlpha = (1 - u) * 0.9;
+      c.strokeStyle = p.color;
+      c.lineWidth = 2.5 * (1 - u) + 0.5;
+      c.beginPath();
+      c.arc(p.x, p.y, 5 + (p.size - 5) * e, 0, Math.PI * 2);
+      c.stroke();
+      break;
+    }
+    case POP: {
+      const e = 1 - (1 - u) * (1 - u);
+      c.globalAlpha = (1 - u) * 0.6;
+      c.fillStyle = p.color;
+      c.beginPath();
+      c.arc(p.x, p.y, p.size * (1 + 0.7 * e), 0, Math.PI * 2);
+      c.fill();
+      break;
+    }
+  }
+}
+
+/**
+ * Draw the particles that are on this layer this frame. A particle that is also showing through the
+ * top layer's window is drawn here with the window cut out, so the two halves meet without overlapping.
+ */
+function drawParticles(c: CanvasRenderingContext2D, layer: number, ratio: number) {
+  const bit = 1 << layer;
+  const split = layer !== TOP && splitBy[layer] > 0 && top;
+  for (const p of pool) {
+    if (p.kind === 0 || !(p.mask & bit) || p.t < 0) continue;
+    if (split && p.mask & B_TOP) continue;
+    drawOne(c, p, ratio);
+  }
+  if (split) {
+    c.save();
+    c.globalAlpha = 1;
+    c.beginPath();
+    c.rect(-1e5, -1e5, 2e5, 2e5);
+    c.rect(top!.x, top!.y, top!.w, top!.h);
+    c.clip('evenodd');
+    for (const p of pool) if (p.kind !== 0 && p.mask & bit && p.mask & B_TOP && p.t >= 0) drawOne(c, p, ratio);
+    c.restore();
   }
   c.globalAlpha = 1;
 }
 
+// ---------- overlays ----------
+
+/**
+ * Something that draws itself each frame while it is active (the guiding hand, a celebration).
+ * `draw` gets a context whose units are client pixels, like everything else here.
+ */
+export interface Overlay {
+  active(): boolean;
+  draw(c: CanvasRenderingContext2D, dt: number): void;
+}
+
+const overlays: [Overlay[], Overlay[]] = [[], []];
+
+/** Register an overlay on the board layer (under the HUD), or with `onTop` on the top layer above everything. */
+export function addOverlay(o: Overlay, onTop = false) {
+  overlays[onTop ? TOP : BOARD].push(o);
+}
+
+const anyActive = (list: Overlay[]) => {
+  for (const o of list) if (o.active()) return true;
+  return false;
+};
+
+/** Add a material's dot outline to the current path (for overlays that want the same shapes as the wires). */
+export const shapePath = addShape;
+
 // ---------- frame ----------
+
+/** Seconds for the mood to follow its target. */
+const MOOD_EASE = 0.9;
+/** The board layer's last frame had particles or an overlay on it. */
+let boardExtras = false;
 
 /**
  * Advance and draw everything. Call once per animation frame.
- * `covered` means the board cannot be seen (a full-screen overlay is up): wire dots and port pulses
- * are then skipped, but particles still run, so an `onArrive` callback is never left waiting.
+ * `covered` means the board cannot be seen (a full-screen overlay is up): wire dots, port pulses and
+ * everything else on the board layer are then skipped. Particles still run, so an `onArrive`
+ * callback is never left waiting, and the layers above the panels are drawn as usual.
  */
 export function frameFx(dt: number, view: { x: number; y: number; k: number }, paused: boolean, covered = false) {
   if (!ctx || !canvas) return;
   if (sizeDirty) resize();
+  const pdt = Math.min(dt, 0.1);
+  if (mood !== moodTarget) {
+    mood += (moodTarget - mood) * (1 - Math.exp(-pdt / MOOD_EASE));
+    if (Math.abs(moodTarget - mood) < 0.003) mood = moodTarget;
+  }
+  if (live) stepParticles(pdt);
+  frameBoard(ctx, canvas, dt, pdt, view, paused, covered);
+  if (top) frameSurface(top, liveBy[TOP], overlays[TOP], TOP, pdt);
+  if (bar && bar.h > 0) frameSurface(bar, liveBy[BAR], null, BAR, pdt);
+}
+
+function frameBoard(c: CanvasRenderingContext2D, cv: HTMLCanvasElement, dt: number, pdt: number, view: { x: number; y: number; k: number }, paused: boolean, covered: boolean) {
   const total = covered ? 0 : stepFlows(dt, view, paused);
-  beaconClock += Math.min(dt, 0.1);
+  beaconClock += pdt;
   let pulsing = false;
   if (!covered) {
     for (const b of beacons) {
@@ -538,11 +937,18 @@ export function frameFx(dt: number, view: { x: number; y: number; k: number }, p
       }
     }
   }
+  const over = !covered && anyActive(overlays[BOARD]);
+  const parts = covered ? 0 : liveBy[BOARD];
+  // The frame after the last particle or overlay has gone must be drawn once more, or (while paused,
+  // when nothing else asks for a redraw) its last image would stay on the canvas.
+  const extras = over || parts > 0;
+  if (boardExtras && !extras) stale = true;
+  boardExtras = extras;
   if (!total) dotCount = 0;
-  if (!total && !live && !pulsing) {
+  if (!total && !parts && !pulsing && !over) {
     if (!wasBlank) {
-      ctx.setTransform(1, 0, 0, 1, 0, 0);
-      ctx.clearRect(0, 0, canvas.width, canvas.height);
+      c.setTransform(1, 0, 0, 1, 0, 0);
+      c.clearRect(0, 0, cv.width, cv.height);
       wasBlank = true;
     }
     stale = false;
@@ -552,20 +958,49 @@ export function frameFx(dt: number, view: { x: number; y: number; k: number }, p
   // Paused with nothing moving: the last frame is still right unless the view or the wires changed.
   // (Beacons keep breathing while paused, so they count as movement.)
   const key = `${view.x}|${view.y}|${view.k}`;
-  if (paused && !live && !pulsing && !stale && key === lastKey) return;
+  if (paused && !parts && !pulsing && !over && !stale && key === lastKey) return;
   lastKey = key;
   stale = false;
   wasBlank = false;
-  ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
-  ctx.clearRect(0, 0, W, H);
-  if (pulsing) drawBeacons(ctx, view);
-  if (total) drawFlows(ctx, view);
-  if (live) drawParticles(ctx, Math.min(dt, 0.1));
+  c.setTransform(dpr, 0, 0, dpr, 0, 0);
+  c.clearRect(0, 0, W, H);
+  if (pulsing) drawBeacons(c, view);
+  if (total) drawFlows(c, view);
+  if (!over && !parts) return;
+  // Overlays and particles work in client pixels: shift so that the canvas corner is where it is on screen.
+  c.setTransform(dpr, 0, 0, dpr, -originX * dpr, -originY * dpr);
+  if (over) for (const o of overlays[BOARD]) if (o.active()) o.draw(c, pdt);
+  if (parts) drawParticles(c, BOARD, dpr);
 }
 
-/** Numbers for tests and tuning. */
+/** One of the layers above the panels: wiped once when it empties, otherwise cleared and redrawn. */
+function frameSurface(s: Surface, parts: number, list: Overlay[] | null, layer: number, pdt: number) {
+  const c = s.ctx;
+  if (!c) return;
+  const over = !!list && anyActive(list);
+  if (!parts && !over) {
+    if (!s.blank) {
+      c.setTransform(1, 0, 0, 1, 0, 0);
+      c.clearRect(0, 0, s.canvas.width, s.canvas.height);
+      s.blank = true;
+    }
+    return;
+  }
+  s.blank = false;
+  c.setTransform(s.ratio, 0, 0, s.ratio, -s.x * s.ratio, -s.y * s.ratio);
+  c.clearRect(s.x, s.y, s.w, s.h);
+  if (over) for (const o of list!) if (o.active()) o.draw(c, pdt);
+  if (parts) drawParticles(c, layer, s.ratio);
+}
+
+/** Numbers for tests and tuning. `width`, `height` and `dpr` describe the board layer. */
 export function fxStats() {
-  return { dots: dotCount, particles: live, thin: +thin.toFixed(2), width: canvas?.width ?? 0, height: canvas?.height ?? 0, dpr };
+  return {
+    dots: dotCount, particles: live, thin: +thin.toFixed(2), width: canvas?.width ?? 0, height: canvas?.height ?? 0, dpr,
+    top: { particles: liveBy[TOP], width: top?.canvas.width ?? 0, height: top?.canvas.height ?? 0 },
+    bar: { particles: liveBy[BAR], width: bar?.canvas.width ?? 0, height: bar?.canvas.height ?? 0 },
+    mood: +mood.toFixed(2),
+  };
 }
 
-export const fx = { burst, fly, floater, ring, stats: fxStats };
+export const fx = { burst, fly, floater, ring, pop, stats: fxStats };
