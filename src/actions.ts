@@ -1,11 +1,15 @@
-// Every change the player can make to the board. All of them are undoable and refund in full.
+// Every change the player can make to the board. Board edits are undoable and refund in full;
+// claiming a goal or an order (re-exported below) is not undoable.
 import { EXPANSION_DEPOSITS, MATERIALS, MatId, NODE_DEFS, NodeType, PIPES, RECIPES, Recipe, Track } from './content';
 import {
-  cycleTime, expansionCost, has, matUnlocked, maxLevel, maxPipeTier, nodeCost, nodeUnlocked, recipeOf, recipeUnlocked,
-  trackAvailable, upgradeCost,
+  buyBackPrice, cycleTime, expansionCost, has, matUnlocked, maxLevel, maxPipeTier, nodeCost, nodeCount, nodeUnlocked, recipeOf,
+  recipeUnlocked, trackAvailable, upgradeCost, upgradeValue,
 } from './economy';
 import { graph, isMachine, isPass, isSink, outPortCount } from './sim';
 import { Game, GNode, RouterMode, Snapshot, Wire, makeNode, makeWire, restore, snap, snapshot } from './state';
+
+export { claimGoal } from './goals';
+export { claimOrder } from './orders';
 
 // ---------- undo ----------
 
@@ -46,17 +50,46 @@ export function act(g: Game, fn: () => number | false): boolean {
   return true;
 }
 
-export function pushUndo(g: Game, before: Snapshot) {
+/** Same nodes and wires, give or take positions? Used to accept a "node moved" undo step. */
+function sameStructure(g: Game, before: Snapshot): boolean {
+  if (before.nodes.length !== g.nodes.length || before.wires.length !== g.wires.length) return false;
+  const nodes = new Map(g.nodes.map((n) => [n.id, n]));
+  for (const b of before.nodes) {
+    const n = nodes.get(b.id);
+    if (!n || n.type !== b.type || n.recipe !== b.recipe || n.lv.speed !== b.lv.speed || n.lv.eff !== b.lv.eff || n.lv.buffer !== b.lv.buffer) return false;
+  }
+  const wires = new Map(g.wires.map((w) => [w.id, w]));
+  for (const b of before.wires) {
+    const w = wires.get(b.id);
+    if (!w || w.tier !== b.tier) return false;
+  }
+  return true;
+}
+
+/**
+ * Record a free undo step for a change made outside act(): moving a node. `before` is the board before the move.
+ * Ignored (returns false) if anything else changed since `before` was taken, e.g. the node was deleted mid-drag:
+ * restoring that snapshot for free would hand back a node whose refund was already paid.
+ */
+export function pushUndo(g: Game, before: Snapshot): boolean {
+  if (!sameStructure(g, before)) return false;
   undoStack.push({ state: before, spent: 0 });
   redoStack.length = 0;
+  return true;
 }
 
 export const canUndo = () => undoStack.length > 0;
 export const canRedo = () => redoStack.length > 0;
 
 export function undo(g: Game): boolean {
-  const e = undoStack.pop();
+  const e = undoStack[undoStack.length - 1];
   if (!e) return false;
+  // Undoing a delete takes its refund back: refuse if that refund has been spent.
+  if (g.credits + e.spent < -1e-6) {
+    g.events.push({ kind: 'toast', text: 'Not enough credits to undo that' });
+    return false;
+  }
+  undoStack.pop();
   redoStack.push({ state: snapshot(g), spent: e.spent });
   restore(g, e.state);
   g.credits += e.spent;
@@ -120,8 +153,18 @@ export function freeDeposits(g: Game) {
   return g.deposits.filter((d) => !used.has(d.id) && matUnlocked(g, d.mat));
 }
 
+/** The last Well can never be deleted: with no Well and no credits the save would be stuck. */
+export function canDelete(g: Game, n: GNode): boolean {
+  return n.type !== 'well' || nodeCount(g, 'well') > 1;
+}
+
+/**
+ * Credits returned for deleting a node: what it would cost to buy it back, plus its upgrades and the
+ * upgrades on its wires. Deleting and re-placing always nets to zero. 0 for a node that cannot be deleted.
+ */
 export function refundOf(g: Game, n: GNode): number {
-  let r = n.paid;
+  if (!canDelete(g, n)) return 0;
+  let r = buyBackPrice(g, n.type) + upgradeValue(n);
   for (const w of g.wires) if (w.from === n.id || w.to === n.id) r += w.paid;
   return r;
 }
@@ -152,12 +195,17 @@ export function placeNode(g: Game, type: NodeType, x: number, y: number, opts: P
     node = n;
     return cost;
   });
+  if (ok) g.stats.nodesBuilt++;
   return ok ? node : null;
 }
 
 export function deleteNode(g: Game, id: number): boolean {
   const n = nodeById(g, id);
   if (!n) return false;
+  if (!canDelete(g, n)) {
+    g.events.push({ kind: 'toast', text: 'You need at least one Well' });
+    return false;
+  }
   return act(g, () => {
     const refund = refundOf(g, n);
     g.wires = g.wires.filter((w) => w.from !== id && w.to !== id);
@@ -210,6 +258,7 @@ export function setRecipe(g: Game, id: number, recipeId: string): boolean {
     n.crafting = false;
     n.prog = 0;
     n.grace = 6;
+    n.born = g.time; // a re-tooled machine is new again as far as Flow is concerned
     g.credits += refund;
     return -refund;
   });
@@ -308,6 +357,7 @@ export function connect(g: Game, fromId: number, port: number, toId: number): Wi
     a.fBlocked = 0;
     return 0;
   });
+  if (wire) g.stats.wiresMade++;
   return wire;
 }
 
@@ -352,7 +402,11 @@ export function upgradeSaturatedWires(g: Game): number {
   return count;
 }
 
-/** Insert an existing, unconnected node into the middle of a wire. */
+/**
+ * Drop an existing, unconnected node onto a wire.
+ * A Market, Lab or Void becomes a branch: the wire stays and a new one runs from the same port to the sink.
+ * Anything else is inserted into the wire; both halves keep the wire's tier and share what was paid for it.
+ */
 export function splice(g: Game, wireId: number, nodeId: number): boolean {
   const w = g.wires.find((x) => x.id === wireId);
   const n = nodeById(g, nodeId);
@@ -360,14 +414,17 @@ export function splice(g: Game, wireId: number, nodeId: number): boolean {
   if (g.wires.some((x) => x.from === nodeId || x.to === nodeId)) return false;
   return act(g, () => {
     const { from, port, to, tier, paid } = w;
+    if (isSink(n)) return connect(g, from, port, nodeId) ? 0 : false;
     g.wires = g.wires.filter((x) => x.id !== wireId);
     g.rev++;
     const a = connect(g, from, port, nodeId);
     if (!a) return false;
-    a.tier = tier;
-    a.paid = paid;
     g.rev++;
-    if (!isSink(n)) connect(g, nodeId, 0, to);
+    const b = connect(g, nodeId, 0, to);
+    if (!b) return false;
+    a.tier = b.tier = tier;
+    a.paid = Math.ceil(paid / 2);
+    b.paid = paid - a.paid;
     return 0;
   });
 }

@@ -1,5 +1,5 @@
 import {
-  DATA_YIELD, DataTier, MATERIALS, MatId, NODE_DEFS, NodeType, PIPES, RECIPES, Recipe, TECHS, Tech, Track,
+  DATA_YIELD, DataTier, MATERIALS, MatId, NODE_DEFS, NodeType, PIPES, RECIPES, RULES, Recipe, TECHS, Tech, Track,
 } from './content';
 import { Game, GNode } from './state';
 
@@ -15,15 +15,20 @@ export function nodeCount(g: Game, type: NodeType) {
   return c;
 }
 
-export function nodeCost(g: Game, type: NodeType): number {
+/** Price of a node of this type when `owned` of them are already on the board. */
+export function nodeCostAt(type: NodeType, owned: number): number {
   const def = NODE_DEFS[type];
-  let owned = nodeCount(g, type);
   if (def.firstFree) {
-    if (owned === 0) return 0;
+    if (owned <= 0) return 0;
     owned -= 1;
   }
-  return Math.round(def.base * Math.pow(def.growth, owned));
+  return Math.round(def.base * Math.pow(def.growth, Math.max(0, owned)));
 }
+
+export const nodeCost = (g: Game, type: NodeType): number => nodeCostAt(type, nodeCount(g, type));
+
+/** What it would cost to buy one node of this type back after deleting it: the refund for the node itself. */
+export const buyBackPrice = (g: Game, type: NodeType): number => nodeCostAt(type, nodeCount(g, type) - 1);
 
 export function trackAvailable(g: Game, n: GNode, track: Track): boolean {
   if (!NODE_DEFS[n.type].tracks.includes(track)) return false;
@@ -37,10 +42,19 @@ export function maxLevel(g: Game, track: Track): number {
   return 5;
 }
 
-export function upgradeCost(n: GNode, track: Track): number {
-  const base = Math.max(10, NODE_DEFS[n.type].base);
-  const mult = track === 'speed' ? 0.5 : track === 'eff' ? 1.5 : 0.4;
-  return Math.round(mult * base * Math.pow(1.6, n.lv[track]));
+/** Price of taking a track from `level` to `level + 1`. */
+export function upgradeCostAt(type: NodeType, track: Track, level: number): number {
+  const U = RULES.upgrade;
+  return Math.round(U[track] * Math.max(U.minBase, NODE_DEFS[type].base) * Math.pow(U.growth, level));
+}
+
+export const upgradeCost = (n: GNode, track: Track): number => upgradeCostAt(n.type, track, n.lv[track]);
+
+/** Credits spent on a node's upgrades, worked out from its levels. Refunded in full on delete. */
+export function upgradeValue(n: GNode): number {
+  let v = 0;
+  for (const track of NODE_DEFS[n.type].tracks) for (let l = 0; l < n.lv[track]; l++) v += upgradeCostAt(n.type, track, l);
+  return v;
 }
 
 export const TRACK_INFO: Record<Track, { name: string; desc: (n: GNode) => string }> = {
@@ -69,14 +83,77 @@ export function recipeOf(n: GNode): Recipe | null {
 // ---------- market ----------
 
 export const demandMult = (g: Game) => (has(g, 'C2') ? 1.5 : 1) * (has(g, 'C5') ? 2 : 1);
+/** Full price of one item, before the Flow bonus. */
 export const valueOf = (g: Game, m: MatId) => MATERIALS[m].value * (MATERIALS[m].tier >= 2 && has(g, 'C4') ? 1.25 : 1);
+/** Items per second the Markets buy at full price. */
+export const demandRate = (g: Game, m: MatId) => MATERIALS[m].demand * demandMult(g);
+/** How much unused demand a Market banks, in items, so that bursty deliveries still get full price. */
+export const demandBurst = (g: Game, m: MatId) => Math.max(RULES.demand.minBurst, demandRate(g, m) * RULES.demand.burstSeconds);
 
-/** 1 = full price, falls toward 0 as the market floods. */
-export function saturation(g: Game, m: MatId): number {
-  return 1 / (1 + (g.soldRate[m] ?? 0) / (MATERIALS[m].demand * demandMult(g)));
+/** Sale price multiplier from Flow: 1 until the Flow meter is unlocked, then 1 + bonus × Flow. */
+export const flowMult = (g: Game) => (g.flowOn ? 1 + RULES.flow.bonus * g.flow : 1);
+
+export interface DemandInfo {
+  /** Items per second being sold right now (smoothed). */
+  rate: number;
+  /** Items per second that sell at full price. */
+  demand: number;
+  /** The part of `rate` sold at full price, and the part sold as surplus. rate = fullRate + surplusRate. */
+  fullRate: number;
+  surplusRate: number;
+  /** Credits per item at full price and for the surplus, before the Flow bonus. */
+  unitPrice: number;
+  surplusPrice: number;
+  /** Current Flow multiplier on both prices (1 when Flow is locked). */
+  mult: number;
+  /** Credits per second this material earns right now, Flow bonus included. */
+  income: number;
 }
 
+/**
+ * Everything the Market inspector shows for one material, ready to print:
+ * "{fullRate}/s at {unitPrice}¢ · {surplusRate}/s surplus at {surplusPrice}¢".
+ */
+export function demandInfo(g: Game, m: MatId): DemandInfo {
+  const rate = g.soldRate[m] ?? 0;
+  const demand = demandRate(g, m);
+  const fullRate = Math.min(rate, demand);
+  const surplusRate = Math.max(0, rate - demand);
+  const unitPrice = valueOf(g, m);
+  const surplusPrice = unitPrice * RULES.demand.surplusShare;
+  const mult = flowMult(g);
+  return { rate, demand, fullRate, surplusRate, unitPrice, surplusPrice, mult, income: (fullRate * unitPrice + surplusRate * surplusPrice) * mult };
+}
+
+/** Average price as a share of the full price: 1 while everything sells at full price, falling toward the surplus share. */
+export function saturation(g: Game, m: MatId): number {
+  const d = demandInfo(g, m);
+  return d.rate > 1e-9 ? (d.fullRate + d.surplusRate * RULES.demand.surplusShare) / d.rate : 1;
+}
+
+/** Average credits per item at the current sell rate, before the Flow bonus. */
 export const price = (g: Game, m: MatId) => valueOf(g, m) * saturation(g, m);
+
+/**
+ * Sell `amt` items: the banked demand is used up at full price, the rest goes at the surplus price.
+ * Returns the credits earned (Flow bonus included). The caller pays them out.
+ */
+export function sellValue(g: Game, m: MatId, amt: number): number {
+  const left = g.demandLeft[m] ?? demandBurst(g, m);
+  const full = Math.min(amt, left);
+  g.demandLeft[m] = left - full;
+  return (full + (amt - full) * RULES.demand.surplusShare) * valueOf(g, m) * flowMult(g);
+}
+
+/** Refill the banked demand. Called once per tick, before anything is sold. */
+export function refillDemand(g: Game, dt: number) {
+  for (const k in g.demandLeft) {
+    const m = k as MatId;
+    const next = (g.demandLeft[m] ?? 0) + demandRate(g, m) * dt;
+    if (next >= demandBurst(g, m)) delete g.demandLeft[m];
+    else g.demandLeft[m] = next;
+  }
+}
 
 export function dataYield(g: Game, m: MatId): { tier: DataTier; amount: number } {
   const y = DATA_YIELD[MATERIALS[m].tier];
@@ -92,12 +169,16 @@ export const maxPipeTier = (g: Game) => {
   return t;
 };
 
-export const expansionCost = (g: Game) => Math.round(100 * Math.pow(2.2, g.board.expansions));
-export const offlineCap = (g: Game) => (has(g, 'R4') ? 8 : 2) * 3600;
+export const expansionCost = (g: Game) => Math.round(RULES.expansion.base * Math.pow(RULES.expansion.growth, g.board.expansions));
+export const offlineCap = (g: Game) => (has(g, 'R4') ? RULES.away.capHoursLong : RULES.away.capHours) * 3600;
 
 // ---------- tech ----------
 
-export const techAvailable = (g: Game, t: Tech) => !g.techs.includes(t.id) && !t.auto && t.requires.every((r) => g.techs.includes(r));
+/** Not shown in the tree yet: Long Absence stays hidden until the demo has ended. */
+export const techHidden = (g: Game, t: Tech) => !!t.needsEnd && !g.ended;
+/** Can be researched now if affordable. Goal-granted techs (`auto`) are never purchasable. */
+export const techAvailable = (g: Game, t: Tech) =>
+  !g.techs.includes(t.id) && !t.auto && !techHidden(g, t) && t.requires.every((r) => g.techs.includes(r));
 export const techAffordable = (g: Game, t: Tech) =>
   (Object.keys(t.cost) as DataTier[]).every((k) => g.data[k] >= (t.cost[k] ?? 0));
 
@@ -136,10 +217,19 @@ export function research(g: Game, id: string): boolean {
 }
 
 export function grantTech(g: Game, id: string) {
-  if (g.techs.includes(id)) return;
+  if (!TECHS[id] || g.techs.includes(id)) return;
   g.techs.push(id);
   g.queue = g.queue.filter((q) => q !== id);
   g.events.push({ kind: 'tech', id });
+  g.rev++;
+}
+
+/** The demo is complete (first Lens). Sets `ended` once and raises 'demo-end'; later calls do nothing. */
+export function endDemo(g: Game) {
+  if (g.ended) return;
+  g.ended = true;
+  g.stats.firstLensAt = g.time;
+  g.events.push({ kind: 'demo-end', text: 'Demo complete: you made your first Lens.' });
   g.rev++;
 }
 

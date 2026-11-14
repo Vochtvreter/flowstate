@@ -1,40 +1,33 @@
 import { describe, expect, it } from 'vitest';
 import { connect, cutWire, deleteNode, placeNode, redo, setMode, setWeight, undo, upgrade } from '../src/actions';
-import { nodeCost, price } from '../src/economy';
-import { offlineGains, tick } from '../src/sim';
-import { Game, deserialize, newGame, serialize } from '../src/state';
-
-function run(g: Game, seconds: number, dt = 0.05) {
-  for (let t = 0; t < seconds; t += dt) tick(g, dt);
-}
-
-function rich(): Game {
-  const g = newGame();
-  g.credits = 1e9;
-  g.techs = ['P1', 'R1', 'P2', 'P3', 'P4', 'P5', 'L1', 'L4', 'L6', 'L2', 'L5'];
-  return g;
-}
-
-const well = (g: Game) => g.nodes.find((n) => n.type === 'well')!;
-const market = (g: Game) => g.nodes.find((n) => n.type === 'market')!;
+import { nodeCost, price, research, techAvailable } from '../src/economy';
+import { TECHS } from '../src/content';
+import { deserialize, serialize } from '../src/state';
+import { fresh as newGame, market, rich, run, well } from './helpers';
 
 describe('simulation', () => {
-  it('a well wired to a market earns credits with saturation', () => {
+  it('a well wired to a market earns a clean 1¢ per second', () => {
     const g = newGame();
     connect(g, well(g).id, 0, market(g).id);
     run(g, 60);
-    // 1 glint/s, demand 2/s => price settles near 0.667
-    expect(price(g, 'glint')).toBeCloseTo(2 / 3, 1);
-    expect(g.credits).toBeGreaterThan(35);
-    expect(g.credits).toBeLessThan(60);
+    // 1 glint/s is under the demand of 2/s, so every item sells at full price
+    expect(price(g, 'glint')).toBeCloseTo(1, 5);
+    expect(g.credits).toBeGreaterThan(59);
+    expect(g.credits).toBeLessThanOrEqual(60.001);
     expect(g.wires[0].rate).toBeCloseTo(1, 1);
   });
 
-  it('grants Refining after 50 lifetime credits', () => {
+  it('never grants Refining by itself: it is a goal reward and cannot be bought', () => {
     const g = newGame();
     connect(g, well(g).id, 0, market(g).id);
     run(g, 120);
-    expect(g.techs).toContain('P1');
+    expect(g.lifetime).toBeGreaterThan(50);
+    expect(g.techs).not.toContain('P1');
+    g.data = { a: 1e6, b: 1e6, g: 1e6 };
+    for (const id of ['P1', 'R1', 'L1', 'C1']) {
+      expect(techAvailable(g, TECHS[id])).toBe(false);
+      expect(research(g, id)).toBe(false);
+    }
   });
 
   it('refiner converts 2 glint into 1 shard and reports starvation', () => {
@@ -143,10 +136,10 @@ describe('simulation', () => {
 
   it('wire capacity limits flow', () => {
     const g = rich();
-    for (let i = 0; i < 6; i++) upgrade(g, well(g).id, 'speed'); // ~3.8/s
+    for (let i = 0; i < 8; i++) upgrade(g, well(g).id, 'speed'); // ~6/s
     connect(g, well(g).id, 0, market(g).id);
     run(g, 30);
-    expect(g.wires[0].rate).toBeCloseTo(2, 1); // Mk I cap
+    expect(g.wires[0].rate).toBeCloseTo(4, 1); // Mk I cap
   });
 });
 
@@ -181,17 +174,15 @@ describe('editing', () => {
     expect(placeNode(g, 'well', 0, 0, { depositId: 2 })).not.toBeNull();
   });
 
-  it('save round-trips and offline gains scale with time', () => {
+  it('save round-trips', () => {
     const g = newGame();
     connect(g, well(g).id, 0, market(g).id);
     run(g, 10);
     const g2 = deserialize(serialize(g))!;
     expect(g2.nodes.length).toBe(g.nodes.length);
     expect(g2.wires.length).toBe(1);
-    const before = g2.credits;
-    const gains = offlineGains(g2, 3600);
-    expect(gains.credits).toBeGreaterThan(2000);
-    expect(gains.credits).toBeLessThan(2800);
-    expect(g2.credits).toBeCloseTo(before + gains.credits, 3);
+    expect(g2.credits).toBe(g.credits);
+    expect(g2.goal).toEqual(g.goal);
+    expect(g2.stats).toEqual(g.stats);
   });
 });

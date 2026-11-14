@@ -1,42 +1,18 @@
 // Deterministic, DOM-free simulation. tick(game, dt) advances everything.
-import { DataTier, MATERIALS, MatId, Recipe } from './content';
+import { DataTier, MATERIALS, MatId, RULES, Recipe } from './content';
 import {
-  bufMult, cycleTime, dataYield, effEvery, grantTech, labRate, pipeCap, price, recipeOf, research, wellRate,
+  bufMult, cycleTime, dataYield, effEvery, endDemo, labRate, offlineCap, pipeCap, recipeOf, refillDemand, research, sellValue, wellRate,
 } from './economy';
-import { Bag, Game, GNode, Status, Wire } from './state';
+import { updateFlow } from './flow';
+import { tickGoal } from './goals';
+import { Graph, graph, isMachine, isPass, isSink } from './graph';
+import { tickOrders } from './orders';
+import { Bag, Game, GNode, Status, Wire, deserialize, serialize } from './state';
+
+export { graph, isMachine, isPass, isSink };
+export type { Graph };
 
 const EPS = 1e-9;
-
-export interface Graph {
-  rev: number;
-  byId: Map<number, GNode>;
-  /** Outgoing wires per node, grouped by output port. */
-  outs: Map<number, Wire[][]>;
-  ins: Map<number, Wire[]>;
-}
-
-const graphs = new WeakMap<Game, Graph>();
-
-export function graph(g: Game): Graph {
-  let c = graphs.get(g);
-  if (c && c.rev === g.rev && c.byId.size === g.nodes.length) return c;
-  c = { rev: g.rev, byId: new Map(), outs: new Map(), ins: new Map() };
-  for (const n of g.nodes) c.byId.set(n.id, n);
-  for (const w of g.wires) {
-    let ports = c.outs.get(w.from);
-    if (!ports) c.outs.set(w.from, (ports = []));
-    (ports[w.port] ??= []).push(w);
-    let ins = c.ins.get(w.to);
-    if (!ins) c.ins.set(w.to, (ins = []));
-    ins.push(w);
-  }
-  graphs.set(g, c);
-  return c;
-}
-
-export const isMachine = (n: GNode) => n.type === 'refiner' || n.type === 'assembler' || n.type === 'fabricator';
-export const isPass = (n: GNode) => n.type === 'router' || n.type === 'merger' || n.type === 'silo';
-export const isSink = (n: GNode) => n.type === 'market' || n.type === 'lab' || n.type === 'void';
 
 export function bagTotal(b: Bag): number {
   let t = 0;
@@ -99,13 +75,10 @@ function ema(prev: number, value: number, dt: number, tau: number) {
 function markMade(g: Game, m: MatId) {
   if (g.made[m]) return;
   g.made[m] = true;
-  const mat = MATERIALS[m];
-  if (mat.tier >= 1) {
-    const reward = Math.round(mat.value * 30);
-    g.credits += reward;
-    g.lifetime += reward;
-    g.events.push({ kind: 'milestone', mat: m, reward });
-  }
+  g.madeAt[m] = g.time;
+  // Goals pay for firsts now; this only lets the UI announce a new material.
+  g.events.push({ kind: 'milestone', mat: m, reward: 0 });
+  if (m === RULES.capstone) endDemo(g);
 }
 
 function setStatus(n: GNode, worked: number, inst: Status, dt: number) {
@@ -221,10 +194,11 @@ function deliver(g: Game, w: Wire, dest: GNode, m: MatId, amt: number) {
   if (w.mat && w.mat !== m && w.flow - amt > EPS) w.mixed = true;
   w.mat = m;
   if (dest.type === 'market') {
-    const p = price(g, m);
-    const earned = amt * p;
+    // The one place sales are paid: full price up to demand, the surplus price beyond, times the Flow bonus.
+    const earned = sellValue(g, m, amt);
     g.credits += earned;
     g.lifetime += earned;
+    g.stats.fromSales += earned;
     g.tickAcc.credits += earned;
     g.tickAcc.sold[m] = (g.tickAcc.sold[m] ?? 0) + amt;
     g.sold[m] = (g.sold[m] ?? 0) + amt;
@@ -238,9 +212,43 @@ function deliver(g: Game, w: Wire, dest: GNode, m: MatId, amt: number) {
   }
 }
 
-/** Split `avail` of material m across the wires of one output port. Returns the amount moved. */
+/**
+ * Water-fill `remaining` across the wires picked by `include`, by weight, never past what each can take.
+ * Adds to `given` and returns what is left over.
+ */
+function share(
+  wires: Wire[], demand: number[], given: number[], remaining: number, weighted: boolean, include: (i: number) => boolean,
+): number {
+  const n = wires.length;
+  for (let pass = 0; pass < n && remaining > EPS; pass++) {
+    let sumW = 0;
+    for (let i = 0; i < n; i++) {
+      if (include(i) && demand[i] - given[i] > EPS) sumW += weighted ? Math.max(0, wires[i].weight) : 1;
+    }
+    if (sumW <= EPS) break;
+    const pool = remaining;
+    for (let i = 0; i < n; i++) {
+      if (!include(i)) continue;
+      const open = demand[i] - given[i];
+      if (open <= EPS) continue;
+      const wgt = weighted ? Math.max(0, wires[i].weight) : 1;
+      const give = Math.min(open, (pool * wgt) / sumW);
+      given[i] += give;
+      remaining -= give;
+    }
+  }
+  return remaining;
+}
+
+/**
+ * Split `avail` of material m across the wires of one output port. Returns the amount moved.
+ *
+ * A plain port (anything but a Router) feeds machines and pass-through nodes first, evenly, and lets
+ * Markets, Labs and Voids share whatever is left. A Router follows its mode; its Even mode is truly even.
+ */
 function distribute(g: Game, c: Graph, src: GNode, wires: Wire[], m: MatId, avail: number): number {
-  const mode = src.type === 'router' ? src.mode : 'even';
+  const router = src.type === 'router';
+  const mode = router ? src.mode : 'even';
   const n = wires.length;
   const dests: GNode[] = new Array(n);
   const demand: number[] = new Array(n);
@@ -263,19 +271,10 @@ function distribute(g: Game, c: Graph, src: GNode, wires: Wire[], m: MatId, avai
     return avail - remaining;
   }
   const given: number[] = new Array(n).fill(0);
-  for (let pass = 0; pass < n && remaining > EPS; pass++) {
-    let sumW = 0;
-    for (let i = 0; i < n; i++) if (demand[i] - given[i] > EPS) sumW += mode === 'ratio' ? Math.max(0, wires[i].weight) : 1;
-    if (sumW <= EPS) break;
-    const pool = remaining;
-    for (let i = 0; i < n; i++) {
-      const open = demand[i] - given[i];
-      if (open <= EPS) continue;
-      const wgt = mode === 'ratio' ? Math.max(0, wires[i].weight) : 1;
-      const give = Math.min(open, (pool * wgt) / sumW);
-      given[i] += give;
-      remaining -= give;
-    }
+  if (router) remaining = share(wires, demand, given, remaining, mode === 'ratio', () => true);
+  else {
+    remaining = share(wires, demand, given, remaining, false, (i) => !isSink(dests[i]));
+    remaining = share(wires, demand, given, remaining, false, (i) => isSink(dests[i]));
   }
   for (let i = 0; i < n; i++) if (given[i] > EPS) deliver(g, wires[i], dests[i], m, given[i]);
   return avail - remaining;
@@ -297,7 +296,8 @@ function transferFrom(g: Game, c: Graph, n: GNode) {
   }
 }
 
-let rot = 0;
+/** Ticks run per game, so the order nodes hand items on rotates the same way for every game. */
+const tickCount = new WeakMap<Game, number>();
 
 export function tick(g: Game, dt: number) {
   const c = graph(g);
@@ -306,6 +306,7 @@ export function tick(g: Game, dt: number) {
   acc.credits = 0;
   acc.data.a = acc.data.b = acc.data.g = 0;
   acc.sold = {};
+  refillDemand(g, dt);
 
   for (const w of g.wires) {
     w.budget = pipeCap(w.tier) * dt;
@@ -322,7 +323,9 @@ export function tick(g: Game, dt: number) {
   }
 
   const N = g.nodes.length;
-  rot = (rot + 1) % Math.max(1, N);
+  const ticks = (tickCount.get(g) ?? 0) + 1;
+  tickCount.set(g, ticks);
+  const rot = ticks % Math.max(1, N);
   for (let i = 0; i < N; i++) transferFrom(g, c, g.nodes[(i + rot) % N]);
 
   for (const n of g.nodes) {
@@ -346,43 +349,51 @@ export function tick(g: Game, dt: number) {
   g.creditRate = ema(g.creditRate, acc.credits / dt, dt, 3);
   for (const k of ['a', 'b', 'g'] as DataTier[]) g.dataRate[k] = ema(g.dataRate[k], acc.data[k] / dt, dt, 3);
 
-  progress(g);
+  progress(g, dt);
 }
 
-/** Milestone unlocks and the research queue. */
-function progress(g: Game) {
-  if (!g.techs.includes('P1') && g.lifetime >= 50) grantTech(g, 'P1');
-  if (!g.techs.includes('R1') && (g.sold.shard ?? 0) > 0) grantTech(g, 'R1');
+/** The research queue, Flow, the active order and the active goal. */
+function progress(g: Game, dt: number) {
   if (g.queue.length) for (const id of [...g.queue]) research(g, id);
+  updateFlow(g, dt);
+  tickOrders(g);
+  tickGoal(g);
 }
+
+export interface AwayGains { credits: number; a: number; b: number; g: number }
 
 /**
- * Estimate earnings for time away: run the line briefly to reach steady state,
- * measure, then scale. Cheap and close enough for an idle game.
+ * Earnings for time away. Pays nothing until the demo has ended (a pitch is one sitting).
+ * After that a COPY of the game is run briefly to reach steady state and measured; the live game
+ * only receives the result: RULES.away.share of the measured rate for `seconds`, capped by offlineCap().
  */
-export function offlineGains(g: Game, seconds: number) {
-  const before = { credits: g.credits, a: g.data.a, b: g.data.b, g: g.data.g, lifetime: g.lifetime };
-  const warm = 90;
-  const dt = 0.1;
-  for (let t = 0; t < warm; t += dt) tick(g, dt);
-  const mid = { credits: g.credits, a: g.data.a, b: g.data.b, g: g.data.g };
-  const sample = 60;
-  for (let t = 0; t < sample; t += dt) tick(g, dt);
-  const per = {
-    credits: (g.credits - mid.credits) / sample,
-    a: (g.data.a - mid.a) / sample,
-    b: (g.data.b - mid.b) / sample,
-    g: (g.data.g - mid.g) / sample,
-  };
-  const gains = { credits: per.credits * seconds, a: per.a * seconds, b: per.b * seconds, g: per.g * seconds };
-  g.credits = before.credits + gains.credits;
-  g.lifetime = before.lifetime + gains.credits;
-  g.data.a = before.a + gains.a;
-  g.data.b = before.b + gains.b;
-  g.data.g = before.g + gains.g;
-  for (const n of g.nodes) {
-    n.gain = 0;
-    n.gainB = {};
+export function offlineGains(g: Game, seconds: number): AwayGains {
+  const gains: AwayGains = { credits: 0, a: 0, b: 0, g: 0 };
+  if (!g.ended || !(seconds > 0)) return gains;
+  const copy = deserialize(serialize(g));
+  if (!copy) return gains;
+  const A = RULES.away;
+  copy.queue = []; // the estimate must not research anything
+  for (let t = 0; t < A.warmup; t += A.step) tick(copy, A.step);
+  const sum: AwayGains = { credits: 0, a: 0, b: 0, g: 0 };
+  let sampled = 0;
+  for (; sampled < A.sample; sampled += A.step) {
+    tick(copy, A.step);
+    sum.credits += copy.tickAcc.credits;
+    sum.a += copy.tickAcc.data.a;
+    sum.b += copy.tickAcc.data.b;
+    sum.g += copy.tickAcc.data.g;
   }
+  const k = (A.share * Math.min(seconds, offlineCap(g))) / sampled;
+  gains.credits = sum.credits * k;
+  gains.a = sum.a * k;
+  gains.b = sum.b * k;
+  gains.g = sum.g * k;
+  g.credits += gains.credits;
+  g.lifetime += gains.credits;
+  g.stats.fromAway += gains.credits;
+  g.data.a += gains.a;
+  g.data.b += gains.b;
+  g.data.g += gains.g;
   return gains;
 }
