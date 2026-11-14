@@ -9,6 +9,7 @@
     "preview": "vite preview",
     "test": "vitest run",
     "pacing": "vite-node tools/pacing.ts --",
+    "baseline": "vitest run tests/playthrough.test.ts -t BASELINE",
     "check:tools": "tsc --noEmit --target ES2022 --module ESNext --moduleResolution bundler --strict --skipLibCheck --lib ES2022,DOM tools/pacing.ts"
   },
   "devDependencies": {
