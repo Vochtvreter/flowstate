@@ -1,156 +1,211 @@
-# Flowstate — Content & Numbers (v0.1)
+# Flowstate — Content & Numbers
 
-All numbers are **first-pass placeholders** meant to be tuned in playtests. They're written so a prototype can load them directly as data. See [DESIGN.md](./DESIGN.md) for the rules these plug into.
-
----
+Every number in the pitch build, as tuned with the pacing bot (`npm run pacing`). The source of truth is the code: tables and `RULES` in `src/content.ts`, goals in `src/goals.ts`. The rules these numbers plug into are in [PITCH_PLAN.md](./PITCH_PLAN.md) section 2. `DESIGN.md` and `README.md` still describe the older build.
 
 ## Materials
 
-| Material | Tier | Shape · Color | Base value ¢ | Demand* | Source |
-|---|---|---|---|---|---|
-| Glint | T0 | ◆ yellow | 1 | 2.0/s | Glint Deposit |
-| Murk | T0 | ● violet | 1 | 2.0/s | Murk Deposit |
-| Ember | T0 | ▲ orange | 2 | 1.5/s | Ember Deposit |
-| Breeze | T0 | ≈ cyan | 2 | 1.5/s | Breeze Deposit |
-| Shard | T1 | ⬢ pale gold | 3 | 1.5/s | Refiner |
-| Ink | T1 | ■ deep blue | 4 | 1.2/s | Refiner |
-| Silt | T1 | · grey | 0.5 | 0.5/s | Refiner (byproduct) |
-| Spark | T1 | ✦ red-orange | 6 | 1.0/s | Refiner |
-| Mist | T1 | ☁ teal | 6 | 1.0/s | Refiner |
-| Clay | T1 | ▬ brown | 3 | 0.8/s | Refiner |
-| Prism | T2 | ◇ rainbow | 24 | 0.6/s | Assembler |
-| Glyph | T2 | ✧ magenta | 20 | 0.6/s | Assembler |
-| Coil | T2 | ⊚ copper | 22 | 0.5/s | Assembler |
-| Lens | T3 | ◎ white | 130 | 0.25/s | Fabricator |
-| Dynamo | T3 | ⚙ electric blue | 180 | 0.2/s | Fabricator |
-| Paradox | T3★ | ∞ shifting | 750 | 0.1/s | Fabricator (capstone) |
+| Material | Tier | Value ¢ | Demand /s | Made by |
+|---|---|---|---|---|
+| Glint | T0 | 1 | 2.0 | Well |
+| Murk | T0 | 1 | 2.0 | Well (Murk Deposits) |
+| Ember | T0 | 2 | 1.5 | Well (Ember Deposits) |
+| Breeze | T0 | 2 | 1.5 | Well (Breeze Deposits) |
+| Shard | T1 | 3 | 1.5 | Refiner |
+| Ink | T1 | 4 | 1.2 | Refiner |
+| Silt | T1 | 0.5 | 0.5 | Refiner (byproduct of Ink) |
+| Spark | T1 | 6 | 1.0 | Refiner |
+| Mist | T1 | 6 | 1.0 | Refiner |
+| Clay | T1 | 3 | 0.8 | Refiner |
+| Prism | T2 | 24 | 0.6 | Assembler |
+| Glyph | T2 | 20 | 0.6 | Assembler |
+| Coil | T2 | 22 | 0.5 | Assembler |
+| Lens | T3 | 130 | 0.25 | Fabricator (ends the demo) |
+| Dynamo | T3 | 180 | 0.2 | Fabricator |
+| Paradox | T3 | 750 | 0.1 | Fabricator |
 
-\* **Demand** = sell rate at which that material's price halves: `price = value / (1 + rate / demand)`.
-
----
+**Demand: two prices.** Markets buy each material at full price up to its demand rate; anything beyond that sells at a flat 25%. Unused demand is banked for 8 seconds (at least one item), so a machine that delivers whole items in bursts is still paid in full. Wider Demand multiplies every demand rate by 1.5, Exports by 2; Luxury Buyers adds 25% to the value of T2 and T3. In the bot's runs nothing sells over demand before the first Lens.
 
 ## Recipes
 
-| Recipe | Machine | Inputs | Outputs | Time |
+| Recipe | Machine | Inputs | Outputs | Time | Tech |
+|---|---|---|---|---|---|
+| Shard | Refiner | 2 Glint | 1 Shard | 2 s | Refining |
+| Ink | Refiner | 2 Murk | 1 Ink + 1 Silt | 2 s | Murk Deposits |
+| Spark | Refiner | 2 Ember | 1 Spark | 2 s | Ember Deposits |
+| Mist | Refiner | 2 Breeze | 1 Mist | 2 s | Breeze Deposits |
+| Clay | Refiner | 3 Silt | 1 Clay | 3 s | Reclamation |
+| Glyph | Assembler | 1 Ink + 1 Spark | 1 Glyph | 3 s | Assembly |
+| Prism | Assembler | 2 Shard + 1 Mist | 1 Prism | 4 s | Breeze Deposits |
+| Coil | Assembler | 1 Spark + 2 Clay | 1 Coil | 4 s | Reclamation |
+| Lens | Fabricator | 1 Prism + 2 Glyph | 1 Lens | 6 s | Fabrication |
+| Dynamo | Fabricator | 2 Coil + 1 Glyph + 1 Prism | 1 Dynamo | 8 s | Dynamo |
+| Paradox | Fabricator | 1 Lens + 1 Dynamo + 4 Breeze | 1 Paradox | 12 s | Paradox |
+
+## Nodes
+
+The nth node of a type costs `base × growth^(n-1)`, rounded. Deleting a node refunds what it would cost to buy back, plus its upgrades.
+
+| Node | Base ¢ | Growth | Needs | Rate |
 |---|---|---|---|---|
-| Shard | Refiner | 2 Glint | 1 Shard | 2.0s |
-| Ink | Refiner | 2 Murk | 1 Ink + 1 Silt | 2.0s |
-| Spark | Refiner | 2 Ember | 1 Spark | 2.0s |
-| Mist | Refiner | 2 Breeze | 1 Mist | 2.0s |
-| Clay | Refiner | 3 Silt | 1 Clay | 3.0s |
-| Prism | Assembler | 2 Shard + 1 Mist | 1 Prism | 4.0s |
-| Glyph | Assembler | 1 Ink + 1 Spark | 1 Glyph | 3.0s |
-| Coil | Assembler | 1 Spark + 2 Clay | 1 Coil | 4.0s |
-| Lens | Fabricator | 1 Prism + 2 Glyph | 1 Lens | 6.0s |
-| Dynamo | Fabricator | 2 Coil + 1 Glyph + 1 Prism | 1 Dynamo | 8.0s |
-| Paradox | Fabricator | 1 Lens + 1 Dynamo + 4 Breeze | 1 Paradox | 12.0s |
+| Well | 10 | ×1.15 | a free deposit | 1.0/s (Ember, Breeze: 0.8/s) |
+| Refiner | 50 | ×1.15 | Refining | one craft per recipe time |
+| Assembler | 600 | ×1.15 | Assembly | one craft per recipe time |
+| Fabricator | 6,600 | ×1.15 | Fabrication | one craft per recipe time |
+| Router | 25 | ×1.10 | Routing | splits evenly, by ratio, by priority or by filter |
+| Merger | 25 | ×1.10 | Merger | — |
+| Silo | 200 | ×1.20 | Silo | holds 200 items |
+| Market | first free, then 150 | ×1.50 | — | sells anything |
+| Lab | 100 | ×1.30 | Lab | studies 1 item/s (2 with Lab Speed) |
+| Void | free | — | Murk Deposits | destroys anything |
 
-```mermaid
-flowchart LR
-  Glint((Glint)) --> Shard
-  Murk((Murk)) --> Ink
-  Murk --> Silt
-  Ember((Ember)) --> Spark
-  Breeze((Breeze)) --> Mist
-  Silt --> Clay
-  Shard --> Prism
-  Mist --> Prism
-  Ink --> Glyph
-  Spark --> Glyph
-  Spark --> Coil
-  Clay --> Coil
-  Prism --> Lens
-  Glyph --> Lens
-  Coil --> Dynamo
-  Glyph --> Dynamo
-  Prism --> Dynamo
-  Lens --> Paradox
-  Dynamo --> Paradox
-  Breeze --> Paradox
-```
+**Fan-out: machines are fed first.** When one port feeds several wires, machines, Routers, Mergers and Silos are served first, evenly; Markets, Labs and Voids share what is left. A Router follows its own mode, and its Even mode is truly even.
 
-Design notes:
-- **Silt** is the deliberate nuisance byproduct: worth almost nothing, low demand, and it backs up Ink production if ignored. Early answer: Void it or fan it to the Market. Later answer: turn it into Clay → Coil. That's a full "problem → patch → elegant solution" arc in one material.
-- **Glyph** is the hub material (feeds Lens *and* Dynamo), so it's the first place players need Ratio/Priority routing.
-- **Paradox** re-uses raw Breeze, forcing a long-distance wire from the raw edge of the board to the T3 core — a layout challenge, not just a ratio one.
+### Upgrades
 
----
+Level L of a track costs `first level × 1.6^(L-1)`, rounded.
 
-## Nodes (board purchases)
-
-| Node | Base cost ¢ | Cost growth | Base rate / buffer | Upgrade tracks |
+| | Speed, first level ¢ | then | Efficiency ¢ | Buffer ¢ |
 |---|---|---|---|---|
-| Well | 10 | ×1.15 | 1.0/s (Ember/Breeze 0.8/s) | Speed |
-| Refiner | 50 | ×1.15 | — | Speed, Efficiency, Buffer |
-| Assembler | 400 | ×1.15 | — | Speed, Efficiency, Buffer |
-| Fabricator | 5,000 | ×1.15 | — | Speed, Efficiency, Buffer |
-| Router | 25 | ×1.10 | — | — |
-| Merger | 25 | ×1.10 | — | — |
-| Silo | 200 | ×1.20 | 200 items | Buffer |
-| Market | 1st free, then 150 | ×1.5 | sells anything, no limit | — |
-| Lab | 100 | ×1.30 | 1 item/s | Speed |
-| Void | free | — | unlimited | — |
+| Well | 50 | 80, 128, 205… | — | — |
+| Refiner | 32 | 51, 82, 131… | 75 | 20 |
+| Assembler | 100 | 160, 256… | 300 | 80 |
+| Fabricator | 400 | 640, 1,024… | 1,200 | 320 |
+| Lab | 50 | 80, 128… | — | — |
+| Silo | — | — | — | 80 |
 
-**Upgrades:** level cost = `k × node base cost × 1.6^level` (k = 0.5 Speed, 1.5 Efficiency, 0.4 Buffer). Speed caps at level 10 (25 with Overclock), Efficiency at 4, Buffer at 5.
-- Speed: −15% cycle time / +25% Well rate, multiplicative per level.
-- Efficiency: every 6th → 5th → 4th → 3rd cycle consumes no inputs.
-- Buffer: +100% internal buffer.
+- **Speed:** +25% per level for a Well or Lab, −15% craft time for a machine. Cap 10 levels (25 with Overclock).
+- **Efficiency** (needs Efficiency Tuning): every 6th, then 5th, 4th, 3rd craft uses no inputs. Cap 4.
+- **Buffer:** +100% internal storage per level. Cap 5.
 
-**Pipes:** Mk I 2/s (free) · Mk II 5/s (20¢/wire) · Mk III 12/s (300¢/wire) · Mk IV 30/s (4,000¢/wire).
+Speed is priced so that a first or second level pays for itself in one to three minutes when the extra input exists: 83–171 s for a Well whose output is refined, 60–164 s for a machine whose input was backing up. If that input was selling at full price instead, a machine takes two to three times as long.
 
-**Board:** starts with five deposits (2 Glint, Murk, Ember, Breeze). Expansion *n* costs `100 × 2.2^n`, alternately widens and deepens the board, and reveals 2–3 deposits from a fixed cycle.
+### Wires
 
----
+| Tier | Carries | Upgrade ¢ per wire | Tech |
+|---|---|---|---|
+| Mk I | 4/s | — | — |
+| Mk II | 8/s | 20 | Pipes Mk II |
+| Mk III | 16/s | 300 | Pipes Mk III |
+| Mk IV | 32/s | 4,000 | Pipes Mk IV |
 
-## Data (research currency)
+### Board
 
-A Lab converts each item into Data of a tier:
+Five deposits at the start: 2 Glint, Murk, Ember, Breeze. Expansion n costs `200 × 2.5^(n-1)`: 200, 500, 1,250, 3,125, 7,813… Each reveals two or three deposits from a fixed cycle: Glint + Murk, Ember + Glint, Breeze + Murk, Glint + Ember, Breeze + Glint, Murk + Ember + Breeze.
 
-| Item tier | Yields |
-|---|---|
-| T0 | 1 α |
-| T1 | 3 α |
-| T2 | 5 β |
-| T3 | 8 γ |
+## Data
 
----
+A Lab turns each item into Data by tier: T0 → 1 α, T1 → 3 α, T2 → 5 β, T3 → 8 γ (×1.5 with Deep Analysis). One β is worth 4 α and one γ 12 α when an order's pay is converted.
+
+## Flow
+
+Wells and machines that have a wire and are at least 20 s old count; one is *flowing* at 90% utilisation or more. Flow is the flowing share, smoothed over 3 s. Once the goal chain unlocks the meter, every sale is multiplied by `1 + 0.2 × Flow`. 100% for 10 s with six or more producers is Flow State.
+
+## Orders
+
+Unlocked by the Spark goal. One order at a time: "deliver N of X", counted from sales at any Market, no timer.
+
+- **X:** something refined that the player makes right now; the newest, second-newest or third-newest with chances 55 / 30 / 15%, never the same twice running.
+- **N:** 45–90 s of that material's total output, at least 8.
+- **Pay:** credits worth half the items at full price, plus the Data a Lab would have made from them, paid in the tier the player is shortest of.
+- An order with no delivery for 120 s is quietly replaced.
+
+## Goal chain
+
+One goal at a time; a finished goal waits for Claim. Rewards are the only source of Refining, Lab, Routing, Market Lens, Orders and the Flow meter. Through goal 7 the credits paid so far always cover the next purchase the card asks for.
+
+| # | Goal | Reward |
+|---|---|---|
+| 1 | Wire the Well to the Market | 12¢ |
+| 2 | Place a second Well | 10¢ |
+| 3 | Wire it to the Market too | Refining + 50¢ |
+| 4 | Build a Refiner from a Well's port | 20¢ |
+| 5 | Sell your first Shard | Lab + 70¢ ★ |
+| 6 | Upgrade a Well | 50¢ |
+| 7 | Build a Lab and feed it | 15α ★ |
+| 8 | Research Murk Deposits | 40¢ |
+| 9 | Refine Murk into Ink | 40¢ |
+| 10 | Give the Silt somewhere to go | 20α |
+| 11 | Make your first Spark | Orders + 25α |
+| 12 | Fill your first order | Routing + Market Lens |
+| 13 | Route more to a Lab than to the Market | 30α |
+| 14 | Expand the board | 60¢ |
+| 15 | Assemble your first Glyph | Flow meter + 300¢ ★ |
+| 16 | Hold 75% Flow for 10 seconds | 300¢ |
+| 17 | Study Glyph for β (10 β) | 50α |
+| 18 | Make your first Mist | 50α |
+| 19 | Assemble your first Prism | 600¢ + 40β |
+| 20 | Fill three orders | 1,200¢ + 60β |
+| 21 | Build a Fabricator | 40β |
+| 22 | Make your first Lens | demo complete ★ |
+| free play | Clay · Coil · Dynamo · Paradox | 200¢ · 600¢ · 1,800¢ · 7,500¢ |
+
+★ = big celebration; the fifth is the first Flow State.
 
 ## Tech tree
 
-`★` = auto-granted by a milestone (part of onboarding, never bought). The source of truth is `src/content.ts`.
+| ID | Tech | Cost | Requires | Gives |
+|---|---|---|---|---|
+| **Processing** | | | | |
+| P1 | Refining | goal 3 | — | Refiner, Shard |
+| P2 | Murk Deposits | 45α | Lab | Murk Wells, Ink + Silt, Void |
+| P3 | Ember Deposits | 180α | P2 | Ember Wells, Spark |
+| P4 | Assembly | 800α | P3 | Assembler, Glyph |
+| P5 | Breeze Deposits | 850α | P4 | Breeze Wells, Mist, Prism |
+| P7 | Fabrication | 700α + 150β | P5 | Fabricator, Lens |
+| P6 | Reclamation | 300α + 25γ | P4 | Clay, Coil |
+| P8 | Dynamo | 1,200α + 300β + 100γ | P6, P7 | Dynamo |
+| P9 | Paradox | 2,500α + 500β + 400γ | P8 | Paradox |
+| U1 | Efficiency Tuning | 40β | P1 | Efficiency upgrades |
+| U2 | Overclock | 60γ | U1 | Speed cap 10 → 25 |
+| **Logistics** | | | | |
+| L1 | Routing | goal 12 | Lab | Router, Ratio mode |
+| L2 | Merger | 40α | L1 | Merger |
+| L3 | Pipes Mk II | 60α | L1 | 8/s wires |
+| L4 | Priority Routing | 20β | L1 | Router Priority mode |
+| L5 | Silo | 15β | L2 | Silo |
+| L6 | Filter Routing | 30β | L4 | Router Filter mode |
+| L7 | Pipes Mk III | 60β | L3 | 16/s wires |
+| L8 | Pipes Mk IV | 150γ | L7 | 32/s wires |
+| **Commerce** | | | | |
+| C1 | Market Lens | goal 12 | Lab | price gauges on Markets |
+| C2 | Wider Demand | 200α | C1 | +50% demand |
+| C4 | Luxury Buyers | 300β | C2 | +25% value on T2 and T3 |
+| C5 | Exports | 80γ | C4 | +100% demand |
+| **Research** | | | | |
+| R1 | Lab | goal 5 | — | Lab, tech tree |
+| R2 | Lab Speed | 50α | R1 | Labs study 2 items/s |
+| R3 | Deep Analysis | 80β | R2 | +50% Data per item |
+| R4 | Long Absence | 210α, hidden until the demo ends | R1 | time away capped at 8 h instead of 2 h |
+| **Scale tools** | | | | |
+| S1 | Bulk Upgrade | 60α | L1 | "Upgrade all" button |
+| S3 | Auto-balance | 50β | S1, L4 | one-click Router weights |
 
-| ID | Tech | Branch | Cost | Requires | Unlocks |
-|---|---|---|---|---|---|
-| P1 | Refining ★ | Processing | earn 50¢ in total | — | Refiner, Shard |
-| R1 | Lab ★ | Research | sell your first Shard | — | Lab, Data, Tech tree |
-| P2 | Murk Deposits | Processing | 20α | R1 | Murk Wells, Ink + Silt, Void node |
-| P3 | Ember Deposits | Processing | 40α | P2 | Ember Wells, Spark |
-| P4 | Assembly | Processing | 80α | P3 | Assembler, Glyph |
-| P5 | Breeze Deposits | Processing | 150α | P4 | Breeze Wells, Mist, Prism |
-| P6 | Reclamation | Processing | 60α + 20β | P4 | Clay, Coil |
-| P7 | Fabrication | Processing | 300α + 150β | P5 | Fabricator, Lens |
-| P8 | Dynamo | Processing | 200β + 40γ | P6, P7 | Dynamo |
-| P9 | Paradox | Processing | 400β + 150γ | P8 | Paradox (capstone) |
-| U1 | Efficiency Tuning | Processing | 80α | P1 | Efficiency upgrade track |
-| U2 | Overclock | Processing | 100β | U1 | Speed cap 10 → 25 |
-| L1 | Routing | Logistics | 15α | R1 | Router node, Ratio mode |
-| L3 | Pipes Mk II | Logistics | 40α | L1 | 5/s wires |
-| L7 | Pipes Mk III | Logistics | 80β | L3 | 12/s wires |
-| L8 | Pipes Mk IV | Logistics | 100γ | L7 | 30/s wires |
-| L4 | Priority Routing | Logistics | 60α | L1 | Router Priority mode (fill #1, overflow to the rest) |
-| L6 | Filter Routing | Logistics | 100α + 20β | L4 | Router Filter mode |
-| L2 | Merger | Logistics | 25α | L1 | Merger (junction) node |
-| L5 | Silo | Logistics | 30α | L2 | Silo node |
-| C1 | Market Lens | Commerce | 10α | R1 | Exact prices in the Market inspector |
-| C2 | Wider Demand | Commerce | 50α | C1 | +50% demand |
-| C4 | Luxury Buyers | Commerce | 100β | C2 | +25% value on T2 and T3 |
-| C5 | Exports | Commerce | 50γ | C4 | +100% demand |
-| R2 | Lab Speed | Research | 30α | R1 | Labs 2× speed |
-| R3 | Deep Analysis | Research | 60β | R2 | +50% Data per item |
-| R4 | Long Absence | Research | 40α | R1 | Offline cap 2h → 8h |
-| S1 | Bulk Upgrade | Scale tools | 40α | L1 | "all" button on upgrades |
-| S3 | Auto-balance | Scale tools | 150β | S1, L4 | One-click Router weights |
+How the prices are meant to work:
 
-**Designed but not built yet:** Contracts (C3), Blueprints (S2), Ghost Planner (S4).
+- **The spine (P2 → P3 → P4 → P5 → P7)** is what the goal chain asks for. No step costs more than about three minutes of what a slow player's un-upgraded Labs bring in at that point.
+- **Side techs are impulse buys.** Each is small next to the spine tech it competes with, so every kind of player picks them up along the way: α for what helps before the first Glyph, β after it. Luxury Buyers is the exception: dearer than Fabrication's β, so it comes after.
+- **γ does not exist before the first Lens,** so anything priced in γ is free-play content. The late Processing techs need all three kinds of Data, which keeps Tier 1 items worth studying to the end.
 
-**Tree shape rule:** at any moment the player should see **2–4 affordable-soon techs** across at least two branches, so research always feels like a choice.
+## Time away
+
+Nothing before the first Lens. After it: 50% of the live rate, measured on a copy of the game, for up to 2 hours (8 with Long Absence).
+
+## Where the pacing lands
+
+`npm run pacing`, seeds 1–3, on the bot's clock. The fast policies act every 3–4 s; the slow one every 8–10 s, claims late, ignores amber rings and never upgrades a Lab.
+
+| | fast (mainline, greedy) | slow | target |
+|---|---|---|---|
+| First machine / Lab / research | 0:21–0:22 / 0:39–0:40 / 1:05–1:06 | 1:07–1:13 / 2:11–2:17 / 2:46–2:53 | fast: by 0:45 / 1:30 / 2:30 |
+| First Glyph | 6:34–6:47 | 10:23–10:57 | fast: 6:00–8:00 |
+| First Lens | 16:58–17:46 | 18:29–19:05 | fast: 16:00–19:00; slow: by 28:00 |
+| First Paradox | 28:48–30:27 | 38:13–39:17 | fast: not before 24:00 |
+| Longest dead stretch before the Lens | 33–45 s | none | fast: 60 s before 10:00, 120 s after |
+| Longest on one goal | 341–438 s (Build a Fabricator) | 164–192 s | slow: 240 s |
+| Dearest spine tech, in Data income | — | 182–184 s | slow: about 180 s |
+| Credits from sales and orders at the Lens | 86–88% | 75% | 65% |
+
+Two things to know before changing a number:
+
+- **The fast Lens time is set by the Fabricator, and by two habits of the bot.** A fast player has Fabrication researched around 11:00 and then saves 6,600¢ for five to seven minutes. While it saves, the bot keeps studying Tier 1 items for the free-play techs and keeps buying every small upgrade. Measured on seeds 1–3: a player who spends only half of what comes in on small upgrades makes the Lens at 15:49–16:16, one who buys nothing at 14:30–14:58 (`npm run pacing -- --pettyBudget=0.5` or `0`), and one who also stops studying at 13:17–14:05.
+- **The slow player arrives rich.** Slow hands leave credits unspent, so the Fabricator costs them one to three minutes, not six. Their limit is Data: raise a spine tech's price and the "three minutes of Data income" line breaks before anything else does.
