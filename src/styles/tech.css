@@ -2,10 +2,13 @@
    Desktop comes first: branch rows beside a detail column. The phone layout (#app.phone) is at the end:
    a full-screen sheet with branch tabs, 56px rows and the detail as a bottom sheet. */
 
+/* How wide the detail column is: the HUD centres its slim Claim bar over the rest (hud.css), and
+   toasts keep out of it (below). */
+#app { --tech-side: 340px; }
 #tech {
   --rdy: #5eead4;
-  position: absolute; left: 0; right: 0; top: 56px; bottom: 0; z-index: 40;
-  display: none; grid-template-columns: minmax(0, 1fr) 340px; grid-template-rows: auto auto minmax(0, 1fr);
+  position: absolute; left: 0; right: 0; top: var(--top-h, 56px); bottom: 0; z-index: 40;
+  display: none; grid-template-columns: minmax(0, 1fr) var(--tech-side); grid-template-rows: auto auto minmax(0, 1fr);
   grid-template-areas: 'head head' 'goal goal' 'tree detail';
   background: #0a0e16;
 }
@@ -27,6 +30,9 @@
 #tech .tclose { flex: none; display: inline-flex; align-items: center; gap: 8px; height: 40px; padding: 0 12px 0 10px; border-radius: 10px; border: 1px solid var(--border); background: #121929; color: var(--text); font-size: 13px; font-weight: 600; white-space: nowrap; }
 /* Key names are for people with a keyboard. */
 html[data-input='touch'] #tech .kbd { display: none; }
+/* A finger on a wide screen (a tablet has this layout, not the phone's) gets 44 px targets. */
+html[data-input='touch'] #tech .tclose, html[data-input='touch'] #tech .dgo { height: 44px; }
+html[data-input='touch'] #tech .tt.own, html[data-input='touch'] #tech .qbox { min-height: 44px; }
 
 /* A goal is waiting on the board: one bar that takes the player back to claim it. */
 #tech .tgoal { grid-area: goal; display: flex; align-items: center; gap: 10px; min-height: 44px; padding: 6px 16px 6px 24px; border: 0; border-bottom: 1px solid #5a4718; background: #2a2110; color: var(--credits); font-size: 13px; text-align: left; animation: tgoal-in 0.35s cubic-bezier(0.2, 1.4, 0.4, 1); }
@@ -36,6 +42,20 @@ html[data-input='touch'] #tech .kbd { display: none; }
 #tech .tgoal .gt span { min-width: 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 #tech .tgoal .go { flex: none; padding: 5px 12px; border-radius: 999px; background: var(--credits); color: #1a1405; font-size: 12.5px; font-weight: 700; white-space: nowrap; }
 @keyframes tgoal-in { from { opacity: 0; transform: translateY(-8px); } }
+/* Outside the phone layout the HUD lifts a ready goal above the tree as a slim bar with its own Claim
+   (#hud-strip.over-tech, z-index 45, 14 px from the top of the stage). Then this bar is not a button
+   but the seat that bar lands on: a band across the very top of the tree, so the bar covers nothing.
+   (Should the HUD stop doing that, the rule no longer matches and this is the tree's own bar again.) */
+#app:not(.phone):has(#hud-strip.over-tech) #tech { grid-template-areas: 'goal goal' 'head head' 'tree detail'; grid-template-rows: auto auto minmax(0, 1fr); }
+#app:not(.phone):has(#hud-strip.over-tech) #tech .tgoal { min-height: 86px; pointer-events: none; animation: none; }
+#app:not(.phone):has(#hud-strip.over-tech) #tech .tgoal .gt span, #app:not(.phone):has(#hud-strip.over-tech) #tech .tgoal .go { display: none; }
+
+/* Toasts are drawn above the tree (50 over 40) at the foot of the stage. While the tree is open they
+   keep to its list, clear of the detail column and the Research button at its foot. */
+#app:not(.phone):has(#tech.open) #hud #toasts { right: calc(var(--tech-side) + 12px); }
+#app:not(.phone):has(#tech.open):has(#insp.open) #hud #toasts { right: 32px; }
+/* The top bar already shows the Data in hand; only the phone layout, where the tree covers the bar, repeats it. */
+#app:not(.phone) #tech .tdata { display: none; }
 
 #tech .ttabs { grid-area: tabs; display: none; }
 
@@ -155,9 +175,14 @@ html[data-input='touch'] #tech .kbd { display: none; }
   #tech .rbtn.ok:hover, #tech .tgoal:hover .go { filter: brightness(1.08); }
 }
 
+/* (Under 1100 px the slim bar reaches the left end of its seat: the seat keeps only its flag.) */
+@media (max-width: 1100px) {
+  #app:not(.phone):has(#hud-strip.over-tech) #tech .tgoal .gt { display: none; }
+}
+
 /* A narrow window that is not a phone: headings sit above their tiles and the detail column slims down. */
 @media (max-width: 900px) {
-  #tech { grid-template-columns: minmax(0, 1fr) 300px; }
+  #app { --tech-side: 300px; }
   #tech .tbranch { grid-template-columns: minmax(0, 1fr); }
   #tech .bh, #tech .tlist, #tech .towned { grid-column: 1; grid-row: auto; }
   #tech .tgoal { padding-left: 16px; }
@@ -183,6 +208,8 @@ html[data-input='touch'] #tech .kbd { display: none; }
 
 #app.phone #tech .tgoal { min-height: 52px; padding: 6px 12px 6px 14px; }
 #app.phone #tech .tgoal .gt { flex-direction: column; align-items: stretch; gap: 1px; line-height: 17px; }
+/* (The goal's title is given the lines it needs: a title cut short says less than the bar is there to say.) */
+#app.phone #tech .tgoal .gt span { white-space: normal; }
 #app.phone #tech .tgoal .go { padding: 8px 12px; }
 #app.phone #tech .ttabs { display: flex; gap: 0; padding: 0 6px; overflow-x: auto; overflow-y: hidden; scrollbar-width: none; overscroll-behavior: contain; border-bottom: 1px solid var(--line); }
 #app.phone #tech .ttabs::-webkit-scrollbar { display: none; }

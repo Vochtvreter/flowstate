@@ -214,7 +214,7 @@ div.gc-rewards { justify-content: flex-start; margin-top: 2px; }
 html[data-input='touch'] #hints, html[data-input='touch'] .kbd { display: none; }
 html[data-input='touch'] .alertchip { min-height: 44px; }
 html[data-input='touch'] .gc-show { height: 36px; padding: 0 14px; }
-html[data-input='touch'] .gc-show::after { content: ''; position: absolute; inset: -4px 0; }
+html[data-input='touch'] .gc-show::after { content: ''; position: absolute; inset: -6px 0; }
 html[data-input='touch'] .menu button { height: 44px; }
 /* Inside the inspector: full-height buttons, and a wider reach around the small ones. */
 html[data-input='touch'] #insp .buy, html[data-input='touch'] #insp .fbtn, html[data-input='touch'] #insp .ghostbtn, html[data-input='touch'] #insp .recipelist button { height: 44px; }
@@ -224,7 +224,7 @@ html[data-input='touch'] #insp .step, html[data-input='touch'] #insp .filt, html
 html[data-input='touch'] #insp .step { width: 32px; height: 32px; }
 html[data-input='touch'] #insp .filt { height: 32px; }
 html[data-input='touch'] #insp .step::after, html[data-input='touch'] #insp .filt::after { content: ''; position: absolute; inset: -6px; }
-html[data-input='touch'] #insp .link::after { content: ''; position: absolute; inset: -14px -8px; }
+html[data-input='touch'] #insp .link::after { content: ''; position: absolute; inset: -15px -8px; }
 
 /* (The phone layout of the strip and where Claim sits on a phone are at the end of this file, under "phone seating".) */
 #app.phone #toasts { position: static; transform: none; align-self: center; margin-top: 6px; max-width: 100%; }
@@ -250,7 +250,7 @@ html[data-input='touch'] #insp .link::after { content: ''; position: absolute; i
    player is wiring, placing or carrying something, so it can never lie on the node they are aiming at
    (the "tap where..." line takes its place). Under the open tech tree the whole strip stays below the
    tree (z-index 10): the tree's own "Goal complete" bar leads back to it. */
-#app.phone #hud { padding: 5px var(--edge-r, 8px) 0 var(--edge-l, 8px); align-items: stretch; }
+#app.phone #hud { padding: 4px var(--edge-r, 8px) 0 var(--edge-l, 8px); align-items: stretch; }
 #app.phone #hud-strip, #app.phone #hud-strip.over-tech { z-index: 10; align-items: stretch; gap: 4px; padding-right: 0; }
 #app.phone #hud-row { flex-direction: column; flex-wrap: nowrap; align-items: stretch; gap: 4px; }
 #app.phone #goal, #app.phone #order { flex: none; }
@@ -270,7 +270,7 @@ html[data-input='touch'] #insp .link::after { content: ''; position: absolute; i
 #app.phone:has(#board.arming, #board.wiring, #board.placing) #goal .claim { opacity: 0; visibility: hidden; pointer-events: none; transition: transform 0.22s, opacity 0.15s, visibility 0s linear 0.15s; }
 
 /* The goal card: the same parts, set tighter. */
-#app.phone #goal { display: flex; flex-wrap: nowrap; gap: 0; padding: 7px 10px 8px 12px; border-radius: 12px; }
+#app.phone #goal { display: flex; flex-wrap: nowrap; gap: 0; padding: 6px 10px 7px 12px; border-radius: 12px; }
 #app.phone #goal.done { align-self: center; padding: 6px 14px; }
 #app.phone .gc-main { flex: 1 1 auto; gap: 2px; }
 #app.phone .gc-head { min-height: 18px; gap: 8px; }
@@ -287,7 +287,18 @@ html[data-input='touch'] #insp .link::after { content: ''; position: absolute; i
 #app.phone .gc-tiptxt i { display: inline; }
 #app.phone .gc-tiptxt i::before { content: ' · '; }
 #app.phone .gc-show { height: 36px; padding: 0 12px; }
-#app.phone .gc-show::after { content: ''; position: absolute; inset: -4px 0; }
+#app.phone .gc-show::after { content: ''; position: absolute; inset: -6px 0; }
+
+/* Where the strip would take too much of the stage the card folds its hint behind a tap: always on a
+   phone held sideways, and upright whenever card, order and alert together would pass 45% of the stage.
+   phone.ts decides (#app.fold) and keeps #app.hint-open: each new goal opens its hint, a press on the
+   board folds it away, a tap on the card opens and closes it. A small chevron says the card opens. */
+#app.phone.fold #goal { cursor: pointer; }
+#app.phone.fold:not(.hint-open) .gc-hint { display: none; }
+#app.phone.fold #goal:not(.done):not([data-ready='1']) .gc-head::after { content: ''; flex: none; order: 9; width: 7px; height: 7px; margin: -3px 2px 0 4px; border-right: 2px solid #9db8ff; border-bottom: 2px solid #9db8ff; transform: rotate(45deg); opacity: 0.8; }
+#app.phone.fold.hint-open #goal:not(.done):not([data-ready='1']) .gc-head::after { transform: rotate(-135deg); margin-top: 3px; }
+#app.phone.fold .gc-head { justify-content: flex-start; }
+#app.phone.fold .gc-head .gc-rewards, #app.phone.fold .gc-head .gc-done { margin-left: auto; }
 
 /* The order: one row. What to deliver, what it pays, and its progress as a line along the foot. */
 #app.phone #order { position: relative; gap: 8px; min-height: 44px; padding: 4px 6px 6px 8px; border-radius: 12px; font-size: 12.5px; }
@@ -306,31 +317,28 @@ html[data-input='touch'] #insp .link::after { content: ''; position: absolute; i
 #app.phone .al-go { height: 32px; }
 
 /* A phone on its side has 276 px of stage. The card folds to one line (step and reward over the title,
-   progress beside it) and keeps its hint behind a tap (phone.ts sets #app.hint-open: each new goal
-   opens it, a press on the board folds it away). The order and the alert are small pills beside it. */
+   progress beside it) with its hint behind a tap, as above. The order and the alert are small pills
+   beside it; with a sheet standing at the side they move under the card, next to each other. */
 @media (orientation: landscape) and (max-height: 520px) {
   #app.phone #hud { padding-top: 4px; padding-right: calc(var(--edge-r, 8px) + var(--shift, 0px)); }
   #app.phone #hud-strip, #app.phone #hud-strip.over-tech { display: grid; grid-template-columns: minmax(0, 3fr) minmax(0, 2fr); grid-template-areas: 'goal order' 'goal alert'; grid-template-rows: auto 1fr; gap: 4px 6px; align-items: start; }
   #app.phone #hud-strip:not(:has(#order:not([hidden]), #hud-alert:not([hidden]))) { grid-template-columns: minmax(0, 1fr); grid-template-areas: 'goal'; }
   #app.phone #hud-row { display: contents; }
-  #app.phone #goal { grid-area: goal; padding: 4px 10px 5px 12px; cursor: pointer; }
+  #app.phone:has(#insp.open, #build-sheet.open) #hud-strip { grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); grid-template-areas: 'goal goal' 'order alert'; grid-template-rows: auto auto; }
+  #app.phone #goal { grid-area: goal; padding: 4px 10px 5px 12px; }
   #app.phone #goal.done { justify-self: center; }
   #app.phone #order { grid-area: order; }
   #app.phone #hud-alert { grid-area: alert; align-self: start; justify-self: stretch; }
   #app.phone .alertchip { width: 100%; border-radius: 12px; }
   #app.phone .al-txt { flex: 1; }
   #app.phone .gc-main { display: grid; grid-template-columns: minmax(0, 1fr) auto; grid-template-areas: 'head head' 'title prog' 'hint hint' 'tip tip'; align-items: center; gap: 1px 12px; }
-  #app.phone .gc-head { grid-area: head; min-height: 16px; justify-content: flex-start; }
-  #app.phone .gc-head .gc-rewards, #app.phone .gc-head .gc-done { margin-left: auto; }
+  #app.phone .gc-head { grid-area: head; min-height: 16px; }
   #app.phone .gc-head .rw { height: 16px; line-height: 16px; }
-  #app.phone .gc-title { grid-area: title; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-  /* A small chevron says the card opens. */
-  #app.phone #goal:not(.done):not([data-ready='1']) .gc-head::after { content: ''; flex: none; order: 9; width: 7px; height: 7px; margin: -3px 2px 0 4px; border-right: 2px solid #9db8ff; border-bottom: 2px solid #9db8ff; transform: rotate(45deg); opacity: 0.8; }
-  #app.phone.hint-open #goal:not(.done):not([data-ready='1']) .gc-head::after { transform: rotate(-135deg); margin-top: 3px; }
-  #app.phone .gc-prog { grid-area: prog; width: 230px; margin: 0; }
+  #app.phone .gc-title { grid-area: title; }
+  #app.phone .gc-prog { grid-area: prog; margin: 0; }
+  #app.phone .gc-prog .pbar { flex: none; width: 72px; }
   #app.phone div.gc-rewards { grid-area: prog; margin: 0; flex-wrap: nowrap; }
-  #app.phone .gc-hint { grid-area: hint; display: none; padding: 2px 0 1px; }
-  #app.phone.hint-open .gc-hint { display: block; }
+  #app.phone .gc-hint { grid-area: hint; padding: 2px 0 1px; }
   #app.phone .gc-tip { grid-area: tip; margin-top: 3px; padding-top: 3px; }
   /* Claim keeps to the right-hand thumb, beside Fit and Undo, and to the left of a sheet at the side. */
   #app.phone #goal .claim { left: auto; right: calc(var(--edge-r, 8px) + 104px + var(--shift, 0px)); width: min(300px, calc(100% - var(--edge-l, 8px) - var(--edge-r, 8px) - 104px - var(--shift, 0px))); bottom: 6px; height: 52px; transform: none; }

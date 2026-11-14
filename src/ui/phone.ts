@@ -84,6 +84,12 @@ let stripNow: StripBox | null = null;
 /** Bumped whenever the strip, a sheet or the stage changed size (see the ResizeObserver in initPhone). */
 let sizeRev = 0;
 let sizeSeen = 0;
+/** Height of the stage, and of the goal card's hint when it was last on show (it folds away: see `sync`). */
+let stageH = 0;
+let hintH = 0;
+/** The share of the stage the strip may take on an upright phone before the card folds its hint. */
+const STRIP_SHARE = 0.45;
+const shortLandscape = typeof matchMedia === 'function' ? matchMedia('(orientation: landscape) and (max-height: 520px)') : null;
 
 const isOpen = (e: HTMLElement | null): e is HTMLElement => !!e && e.classList.contains('open');
 const carrying = () => app.classList.contains('carrying');
@@ -134,6 +140,9 @@ function measure() {
     coverNow = NONE;
     return;
   }
+  stageH = stage.offsetHeight;
+  const hintEl = goalEl?.querySelector<HTMLElement>('.gc-hint');
+  if (hintEl?.offsetHeight) hintH = hintEl.offsetHeight + 2;
   const { lift, shift } = sheetSize();
   coverNow = { top: bottom, right: shift, bottom: lift, left: 0, row: (g?.goal.ready ? CLAIM_ROW : THUMB_ROW) + 16 };
 }
@@ -269,6 +278,8 @@ let seenRev = -1;
 /** The goal whose hint was last opened by itself, and whether the hint is open. */
 let hintGoal = -1;
 let hintOpen = false;
+/** The card folds its hint behind a tap (`#app.fold`): see below. */
+let fold = false;
 let coverSeen = '';
 
 function setHintOpen(on: boolean) {
@@ -287,13 +298,20 @@ function sync() {
   const line = env.phone || env.touch ? hintLine() : '';
   setHidden(hint, !line);
   if (line) setHTML(hintText, line);
-  // Where the goal card folds to one line (a phone on its side), a new goal starts with its hint open.
+  // Where the goal card folds its hint away, a new goal starts with the hint open.
   if (g.goal.i !== hintGoal) {
     hintGoal = g.goal.i;
+    hintH = 0;
     setHintOpen(true);
   }
   measure();
   const c = coverNow;
+  // The card folds its hint behind a tap where the strip would otherwise take too much of the board:
+  // always on a phone held sideways, and upright while the strip with the hint in it would pass 45%
+  // of the stage. (Judged with the hint counted in, folded or not, so the answer cannot flip-flop.)
+  const withHint = c.top + (fold && !hintOpen ? hintH : 0);
+  fold = env.phone && (!!shortLandscape?.matches || (stageH > 0 && withHint > stageH * STRIP_SHARE));
+  if (setClass(app, 'fold', fold)) sizeRev++;
   // How tall the strip is decides how tall a sheet may be (see phone.css), so that comes first.
   let moved = setStyle(app, '--strip-h', c.top + 'px');
   if (setStyle(app, '--lift', c.bottom + 'px')) moved = true;
