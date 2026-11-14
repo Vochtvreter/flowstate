@@ -25,15 +25,16 @@ describe('tech tree: what is shown', () => {
     expect(show(g)).toEqual({ P1: 'goal', R1: 'goal' });
   });
 
-  it('the first visit shows 10 of 29: owned, researchable, goal rewards, and one step ahead as silhouettes', () => {
+  it('the first visit shows 8 of 29: owned, researchable, goal rewards, and one step ahead as silhouettes', () => {
     const g = newGame();
     g.techs = ['P1', 'R1'];
     g.data.a = 47;
+    // (Efficiency Tuning is priced in β and sits behind Assembly, which brings the first β: it is not here yet.)
     expect(show(g)).toEqual({
       P1: 'own', R1: 'own',
-      P2: 'rdy', R2: 'sav', U1: 'sav',
+      P2: 'rdy', R2: 'sav',
       L1: 'goal', C1: 'goal',
-      P3: 'veil', U2: 'veil', R3: 'veil',
+      P3: 'veil', R3: 'veil',
     });
     expect(Object.keys(TECHS)).toHaveLength(29);
     // Nothing of Scale tools is visible, so the branch is left out.
@@ -101,7 +102,7 @@ describe('tech tree: what is shown', () => {
     g.queue = ['NOPE'];
     expect(() => techTiles(g)).not.toThrow();
     expect(ids(g)).toEqual(allowed(g));
-    expect(ids(g)).toHaveLength(10);
+    expect(ids(g)).toHaveLength(8);
   });
 
   it('researching in any order: the tree always matches the rule, and nothing shown ever disappears', () => {

@@ -175,7 +175,7 @@ One goal at a time; a finished goal waits for Claim. Rewards are the only source
 | P6 | Reclamation | 300α + 25γ | P4 | Clay, Coil |
 | P8 | Dynamo | 1,200α + 300β + 100γ | P6, P7 | Dynamo |
 | P9 | Paradox | 2,500α + 500β + 450γ | P8 | Paradox |
-| U1 | Efficiency Tuning | 40β | P1 | Efficiency upgrades |
+| U1 | Efficiency Tuning | 40β | P1, P4 | Efficiency upgrades |
 | U2 | Overclock | 60γ | U1 | Speed cap 10 → 25 |
 | **Logistics** | | | | |
 | L1 | Routing | goal 12 | Lab | Router, Ratio mode |
