@@ -14,7 +14,7 @@ import { fx, initFx } from './ui/fx';
 import { matGlyph } from './ui/icons';
 import { hotbarTypes, initPanels, renderPanels, tickPanels } from './ui/panels';
 import { closeTech, initTech, openTech, renderTech } from './ui/tech';
-import { initToasts, select, toast, touch, ui } from './ui/ui';
+import { initToasts, onSignal, select, toast, touch, ui } from './ui/ui';
 
 const STEP = 0.05;
 /** Seconds between refresh beats for on-board numbers and panels (see the frame loop). */
@@ -76,8 +76,8 @@ function boot() {
     if (document.hidden) saveGame(ui.g);
   });
   setInterval(() => saveGame(ui.g), 10000);
-  // Test hooks. `ui` and `tick` are relied on by scripts; `fx` and `view` are there for convenience.
-  (window as unknown as Record<string, unknown>).flowstate = { ui, tick, fx, view: { fit: fitView, zoomBy, jumpTo } };
+  // Test hooks. `ui` and `tick` are relied on by scripts; the rest are there for convenience.
+  (window as unknown as Record<string, unknown>).flowstate = { ui, tick, fx, view: { fit: fitView, zoomBy, jumpTo }, onSignal };
   requestAnimationFrame(frame);
 }
 

@@ -38,6 +38,30 @@ export function touch() {
   ui.uiRev++;
 }
 
+// ---------- signals ----------
+// Moments in the interface that sound or celebration effects may want to react to, without the
+// board or panels having to know who is listening. Positions are in client pixels.
+
+export interface Signals {
+  /** The player connected two nodes with a wire. `at` is the port the wire arrives at. */
+  connect: { from: number; to: number; at: { x: number; y: number } };
+  /** A node was placed from the hotbar or built from the radial menu. */
+  place: { id: number; type: NodeType };
+  /** Once a second for each Market that earned something. */
+  sale: { id: number; amount: number; at: { x: number; y: number } };
+}
+
+const listeners: { [K in keyof Signals]?: ((detail: Signals[K]) => void)[] } = {};
+
+export function onSignal<K extends keyof Signals>(kind: K, fn: (detail: Signals[K]) => void) {
+  ((listeners[kind] ??= []) as ((detail: Signals[K]) => void)[]).push(fn);
+}
+
+export function signal<K extends keyof Signals>(kind: K, detail: Signals[K]) {
+  const list = listeners[kind];
+  if (list) for (const fn of list) fn(detail);
+}
+
 // ---------- toasts ----------
 
 let toastHost: HTMLElement | null = null;

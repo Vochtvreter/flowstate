@@ -16,7 +16,7 @@ import {
 import { Port, Pt, bezierAt, inPorts, matColor, nodeSize, outPorts, pathD, segmentsCross, wireEnds } from './geom';
 import { esc, icon, matGlyph, matShape, nodeIcon } from './icons';
 import { diagnose } from './status';
-import { delegate, onPress, select, toast, touch, ui } from './ui';
+import { delegate, onPress, select, signal, toast, touch, ui } from './ui';
 
 let boardEl: HTMLElement;
 let worldEl: HTMLElement;
@@ -808,6 +808,7 @@ function showGains() {
     if (n.type === 'market' && n.gain >= 0.05) {
       const { w, h } = nodeSize(n);
       const top = toClient({ x: n.x + w / 2 + (Math.random() * 30 - 15), y: n.y - 4 });
+      signal('sale', { id: n.id, amount: n.gain, at: top });
       if (visible(top) && !ui.techOpen) {
         floater(top, `+${fmt(n.gain)}¢`, '#FFC857', size);
         if (counter && coins > 0) {
@@ -1036,6 +1037,7 @@ function placeAt(p: Pt, keep: boolean) {
   if (!node) return toast(`Not enough credits for a ${NODE_DEFS[pl.type].name}`, 'bad');
   if (!keep || nodeCost(g, pl.type) > g.credits) ui.placing = null;
   select({ kind: 'node', id: (node as GNode).id });
+  signal('place', { id: (node as GNode).id, type: pl.type });
 }
 
 // ---------- pointer gestures ----------
@@ -1339,7 +1341,10 @@ function onUp(e: PointerEvent) {
       if (d.target != null) {
         const tn = nodeById(g, d.target)!;
         const w = connect(g, d.from, d.port, d.target);
-        if (w) flashQueue.push(d.target);
+        if (w) {
+          flashQueue.push(d.target);
+          signal('connect', { from: d.from, to: d.target, at: toClient(d.tp) });
+        }
         const r = recipeOf(tn);
         if (w && isMachine(tn) && r && d.mats.length && !r.inputs.some((i) => d.mats.includes(i[0]))) {
           toast(`This ${NODE_DEFS[tn.type].name} makes ${r.name} and does not use ${MATERIALS[d.mats[0]].name}`, 'bad');
@@ -1358,7 +1363,10 @@ function onUp(e: PointerEvent) {
         let port = 0;
         const r = recipeOf(src);
         if (isMachine(src) && r && d.mat) port = Math.max(0, r.outputs.findIndex((o) => o[0] === d.mat));
-        if (port < outPortCount(src) && connect(g, d.target, port, d.to)) flashQueue.push(d.to);
+        if (port < outPortCount(src) && connect(g, d.target, port, d.to)) {
+          flashQueue.push(d.to);
+          signal('connect', { from: d.target, to: d.to, at: toClient(d.b) });
+        }
       } else if (Math.hypot(p.x - d.b.x, p.y - d.b.y) > 36 && !nodeAt(p)) {
         const opts = d.mat ? produceOptions(g, d.mat) : [];
         if (!opts.length) toast(d.mat ? `Nothing you have unlocked makes ${MATERIALS[d.mat].name}. Wire a Well to it.` : 'Drag from an output port instead', 'bad');
@@ -1525,7 +1533,10 @@ export function pickRadial(i: number) {
     return 0;
   });
   closeRadial();
-  if (made) select({ kind: 'node', id: (made as GNode).id });
+  if (made) {
+    select({ kind: 'node', id: (made as GNode).id });
+    signal('place', { id: (made as GNode).id, type: o.type });
+  }
 }
 
 /** Close the build menu and abandon any drag in progress, leaving the board as it was before it started. */
