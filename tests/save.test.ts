@@ -271,12 +271,19 @@ describe('loading saves', () => {
   });
 
   it('survives junk in the new fields', () => {
-    const raw = { ...oldSave(), goal: { i: 'three', ready: 1 }, order: { mat: 'unobtainium', need: 5 }, stats: { ordersFilled: 2 }, flow: 'lots', orderSeed: null };
+    const raw = {
+      ...oldSave(), goal: { i: 'three', ready: 1 }, order: { mat: 'unobtainium', need: 5 },
+      stats: { ordersFilled: 2, fromGoals: 'plenty', firstLensAt: 'noon' }, flow: 'lots', orderSeed: null, demandLeft: 7, flowOn: 1,
+    };
     const g = deserialize(JSON.stringify(raw))!;
     expect(g.goal).toEqual({ i: 0, ready: true });
     expect(g.order).toBeNull();
     expect(g.stats.ordersFilled).toBe(2);
     expect(g.stats.fromSales).toBe(0);
+    expect(g.stats.fromGoals).toBe(0);
+    expect(g.stats.firstLensAt).toBeNull();
+    expect(g.demandLeft).toEqual({});
+    expect(g.flowOn).toBe(true);
     expect(g.flow).toBe(0);
     expect(g.orderSeed).toBe(RULES.orders.seed >>> 0);
     run(g, 1);

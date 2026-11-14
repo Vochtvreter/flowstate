@@ -306,11 +306,20 @@ export function deserialize(json: string): Game | null {
     const known = (list: unknown) => [...new Set(Array.isArray(list) ? list : [])].filter((id) => typeof id === 'string' && !!TECHS[id]) as string[];
     g.techs = known(g.techs);
     g.queue = known(g.queue).filter((id) => !g.techs.includes(id));
-    // Nested objects are merged field by field so that later additions get defaults too.
-    g.stats = { ...base.stats, ...(raw.stats ?? {}) };
+    // Nested objects are rebuilt field by field so that later additions get defaults too.
+    const stats = newStats();
+    for (const k of Object.keys(stats) as (keyof Stats)[]) {
+      if (k === 'firstLensAt') stats[k] = typeof raw.stats?.[k] === 'number' ? raw.stats[k] : null;
+      else stats[k] = num(raw.stats?.[k], 0);
+    }
+    g.stats = stats;
     g.goal = { i: Math.max(0, Math.floor(num(raw.goal?.i, 0))), ready: !!raw.goal?.ready };
-    g.madeAt = { ...(raw.madeAt ?? {}) };
+    const bag = (v: unknown): Bag => (v && typeof v === 'object' ? { ...(v as Bag) } : {});
+    g.madeAt = bag(raw.madeAt);
     for (const m in g.made) if (g.made[m as MatId] && g.madeAt[m as MatId] == null) g.madeAt[m as MatId] = 0;
+    g.demandLeft = bag(raw.demandLeft);
+    g.flowOn = !!raw.flowOn;
+    g.ordersOn = !!raw.ordersOn;
     g.flow = Math.max(0, Math.min(1, num(raw.flow, 0)));
     g.flowStreak = num(raw.flowStreak, 0);
     g.flowBest = num(raw.flowBest, 0);
@@ -318,7 +327,7 @@ export function deserialize(json: string): Game | null {
     g.orderSeed = num(raw.orderSeed, base.orderSeed) >>> 0;
     g.order = loadOrder(raw.order);
     // A save from before the `ended` flag that already has a Lens is past the demo.
-    g.ended = raw.ended ?? !!g.made[RULES.capstone];
+    g.ended = typeof raw.ended === 'boolean' ? raw.ended : !!g.made[RULES.capstone];
     return g;
   } catch {
     return null;
