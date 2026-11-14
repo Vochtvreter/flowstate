@@ -17,7 +17,7 @@ import { closeTech, initTech, openTech, renderTech } from './ui/tech';
 import { initToasts, select, toast, touch, ui } from './ui/ui';
 
 const STEP = 0.05;
-/** Seconds between refreshes of on-board numbers and panels. */
+/** Seconds between refresh beats for on-board numbers and panels (see the frame loop). */
 const SLOW_STEP = 0.25;
 const $ = <T extends HTMLElement>(id: string) => document.getElementById(id) as T;
 
@@ -112,6 +112,7 @@ function drainEvents() {
 let last = performance.now();
 let acc = 0;
 let slow = 0;
+let beat = false;
 let techTimer = 0;
 let seenUi = -1;
 let seenRev = -1;
@@ -163,11 +164,14 @@ function step(now: number) {
   tickPanels(dt);
   slow += dt;
   techTimer += dt;
-  // Board text and panels refresh on the same beat: any DOM change costs the browser a full
-  // rendering pass, so one pass with everything in it is cheaper than two.
+  // Refreshing text costs the browser a full rendering pass, so it is done on a slow beat. The
+  // board's share is split over alternate beats to keep each of those frames short: node cards on
+  // one, wires on the next (twice a second each). Panels are cheap when nothing changed, so they
+  // are checked on every beat.
   if (slow >= SLOW_STEP) {
     slow = 0;
-    updateSlow();
+    beat = !beat;
+    updateSlow(beat ? 'nodes' : 'wires');
     renderPanels();
   }
   if (ui.techOpen && techTimer >= 0.5) {

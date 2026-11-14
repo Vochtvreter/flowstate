@@ -177,6 +177,7 @@ export function addTopItem(slot: 'res' | 'actions', item: TopItem, before?: Elem
 let creditsNum: HTMLElement;
 let shownCredits = NaN;
 let shownInt = NaN;
+let sinceWrite = 0;
 let rolledGame: Game | null = null;
 
 function creditsItem(): TopItem {
@@ -187,22 +188,30 @@ function creditsItem(): TopItem {
   return { el: e, update: (g) => void setText(rate, `+${fmtRate(g.creditRate)}/s`) };
 }
 
-/** The credits number chases its real value, closing most of the gap in about 300 ms. Call every frame. */
+/**
+ * The credits number chases its real value, closing most of the gap in about 300 ms. Call every frame.
+ * The text itself is written at most 20 times a second while it rolls through a jump, and 10 times a
+ * second while it just ticks up with income: each write costs the browser a full rendering pass,
+ * and the eye cannot tell the difference.
+ */
 export function tickPanels(dt: number) {
   const g = ui.g;
   const target = g.credits;
+  let gap = 0;
   if (g !== rolledGame || !isFinite(shownCredits)) {
     rolledGame = g;
     shownCredits = target;
+    sinceWrite = 1;
   } else if (shownCredits !== target) {
-    const gap = target - shownCredits;
+    gap = target - shownCredits;
     shownCredits = Math.abs(gap) < 0.5 ? target : shownCredits + gap * (1 - Math.exp(-dt / 0.1));
   }
+  sinceWrite += dt;
   const whole = Math.floor(shownCredits);
-  if (whole !== shownInt) {
-    shownInt = whole;
-    creditsNum.textContent = fmtInt(whole);
-  }
+  if (whole === shownInt || sinceWrite < (Math.abs(gap) > 12 ? 0.045 : 0.095)) return;
+  shownInt = whole;
+  sinceWrite = 0;
+  creditsNum.textContent = fmtInt(whole);
 }
 
 function dataItem(k: DataTier): TopItem {
@@ -559,8 +568,16 @@ function renderObjective(force: boolean) {
 
 const ST_COLORS: Record<string, string> = { working: '#4ADE80', blocked: '#FBBF24', starved: '#F87171', idle: '#64748B' };
 
+let miniKey = '';
+
 function renderMini() {
   const g = ui.g;
+  // Redrawn only when something it shows has changed.
+  const view = boardRect();
+  let key = `${g.board.w}x${g.board.h}|${Math.round(ui.view.x)},${Math.round(ui.view.y)},${ui.view.k.toFixed(3)}|${Math.round(view.width)}x${Math.round(view.height)}`;
+  for (const n of g.nodes) key += `|${n.x},${n.y},${n.status[0]}`;
+  if (key === miniKey) return;
+  miniKey = key;
   const ctx = mini.getContext('2d');
   if (!ctx) return;
   const W = mini.width, H = mini.height;
@@ -576,7 +593,7 @@ function renderMini() {
     ctx.fillStyle = n.type === 'market' ? '#FFC857' : n.type === 'lab' ? '#C4A1FF' : ST_COLORS[n.status];
     ctx.fillRect(ox + n.x * s, oy + n.y * s, Math.max(3, w * s), Math.max(2, h * s));
   }
-  const r = boardRect();
+  const r = view;
   ctx.strokeStyle = '#7AA2FF';
   ctx.lineWidth = 1.5;
   ctx.strokeRect(ox + (-ui.view.x / ui.view.k) * s, oy + (-ui.view.y / ui.view.k) * s, (r.width / ui.view.k) * s, (r.height / ui.view.k) * s);

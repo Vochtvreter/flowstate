@@ -41,15 +41,15 @@ interface NodeRefs {
   x: number; y: number;
   // last values written, so the slow update only touches what changed
   cRate: string; cSub: string; cRing: number; cSt: string; cPill: string;
-  // rate and utilisation as last shown / last sampled (see `steady`)
-  vRate: number; pRate: number; vUtil: number; pUtil: number;
+  // rate and utilisation: smoothed for display, and as last shown (see `settle`)
+  sRate: number; vRate: number; sUtil: number; vUtil: number;
 }
 interface WireRefs {
   g: SVGGElement; hit: SVGPathElement; glow: SVGPathElement; base: SVGPathElement; chip: HTMLElement; chipText: HTMLElement;
   a: Pt; b: Pt; flow: Flow;
   chipX: number; chipY: number; chipHw: number; chipOff: boolean;
   cColor: string; cWidth: number; cFlowing: boolean | null; cSat: boolean | null; cChip: string;
-  vRate: number; pRate: number;
+  sRate: number; vRate: number;
 }
 const nodeEls = new Map<number, NodeRefs>();
 const wireEls = new Map<number, WireRefs>();
@@ -312,7 +312,7 @@ function buildNode(n: GNode, w: number, h: number, ins: Port[], outs: Port[], si
     outs: outEls, open: outEls.map(() => false),
     sig, x: n.x, y: n.y,
     cRate: '', cSub: sub, cRing: -1, cSt: '', cPill: '',
-    vRate: -1, pRate: -1, vUtil: -1, pUtil: -1,
+    sRate: -1, vRate: -1, sUtil: -1, vUtil: -1,
   };
 }
 
@@ -392,7 +392,7 @@ function buildWire(w: Wire, a: Pt, b: Pt, fresh: boolean): WireRefs {
     flow: makeFlow(fresh),
     chipX: NaN, chipY: NaN, chipHw: 24, chipOff: false,
     cColor: '', cWidth: -9, cFlowing: false, cSat: false, cChip: '',
-    vRate: -1, pRate: -1,
+    sRate: -1, vRate: -1,
   };
   setWirePath(refs, a, b);
   return refs;
@@ -586,6 +586,7 @@ function syncStructure() {
     const refs = nodeEls.get(id);
     if (refs) oneShot(refs.el, 'flash', 260);
   }
+  livelyUntil = performance.now() + LIVELY_FOR;
   updateSlow();
 }
 
@@ -622,30 +623,48 @@ function rateLine(g: Game, n: GNode, rate: number, util: number): string {
   }
 }
 
+// Readings on the board never quite sit still: items move in bursts, so a wire carrying 0.5/s
+// reads 0.46, 0.53, 0.49… from one moment to the next. Showing that raw makes every number on
+// screen flicker, and every flicker is a repaint. So each reading is eased a little more for
+// display, and the shown value is only replaced once the eased one has clearly moved away from it
+// or has come to rest somewhere else.
+
+/** Weight of a new sample in the display average (about two seconds of smoothing at two samples a second). */
+const EASE = 0.25;
+/** For this long after the player changes the board, readings are shown as they are, so the change is felt at once. */
+const LIVELY_FOR = 3000;
+let livelyUntil = 0;
+let lively = true;
+
+/** Ease `avg` toward `now`; a first sample or a big jump is taken at once, and so is everything while `lively`. */
+function ease(avg: number, now: number, jump: number): number {
+  return lively || avg < 0 || Math.abs(now - avg) > jump ? now : avg + (now - avg) * EASE;
+}
+
 /**
- * The value to show for a reading that never quite sits still. The shown value is kept while the
- * real one only wobbles within `tol` of it, and replaced once it moves further or comes to rest.
- * This stops last digits flickering, and saves the browser a repaint for every flicker.
+ * The value to keep showing. `shown` stays while the eased reading is within `tol` of it; it is
+ * replaced when the reading moves further away, or when the reading has stopped moving and sits
+ * most of a display step (`step` is one unit of the last digit shown) from it, so that a steady
+ * 1.00 never goes on reading 0.99.
  */
-function steady(shown: number, prev: number, now: number, tol: number): number {
-  return Math.abs(now - shown) >= tol || Math.abs(now - prev) < tol * 0.05 ? now : shown;
+function settle(shown: number, before: number, avg: number, tol: number, step: number): number {
+  const off = Math.abs(avg - shown);
+  return off >= tol || (off >= step * 0.75 && Math.abs(avg - before) < step * 0.05) ? avg : shown;
 }
 
 let expandCost = -1;
 
-/**
- * Text, rings, pills, wire widths: things that only need refreshing a few times a second.
- * Everything is compared with what was last written, so a steady factory costs almost nothing.
- */
-export function updateSlow() {
-  const g = ui.g;
+function updateNodes(g: Game) {
   for (const n of g.nodes) {
     const refs = nodeEls.get(n.id);
     if (!refs) continue;
-    refs.vRate = steady(refs.vRate, refs.pRate, n.rate, 0.012);
-    refs.pRate = n.rate;
-    refs.vUtil = steady(refs.vUtil, refs.pUtil, n.util, 0.02);
-    refs.pUtil = n.util;
+    let was = refs.sRate;
+    refs.sRate = ease(was, n.rate, Math.max(0.15, was * 0.4));
+    refs.vRate = settle(refs.vRate, was, refs.sRate, Math.max(0.012, refs.sRate * 0.025), 0.01);
+    was = refs.sUtil;
+    refs.sUtil = ease(was, n.util, 0.25);
+    refs.vUtil = settle(refs.vUtil, was, refs.sUtil, 0.02, 0.01);
+    // Zoomed far out the small print cannot be read, so it is left alone (and caught up on the way back in).
     if (!tiny || refs.cRate === '') {
       const rate = rateLine(g, n, refs.vRate, refs.vUtil);
       if (rate !== refs.cRate) {
@@ -685,6 +704,9 @@ export function updateSlow() {
       refs.pill.dataset.kind = pill.toLowerCase();
     }
   }
+}
+
+function updateWires(g: Game) {
   let recolored = false;
   for (const w of g.wires) {
     const refs = wireEls.get(w.id);
@@ -701,7 +723,10 @@ export function updateSlow() {
       refs.flow.shape = matShape(mat);
       recolored = true;
     }
-    const width = 2 + Math.min(5, w.rate * 1.1);
+    const was = refs.sRate;
+    refs.sRate = flowing === refs.cFlowing ? ease(was, w.rate, Math.max(0.15, was * 0.4)) : w.rate;
+    refs.vRate = settle(refs.vRate, was, refs.sRate, Math.max(0.012, refs.sRate * 0.025), 0.01);
+    const width = 2 + Math.min(5, refs.vRate * 1.1);
     if (Math.abs(width - refs.cWidth) > 0.3) {
       refs.cWidth = width;
       refs.base.style.strokeWidth = width.toFixed(1) + 'px';
@@ -717,13 +742,12 @@ export function updateSlow() {
       refs.g.classList.toggle('sat', sat);
       refs.chip.classList.toggle('sat', sat);
     }
-    refs.vRate = steady(refs.vRate, refs.pRate, w.rate, 0.012);
-    refs.pRate = w.rate;
     // Chips are hidden when zoomed far out, so their text can wait.
     if (!far && !refs.chipOff) {
       const src = nodeById(g, w.from);
       const weight = src?.type === 'router' && src.mode === 'ratio' ? `×${w.weight} · ` : '';
-      const text = flowing ? `${weight}${fmtRate(refs.vRate)}/s${sat ? ' MAX' : ''}` : `${weight}0/s`;
+      // A saturated wire shows its capacity exactly; otherwise the settled reading.
+      const text = flowing ? `${weight}${fmtRate(sat ? w.rate : refs.vRate)}/s${sat ? ' MAX' : ''}` : `${weight}0/s`;
       if (text !== refs.cChip) {
         refs.cChip = text;
         refs.chipText.textContent = text;
@@ -731,6 +755,19 @@ export function updateSlow() {
     }
   }
   if (recolored) pushFlows();
+}
+
+/**
+ * Text, rings, pills, wire widths: things that only need refreshing a few times a second.
+ * Everything is compared with what was last written, so a steady factory costs almost nothing.
+ * The frame loop alternates between the two halves ('nodes', 'wires') so that neither refresh is
+ * a long frame; called with no argument it does both.
+ */
+export function updateSlow(part?: 'nodes' | 'wires') {
+  const g = ui.g;
+  lively = performance.now() < livelyUntil;
+  if (part !== 'wires') updateNodes(g);
+  if (part !== 'nodes') updateWires(g);
   const cost = expansionCost(g);
   if (cost !== expandCost) {
     expandCost = cost;
@@ -749,6 +786,12 @@ function showGains() {
   const size = Math.max(11, Math.min(15, 9 + 5 * ui.view.k));
   const counter = anchorPt('credits');
   let coins = 6;
+  let landed = false;
+  const land = () => {
+    // One pulse per second at most, however many Markets paid out.
+    if (!landed) pulseAnchor('credits');
+    landed = true;
+  };
   const visible = (p: Pt) => p.x > r.left - 30 && p.x < r.right + 30 && p.y > r.top - 30 && p.y < r.bottom + 30;
   for (const n of g.nodes) {
     if (n.type === 'market' && n.gain >= 0.05) {
@@ -759,7 +802,7 @@ function showGains() {
         if (counter && coins > 0) {
           const count = Math.min(coins, n.gain >= 20 ? 3 : n.gain >= 2 ? 2 : 1);
           coins -= count;
-          fly(toClient({ x: n.x + 29, y: n.y + h / 2 }), counter, '#FFC857', count, () => pulseAnchor('credits'));
+          fly(toClient({ x: n.x + 29, y: n.y + h / 2 }), counter, '#FFC857', count, land);
         }
       }
     }
