@@ -1,31 +1,39 @@
 // Phone and touch: the small-screen shell, bottom sheets and the floating buttons.
-// Owned by the phone track. The gestures themselves (pinch, wiring by tap) live in board.ts;
-// this file decides when the phone layout is on, tells the rest of the interface what kind of
-// pointer is in use, and measures what covers the board so the camera can keep things in view.
+// The gestures themselves (pinch, wiring by tap) live in board.ts; this file decides when the phone
+// layout is on, tells the rest of the interface what kind of pointer is in use, and measures what
+// covers the board (the HUD's strip at the top, sheets, the thumb row) so the camera can keep things
+// in view.
 //
-// For the other tracks:
+// For the other modules:
 //   - `#app.phone` (and `html.phone`) is set here; `html[data-input]` is 'touch' or 'mouse'.
-//   - CSS variables on `#app.phone`: --top-h (top bar), --hot-h (bottom hotbar), --strip-h (how far
-//     the strip reaches down the stage), --lift (height of an open bottom sheet), --shift (width
-//     of a sheet docked at the side, on short landscape screens).
-//   - `#thumb-slot` sits just above the hotbar (and rises above an open sheet): put a Claim button
-//     in it and it is in thumb reach. It only shows in the phone layout.
-//   - `#objective`, `#alert`, `#toasts` and anything else in `#stage` with the class `strip-item`
-//     form the strip at the top of the board (see phone.css); `strip-wide` gives a row of its own.
-//   - `#app.carrying` while a node is being moved, `#app.building` while the build sheet is open.
+//   - CSS variables on `#app`: --strip-h (how far the strip reaches down the stage; 0 outside the
+//     phone layout), --lift (height of an open bottom sheet), --shift (width of a sheet docked at
+//     the side, on short landscape screens). phone.css adds --top-h and --hot-h (the two bars).
+//   - The strip is the HUD's: #goal, #order and #hud-alert inside #hud-strip. It is measured, never
+//     moved, here; its phone layout and the place of the Claim button are CSS (hud.css, "phone seating").
+//   - `#app.carrying` while a node is being moved, `#app.building` while the build sheet is open,
+//     `#app.hint-open` while the goal card shows its hint on a phone held sideways (where it folds).
+//   - `#thumb-slot` holds the one-line "tap where…" hint, for touch input on any screen.
 //   - `swipeToDismiss()` below works for any sheet.
+//   - For scripts: `flowstate.phone.cover()` and `.strip()` return what the camera is told.
 import { MATERIALS, NODE_DEFS } from '../content';
 import { canUndo, undo } from '../actions';
-import { armedPort, cancelArmed, cancelGesture, closeRadial, fitView, refreshBoard, settleGesture } from './board';
+import {
+  armedPort, cancelArmed, cancelGesture, closeRadial, ensureVisible, fitView, gestureActive, refreshBoard, settleGesture,
+} from './board';
 import { el, invalidateLayout, setAttr, setClass, setHTML, setHidden, setStyle } from './dom';
+import { PressWord } from './hud-words';
 import { icon } from './icons';
-import { Insets, env } from './phone-env';
+import { Insets, StripBox, env } from './phone-env';
 import { delegate, onBeat, onFrame, onNewGame, select, touch, ui } from './ui';
 
 let app: HTMLElement;
 let stage: HTMLElement;
 let insp: HTMLElement | null;
 let build: HTMLElement | null;
+let goalEl: HTMLElement | null;
+let orderEl: HTMLElement | null;
+let alertEl: HTMLElement | null;
 let thumb: HTMLElement;
 let hint: HTMLElement;
 let hintText: HTMLElement;
@@ -46,7 +54,7 @@ function applyLayout(first = false) {
   env.phone = phone;
   app.classList.toggle('phone', phone);
   document.documentElement.classList.toggle('phone', phone);
-  coverKey = '';
+  measuredKey = '';
   invalidateLayout();
   refit = 2;
   if (first) return;
@@ -67,11 +75,15 @@ function setInput(touchy: boolean) {
 // ---------- what covers the board ----------
 
 const NONE: Insets = { top: 0, right: 0, bottom: 0, left: 0, row: 0 };
-/** Height of the floating buttons in the thumb row. */
+/** Height of the thumb row: the floating buttons alone, and with the Claim button beside them. */
 const THUMB_ROW = 44;
-let coverKey = '';
+const CLAIM_ROW = 54;
+let measuredKey = '';
 let coverNow: Insets = NONE;
-let beats = 0;
+let stripNow: StripBox | null = null;
+/** Bumped whenever the strip, a sheet or the stage changed size (see the ResizeObserver in initPhone). */
+let sizeRev = 0;
+let sizeSeen = 0;
 
 const isOpen = (e: HTMLElement | null): e is HTMLElement => !!e && e.classList.contains('open');
 const carrying = () => app.classList.contains('carrying');
@@ -92,28 +104,49 @@ function sheetSize(): { lift: number; shift: number } {
 }
 
 /**
- * How much of each edge of the stage is hidden: by the strip at the top, by an open sheet at the
- * bottom (or at the side, on a short landscape screen) and by whatever sits in the thumb slot.
- * Measured from layout boxes, not from where things are drawn, so a sheet that is still sliding
- * in already counts at its full height. Measured again only when something may have changed.
+ * Measure what lies over the board. The strip is the HUD's goal card, order chip and alert chip
+ * (toasts come and go; the camera does not move for them). On a phone the strip spans the stage, so
+ * it hides the top of it; an open sheet hides the bottom (or the side, on a short landscape screen),
+ * and the thumb row (Fit, Undo, and Claim when a goal is ready) floats on top of whatever is at the
+ * bottom. Measured from layout boxes, not from where things are drawn, so a sheet that is still
+ * sliding in already counts at its full height. Measured again only when something may have changed.
  */
-function cover(): Insets {
-  if (!env.phone) return NONE;
-  const key = `${ui.uiRev}|${ui.g?.rev}|${beats}|${isOpen(insp) ? 1 : 0}${isOpen(build) ? 1 : 0}${carrying() ? 1 : 0}`;
-  if (key === coverKey) return coverNow;
-  coverKey = key;
-  let top = 0;
-  for (const c of stage.children) {
-    const e = c as HTMLElement;
-    // The goal card and the chips under it. (Toasts come and go; the camera does not move for them.)
-    if (!(e.id === 'objective' || e.id === 'alert' || e.classList.contains('strip-item'))) continue;
-    if (e.offsetHeight) top = Math.max(top, e.offsetTop + e.offsetHeight);
+function measure() {
+  const g = ui.g;
+  const key = env.phone
+    ? `p|${ui.uiRev}|${g?.rev}|${sizeRev}|${isOpen(insp) ? 1 : 0}${isOpen(build) ? 1 : 0}${carrying() ? 1 : 0}${g?.goal.ready ? 1 : 0}`
+    : `d|${sizeRev}`;
+  if (key === measuredKey) return;
+  measuredKey = key;
+  let x0 = Infinity, x1 = -Infinity, bottom = 0, goalBottom = 0;
+  for (const e of [goalEl, orderEl, alertEl]) {
+    const h = e ? e.offsetHeight : 0;
+    if (!e || !h) continue;
+    // (#hud, which these are measured against, fills the stage.)
+    const left = e.offsetLeft, foot = e.offsetTop + h;
+    x0 = Math.min(x0, left);
+    x1 = Math.max(x1, left + e.offsetWidth);
+    bottom = Math.max(bottom, foot);
+    if (e === goalEl) goalBottom = foot;
+  }
+  stripNow = bottom > 0 ? { x0, x1, bottom, goalBottom } : null;
+  if (!env.phone) {
+    coverNow = NONE;
+    return;
   }
   const { lift, shift } = sheetSize();
-  // The thumb row (Fit, Undo, and whatever is in the slot) floats on top of whatever is at the bottom.
-  const row = Math.max(THUMB_ROW, thumb.offsetHeight) + 16;
-  coverNow = { top, right: shift, bottom: lift, left: 0, row };
+  coverNow = { top: bottom, right: shift, bottom: lift, left: 0, row: (g?.goal.ready ? CLAIM_ROW : THUMB_ROW) + 16 };
+}
+
+function cover(): Insets {
+  if (!env.phone) return NONE;
+  measure();
   return coverNow;
+}
+
+function strip(): StripBox | null {
+  measure();
+  return stripNow;
 }
 
 // ---------- sheets ----------
@@ -218,9 +251,12 @@ function buildChrome() {
   stage.append(thumb, fabs);
 }
 
-/** What the player is in the middle of, said in one line, with a way out. Only shown in the phone layout. */
+/**
+ * What the player is in the middle of, said in one line, with a way out. Shown in the phone layout,
+ * and for touch input on any screen: a finger cannot hover, so nothing else says what a tap will do.
+ */
 function hintLine(): string {
-  const verb = env.touch ? 'Tap' : 'Click';
+  const verb = PressWord();
   const armed = armedPort();
   if (armed) return armed.mat ? `${verb} where the <b>${MATERIALS[armed.mat].name}</b> should go` : `${verb} where this wire should go`;
   const p = ui.placing;
@@ -230,6 +266,15 @@ function hintLine(): string {
 
 let seenUi = -1;
 let seenRev = -1;
+/** The goal whose hint was last opened by itself, and whether the hint is open. */
+let hintGoal = -1;
+let hintOpen = false;
+let coverSeen = '';
+
+function setHintOpen(on: boolean) {
+  hintOpen = on;
+  setClass(app, 'hint-open', on);
+}
 
 /** Bring the phone chrome in line with the game. Everything is written only when it changed. */
 function sync() {
@@ -237,17 +282,34 @@ function sync() {
   if (!g) return;
   seenUi = ui.uiRev;
   seenRev = g.rev;
+  sizeSeen = sizeRev;
   setAttr(undoBtn, 'disabled', canUndo() ? null : '');
-  const line = env.phone ? hintLine() : '';
+  const line = env.phone || env.touch ? hintLine() : '';
   setHidden(hint, !line);
   if (line) setHTML(hintText, line);
+  // Where the goal card folds to one line (a phone on its side), a new goal starts with its hint open.
+  if (g.goal.i !== hintGoal) {
+    hintGoal = g.goal.i;
+    setHintOpen(true);
+  }
+  measure();
+  const c = coverNow;
   // How tall the strip is decides how tall a sheet may be (see phone.css), so that comes first.
-  setStyle(app, '--strip-h', (env.phone ? cover().top : 0) + 'px');
-  const { lift, shift } = sheetSize();
-  setStyle(app, '--lift', lift + 'px');
-  setStyle(app, '--shift', shift + 'px');
+  let moved = setStyle(app, '--strip-h', c.top + 'px');
+  if (setStyle(app, '--lift', c.bottom + 'px')) moved = true;
+  if (setStyle(app, '--shift', c.right + 'px')) moved = true;
   // While the build menu is up the player is choosing from it: the floating controls step aside.
   setClass(app, 'building', isOpen(build));
+  // The thumb row (and the Claim button in it) has moved: whatever cached its place measures again.
+  if (moved) invalidateLayout();
+  // Something covers a different part of the board than a moment ago (the card grew a tip, an order
+  // arrived, Claim appeared, a sheet opened): the selected node is brought back into view.
+  const s = stripNow;
+  const now = `${c.top}|${c.right}|${c.bottom}|${c.row}|${s ? `${s.x0},${s.x1},${s.bottom}` : ''}`;
+  if (now !== coverSeen) {
+    coverSeen = now;
+    if (ui.sel?.kind === 'node' && !gestureActive()) ensureVisible(ui.sel.id);
+  }
 }
 
 // ---------- init ----------
@@ -257,6 +319,9 @@ export function initPhone() {
   stage = document.getElementById('stage')!;
   insp = document.getElementById('insp');
   build = document.getElementById('build-sheet');
+  goalEl = document.getElementById('goal');
+  orderEl = document.getElementById('order');
+  alertEl = document.getElementById('hud-alert');
 
   // Wording follows the pointer in use. Until the first press, a device whose only pointer is a
   // finger is taken to be touch, so the very first hint already says "tap".
@@ -270,6 +335,7 @@ export function initPhone() {
 
   buildChrome();
   env.cover = cover;
+  env.strip = strip;
   applyLayout(true);
   window.addEventListener('resize', () => applyLayout());
   window.addEventListener('orientationchange', () => applyLayout());
@@ -289,18 +355,44 @@ export function initPhone() {
     if (window.scrollX || window.scrollY) window.scrollTo(0, 0);
   }, { passive: true });
 
+  // The goal card folds its hint away on a phone held sideways: a tap on the card (not on a button
+  // in it) opens and closes it, and a press on the board closes it, since the board is what is short.
+  goalEl?.addEventListener('click', (e) => {
+    if (!env.phone || (e.target as HTMLElement).closest('button')) return;
+    setHintOpen(!hintOpen);
+  });
+  document.getElementById('board')?.addEventListener('pointerdown', () => {
+    if (hintOpen) setHintOpen(false);
+  }, { capture: true, passive: true });
+
+  // Sizes are watched rather than polled: the strip grows and shrinks with the goal, a sheet with its
+  // contents. The notice is only recorded here; the next frame measures and writes.
+  if (typeof ResizeObserver !== 'undefined') {
+    const ro = new ResizeObserver(() => void sizeRev++);
+    for (const e of [stage, goalEl, orderEl, alertEl, insp, build]) if (e) ro.observe(e);
+  } else onBeat(() => void sizeRev++);
+
   onFrame(() => {
     const g = ui.g;
-    if (ui.uiRev !== seenUi || g.rev !== seenRev) sync();
-    if (refit && --refit === 0 && env.phone) fitView();
-  });
-  onBeat(() => {
-    beats++;
-    sync();
+    if (ui.uiRev !== seenUi || g.rev !== seenRev || sizeRev !== sizeSeen) sync();
+    // (On every layout: the first framing happens before the goal card has any text in it.)
+    if (refit && --refit === 0) fitView();
   });
   onNewGame(() => {
-    coverKey = '';
+    measuredKey = '';
+    hintGoal = -1;
     refit = 2;
     sync();
+  });
+
+  // main.ts builds window.flowstate after the modules have started, so this joins it a moment later.
+  const attach = () => {
+    const hook = (window as unknown as { flowstate?: Record<string, unknown> }).flowstate;
+    if (!hook) return false;
+    hook.phone ??= { cover, strip, env };
+    return true;
+  };
+  queueMicrotask(() => {
+    if (!attach()) setTimeout(attach, 0);
   });
 }

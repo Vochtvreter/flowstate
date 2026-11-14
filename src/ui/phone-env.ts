@@ -12,6 +12,13 @@ export interface Insets {
 
 const NONE: Insets = { top: 0, right: 0, bottom: 0, left: 0, row: 0 };
 
+/**
+ * Where the strip (the goal card with the order chip and the alert chip) lies over the board, in pixels
+ * from the stage's top left corner: `x0`..`x1` across, and down to `bottom`. `goalBottom` is how far down
+ * the goal card alone reaches.
+ */
+export interface StripBox { x0: number; x1: number; bottom: number; goalBottom: number }
+
 export const env = {
   /** The phone layout is on (`#app` has the class `phone`). */
   phone: false,
@@ -24,4 +31,10 @@ export const env = {
    * (the strip at the top, an open sheet), in pixels. Zero everywhere outside the phone layout.
    */
   cover: (): Insets => NONE,
+  /**
+   * The strip as it is laid out now, on any layout, or null when it shows nothing. On a phone it spans
+   * the stage and is already counted in `cover().top`; elsewhere it is a card in the middle of the top
+   * edge, and the camera keeps things out from under it (see `reveal` in board.ts).
+   */
+  strip: (): StripBox | null => null,
 };

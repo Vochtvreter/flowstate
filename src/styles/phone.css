@@ -96,9 +96,7 @@ html.phone body { position: fixed; inset: 0; width: 100%; }
 #app.phone .menu .m-only { display: flex; }
 #app.phone .menu .danger { margin-top: 5px; border-top: 1px solid var(--line); border-radius: 0 0 7px 7px; height: 45px; }
 #app.phone #stage { grid-row: 2; grid-column: 1; }
-/* The tech tree and the modal are another track's; these only keep them inside the shell. */
-#app.phone :where(#tech) { top: var(--top-h); }
-#app.phone :where(#modal) .card { width: auto; max-width: calc(100% - 24px); }
+#app.phone #modal .card { max-width: calc(100% - 24px); }
 
 /* Hidden on a phone: there is pinch for zoom, a Fit button, and no keyboard. */
 #app.phone #mini, #app.phone #zoom, #app.phone #hints { display: none; }
@@ -126,35 +124,26 @@ html.phone body { position: fixed; inset: 0; width: 100%; }
 #app.phone .hb.tip, #app.phone #hot .grow { display: none; }
 
 /* ----- one strip at the top of the board: goal, order, alert, toasts ----- */
-/* The stage lays its in-flow children out in rows that wrap. The board and the effects canvas
-   are absolutely placed and do not take part; whatever is named below does, in page order, toasts
-   last. Add the class `strip-item` to anything else that belongs here, and `strip-wide` to give
-   it a row of its own (the goal card); small chips share a row when they fit. The selectors are
-   kept weak on purpose: a rule like `#app.phone #goal` beats them.
-   Everything here takes height away from the board, so keep it short: see --strip-h below. */
-#app.phone #stage { display: flex; flex-flow: row wrap; justify-content: center; align-items: flex-start; align-content: flex-start; gap: 6px; padding: 8px var(--edge-r) 0 var(--edge-l); }
-#app.phone :where(#stage) > :where(#objective, #alert, #toasts, .strip-item) {
-  position: relative; left: auto; right: auto; top: auto; bottom: auto; transform: none;
-  flex: none; min-width: 0; max-width: 100%; margin: 0;
-}
-#app.phone :where(#stage) > :where(#objective, #toasts, .strip-wide) { flex: 0 0 100%; width: auto; }
-#app.phone :where(#stage) > :where(#objective) { padding: 9px 12px; font-size: 13px; line-height: 18px; }
-#app.phone :where(#stage) > :where(#alert) { white-space: normal; height: auto; min-height: 44px; padding: 4px 4px 4px 12px; }
-#app.phone :where(#alert) button { height: 36px; min-width: 56px; }
-#app.phone :where(#stage) > :where(#toasts) { order: 9; }
-#app.phone :where(#toasts) .toast { max-width: 100%; }
-/* Room is short: only the two newest toasts show. */
-#app.phone :where(#toasts) .toast:nth-last-child(n + 3) { display: none; }
+/* The strip is the HUD's (#hud-strip in #hud: the goal card, the order chip, the alert chip, then
+   toasts). Its phone layout is in hud.css under "phone seating"; phone.ts measures it (--strip-h is
+   how far it reaches down the stage) so that the camera and the sheets keep clear of it.
+   Room is short: only the two newest toasts show. */
+#app.phone #toasts .toast:nth-last-child(n + 3) { display: none; }
 
 /* ----- the thumb row: one line of controls just above the hotbar (or above an open sheet) ----- */
-/* On the left the slot (Claim goes here; the "tap where…" hint shows here too), on the right
-   Fit and Undo. The camera treats this row as covered, so nothing it brings into view hides here. */
+/* On the right Fit and Undo. On the left the Claim button when a goal is ready (it is the HUD's
+   button, seated here by the rules under "phone seating" in hud.css) or, while the player is in the
+   middle of wiring or placing, the "tap where…" line with its Cancel (#thumb-slot), which takes
+   Claim's place for as long as it shows. The camera treats this row as covered, so nothing it
+   brings into view hides here. */
 #app.phone #thumb-slot {
   display: flex; flex-direction: column-reverse; align-items: center; gap: 8px;
   position: absolute; left: var(--edge-l); right: calc(var(--edge-r) + 104px); bottom: 8px; z-index: 12;
   pointer-events: none; transform: translateY(calc(-1 * var(--lift, 0px))); transition: transform 0.22s cubic-bezier(0.2, 0.8, 0.2, 1);
 }
-#app.phone #thumb-slot > * { pointer-events: auto; max-width: 100%; }
+#thumb-slot > * { pointer-events: auto; max-width: 100%; }
+/* The same line helps a finger on a wider screen (a tablet has the desktop layout): there it sits at the foot of the board. */
+html[data-input='touch'] #app:not(.phone) #thumb-slot { display: flex; position: absolute; left: 50%; bottom: 18px; z-index: 12; transform: translateX(-50%); max-width: calc(100% - 32px); pointer-events: none; }
 #tap-hint { display: flex; align-items: center; gap: 4px; min-height: 44px; padding: 0 0 0 14px; border-radius: 22px; background: #17213a; border: 1px solid #34467a; color: #dbe6ff; font-size: 13px; line-height: 17px; box-shadow: 0 10px 30px rgba(0, 0, 0, 0.5); }
 #tap-hint button { flex: none; width: 44px; height: 44px; border: 0; border-radius: 50%; background: transparent; color: #9db8ff; display: flex; align-items: center; justify-content: center; padding: 0; }
 #app.phone #fabs {
@@ -266,10 +255,11 @@ html.phone body { position: fixed; inset: 0; width: 100%; }
 @media (orientation: landscape) and (max-height: 520px) {
   #app.phone { --top-h: calc(46px + env(safe-area-inset-top, 0px)); --hot-h: calc(68px + env(safe-area-inset-bottom, 0px)); }
   #app.phone #hot { padding-top: 4px; padding-bottom: calc(4px + env(safe-area-inset-bottom, 0px)); }
+  #app.phone .techbtn .badge { top: 0; }
   #app.phone #insp, #app.phone #build-sheet { left: auto; right: var(--edge-r); width: min(340px, 46%); max-height: calc(100% - 6px); border: 1px solid var(--border); border-bottom: 0; }
-  #app.phone #thumb-slot { transform: none; right: calc(var(--edge-r) + 104px + var(--shift, 0px)); }
-  /* The strip keeps clear of a sheet standing at the side. */
-  #app.phone #stage { padding-right: calc(var(--edge-r) + var(--shift, 0px)); }
+  #app.phone #thumb-slot { transform: none; right: calc(var(--edge-r) + 104px + var(--shift, 0px)); bottom: 6px; }
+  #app.phone #fabs { bottom: 6px; }
+  /* (The strip keeps clear of a sheet standing at the side: see "phone seating" in hud.css.) */
   .bopts { grid-template-columns: 1fr; }
 }
 

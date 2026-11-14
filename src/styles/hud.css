@@ -226,39 +226,7 @@ html[data-input='touch'] #insp .filt { height: 32px; }
 html[data-input='touch'] #insp .step::after, html[data-input='touch'] #insp .filt::after { content: ''; position: absolute; inset: -6px; }
 html[data-input='touch'] #insp .link::after { content: ''; position: absolute; inset: -14px -8px; }
 
-/* ---------- narrow stage ----------
-   Below 700px the card takes the width there is, and Claim drops under the text at full width. */
-@media (max-width: 700px) {
-  #hud { padding: 8px 8px 0; }
-  #goal { flex-wrap: wrap; gap: 10px; padding: 10px 12px 11px; }
-  #goal .claim { flex: 1 1 100%; }
-  #hud-strip.over-tech { padding-right: 0; }
-  /* A full-width button breathes less across, or its halo would reach far outside the card. */
-  #goal .claim::before { animation-name: claim-breathe-wide; }
-  #goal .claim::after { animation-name: claim-halo-wide; }
-  .gc-title { font-size: 15.5px; line-height: 19px; }
-}
-
-/* ---------- phone ----------
-   One full-width strip at the top: goal, order under it, alert, then toasts. The Claim button
-   leaves the card for the bottom of the stage, in thumb reach. A layout whose bottom bar or sheet
-   covers the foot of the stage sets --hud-bottom-inset to that height. While the inspector sheet or
-   the tech tree is open, Claim stays in the card at the top instead, where neither can cover it. */
-#app.phone #hud { padding: 8px 8px 0; align-items: stretch; }
-#app.phone #hud-strip { align-items: stretch; gap: 6px; }
-#app.phone #hud-row { flex-direction: column; flex-wrap: nowrap; align-items: stretch; gap: 6px; }
-#app.phone #goal, #app.phone #order { flex: none; }
-#app.phone #goal { flex-wrap: wrap; gap: 10px; padding: 9px 12px 10px; border-radius: 12px; }
-#app.phone #goal.done { align-self: center; }
-#app.phone #order { border-radius: 12px; }
-#app.phone .gc-title { font-size: 15.5px; line-height: 19px; }
-#app.phone #hud-alert { align-self: center; }
-#app.phone #goal .claim { flex: 1 1 100%; }
-#app.phone #goal .claim::before { animation-name: claim-breathe-wide; }
-#app.phone #goal .claim::after { animation-name: claim-halo-wide; }
-#app.phone:not(:has(#insp.open)) #hud-strip:not(.over-tech) #goal .claim { position: absolute; left: 12px; right: 12px; bottom: calc(12px + var(--hud-bottom-inset, 0px)); height: 58px; }
-@keyframes claim-breathe-wide { 50% { transform: scale(1.012, 1.08); opacity: 0.6; } }
-@keyframes claim-halo-wide { 0% { transform: scale(0.99, 0.96); opacity: 0.8; } 75%, 100% { transform: scale(1.03, 1.3); opacity: 0; } }
+/* (The phone layout of the strip and where Claim sits on a phone are at the end of this file, under "phone seating".) */
 #app.phone #toasts { position: static; transform: none; align-self: center; margin-top: 6px; max-width: 100%; }
 #app.phone .toast { max-width: 100%; }
 #app.phone .start-go, #app.phone .sum-go { min-width: 0; width: 100%; }
@@ -267,4 +235,107 @@ html[data-input='touch'] #insp .link::after { content: ''; position: absolute; i
   .claim::before, .claim::after, .sum-card { animation: none !important; }
   .claim::after { opacity: 0.6; }
   .pbar span, .dg-full, .dg-over, #start { transition: none; }
+}
+
+/* ---------- phone seating ----------
+   Everything below is the phone layout (#app.phone, set in phone.ts) of the strip: the goal card, the
+   order and the alert, kept short because every pixel of them is taken from the board, and the Claim
+   button, which leaves the card for the thumb row.
+
+   Claim. The button stays where hud.ts writes it, inside #goal, and is placed from here against #hud
+   (which fills the stage; nothing between the two is positioned). It sits just above the build bar, left
+   of the Fit and Undo buttons (104 px, see #fabs in phone.css), and moves with them: up by --lift when a
+   sheet opens under it, left by --shift when one stands at the side. The 'goal' anchor is this button,
+   so coins leave from under the thumb. It steps aside while the build sheet is open, and while the
+   player is wiring, placing or carrying something, so it can never lie on the node they are aiming at
+   (the "tap where..." line takes its place). Under the open tech tree the whole strip stays below the
+   tree (z-index 10): the tree's own "Goal complete" bar leads back to it. */
+#app.phone #hud { padding: 5px var(--edge-r, 8px) 0 var(--edge-l, 8px); align-items: stretch; }
+#app.phone #hud-strip, #app.phone #hud-strip.over-tech { z-index: 10; align-items: stretch; gap: 4px; padding-right: 0; }
+#app.phone #hud-row { flex-direction: column; flex-wrap: nowrap; align-items: stretch; gap: 4px; }
+#app.phone #goal, #app.phone #order { flex: none; }
+
+#app.phone #goal .claim {
+  position: absolute; left: var(--edge-l, 8px); right: calc(var(--edge-r, 8px) + 104px); bottom: 8px;
+  min-width: 0; height: 54px; padding: 0 12px; border-radius: 16px; font-size: 19px;
+  transform: translateY(calc(-1 * var(--lift, 0px)));
+  transition: transform 0.22s cubic-bezier(0.2, 0.8, 0.2, 1), opacity 0.15s, visibility 0s;
+}
+/* A wide button breathes less across, or its halo would reach under the buttons beside it. */
+#app.phone #goal .claim::before { animation-name: claim-breathe-wide; }
+#app.phone #goal .claim::after { animation-name: claim-halo-wide; }
+@keyframes claim-breathe-wide { 50% { transform: scale(1.012, 1.08); opacity: 0.6; } }
+@keyframes claim-halo-wide { 0% { transform: scale(0.99, 0.96); opacity: 0.8; } 75%, 100% { transform: scale(1.03, 1.3); opacity: 0; } }
+#app.phone.building #goal .claim, #app.phone.carrying #goal .claim,
+#app.phone:has(#board.arming, #board.wiring, #board.placing) #goal .claim { opacity: 0; visibility: hidden; pointer-events: none; transition: transform 0.22s, opacity 0.15s, visibility 0s linear 0.15s; }
+
+/* The goal card: the same parts, set tighter. */
+#app.phone #goal { display: flex; flex-wrap: nowrap; gap: 0; padding: 7px 10px 8px 12px; border-radius: 12px; }
+#app.phone #goal.done { align-self: center; padding: 6px 14px; }
+#app.phone .gc-main { flex: 1 1 auto; gap: 2px; }
+#app.phone .gc-head { min-height: 18px; gap: 8px; }
+#app.phone .gc-step, #app.phone .gc-done { font-size: 10px; }
+#app.phone .gc-head .rw { height: 18px; padding: 0 6px; font-size: 11px; line-height: 18px; }
+#app.phone .gc-title { font-size: 15px; line-height: 18px; }
+#app.phone .gc-hint { font-size: 12.5px; line-height: 16px; }
+#app.phone .gc-prog { margin-top: 1px; gap: 8px; font-size: 11.5px; line-height: 14px; }
+#app.phone div.gc-rewards { margin-top: 1px; }
+#app.phone [data-ready='1'] .rw { height: 22px; padding: 0 8px; font-size: 12.5px; line-height: 22px; }
+/* The tip: its text beside a Show me button that answers a 44 px press (the reach is its ::after). */
+#app.phone .gc-tip { align-items: center; gap: 8px; margin-top: 4px; padding-top: 4px; font-size: 12px; line-height: 15px; }
+#app.phone .gc-tiptxt b { margin-right: 5px; line-height: 14px; }
+#app.phone .gc-tiptxt i { display: inline; }
+#app.phone .gc-tiptxt i::before { content: ' · '; }
+#app.phone .gc-show { height: 36px; padding: 0 12px; }
+#app.phone .gc-show::after { content: ''; position: absolute; inset: -4px 0; }
+
+/* The order: one row. What to deliver, what it pays, and its progress as a line along the foot. */
+#app.phone #order { position: relative; gap: 8px; min-height: 44px; padding: 4px 6px 6px 8px; border-radius: 12px; font-size: 12.5px; }
+#app.phone #order[data-ready='1'] { padding: 3px 4px 5px 8px; }
+#app.phone .oc-ico { width: 28px; height: 28px; border-radius: 8px; }
+#app.phone .oc-main { flex-flow: row wrap; align-items: center; gap: 1px 8px; }
+#app.phone .oc-lbl, #app.phone .oc-pay .gc-lbl { display: none; }
+#app.phone .oc-line { flex: 1 1 auto; }
+#app.phone .oc-pay { flex: none; flex-wrap: nowrap; }
+#app.phone #order .rw { height: 18px; padding: 0 6px; font-size: 11px; line-height: 18px; }
+#app.phone .oc-main .pbar { position: absolute; left: 10px; right: 10px; bottom: 2px; height: 3px; min-width: 0; }
+
+/* The alert: one pill, two lines of text at most before it grows. */
+#app.phone #hud-alert { align-self: center; }
+#app.phone .alertchip { min-height: 44px; padding: 3px 4px 3px 12px; gap: 8px; font-size: 12.5px; line-height: 16px; }
+#app.phone .al-go { height: 32px; }
+
+/* A phone on its side has 276 px of stage. The card folds to one line (step and reward over the title,
+   progress beside it) and keeps its hint behind a tap (phone.ts sets #app.hint-open: each new goal
+   opens it, a press on the board folds it away). The order and the alert are small pills beside it. */
+@media (orientation: landscape) and (max-height: 520px) {
+  #app.phone #hud { padding-top: 4px; padding-right: calc(var(--edge-r, 8px) + var(--shift, 0px)); }
+  #app.phone #hud-strip, #app.phone #hud-strip.over-tech { display: grid; grid-template-columns: minmax(0, 3fr) minmax(0, 2fr); grid-template-areas: 'goal order' 'goal alert'; grid-template-rows: auto 1fr; gap: 4px 6px; align-items: start; }
+  #app.phone #hud-strip:not(:has(#order:not([hidden]), #hud-alert:not([hidden]))) { grid-template-columns: minmax(0, 1fr); grid-template-areas: 'goal'; }
+  #app.phone #hud-row { display: contents; }
+  #app.phone #goal { grid-area: goal; padding: 4px 10px 5px 12px; cursor: pointer; }
+  #app.phone #goal.done { justify-self: center; }
+  #app.phone #order { grid-area: order; }
+  #app.phone #hud-alert { grid-area: alert; align-self: start; justify-self: stretch; }
+  #app.phone .alertchip { width: 100%; border-radius: 12px; }
+  #app.phone .al-txt { flex: 1; }
+  #app.phone .gc-main { display: grid; grid-template-columns: minmax(0, 1fr) auto; grid-template-areas: 'head head' 'title prog' 'hint hint' 'tip tip'; align-items: center; gap: 1px 12px; }
+  #app.phone .gc-head { grid-area: head; min-height: 16px; justify-content: flex-start; }
+  #app.phone .gc-head .gc-rewards, #app.phone .gc-head .gc-done { margin-left: auto; }
+  #app.phone .gc-head .rw { height: 16px; line-height: 16px; }
+  #app.phone .gc-title { grid-area: title; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  /* A small chevron says the card opens. */
+  #app.phone #goal:not(.done):not([data-ready='1']) .gc-head::after { content: ''; flex: none; order: 9; width: 7px; height: 7px; margin: -3px 2px 0 4px; border-right: 2px solid #9db8ff; border-bottom: 2px solid #9db8ff; transform: rotate(45deg); opacity: 0.8; }
+  #app.phone.hint-open #goal:not(.done):not([data-ready='1']) .gc-head::after { transform: rotate(-135deg); margin-top: 3px; }
+  #app.phone .gc-prog { grid-area: prog; width: 230px; margin: 0; }
+  #app.phone div.gc-rewards { grid-area: prog; margin: 0; flex-wrap: nowrap; }
+  #app.phone .gc-hint { grid-area: hint; display: none; padding: 2px 0 1px; }
+  #app.phone.hint-open .gc-hint { display: block; }
+  #app.phone .gc-tip { grid-area: tip; margin-top: 3px; padding-top: 3px; }
+  /* Claim keeps to the right-hand thumb, beside Fit and Undo, and to the left of a sheet at the side. */
+  #app.phone #goal .claim { left: auto; right: calc(var(--edge-r, 8px) + 104px + var(--shift, 0px)); width: min(300px, calc(100% - var(--edge-l, 8px) - var(--edge-r, 8px) - 104px - var(--shift, 0px))); bottom: 6px; height: 52px; transform: none; }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  #app.phone #goal .claim { transition: none; }
 }
