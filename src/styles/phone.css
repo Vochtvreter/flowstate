@@ -3,12 +3,14 @@
    Three parts:
    1. every screen: the page never zooms or scrolls, wiring by tap, the hotbar's "affordable" pulse;
    2. `#app.phone` (set in phone.ts under 700 px wide, or on a landscape screen under 500 px tall):
-      the shell, the bottom hotbar, the strip, sheets, bigger type on the board;
+      the shell, the top bar, the bottom hotbar, the thumb row, sheets, bigger type on the board;
    3. short landscape screens: sheets dock at the side.
 
-   Other tracks style their own parts for `#app.phone` in their own stylesheets. These variables
-   are there for them: --top-h and --hot-h (the two bars), --lift (height of an open bottom
-   sheet) and --shift (width of a sheet docked at the side). */
+   The phone layout of the HUD's strip (goal card, order, alert) and the seat of the Claim button
+   are in hud.css under "phone seating"; the tech tree's is in tech.css. These variables are there
+   for all of them: --top-h and --hot-h (the two bars), --edge-l and --edge-r (side margins that
+   respect the safe area), --strip-h (how far the strip reaches down the stage), --lift (height of
+   an open bottom sheet) and --shift (width of a sheet docked at the side). */
 
 /* ================= 1. every screen ================= */
 
@@ -88,6 +90,13 @@ html.phone body { position: fixed; inset: 0; width: 100%; }
 #app.phone #top.roomy .techbtn .tlab { display: inline; }
 @media (min-width: 560px) {
   #app.phone .techbtn .tlab { display: inline; }
+}
+/* Narrower than 360 px (not a size this is tuned for, but it should not break): no logo, no word, less air. */
+@media (max-width: 350px) {
+  #app.phone .logo, #app.phone #top.roomy .techbtn .tlab { display: none; }
+  #app.phone #top, #app.phone .resrow, #app.phone .acts { gap: 4px; }
+  #app.phone .res.credits { gap: 5px; padding: 0 5px 0 7px; }
+  #app.phone .datas { padding: 0 5px; }
 }
 /* How many techs are ready rides on the button's corner. */
 #app.phone .techbtn .badge { position: absolute; right: -3px; top: -3px; min-width: 18px; height: 18px; padding: 0 5px; font-size: 11px; line-height: 18px; text-align: center; box-shadow: 0 0 0 2px var(--chrome); }

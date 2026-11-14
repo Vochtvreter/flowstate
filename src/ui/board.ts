@@ -76,6 +76,8 @@ let depositsHtml = '';
 let selNodeId: number | null = null;
 let selWireId: number | null = null;
 let targetId: number | null = null;
+// (`far` and `tiny` are overview modes for zooms under 0.6 and 0.5. With today's floors, 0.7 and 0.74 (see
+// `zoomMin`), the board never gets there; they are kept for the day a floor is lowered.)
 let far = false;
 /** Zoomed out so far that the small print on cards cannot be read; it is then not kept up to date. */
 let tiny = false;

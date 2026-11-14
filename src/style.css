@@ -340,3 +340,9 @@ html[data-input='touch'] #zoom .zl { height: 44px; }
   .datas[data-n='1'] .res.data .sym, .datas[data-n='1'] .res.data .nums b { font-size: 15px; line-height: 18px; }
   .techbtn .tl2 { display: none; }
 }
+/* Just above the phone layout's width, with 44 px buttons for a finger, the bar is at its fullest: it gives up its divider and some air. */
+@media (max-width: 760px) {
+  #top { gap: 6px; padding: 0 10px; }
+  #top .sep { display: none; }
+  .acts { gap: 6px; }
+}
