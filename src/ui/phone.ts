@@ -116,11 +116,13 @@ function cover(): Insets {
 
 /**
  * Let a sheet be swiped down by its grab handle or its header to dismiss it. The sheet follows
- * the finger; past a third of its height, or with a quick flick, it goes.
+ * the finger; past a quarter of its height, or with a quick flick (400 px a second), it goes.
  */
 function swipeToDismiss(sheet: HTMLElement, dismiss: () => void) {
-  let id = -1, x0 = 0, y0 = 0, dy = 0, t0 = 0, on = false;
+  let id = -1, x0 = 0, y0 = 0, dy = 0, on = false;
   let settle = 0;
+  // Where the finger was about a tenth of a second ago, for its speed at the moment it lifts.
+  let py = 0, pt = 0, qy = 0, qt = 0;
   sheet.addEventListener('pointerdown', (e) => {
     if (!env.phone || id !== -1 || (e.pointerType === 'mouse' && e.button !== 0)) return;
     const t = e.target as HTMLElement;
@@ -129,12 +131,20 @@ function swipeToDismiss(sheet: HTMLElement, dismiss: () => void) {
     x0 = e.clientX;
     y0 = e.clientY;
     dy = 0;
-    t0 = performance.now();
+    py = qy = y0;
+    pt = qt = performance.now();
     on = false;
   });
   sheet.addEventListener('pointermove', (e) => {
     if (e.pointerId !== id) return;
     dy = e.clientY - y0;
+    const now = performance.now();
+    if (now - qt > 60) {
+      py = qy;
+      pt = qt;
+      qy = e.clientY;
+      qt = now;
+    }
     if (!on) {
       if (dy < 8 || Math.abs(e.clientX - x0) > dy) return;
       on = true;
@@ -144,14 +154,20 @@ function swipeToDismiss(sheet: HTMLElement, dismiss: () => void) {
     }
     sheet.style.transform = `translateY(${Math.max(0, dy - 8)}px)`;
   });
+  // Chromium takes a quick drag it was not told about for the start of a fling, and then swallows
+  // the next tap anywhere on the page. Claiming the moves of a swipe in progress prevents that.
+  sheet.addEventListener('touchmove', (e) => {
+    if (on && e.cancelable) e.preventDefault();
+  }, { passive: false });
   const end = (e: PointerEvent) => {
     if (e.pointerId !== id) return;
     id = -1;
     if (!on) return;
     on = false;
     sheet.classList.remove('swiping');
-    const quick = dy > 36 && dy / Math.max(1, performance.now() - t0) > 0.55;
-    const gone = e.type === 'pointerup' && (quick || dy > Math.max(64, sheet.offsetHeight * 0.33));
+    const speed = (e.clientY - py) / Math.max(16, performance.now() - pt);
+    const quick = dy > 24 && speed > 0.4;
+    const gone = e.type === 'pointerup' && (quick || dy > Math.max(56, sheet.offsetHeight * 0.25));
     if (gone) {
       // It carries on down from where the finger left it; the class that keeps it hidden follows.
       sheet.style.transform = 'translateY(105%)';
