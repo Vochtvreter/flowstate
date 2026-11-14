@@ -17,7 +17,11 @@
 #hud #toasts { left: 12px; right: 12px; transform: none; }
 /* While the tech tree covers the board, a goal that is ready rides above it (the tree is 40, toasts
    50) as one slim bar: title, reward, Claim. The order and the alert wait underneath. */
-#hud-strip.over-tech { z-index: 45; }
+#hud-strip.over-tech { z-index: 45; padding-right: var(--tech-side, 320px); }
+/* The bar is centred over the tree's own column: the column on the right (--tech-side wide) holds
+   the tree's way out and its Research button, which nothing may cover. With the inspector open the
+   stage already ends where that column begins. */
+#app:has(#insp.open) #hud-strip.over-tech, #app.phone #hud-strip.over-tech { padding-right: 0; }
 #hud-strip.over-tech #order, #hud-strip.over-tech #hud-alert, #hud-strip.over-tech .gc-head, #hud-strip.over-tech .gc-lbl { display: none; }
 
 /* ---------- goal card ---------- */
@@ -47,9 +51,10 @@ div.gc-rewards { justify-content: flex-start; margin-top: 2px; }
 [data-ready='1'] .rw { height: 24px; padding: 0 9px; font-size: 13px; line-height: 24px; }
 
 #hud-strip.over-tech #goal { flex: 0 1 auto; gap: 14px; padding: 6px 6px 6px 16px; border-radius: 16px; }
-#hud-strip.over-tech .gc-main { flex: 0 1 auto; flex-direction: row; align-items: center; flex-wrap: wrap; gap: 4px 12px; }
-#hud-strip.over-tech .gc-title { font-size: 15px; line-height: 19px; }
-#hud-strip.over-tech div.gc-rewards { margin-top: 0; }
+/* One row whatever the width: the title gives way (…) before the reward or Claim do. */
+#hud-strip.over-tech .gc-main { flex: 0 1 auto; flex-direction: row; align-items: center; flex-wrap: nowrap; gap: 12px; }
+#hud-strip.over-tech .gc-title { flex: 0 1 auto; min-width: 0; font-size: 15px; line-height: 19px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+#hud-strip.over-tech div.gc-rewards { flex: none; flex-wrap: nowrap; margin-top: 0; }
 #hud-strip.over-tech .claim { min-width: 96px; height: 44px; border-radius: 12px; font-size: 16px; }
 
 /* The tip line: what to do while waiting. */
@@ -227,6 +232,7 @@ html[data-input='touch'] #insp .link::after { content: ''; position: absolute; i
   #hud { padding: 8px 8px 0; }
   #goal { flex-wrap: wrap; gap: 10px; padding: 10px 12px 11px; }
   #goal .claim { flex: 1 1 100%; }
+  #hud-strip.over-tech { padding-right: 0; }
   /* A full-width button breathes less across, or its halo would reach far outside the card. */
   #goal .claim::before { animation-name: claim-breathe-wide; }
   #goal .claim::after { animation-name: claim-halo-wide; }
