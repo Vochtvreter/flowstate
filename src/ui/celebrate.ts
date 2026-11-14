@@ -252,7 +252,7 @@ const RAINBOW = ['shard', 'ink', 'spark', 'mist', 'glyph', 'prism'] as const;
 
 function lensCard(life: number) {
   start({
-    kind: 'lens', title: 'First Lens', line: 'Demo complete · your supply line is running', glyph: matGlyph('lens', 80), color: MATERIALS.lens.color,
+    kind: 'lens', title: 'First Lens', line: 'Demo complete · free play is open', glyph: matGlyph('lens', 80), color: MATERIALS.lens.color,
     life, block: false,
     show: (at) => {
       // Three waves, each in the colours of what the factory makes on the way to a Lens.

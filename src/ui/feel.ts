@@ -287,10 +287,24 @@ function onPlace(d: { id: number }) {
 // ---------- Flow State ----------
 
 let inFlow = false;
+let edge: HTMLElement | null = null;
+let edgeOn = false;
+let breathTimer = 0;
 
 function tickFlow() {
   const g = ui.g;
-  const on = inFlowState(g) && !g.paused;
+  const state = inFlowState(g);
+  // The glow around the board. It fades in and out by itself (feel.css); the breathing is switched off
+  // only once the fade-out has finished, so nothing jumps.
+  if (edge && state !== edgeOn) {
+    edgeOn = state;
+    setClass(edge, 'on', state);
+    clearTimeout(breathTimer);
+    if (state) setClass(edge, 'breathe', true);
+    else breathTimer = window.setTimeout(() => edge && setClass(edge, 'breathe', false), 3000);
+  }
+  // The hum and the quicker dots stop while the game is paused: a paused factory is not humming.
+  const on = state && !g.paused;
   if (on !== inFlow) {
     inFlow = on;
     setMood(on ? 1 : 0);
@@ -340,7 +354,7 @@ export function initFeel() {
 
   // The glow around the board's edge in Flow State. It sits in the stage, above the board and under the HUD.
   const stage = document.getElementById('stage');
-  if (stage) stage.appendChild(el(`<div id="feel-edge" aria-hidden="true"></div>`));
+  if (stage) stage.appendChild((edge = el(`<div id="feel-edge" aria-hidden="true"></div>`)));
 
   window.addEventListener('pointerdown', (e) => (lastPress = { x: e.clientX, y: e.clientY }), { capture: true, passive: true });
 

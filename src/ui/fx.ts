@@ -194,6 +194,8 @@ export function setFlows(list: Flow[]) {
   stale = true;
 }
 
+const calm = typeof matchMedia === 'function' ? matchMedia('(prefers-reduced-motion: reduce)') : null;
+
 /** A spot on the board that should pulse gently to invite a click (an output port with nothing attached). */
 export interface Beacon { x: number; y: number; r: number }
 let beacons: Beacon[] = [];
@@ -213,7 +215,8 @@ const onScreen = (b: Beacon, view: { x: number; y: number; k: number }) => {
 function drawBeacons(c: CanvasRenderingContext2D, view: { x: number; y: number; k: number }) {
   const k = view.k;
   // One breath every 1.6 s: a soft white ring that swells from the port's edge and settles back.
-  const s = 0.5 - 0.5 * Math.cos((beaconClock / 1.6) * Math.PI * 2);
+  // (A steady ring for players who have asked for less motion.)
+  const s = calm?.matches ? 0.6 : 0.5 - 0.5 * Math.cos((beaconClock / 1.6) * Math.PI * 2);
   const spread = (1 + 5 * s) * k;
   c.beginPath();
   for (const b of beacons) {
