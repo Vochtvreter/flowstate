@@ -48,8 +48,9 @@ function trial(g: Game, a: Advice, limit = 900) {
 function checkWording(a: Advice) {
   for (const text of [a.text.mouse, a.text.touch]) {
     expect(text.length, text).toBeGreaterThan(20);
-    expect(text.length, text).toBeLessThan(230);
+    expect(text.length, text).toBeLessThan(200);
     expect(text.endsWith('.'), text).toBe(true);
+    expect(text.slice(0, -1), `one sentence: ${text}`).not.toMatch(/[.!?] /);
     expect(text, text).not.toMatch(/undefined|NaN|null|\[object/);
     expect(text, text).not.toMatch(/\b(key|Ctrl|Shift|Delete|Backspace|Esc)\b/);
   }
@@ -375,8 +376,8 @@ describe('advice: the repertoire, one board at a time', () => {
       const a = advice(g)!;
       expect(a, 'a Flow tip').not.toBeNull();
       expect(a.kind).toBe('flow');
-      expect(a.text.mouse).toMatch(/^(The|A|An) \w+ Well is holding Flow back: it makes more \w+ than its machines take, and the Market buys the rest\. Drag from /);
-      expect(a.text.touch).toMatch(/is holding Flow back: .*\. Tap /);
+      expect(a.text.mouse).toMatch(/^(The|A|An) \w+ Well is holding Flow back because it makes more \w+ than its machines take: drag from (the|a|an) \w+ Well's port to the Market\.$/);
+      expect(a.text.touch).toMatch(/is holding Flow back because .*: tap (the|a|an) \w+ Well's port, then tap the Market\.$/);
       checkWording(a);
       const before = flowInfo(g).flowing;
       const idle = lookahead(g)!;
@@ -410,7 +411,8 @@ describe('advice: the repertoire, one board at a time', () => {
     at(g, 'hold-flow');
     const a = advice(g)!;
     expect(a.kind).toBe('flow');
-    expect(a.text.mouse).toBe('The Spark Refiner is holding Flow back: it is short of Ember, and the Ember Well cannot make more. Click the Ember Well and buy Speed (50¢).');
+    expect(a.text.mouse).toBe('The Spark Refiner is holding Flow back because it is short of Ember: click the Ember Well and buy Speed (50¢).');
+    expect(a.text.touch).toBe('The Spark Refiner is holding Flow back because it is short of Ember: tap the Ember Well and buy Speed (50¢).');
     expect(a.node).toBe(ember.id);
     expect(a.upgrade).toBe('speed');
     expect(a.cost).toBe(50);

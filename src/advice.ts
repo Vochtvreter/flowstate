@@ -263,6 +263,7 @@ function portName(g: Game, p: Port): string {
 }
 
 const cap = (s: string) => s.charAt(0).toUpperCase() + s.slice(1);
+const low = (s: string) => s.charAt(0).toLowerCase() + s.slice(1);
 const an = (noun: string) => `${/^[AEIOU]/.test(noun) ? 'an' : 'a'} ${noun}`;
 const price = (c: number) => `${Math.round(c)}¢`;
 
@@ -319,7 +320,7 @@ interface Cand {
   cost: number;
   /** A rough guess at how much it helps. Only decides which candidates get tried when there are too many. */
   hope: number;
-  /** The words: `mouse` and `touch` say how, `why` what for; `lead` (Flow tips) names the culprit first. */
+  /** The words: `mouse` and `touch` say how, `why` what for. A Flow tip names the culprit first (`lead`), and `why` is what is wrong with it. */
   mouse: string;
   touch: string;
   why: string;
@@ -679,7 +680,7 @@ function flowCands(g: Game): Cand[] {
         if (from) add(wireCand(g, from, n, hope, `it gets no ${name}`));
       }
       for (const s of sources) {
-        if (s.util >= 0.9) add(speedCand(g, s, hope, `it is short of ${name}, and ${the(g, s)} cannot make more`));
+        if (s.util >= 0.9) add(speedCand(g, s, hope, `it is short of ${name}`));
       }
       const d = freeDeposits(g).find((x) => x.mat === m);
       if (d) add(wellCand(g, d, n, hope - 0.5, `it is short of ${name}`));
@@ -693,12 +694,12 @@ function flowCands(g: Game): Cand[] {
       const name = MATERIALS[p.mat].name;
       if (market && !feeds(g, p, 'market')) {
         add(wireCand(g, p, market, hope, ws.some((x) => machineAt(g, x.to))
-          ? `it makes more ${name} than its machines take, and the Market buys the rest`
+          ? `it makes more ${name} than its machines take`
           : `its ${name} has nowhere to go`));
       }
       for (const x of ws) {
         const c = node(g, x.to)!;
-        if (isMachine(c) && c.util >= 0.9) add(speedCand(g, c, hope - 1, `${the(g, c)} cannot take all the ${name} it makes`));
+        if (isMachine(c) && c.util >= 0.9) add(speedCand(g, c, hope - 1, `it makes more ${name} than ${the(g, c)} can take`));
       }
     }
   });
@@ -842,9 +843,9 @@ function toAdvice(w: Wait, v: Verdict): Advice {
   const c = v.cand;
   const a: Advice = {
     kind: w.kind === 'data' ? 'data' : w.kind === 'flow' ? 'flow' : 'credits',
-    // A Flow tip names the culprit first: "The Murk Well is holding Flow back: it makes more than... Drag from...".
+    // A Flow tip names the culprit first: "The Murk Well is holding Flow back because it makes more Murk than its machines take: drag from...".
     text: c.lead
-      ? { mouse: `${c.lead}: ${c.why}. ${c.mouse}.`, touch: `${c.lead}: ${c.why}. ${c.touch}.` }
+      ? { mouse: `${c.lead} because ${c.why}: ${low(c.mouse)}.`, touch: `${c.lead} because ${c.why}: ${low(c.touch)}.` }
       : { mouse: `${c.mouse}: ${c.why}.`, touch: `${c.touch}: ${c.why}.` },
     eta: v.base,
     cost: c.cost,
@@ -930,7 +931,7 @@ export function adviceTrials(g: Game): { kind: string; idle: { ends: number; sco
   const cands = w.kind === 'data' ? dataCands(g, w) : w.kind === 'credits' ? creditCands(g) : w.kind === 'flow' ? flowCands(g) : orderCands(g);
   const trials = top(cands, cands.length).map((c): AdviceTrial => {
     const copy = lookahead(g);
-    const text = c.lead ? `${c.lead}: ${c.why}. ${c.mouse}.` : `${c.mouse}: ${c.why}.`;
+    const text = c.lead ? `${c.lead} because ${c.why}: ${low(c.mouse)}.` : `${c.mouse}: ${c.why}.`;
     if (!copy || !perform(copy, c.act)) return { text, cost: c.cost, doable: false, ends: Infinity, score: Infinity, worth: false };
     const o = tryOut(copy, w, isFinite(base.t) ? base.t : screen);
     return { text, cost: c.cost, doable: true, ends: o.t, score: o.score, worth: worth(base.score, o.score) };
