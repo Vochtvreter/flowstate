@@ -659,6 +659,17 @@ export function pop(at: Pt, color: string, r = 13, o?: LayerOpt) {
   p.color = color;
 }
 
+/**
+ * Take every particle away at once, without running what was waiting for a coin to land (the game
+ * was reset: whatever those were about is gone). The layers are wiped on the next frame.
+ */
+export function clearParticles() {
+  for (const p of pool) if (p.kind !== 0) kill(p);
+  liveBy[0] = liveBy[1] = liveBy[2] = 0;
+  splitBy[0] = splitBy[1] = splitBy[2] = 0;
+  stale = true;
+}
+
 const easeInOut = (u: number) => (u < 0.5 ? 2 * u * u : 1 - ((2 - 2 * u) * (2 - 2 * u)) / 2);
 /** A small particle this near the edge of a layer is drawn on both sides of it, so it is never cut in half. */
 const EDGE = 12;
