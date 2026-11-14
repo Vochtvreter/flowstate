@@ -11,6 +11,8 @@ npm run dev      # http://localhost:5173
 
 `npm run build` writes a static site to `dist/` (relative paths, so it can be hosted anywhere). `npm test` runs the simulation tests.
 
+Every push to `main` runs the tests and deploys the build to GitHub Pages (`.github/workflows/deploy.yml`). This needs Pages turned on once: repository Settings → Pages → Source: **GitHub Actions**.
+
 ## Controls
 
 | Action | How |
