@@ -5,14 +5,18 @@
 #tech {
   --rdy: #5eead4;
   position: absolute; left: 0; right: 0; top: 56px; bottom: 0; z-index: 40;
-  display: none; grid-template-columns: minmax(0, 1fr) 340px; grid-template-rows: auto minmax(0, 1fr);
+  display: none; grid-template-columns: minmax(0, 1fr) 340px; grid-template-rows: auto auto minmax(0, 1fr);
+  grid-template-areas: 'head head' 'goal goal' 'tree detail';
   background: #0a0e16;
 }
 #tech.open { display: grid; animation: tech-in 0.16s ease-out; }
+/* Nothing in here is text to select; a long press or a double tap must not select or zoom. */
+#tech { -webkit-user-select: none; user-select: none; -webkit-touch-callout: none; }
+#tech button { -webkit-tap-highlight-color: transparent; touch-action: manipulation; }
 @keyframes tech-in { from { opacity: 0; transform: translateY(6px); } }
 
 /* ---------- header: title, Data in hand, close ---------- */
-#tech .thead { grid-column: 1 / -1; display: flex; align-items: center; gap: 14px; min-height: 64px; padding: 8px 16px 8px 24px; border-bottom: 1px solid var(--line); }
+#tech .thead { grid-area: head; display: flex; align-items: center; gap: 14px; min-height: 64px; padding: 8px 16px 8px 24px; border-bottom: 1px solid var(--line); }
 #tech .ttl { flex: 1 1 auto; min-width: 0; }
 #tech .ttl h1 { margin: 0; font-family: var(--disp); font-size: 22px; font-weight: 700; letter-spacing: -0.01em; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 #tech .ttl p { margin: 2px 0 0; font-size: 12.5px; color: var(--muted); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
@@ -24,10 +28,19 @@
 /* Key names are for people with a keyboard. */
 html[data-input='touch'] #tech .kbd { display: none; }
 
-#tech .ttabs { display: none; }
+/* A goal is waiting on the board: one bar that takes the player back to claim it. */
+#tech .tgoal { grid-area: goal; display: flex; align-items: center; gap: 10px; min-height: 44px; padding: 6px 16px 6px 24px; border: 0; border-bottom: 1px solid #5a4718; background: #2a2110; color: var(--credits); font-size: 13px; text-align: left; animation: tgoal-in 0.35s cubic-bezier(0.2, 1.4, 0.4, 1); }
+#tech .tgoal svg { flex: none; }
+#tech .tgoal .gt { flex: 1; min-width: 0; display: flex; align-items: baseline; gap: 8px; color: #f3e3bd; }
+#tech .tgoal .gt b { flex: none; color: var(--credits); font-weight: 700; }
+#tech .tgoal .gt span { min-width: 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+#tech .tgoal .go { flex: none; padding: 5px 12px; border-radius: 999px; background: var(--credits); color: #1a1405; font-size: 12.5px; font-weight: 700; white-space: nowrap; }
+@keyframes tgoal-in { from { opacity: 0; transform: translateY(-8px); } }
+
+#tech .ttabs { grid-area: tabs; display: none; }
 
 /* ---------- the tree: one row per branch ---------- */
-#tech .tree { grid-column: 1; grid-row: 2; overflow-x: hidden; overflow-y: auto; overscroll-behavior: contain; padding: 0 24px 14px; }
+#tech .tree { grid-area: tree; overflow-x: hidden; overflow-y: auto; overscroll-behavior: contain; padding: 0 24px 14px; }
 #tech .tbranch { display: grid; grid-template-columns: 150px minmax(0, 1fr); gap: 8px 18px; padding: 13px 0; border-top: 1px solid #1a2234; }
 #tech .tbranch:first-child { border-top: 0; }
 #tech .bh h2 { margin: 3px 0 0; font-family: var(--disp); font-size: 15px; font-weight: 700; }
@@ -89,7 +102,7 @@ html[data-input='touch'] #tech .kbd { display: none; }
 @keyframes tt-new { from { opacity: 0; transform: translateY(8px); } }
 
 /* ---------- detail: what it does, what it costs, Research ---------- */
-#tech .tdetail { grid-column: 2; grid-row: 2; display: flex; flex-direction: column; min-width: 0; min-height: 0; background: var(--chrome); border-left: 1px solid var(--line); }
+#tech .tdetail { grid-area: detail; display: flex; flex-direction: column; min-width: 0; min-height: 0; background: var(--chrome); border-left: 1px solid var(--line); }
 #tech .dbody { flex: 1 1 auto; min-height: 0; overflow-y: auto; overscroll-behavior: contain; display: flex; flex-direction: column; gap: 10px; padding: 18px 20px 20px; }
 #tech .dtop { display: flex; align-items: center; gap: 6px; min-height: 24px; }
 #tech .tag { font-size: 10.5px; font-weight: 700; letter-spacing: 0.08em; text-transform: uppercase; color: #9db8ff; padding: 3px 8px; border-radius: 6px; background: #17213a; white-space: nowrap; }
@@ -128,7 +141,8 @@ html[data-input='touch'] #tech .kbd { display: none; }
 #tech .rbtn.ok { background: var(--rdy); border-color: var(--rdy); color: #062b25; box-shadow: 0 0 22px rgba(94, 234, 212, 0.25); }
 #tech .rbtn.ok:active { transform: scale(0.98); }
 #tech .rbtn.ok .kbd { position: relative; border-color: rgba(6, 43, 37, 0.35); background: rgba(6, 43, 37, 0.12); color: #062b25; }
-#tech .rbtn.wake { animation: tt-wake 0.9s cubic-bezier(0.2, 1.5, 0.4, 1); }
+#tech .rbtn.wake { animation: rbtn-wake 0.6s cubic-bezier(0.2, 1.5, 0.4, 1); }
+@keyframes rbtn-wake { 0% { transform: scale(0.97); } 40% { transform: scale(1.03); } 100% { transform: scale(1); } }
 #tech .owned { display: flex; align-items: center; gap: 8px; height: 48px; font-size: 14px; font-weight: 600; color: var(--rdy); }
 
 /* Hover is for pointers that can hover; on touch it would stick to the last thing tapped. */
@@ -138,7 +152,7 @@ html[data-input='touch'] #tech .kbd { display: none; }
   #tech .tt.own:hover, #tech .tt.veil:hover { background: #10172580; }
   #tech .tt.rdy:hover { background: #12302b; }
   #tech .tt.goal:hover { background: #162038; }
-  #tech .rbtn.ok:hover { filter: brightness(1.08); }
+  #tech .rbtn.ok:hover, #tech .tgoal:hover .go { filter: brightness(1.08); }
 }
 
 /* A narrow window that is not a phone: headings sit above their tiles and the detail column slims down. */
@@ -146,16 +160,18 @@ html[data-input='touch'] #tech .kbd { display: none; }
   #tech { grid-template-columns: minmax(0, 1fr) 300px; }
   #tech .tbranch { grid-template-columns: minmax(0, 1fr); }
   #tech .bh, #tech .tlist, #tech .towned { grid-column: 1; grid-row: auto; }
+  #tech .tgoal { padding-left: 16px; }
   #tech .tlist { grid-template-columns: repeat(auto-fill, minmax(170px, 1fr)); }
   #tech .ttl p { display: none; }
 }
 
 /* ---------- phone: full-screen sheet, branch tabs, rows, detail as a bottom sheet ---------- */
 #app.phone #tech {
-  top: 0; grid-template-columns: minmax(0, 1fr); grid-template-rows: auto auto minmax(0, 1fr) auto;
+  top: 0; grid-template-columns: minmax(0, 1fr); grid-template-rows: auto auto auto minmax(0, 1fr) auto;
+  grid-template-areas: 'head' 'goal' 'tabs' 'tree' 'detail';
   padding: env(safe-area-inset-top) env(safe-area-inset-right) 0 env(safe-area-inset-left);
 }
-#app.phone #tech .thead { grid-column: 1; min-height: 56px; gap: 8px; padding: 6px 6px 6px 14px; border-bottom: 0; }
+#app.phone #tech .thead { min-height: 56px; gap: 8px; padding: 6px 6px 6px 14px; border-bottom: 0; }
 #app.phone #tech .ttl h1 { font-size: 17px; }
 #app.phone #tech .ttl p { display: none; }
 #app.phone #tech .tdata { gap: 6px; }
@@ -165,14 +181,17 @@ html[data-input='touch'] #tech .kbd { display: none; }
 #app.phone #tech .tclose { width: 44px; height: 44px; padding: 0; justify-content: center; border: 0; background: transparent; }
 #app.phone #tech .tclose .lab, #app.phone #tech .tclose .kbd { display: none; }
 
-#app.phone #tech .ttabs { grid-column: 1; grid-row: 2; display: flex; gap: 0; padding: 0 6px; overflow-x: auto; overflow-y: hidden; scrollbar-width: none; overscroll-behavior: contain; border-bottom: 1px solid var(--line); }
+#app.phone #tech .tgoal { min-height: 52px; padding: 6px 12px 6px 14px; }
+#app.phone #tech .tgoal .gt { flex-direction: column; align-items: stretch; gap: 1px; line-height: 17px; }
+#app.phone #tech .tgoal .go { padding: 8px 12px; }
+#app.phone #tech .ttabs { display: flex; gap: 0; padding: 0 6px; overflow-x: auto; overflow-y: hidden; scrollbar-width: none; overscroll-behavior: contain; border-bottom: 1px solid var(--line); }
 #app.phone #tech .ttabs::-webkit-scrollbar { display: none; }
 #tech .ttab { position: relative; flex: 1 0 auto; display: inline-flex; align-items: center; justify-content: center; gap: 6px; min-width: 60px; height: 46px; padding: 0 9px; border: 0; background: transparent; color: var(--muted); font-size: 13.5px; font-weight: 600; white-space: nowrap; }
 #tech .ttab.on { color: var(--text); }
 #tech .ttab.on::after { content: ''; position: absolute; left: 8px; right: 8px; bottom: 0; height: 3px; border-radius: 3px 3px 0 0; background: var(--sel); }
 #tech .ttab .dot { flex: none; width: 8px; height: 8px; border-radius: 50%; background: var(--rdy); box-shadow: 0 0 8px rgba(94, 234, 212, 0.7); }
 
-#app.phone #tech .tree { grid-column: 1; grid-row: 3; padding: 10px 12px calc(16px + env(safe-area-inset-bottom)); touch-action: pan-y; -webkit-overflow-scrolling: touch; }
+#app.phone #tech .tree { padding: 10px 12px calc(16px + env(safe-area-inset-bottom)); touch-action: pan-y; -webkit-overflow-scrolling: touch; }
 #app.phone #tech.sheet .tree { padding-bottom: 16px; }
 #app.phone #tech .tbranch { display: block; padding: 0; border: 0; }
 #app.phone #tech .bh h2 { display: none; }
@@ -186,13 +205,14 @@ html[data-input='touch'] #tech .kbd { display: none; }
 #app.phone #tech .tt.own .c { display: block; }
 #app.phone #tech .tt .n, #app.phone #tech .tt .c { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 #app.phone #tech .tt .c { font-size: 12px; line-height: 16px; }
+#app.phone #tech .tt .gl { font-size: 10.5px; line-height: 16px; }
 #app.phone #tech .tt .pb { bottom: 4px; }
 /* A chevron says the row opens. */
 #app.phone #tech .tt .tx::after { content: ''; position: absolute; right: 14px; top: 50%; width: 7px; height: 7px; margin-top: -4px; border-right: 2px solid currentColor; border-top: 2px solid currentColor; transform: rotate(45deg); opacity: 0.4; }
 #app.phone #tech .tt .tx { padding-right: 18px; }
 #app.phone #tech .more { margin-top: 12px; padding: 12px 2px 0; }
 
-#app.phone #tech .tdetail { grid-column: 1; grid-row: 4; max-height: 46vh; max-height: min(46dvh, 440px); padding-bottom: env(safe-area-inset-bottom); border-left: 0; border-top: 1px solid #2c3854; border-radius: 18px 18px 0 0; box-shadow: 0 -14px 34px rgba(0, 0, 0, 0.55); animation: tech-sheet 0.2s ease-out; }
+#app.phone #tech .tdetail { max-height: 46vh; max-height: min(46dvh, 440px); padding-bottom: env(safe-area-inset-bottom); border-left: 0; border-top: 1px solid #2c3854; border-radius: 18px 18px 0 0; box-shadow: 0 -14px 34px rgba(0, 0, 0, 0.55); animation: tech-sheet 0.2s ease-out; }
 @keyframes tech-sheet { from { opacity: 0; transform: translateY(28px); } }
 #app.phone #tech .dbody { padding: 12px 16px 14px; gap: 8px; }
 #app.phone #tech .dbody h2 { font-size: 21px; }
@@ -211,15 +231,16 @@ html[data-input='touch'] #tech .kbd { display: none; }
 }
 @media (orientation: landscape) {
   /* On its side there is no height for a bottom sheet: the detail sits beside the list, always open. */
-  #app.phone #tech { grid-template-columns: minmax(0, 1fr) minmax(280px, 42%); grid-template-rows: auto auto minmax(0, 1fr); }
-  #app.phone #tech .thead { grid-column: 1 / -1; min-height: 48px; padding-top: 2px; padding-bottom: 2px; }
+  #app.phone #tech { grid-template-columns: minmax(0, 1fr) minmax(280px, 42%); grid-template-rows: auto auto auto minmax(0, 1fr); grid-template-areas: 'head head' 'goal goal' 'tabs detail' 'tree detail'; }
+  #app.phone #tech .thead { min-height: 48px; padding-top: 2px; padding-bottom: 2px; }
+  #app.phone #tech .tgoal { min-height: 44px; }
   #app.phone #tech .tree, #app.phone #tech.sheet .tree { padding-bottom: calc(12px + env(safe-area-inset-bottom)); }
-  #app.phone #tech .tdetail { grid-column: 2; grid-row: 2 / 4; max-height: none; border-top: 0; border-left: 1px solid var(--line); border-radius: 0; box-shadow: none; animation: none; }
+  #app.phone #tech .tdetail { max-height: none; border-top: 0; border-left: 1px solid var(--line); border-radius: 0; box-shadow: none; animation: none; }
   #app.phone #tech .dhide { display: none; }
 }
 
 @media (prefers-reduced-motion: reduce) {
-  #tech.open, #tech .tt, #tech .tt::before, #tech .tt::after, #tech .tt .ti, #tech .rbtn, #tech .tdetail { animation: none !important; }
+  #tech.open, #tech .tt, #tech .tt::before, #tech .tt::after, #tech .tt .ti, #tech .rbtn, #tech .tdetail, #tech .tgoal { animation: none !important; }
   #tech .tt.rdy::after { opacity: 0.7; }
   #tech .tt .pb i, #tech .cbar i, #tech .rbtn .fill, #tech .sw, #tech .sw::after { transition: none; }
 }

@@ -196,6 +196,9 @@ const fresh = new Map<string, { kind: 'wake' | 'won' | 'new'; until: number }>()
 const FRESH_MS = 1200;
 /** What to do with the scroll position after the next refresh. */
 let scrollTo: 'top' | 'show' | null = null;
+/** When the tree last refreshed by itself. Refreshes nobody pressed for keep at least this far apart: twice a second at most. */
+let idleAt = -1e9;
+const MIN_GAP_MS = 450;
 
 /** The phone layout is in use (the phone module sets the class). */
 const isPhone = () => !!(appEl ??= document.getElementById('app'))?.classList.contains('phone');
@@ -225,8 +228,9 @@ export function initTech(el: HTMLElement) {
   // Enter researches the selected tech, so a player with Data to spend can keep going from the keyboard.
   window.addEventListener('keydown', (e) => {
     if (!ui.techOpen || e.key !== 'Enter' || e.repeat || e.ctrlKey || e.metaKey || e.altKey) return;
-    const target = e.target as HTMLElement | null;
-    if (target?.closest?.('button, a, input, textarea, select')) return; // a focused control answers Enter itself
+    // A focused control answers Enter itself, except the selected tile: Enter there means "research this".
+    const control = (e.target as HTMLElement | null)?.closest?.('button, a, input, textarea, select');
+    if (control && !(control.classList.contains('tt') && control.getAttribute('data-key') === ui.techSel)) return;
     if (document.getElementById('modal')?.classList.contains('open')) return;
     if (!ui.techSel) return;
     e.preventDefault();
@@ -259,15 +263,19 @@ function doResearch(id: string) {
   const t = TECHS[id];
   if (!t || !research(g, id)) return; // the unlock toast comes from the game event
   const next = sortTiles(techTiles(g).filter((x) => x.t.branch === t.branch), goalTech(g)).find((x) => x.state === 'rdy');
-  if (next) ui.techSel = next.t.id;
+  if (!next) return; // nothing more to buy here: stay on what was just researched
+  ui.techSel = next.t.id;
   scrollTo = 'show';
 }
 
-/** The tile to show when the tree is asked for a tech that may be too far ahead to be drawn: the nearest step toward it. */
+/**
+ * The tile to show when the tree is asked for a tech: the tech itself when the player can read it, else the
+ * nearest step toward it that can be acted on (a silhouette, or a tech too far ahead to be drawn, cannot).
+ */
 function stepToward(tiles: Tile[], id: string): Tile | null {
   const byId = new Map(tiles.map((x) => [x.t.id, x]));
   const exact = byId.get(id);
-  if (exact) return exact;
+  if (exact && !exact.veiled) return exact;
   let veiledHit: Tile | null = null;
   const visited = new Set<string>();
   let level = [id];
@@ -288,10 +296,12 @@ function stepToward(tiles: Tile[], id: string): Tile | null {
   return veiledHit;
 }
 
-/** With nothing ready: what the goal asks for, else whatever will be affordable soonest. */
+/** With nothing ready: what the goal asks for, else what the player last looked at, else whatever will be affordable soonest. */
 function bestWaiting(g: Game, tiles: Tile[], want: string | null): Tile | null {
   const wanted = tiles.find((x) => x.t.id === want);
   if (wanted) return wanted;
+  const kept = tiles.find((x) => x.t.id === ui.techSel && x.state !== 'own');
+  if (kept) return kept;
   let best: Tile | null = null;
   let bestEta = Infinity;
   for (const x of tiles) {
@@ -330,12 +340,10 @@ export function openTech(id?: string) {
   if (asked && id && asked.t.id !== id) {
     toast(`<span><b>${esc(TECHS[id].name)}</b> comes later. Next step: <b>${esc(asked.t.name)}</b>.</span>`, 'info', 4500);
   }
-  const ready = firstReady(groups);
-  const kept = tiles.find((x) => x.t.id === ui.techSel && x.state !== 'own');
-  const pick = asked ?? ready ?? kept ?? bestWaiting(g, tiles, want);
+  const pick = asked ?? firstReady(groups) ?? bestWaiting(g, tiles, want);
   ui.techSel = pick?.t.id ?? null;
   tab = pick?.t.branch ?? null;
-  sheet = !!(asked || ready);
+  sheet = !!asked || pick?.state === 'rdy';
   // Nothing "wakes up" merely because the tree was opened.
   seen.clear();
   fresh.clear();
@@ -457,6 +465,10 @@ export function renderTech(force = false) {
   if (!ui.techOpen) return;
   const g = ui.g;
   const now = performance.now();
+  if (!force) {
+    if (now - idleAt < MIN_GAP_MS) return;
+    idleAt = now;
+  }
   const phone = isPhone();
   const tiles = techTiles(g);
   const want = goalTech(g);
@@ -501,7 +513,11 @@ export function renderTech(force = false) {
   }).join('');
   // Whatever is further ahead is not drawn at all; one quiet line says the tree will grow.
   const hiddenLeft = tiles.length < Object.values(TECHS).filter((t) => !techHidden(g, t)).length;
-  const html = `${headHtml(g, tiles)}<div class="ttabs" role="tablist"${phone ? '' : ' hidden'}>${tabs}</div>`
+  // A goal that is waiting to be claimed sits on the board, behind this screen: say so and offer the way back.
+  const done = g.goal.ready ? GOALS[g.goal.i] : null;
+  const claim = `<button class="tgoal" data-act="close"${done ? '' : ' hidden'}>`
+    + `${done ? `${glyph(FLAG, 18)}<span class="gt"><b>Goal complete</b><span>${esc(done.title)}</span></span><span class="go">Claim on the board</span>` : ''}</button>`;
+  const html = `${headHtml(g, tiles)}${claim}<div class="ttabs" role="tablist"${phone ? '' : ' hidden'}>${tabs}</div>`
     + `<div class="tree">${sections}${hiddenLeft ? '<p class="more">More shows up as you research.</p>' : ''}</div>`
     + `<aside class="tdetail" aria-label="Selected tech">${detailHtml(g, sel, want)}</aside>`;
 
