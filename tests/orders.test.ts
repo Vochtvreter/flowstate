@@ -162,6 +162,7 @@ describe('orders (2.5)', () => {
     // The next order is there at once and starts from zero.
     expect(take(g, 'order-new').length).toBe(1);
     expect(g.order).not.toBe(o);
+    expect(g.order!.mat).not.toBe(o.mat); // something else this time
     expect(g.order!.got).toBe(0);
     expect(g.order!.base).toBe(g.sold[g.order!.mat]);
     expect(claimOrder(g)).toBe(false);

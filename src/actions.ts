@@ -347,7 +347,10 @@ export function connect(g: Game, fromId: number, port: number, toId: number): Wi
     const b = nodeById(g, toId)!;
     if (isMachine(b) && !b.recipe) {
       const r = pickRecipe(g, b.type, materialsAt(g, fromId, port));
-      if (r) b.recipe = r.id;
+      if (r) {
+        b.recipe = r.id;
+        b.born = g.time; // it only becomes a working machine now: Flow gives it the usual head start
+      }
     }
     wire = makeWire(g, fromId, port, toId);
     g.wires.push(wire);

@@ -3,7 +3,8 @@
 // Once unlocked (g.ordersOn, a goal reward) there is always exactly one order: "deliver `need` of `mat`",
 // counted from items sold at any Market after the order appeared. No timer and no failure. A filled order
 // waits for claimOrder(g), which pays it and rolls the next one. An order nobody delivers to for
-// RULES.orders.staleSeconds is quietly replaced by one for a different material.
+// RULES.orders.staleSeconds is quietly replaced. The next order never asks for the same material as the
+// one it replaces, as long as the player makes something else.
 //
 // Generation uses only g.orderSeed (saved with the game), never Math.random, so the same play gives the
 // same orders.
@@ -156,7 +157,7 @@ export function claimOrder(g: Game): boolean {
   g.data.g += r.g;
   g.stats.ordersFilled++;
   g.events.push({ kind: 'order-claimed', order: o, reward: r, text: `Order delivered: ${orderText(o)}` });
-  roll(g, null, false);
+  roll(g, o.mat, false); // never the same material twice in a row when there is a choice
   return true;
 }
 

@@ -255,6 +255,14 @@ describe('Flow (2.3)', () => {
     expect(countsForFlow(g, r)).toBe(false);
     run(g, 21);
     expect(countsForFlow(g, r)).toBe(true);
+    // So does picking its first recipe: a machine placed long ago and only wired up now.
+    const late = placeNode(g, 'refiner', 700, 300)!;
+    run(g, 30);
+    expect(late.recipe).toBeNull();
+    connect(g, well(g).id, 0, late.id);
+    expect(late.recipe).toBe('shard');
+    expect(late.born).toBe(g.time);
+    expect(countsForFlow(g, late)).toBe(false);
   });
 
   it('goes by utilisation, not by the status pill', () => {
