@@ -14,7 +14,12 @@
 // The hints are what a newcomer does, to the letter. So every card that has the player make something new
 // also says to sell it (Ink, Spark, Glyph, Mist, Prism): a player who is never told leaves their dearest
 // goods unsold and their machines blocked, and cannot pay for the Fabricator.
-import { MATERIALS, MatId, NodeType, RULES, TECHS } from './content';
+//
+// The four goals with a long wait also carry a "while you wait" line (Goal.meanwhile): the one move that
+// shortens that wait most for a player who does only what the cards say. The card is the channel every
+// player obeys, so the structural advice lives there and not in the adviser's tips (src/advice.ts), which
+// nobody is sure to follow. How the lines were chosen is in docs/CONTENT.md ("While you wait").
+import { MATERIALS, MatId, NODE_DEFS, NodeType, RULES, TECHS } from './content';
 import { endDemo, expansionCost, grantTech, has, nodeCost, nodeCount, upgradeCost } from './economy';
 import { countsForFlow, isFlowing, nearShare } from './flow';
 import { graph } from './graph';
@@ -28,8 +33,9 @@ export type GoalProgress = [current: number, target: number, unit: string];
  * The next thing a goal needs bought: a tech to research, or something that costs credits. For a tech, `then`
  * is what the card asks the player to buy with credits straight after the research (the machine it unlocks),
  * when there is such a thing: the adviser reads it to see the whole of a wait, not only its first half.
+ * `what` and `thenWhat` name what the credits are for, as a card would ("the Fabricator").
  */
-export type GoalStep = { tech: string; then?: number } | { credits: number };
+export type GoalStep = { tech: string; then?: number; thenWhat?: string } | { credits: number; what?: string };
 
 export interface Goal {
   id: string;
@@ -49,6 +55,27 @@ export interface Goal {
   big?: boolean;
   /** A free-play goal after the capstone. */
   free?: boolean;
+  /** A standing line for the goal's wait: one more thing worth doing meanwhile. */
+  meanwhile?: Meanwhile;
+}
+
+/**
+ * One concrete thing to do while a goal's wait runs. It is true (doing it on the board a card-following player
+ * has ends that wait sooner: tests/meanwhile.test.ts tries it the way tips are tried), and it is never
+ * something a later card or a tip undoes.
+ */
+export interface Meanwhile {
+  /** One sentence, worded for mouse and keyboard and for touch: at most 90 characters each. */
+  text: { mouse: string; touch: string };
+  /** It has been done: the card ticks the line off. */
+  done(g: Game): boolean;
+  /** Does the line apply right now? Absent = for as long as the goal is the active one. While it does not, the card leaves it out. */
+  when?(g: Game): boolean;
+  /**
+   * Wires the line asks the player to remove, if it asks for that. The adviser reads it: "remove this wire"
+   * is only ever a tip when a card says the same.
+   */
+  cuts?(g: Game): number[];
 }
 
 // ---------- helpers for predicates ----------
@@ -86,8 +113,9 @@ function savingTech(g: Game, id: string): GoalProgress | null {
   return best;
 }
 
-const tech = (id: string, then = 0): GoalStep => (then > 0 ? { tech: id, then } : { tech: id });
-const price = (credits: number): GoalStep => ({ credits });
+const tech = (id: string, then = 0, thenWhat?: string): GoalStep => (then > 0 ? { tech: id, then, ...(thenWhat ? { thenWhat } : {}) } : { tech: id });
+const price = (credits: number, what?: string): GoalStep => ({ credits, ...(what ? { what } : {}) });
+const THE: Record<NodeType, string> = Object.fromEntries((Object.keys(NODE_DEFS) as NodeType[]).map((t) => [t, `the ${NODE_DEFS[t].name}`])) as Record<NodeType, string>;
 
 /** What the card shows for a step: Data toward the tech, or credits toward the price. */
 const show = (g: Game, s: GoalStep | null): GoalProgress | null => (!s ? null : 'tech' in s ? savingTech(g, s.tech) : saving(g, s.credits));
@@ -98,17 +126,17 @@ const buying = (step: (g: Game) => GoalStep | null) => ({ step, progress: (g: Ga
 /** Research first, then save for the machine if none of that kind is free to use yet. */
 function techThenNode(g: Game, id: string, type: NodeType, recipe: string): GoalStep | null {
   const built = g.nodes.some((n) => n.recipe === recipe);
-  if (!has(g, id)) return tech(id, built ? 0 : nodeCost(g, type));
-  return built ? null : price(nodeCost(g, type));
+  if (!has(g, id)) return tech(id, built ? 0 : nodeCost(g, type), THE[type]);
+  return built ? null : price(nodeCost(g, type), THE[type]);
 }
 
 /** A raw material line: research, then a Well on the deposit, then a Refiner. */
 function rawLine(g: Game, id: string, raw: MatId, recipe: string): GoalStep | null {
   const well = g.nodes.some((n) => n.type === 'well' && n.material === raw);
   const refiner = g.nodes.some((n) => n.recipe === recipe);
-  if (!has(g, id)) return tech(id, (well ? 0 : nodeCost(g, 'well')) + (refiner ? 0 : nodeCost(g, 'refiner')));
-  if (!well) return price(nodeCost(g, 'well'));
-  if (!refiner) return price(nodeCost(g, 'refiner'));
+  if (!has(g, id)) return tech(id, (well ? 0 : nodeCost(g, 'well')) + (refiner ? 0 : nodeCost(g, 'refiner')), well ? THE.refiner : refiner ? THE.well : 'the Well and the Refiner');
+  if (!well) return price(nodeCost(g, 'well'), THE.well);
+  if (!refiner) return price(nodeCost(g, 'refiner'), THE.refiner);
   return null;
 }
 
@@ -118,6 +146,34 @@ const wellsWired = (g: Game) => g.nodes.filter((n) => n.type === 'well' && outWi
 function siltHandled(g: Game): boolean {
   return g.nodes.some((n) => n.recipe === 'ink' && outWires(g, n, 1) > 0 && n.util >= 0.25);
 }
+
+const typeOf = (g: Game, id: number) => graph(g).byId.get(id)?.type;
+
+/** Wires that run straight from a machine making `recipe` (its first port) into a Lab. */
+const studyWires = (g: Game, recipe: string) =>
+  g.wires.filter((w) => w.port === 0 && graph(g).byId.get(w.from)?.recipe === recipe && typeOf(g, w.to) === 'lab');
+
+/**
+ * Labs that study what Wells give them and nothing else: a Well with a Lab of its own is 1 α a second for
+ * good. (A Well wired into a Lab that also studies Shard or Glyph does not count: it takes their place.)
+ */
+function wellLabs(g: Game): number {
+  const c = graph(g);
+  return g.nodes.filter((n) => {
+    const fed = n.type === 'lab' ? c.ins.get(n.id) ?? [] : [];
+    return fed.length > 0 && fed.every((w) => c.byId.get(w.from)?.type === 'well');
+  }).length;
+}
+
+/** Is there a deposit with no Well on it that the player could put one on, or a Well that has not been wired to anything yet? */
+const wellToPlace = (g: Game) => g.deposits.some((d) => has(g, MATERIALS[d.mat].tech) && !g.nodes.some((n) => n.depositId === d.id))
+  || g.nodes.some((n) => n.type === 'well' && outWires(g, n) === 0);
+
+/** Does the player hold the Data a tech costs (or the tech itself)? */
+const dataFor = (g: Game, id: string, tier: 'a' | 'b' | 'g') => has(g, id) || g.data[tier] >= (TECHS[id].cost[tier] ?? 0);
+
+/** "Build a Fabricator": Fabrication's β is covered, and the Fabricator still has to be saved for. */
+const sellGlyphNow = (g: Game) => dataFor(g, 'P7', 'b') && count(g, 'fabricator') === 0 && g.credits < nodeCost(g, 'fabricator');
 
 /** A Router in use that sends more to a Lab than to a Market: a bigger ratio weight, or an earlier priority slot. */
 export function routerFavoursLab(g: Game): boolean {
@@ -192,7 +248,7 @@ export const GOALS: Goal[] = [
     id: 'second-well', title: 'Place a second Well',
     hint: hint('Pick the Well in the hotbar and click the free Glint deposit.', 'Tap Well in the bottom bar, then tap the free Glint deposit.'),
     done: (g) => count(g, 'well') >= 2,
-    ...buying((g) => price(nodeCost(g, 'well'))),
+    ...buying((g) => price(nodeCost(g, 'well'), THE.well)),
     reward: { credits: 10 },
   },
   {
@@ -212,7 +268,7 @@ export const GOALS: Goal[] = [
       'Tap a Well\'s port, tap an empty spot, and pick Refiner.',
     ),
     done: (g) => g.nodes.some((n) => n.type === 'refiner' && inWires(g, n) > 0),
-    ...buying((g) => (count(g, 'refiner') ? null : price(nodeCost(g, 'refiner')))),
+    ...buying((g) => (count(g, 'refiner') ? null : price(nodeCost(g, 'refiner'), THE.refiner))),
     reward: { credits: 20 },
   },
   {
@@ -234,7 +290,7 @@ export const GOALS: Goal[] = [
     done: (g) => g.nodes.some((n) => n.type === 'well' && n.lv.speed >= 1),
     ...buying((g) => {
       const well = g.nodes.find((n) => n.type === 'well');
-      return well ? price(upgradeCost(well, 'speed')) : null;
+      return well ? price(upgradeCost(well, 'speed'), 'the Speed upgrade') : null;
     }),
     reward: { credits: 50 },
   },
@@ -245,7 +301,7 @@ export const GOALS: Goal[] = [
       'Tap the Refiner\'s port, tap an empty spot and pick Lab: what it studies becomes Data instead of credits.',
     ),
     done: (g) => g.data.a > 0,
-    ...buying((g) => (count(g, 'lab') ? null : price(nodeCost(g, 'lab')))),
+    ...buying((g) => (count(g, 'lab') ? null : price(nodeCost(g, 'lab'), THE.lab))),
     reward: { a: 15 },
     big: true,
   },
@@ -281,6 +337,15 @@ export const GOALS: Goal[] = [
     hint: hint('Research Ember Deposits, then put a Well on the Ember deposit, build a Refiner from its port and sell the Spark.'),
     done: (g) => made(g, 'spark'),
     ...buying((g) => rawLine(g, 'P3', 'ember', 'spark')),
+    // The first long wait for α, and the Lab studies only half the Shard. Ink is the dearest thing on the board.
+    meanwhile: {
+      text: hint(
+        'Drag from the Ink Refiner\'s Ink port to the Lab too: studied Ink is 3 α each.',
+        'Tap the Ink Refiner\'s Ink port, then tap the Lab too: studied Ink is 3 α each.',
+      ),
+      done: (g) => studyWires(g, 'ink').length > 0,
+      when: (g) => count(g, 'lab') > 0 && g.nodes.some((n) => n.recipe === 'ink'),
+    },
     reward: { a: 25, unlock: 'orders' },
   },
   {
@@ -297,12 +362,14 @@ export const GOALS: Goal[] = [
   },
   {
     id: 'route-lab', title: 'Route more to a Lab than to the Market',
+    // The Spark Refiner by name: Spark is the one refined material nothing studies yet (Shard has the Lab of
+    // goal 7, Ink the "while you wait" line of goal 11), so that is where a Router toward a Lab pays.
     hint: hint(
-      'Build a Router from a machine\'s port and wire it to a Lab and to a Market, then select the Router and press Favour on the Lab\'s wire.',
-      'Build a Router from a machine\'s port and wire it to a Lab and to a Market, then tap the Router and tap Favour on the Lab\'s wire.',
+      'Build a Router from the Spark Refiner\'s port and wire it to a Lab and to a Market, then select the Router and press Favour on the Lab\'s wire.',
+      'Build a Router from the Spark Refiner\'s port and wire it to a Lab and to a Market, then tap the Router and tap Favour on the Lab\'s wire.',
     ),
     done: routerFavoursLab,
-    ...buying((g) => (count(g, 'router') ? null : price(nodeCost(g, 'router')))),
+    ...buying((g) => (count(g, 'router') ? null : price(nodeCost(g, 'router'), THE.router))),
     reward: { a: 30 },
   },
   {
@@ -312,7 +379,7 @@ export const GOALS: Goal[] = [
       'Tap Expand board at the edge of the map to reveal new deposits.',
     ),
     done: (g) => g.board.expansions >= 1,
-    ...buying((g) => price(expansionCost(g))),
+    ...buying((g) => price(expansionCost(g), 'the expansion')),
     reward: { credits: 60 },
   },
   {
@@ -320,6 +387,14 @@ export const GOALS: Goal[] = [
     hint: hint('Research Assembly, then build an Assembler, wire both Ink and Spark into it and sell its Glyph at the Market.'),
     done: (g) => made(g, 'glyph'),
     ...buying((g) => techThenNode(g, 'P4', 'assembler', 'glyph')),
+    // The board has just grown by two deposits. A Well with a Lab of its own is 1 α a second for good: wired
+    // into the Lab the player already has it would only push the dearer Shard and Ink (and later Glyph) aside.
+    // Both deposits: with one pair this wait was still four and a half minutes for a player who gets no tip.
+    meanwhile: {
+      text: hint('Give each new deposit a Well and a Lab built from its port: each pair is 1 α a second.'),
+      done: (g) => wellLabs(g) >= 2,
+      when: (g) => wellLabs(g) >= 2 || wellToPlace(g),
+    },
     reward: { credits: 150, unlock: 'flow' },
     big: true,
   },
@@ -348,6 +423,14 @@ export const GOALS: Goal[] = [
     hint: hint('Research Breeze Deposits, then put a Well on a Breeze deposit, build a Refiner from its port and sell the Mist.'),
     done: (g) => made(g, 'mist'),
     ...buying((g) => rawLine(g, 'P5', 'breeze', 'mist')),
+    // The dearest research so far, and the Assembler now takes most of the Ink and Spark the Lab was studying.
+    // Both deposits of the first expansion are in use by now; the second expansion costs 500¢ and brings two more.
+    meanwhile: {
+      text: hint('Expand the board again, then give a new deposit a Well and a Lab of its own.'),
+      done: (g) => wellLabs(g) >= 3,
+      // Not the Breeze deposit this very card is about to ask for: only while Breeze is still locked, or done.
+      when: (g) => wellLabs(g) >= 3 || !has(g, 'P5'),
+    },
     reward: { a: 50 },
   },
   {
@@ -369,7 +452,21 @@ export const GOALS: Goal[] = [
     id: 'build-fabricator', title: 'Build a Fabricator',
     hint: hint('Research Fabrication, then save up for the Fabricator: orders and a high Flow get you there faster.'),
     done: (g) => count(g, 'fabricator') >= 1,
-    ...buying((g) => (has(g, 'P7') ? price(nodeCost(g, 'fabricator')) : tech('P7', nodeCost(g, 'fabricator')))),
+    ...buying((g) => (has(g, 'P7') ? price(nodeCost(g, 'fabricator'), THE.fabricator) : tech('P7', nodeCost(g, 'fabricator'), THE.fabricator))),
+    // Goal 17 had the player study Glyph. Fabrication's β is in hand by now (the two goals before pay it), and
+    // from here every Glyph in a Lab is 20¢ not earned toward the Fabricator. This is the one place the chain
+    // takes a wire back, and it is a card that says so: the adviser never reverses a card (src/advice.ts).
+    // It applies while the β is covered and the Fabricator's price is not: a player who already has the
+    // credits (one who never spent any on upgrades) gains nothing by it, and is not asked.
+    meanwhile: {
+      text: hint(
+        'You have the β you need: remove the wire from the Glyph Assembler to the Lab.',
+        'You have the β you need: remove the wire from the Glyph Assembler to the Lab.',
+      ),
+      done: (g) => studyWires(g, 'glyph').length === 0,
+      when: sellGlyphNow,
+      cuts: (g) => (sellGlyphNow(g) ? studyWires(g, 'glyph').map((w) => w.id) : []),
+    },
     reward: { b: 40 },
   },
   {
@@ -436,6 +533,11 @@ export interface GoalView {
    * needed right now, so the card can read "Flow 90% · 9 of 10 running" with a mark at the bar.
    */
   flow?: FlowGoalView;
+  /**
+   * The goal's "while you wait" line, for the input in use, and whether it has been done. Absent when the goal
+   * has none, is ready to claim, or the line does not apply to this board right now.
+   */
+  meanwhile?: { text: string; done: boolean };
 }
 
 /** Everything the goal card shows. null when every goal has been claimed. */
@@ -443,8 +545,10 @@ export function goalView(g: Game, touch = false): GoalView | null {
   const goal = activeGoal(g);
   if (!goal) return null;
   const free = !!goal.free;
+  const line = meanwhileOf(g);
   return {
     ...(goal.id === 'hold-flow' ? { flow: flowGoalView(g) } : {}),
+    ...(line ? { meanwhile: { text: touch ? line.text.touch : line.text.mouse, done: line.done(g) } } : {}),
     goal,
     number: free ? g.goal.i - MAIN_GOALS + 1 : g.goal.i + 1,
     total: free ? GOALS.length - MAIN_GOALS : MAIN_GOALS,
@@ -455,6 +559,16 @@ export function goalView(g: Game, touch = false): GoalView | null {
     reward: goal.reward,
     big: !!goal.big,
   };
+}
+
+/**
+ * The active goal's "while you wait" line, if it has one that applies to this board right now (done or not).
+ * null once the goal is ready to claim.
+ */
+export function meanwhileOf(g: Game): Meanwhile | null {
+  const line = activeGoal(g)?.meanwhile;
+  if (!line || g.goal.ready || (line.when && !line.when(g))) return null;
+  return line;
 }
 
 /** Short text for a reward, e.g. "Refining + 50¢". */

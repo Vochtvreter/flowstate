@@ -190,7 +190,7 @@ describe('waitInfo: what the card is waiting for', () => {
     expect(w.eta).toBeGreaterThan(150 / 0.75 + 60);
     expect(waitKind(g)).toBe('credits');
     expect(activeGoal(g)!.progress!(g)![2]).toBe('α');
-    expect(activeGoal(g)!.step!(g)).toEqual({ tech: 'P7', then: nodeCost(g, 'fabricator') });
+    expect(activeGoal(g)!.step!(g)).toEqual({ tech: 'P7', then: nodeCost(g, 'fabricator'), thenWhat: 'the Fabricator' });
     // With the α and β in hand the card asks for an action (research): no wait, whatever the credits.
     g.data.a = alpha;
     expect(waitInfo(g)).toBeNull();

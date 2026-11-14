@@ -359,16 +359,17 @@ describe('goal chain: conditions and progress', () => {
     };
     g.techs = ['P1', 'R1', 'P2', 'P3'];
     // Assembly, then the first Assembler; Breeze Deposits, then a Well and a Refiner; Fabrication, then the Fabricator.
-    expect(step('make-glyph')).toEqual({ tech: 'P4', then: nodeCost(g, 'assembler') });
+    // Each also names what the credits are for, as a card would (waitInfo(g).name passes it on).
+    expect(step('make-glyph')).toEqual({ tech: 'P4', then: nodeCost(g, 'assembler'), thenWhat: 'the Assembler' });
     g.techs.push('P4');
-    expect(step('make-glyph')).toEqual({ credits: 600 });
-    expect(step('make-mist')).toEqual({ tech: 'P5', then: nodeCost(g, 'well') + nodeCost(g, 'refiner') });
+    expect(step('make-glyph')).toEqual({ credits: 600, what: 'the Assembler' });
+    expect(step('make-mist')).toEqual({ tech: 'P5', then: nodeCost(g, 'well') + nodeCost(g, 'refiner'), thenWhat: 'the Well and the Refiner' });
     g.techs.push('P5');
-    expect(step('build-fabricator')).toEqual({ tech: 'P7', then: 7100 });
+    expect(step('build-fabricator')).toEqual({ tech: 'P7', then: 7100, thenWhat: 'the Fabricator' });
     // What the card shows is still the Data for the research.
     expect(activeGoal(g)!.progress!(g)).toEqual([0, 1180, 'α']);
     g.techs.push('P7');
-    expect(step('build-fabricator')).toEqual({ credits: 7100 });
+    expect(step('build-fabricator')).toEqual({ credits: 7100, what: 'the Fabricator' });
     // A research with nothing to buy after it carries no price.
     g.techs = ['P1', 'R1'];
     expect(step('research-murk')).toEqual({ tech: 'P2' });
