@@ -85,10 +85,13 @@ export function goalTech(g: Game): string | null {
   const goal = GOALS[g.goal.i];
   if (!goal || g.goal.ready) return null;
   const text = `${goal.title}. ${goal.hint.mouse}`;
+  // The longest name wins, so "Pipes Mk III" is never taken for "Pipes Mk II".
+  let best: Tech | null = null;
   for (const t of Object.values(TECHS)) {
-    if (!t.auto && !g.techs.includes(t.id) && text.includes(`Research ${t.name}`)) return t.id;
+    if (t.auto || !text.includes(`Research ${t.name}`)) continue;
+    if (!best || t.name.length > best.name.length) best = t;
   }
-  return null;
+  return best && !g.techs.includes(best.id) ? best.id : null;
 }
 
 const ORDER: Record<TileState, number> = { rdy: 0, sav: 1, goal: 3, lck: 4, own: 5 };
@@ -514,9 +517,9 @@ export function renderTech(force = false) {
   // Whatever is further ahead is not drawn at all; one quiet line says the tree will grow.
   const hiddenLeft = tiles.length < Object.values(TECHS).filter((t) => !techHidden(g, t)).length;
   // A goal that is waiting to be claimed sits on the board, behind this screen: say so and offer the way back.
-  const done = g.goal.ready ? GOALS[g.goal.i] : null;
-  const claim = `<button class="tgoal" data-act="close"${done ? '' : ' hidden'}>`
-    + `${done ? `${glyph(FLAG, 18)}<span class="gt"><b>Goal complete</b><span>${esc(done.title)}</span></span><span class="go">Claim on the board</span>` : ''}</button>`;
+  const waiting = g.goal.ready ? GOALS[g.goal.i] : null;
+  const claim = `<button class="tgoal" data-act="close"${waiting ? '' : ' hidden'}>`
+    + `${waiting ? `${glyph(FLAG, 18)}<span class="gt"><b>Goal complete</b><span>${esc(waiting.title)}</span></span><span class="go">Claim on the board</span>` : ''}</button>`;
   const html = `${headHtml(g, tiles)}${claim}<div class="ttabs" role="tablist"${phone ? '' : ' hidden'}>${tabs}</div>`
     + `<div class="tree">${sections}${hiddenLeft ? '<p class="more">More shows up as you research.</p>' : ''}</div>`
     + `<aside class="tdetail" aria-label="Selected tech">${detailHtml(g, sel, want)}</aside>`;
