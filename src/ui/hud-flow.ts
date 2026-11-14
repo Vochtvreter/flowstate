@@ -39,9 +39,14 @@ export function initFlowRing() {
     if (!g.flowOn) return;
     const worst = worstProducer(g);
     if (worst) jumpTo(worst.id);
+    // With nothing counted yet (everything unwired, or only just built) there is nothing to praise.
+    else if (!flowInfo(g).producers) toast(NONE_YET, 'info');
     else toast('Everything is flowing', 'good');
   });
 }
+
+/** Said while no Well or machine counts toward Flow (see countsForFlow in flow.ts). */
+const NONE_YET = 'Flow counts a Well or machine once it has been wired up for a little while';
 
 const producerName = (g: Game, id: number) => {
   const n = g.nodes.find((x) => x.id === id);
@@ -75,7 +80,9 @@ export function updateFlowRing(g: Game) {
   setText(pct, `+${bonus}%`);
   const worst = f.flowing < f.producers ? worstProducer(g) : null;
   const jump = worst ? ` ${isTouch() ? 'Tap' : 'Click'} to jump to the ${producerName(g, worst.id)} holding it back.` : '';
-  const label = `Flow ${v}%: ${f.flowing} of ${f.producers} Wells and machines are running flat out, so every sale pays +${bonus}%.${jump}`;
+  const label = f.producers
+    ? `Flow ${v}%: ${f.flowing} of ${f.producers} Wells and machines are running flat out, so every sale pays +${bonus}%.${jump}`
+    : `Flow ${v}%: the share of your Wells and machines running flat out. ${NONE_YET}.`;
   setAttr(btn, 'title', label);
   setAttr(btn, 'aria-label', label);
 }
