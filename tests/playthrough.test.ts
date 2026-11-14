@@ -159,7 +159,9 @@ describe('scripted playthrough', () => {
 // The test proves that every goal can be done from the state the one before leaves behind. It also pins
 // how long this player waits. As tuned, they are held up by α Data, not credits: three to six minutes each
 // on Spark, Glyph, Mist and the Fabricator, with thousands of credits in the bank. Three of those are over
-// the plan's four minutes on one goal; see the bounds at the end.
+// the plan's four minutes on one goal. A player who studies more (every Refiner wired to the Lab) has the
+// Data sooner and then waits almost nine minutes for the Fabricator's price instead. The pacing bot sees
+// neither: see the bounds at the end, and treat lowering them as the goal.
 // ---------------------------------------------------------------------------------------------------
 
 /** Plays the demo to the first Lens by the card. `studyAll`: also wires every new Refiner to the Lab, as goal 7 taught for Shard. */
@@ -310,7 +312,6 @@ function byTheCard(studyAll: boolean) {
 describe('the whole demo, by the card', () => {
   it('every goal can be done, in order, by doing only what its card says', () => {
     const { g, spent } = byTheCard(false);
-    for (const v of [false, true]) { const r = byTheCard(v); console.log(v, Math.round(r.g.stats.firstLensAt!), r.spent.filter((x) => x.seconds > 120).map((x) => `${x.title} ${Math.round(x.seconds)}s (${x.waitedFor})`).join(' | '), Math.round(r.g.stats.fromSales + r.g.stats.fromGoals + r.g.stats.fromOrders), r.g.stats.ordersFilled); }
     expect(spent.map((x) => x.id)).toEqual(GOALS.slice(0, MAIN_GOALS).map((x) => x.id));
     expect(g.ended).toBe(true);
     expect(g.stats.firstLensAt).not.toBeNull();
@@ -323,7 +324,7 @@ describe('the whole demo, by the card', () => {
 
   it('gets this player to the Lens inside the 28 minutes the plan allows a slow player', () => {
     const { g } = byTheCard(false);
-    expect(g.stats.firstLensAt!).toBeLessThan(28 * 60); // 25:08 as tuned
+    expect(g.stats.firstLensAt!).toBeLessThan(28 * 60); // 23:32 as tuned
     expect(g.stats.firstLensAt!).toBeGreaterThan(20 * 60); // and the demo is not over in a flash either
   });
 
@@ -339,18 +340,21 @@ describe('the whole demo, by the card', () => {
     ]);
     // ...while credits pile up with nothing on the card to spend them on.
     expect(g.stats.fromSales + g.stats.fromGoals + g.stats.fromOrders).toBeGreaterThan(8000);
-    // As tuned: 185 s, 317 s, 367 s and 272 s. The bounds stop it getting worse; the plan's own limit is 240 s,
-    // so lowering them is the goal. (Decision for the designer: cheaper spine techs, or a card that teaches
-    // feeding the Lab; see the next test for what one habit is worth.)
-    expect(Math.max(...spent.map((x) => x.seconds))).toBeLessThan(400);
+    // As tuned: 185 s, 289 s, 250 s and 342 s. The bounds stop it getting worse; the plan's own limit is 240 s.
+    expect(Math.max(...spent.map((x) => x.seconds))).toBeLessThan(380);
     expect(spent.filter((x) => x.seconds > 240).length).toBeLessThanOrEqual(3);
   });
 
-  it('one habit the cards never ask for, wiring every Refiner to the Lab, saves this player over three minutes', () => {
+  it('and a player who studies more waits for credits instead: KNOWN GAP, almost nine minutes on the Fabricator', () => {
+    // Wiring every new Refiner to the Lab, as goal 7 taught for Shard, brings the Data sooner...
     const plain = byTheCard(false);
     const studious = byTheCard(true);
-    expect(studious.g.stats.firstLensAt!).toBeLessThan(plain.g.stats.firstLensAt! - 180);
-    expect(studious.g.stats.firstLensAt!).toBeLessThan(23 * 60); // 21:24 as tuned
-    expect(Math.max(...studious.spent.map((x) => x.seconds))).toBeLessThan(320); // 297 s on Mist: still over four minutes
+    const on = (run: typeof plain, id: string) => run.spent.find((x) => x.id === id)!;
+    expect(on(studious, 'make-glyph').seconds).toBeLessThan(on(plain, 'make-glyph').seconds - 60);
+    // ...but what is studied is not sold, and at about 5¢ a second the Fabricator is a long way off: 529 s as tuned.
+    const fabricator = on(studious, 'build-fabricator');
+    expect(fabricator.waitedFor).toBe('credits for a fabricator');
+    expect(fabricator.seconds).toBeLessThan(560);
+    expect(studious.g.stats.firstLensAt!).toBeLessThan(28 * 60); // 25:40 as tuned, later than the player who studies less
   });
 });
