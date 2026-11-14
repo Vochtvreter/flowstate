@@ -188,7 +188,9 @@ export function placeNode(g: Game, type: NodeType, x: number, y: number, opts: P
       n.x = dep.x;
       n.y = dep.y;
     }
-    if (opts.recipe && RECIPES[opts.recipe]?.machine === type) n.recipe = opts.recipe;
+    // A recipe that is not researched yet is ignored: the machine is placed without one.
+    const r = opts.recipe ? RECIPES[opts.recipe] : null;
+    if (r && r.machine === type && recipeUnlocked(g, r)) n.recipe = r.id;
     n.paid = cost;
     g.credits -= cost;
     g.nodes.push(n);

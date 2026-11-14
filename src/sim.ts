@@ -300,6 +300,8 @@ function transferFrom(g: Game, c: Graph, n: GNode) {
 const tickCount = new WeakMap<Game, number>();
 
 export function tick(g: Game, dt: number) {
+  // Every rate divides by dt: a zero, negative or broken step would turn them all into NaN.
+  if (!(dt > 0) || !isFinite(dt)) return;
   const c = graph(g);
   g.time += dt;
   const acc = g.tickAcc;
