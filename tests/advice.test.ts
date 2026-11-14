@@ -1,13 +1,13 @@
 // The adviser (src/advice.ts): what it says, and above all that what it says is true.
 import { describe, expect, it } from 'vitest';
-import { claimOrder, connect, cutWire, favour, placeNode, setMode, upgrade } from '../src/actions';
+import { canRedo, canUndo, claimOrder, clearHistory, connect, cutWire, favour, placeNode, redo, setMode, undo, upgrade } from '../src/actions';
 import { ADVICE, Advice, advice, adviceTrials, applyAdvice, waitInfo, waitKind } from '../src/advice';
 import { MAT_IDS, RULES, TECHS } from '../src/content';
 import { demandInfo, nodeCost, research, techAffordable } from '../src/economy';
 import { countsForFlow, flowInfo, isFlowing } from '../src/flow';
-import { lookahead } from '../src/forecast';
+import { forecast, lookahead } from '../src/forecast';
 import { GOALS, activeGoal } from '../src/goals';
-import { makeOrder, orderReward, orderView, startOrders } from '../src/orders';
+import { makeOrder, marketRates, orderReward, orderView, startOrders } from '../src/orders';
 import { tick } from '../src/sim';
 import { Game, cloneGame, serialize } from '../src/state';
 import { playByTheCard } from './cardPlayer';
@@ -591,6 +591,42 @@ describe('advice: how it behaves', () => {
     expect(applyAdvice(g, later!)).toBe(true);
     const next = advice(g); // the board changed: a new verdict at once
     expect(next?.text.mouse).not.toBe(a!.text.mouse);
+  });
+
+  it('leaves the player\'s undo and redo history alone: nothing it tries on a copy becomes an Undo step', () => {
+    // Every candidate is tried through the normal actions on a look-ahead copy. Those steps used to land in the
+    // one undo history: after a single verdict, Undo "took back" eight purchases nobody had made and paid 159¢.
+    const g = midGame();
+    at(g, 'make-glyph');
+    run(g, 0.1);
+    clearHistory();
+    const lab = g.nodes.find((n) => n.type === 'lab')!;
+    expect(upgrade(g, lab.id, 'speed')).toBe(true);
+    expect(undo(g)).toBe(true); // one step waiting to be redone
+    const before = state(g);
+    expect(advice(g)).not.toBeNull();
+    expect(adviceTrials(g)!.trials.some((x) => x.doable)).toBe(true);
+    waitInfo(g);
+    forecast(g);
+    marketRates(g);
+    expect(canUndo()).toBe(false);
+    expect(canRedo()).toBe(true);
+    expect(undo(g)).toBe(false);
+    expect(state(g)).toBe(before);
+    expect(redo(g)).toBe(true);
+    expect(lab.lv.speed).toBe(1);
+    // A look-ahead copy can be changed like any game, but has no history of its own to walk.
+    const copy = lookahead(g)!;
+    const copyLab = copy.nodes.find((n) => n.type === 'lab')!;
+    clearHistory();
+    expect(upgrade(copy, copyLab.id, 'speed')).toBe(true);
+    expect(copyLab.lv.speed).toBe(2);
+    expect(canUndo()).toBe(false);
+    expect(upgrade(g, lab.id, 'speed')).toBe(true);
+    expect(undo(copy)).toBe(false); // the step on the stack is the live game's
+    expect(redo(copy)).toBe(false);
+    expect(undo(g)).toBe(true);
+    expect(lab.lv.speed).toBe(1);
   });
 
   it('applyAdvice goes through the normal actions: paid for, undoable, and refused when it no longer applies', () => {

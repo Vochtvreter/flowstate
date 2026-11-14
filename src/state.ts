@@ -434,6 +434,23 @@ export function clearSave() {
   }
 }
 
+// ---------- look-ahead copies ----------
+
+/**
+ * Games made to try something out and be thrown away: the copies a forecast or the adviser runs ahead of the
+ * live game (lookahead() in src/forecast.ts). The undo and redo history belongs to the game the player is
+ * playing (src/actions.ts keeps one history), so nothing done to a look-ahead copy is ever recorded in it:
+ * otherwise every tip the adviser weighed would become an Undo step that hands back credits nobody spent.
+ */
+const lookaheads = new WeakSet<Game>();
+
+/** Mark a game as a look-ahead copy: its edits are not recorded for undo, and it cannot be undone or redone. */
+export function markLookahead(g: Game) {
+  lookaheads.add(g);
+}
+
+export const isLookahead = (g: Game) => lookaheads.has(g);
+
 // ---------- structure snapshots (undo) ----------
 
 export interface Snapshot {

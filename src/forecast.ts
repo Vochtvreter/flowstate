@@ -7,7 +7,7 @@
 import { DataTier, MatId } from './content';
 import { stopNewOrders } from './orders';
 import { tick } from './sim';
-import { Bag, Game, cloneGame } from './state';
+import { Bag, Game, cloneGame, markLookahead } from './state';
 
 export interface Forecast {
   /** Seconds that were measured. */
@@ -24,13 +24,14 @@ export interface Forecast {
 export const FORECAST = { seconds: 40, step: 0.25 };
 
 /**
- * A copy of the game for looking ahead: nothing in it can reach the live game. The research queue is
- * emptied and no new order is ever rolled (the one it has keeps counting), so the copy only shows what the
- * board itself does.
+ * A copy of the game for looking ahead: nothing in it can reach the live game, and nothing done to it is
+ * recorded in the player's undo history. The research queue is emptied and no new order is ever rolled (the
+ * one it has keeps counting), so the copy only shows what the board itself does.
  */
 export function lookahead(g: Game): Game | null {
   const copy = cloneGame(g);
   if (!copy) return null;
+  markLookahead(copy);
   copy.queue = [];
   copy.paused = false;
   stopNewOrders(copy);

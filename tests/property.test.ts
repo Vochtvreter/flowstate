@@ -1,8 +1,9 @@
 // Randomised property test: no sequence of board edits, undo and redo creates or destroys credits.
 //
 // A seeded generator plays a few hundred random actions per seed (place, upgrade, delete, wire, cut, splice,
-// re-tool, expand, claim, undo, redo, stale drag snapshots) with the simulation running in between, and after
-// every single action checks the books:
+// re-tool, Router settings and the Favour preset, expand, claim, undo, redo, stale drag snapshots, asking the
+// adviser for a tip and following it) with the simulation running in between, and after every single action
+// checks the books:
 //
 //     credits + what the board would refund + what was sunk into expansions − everything ever earned
 //
@@ -11,14 +12,17 @@
 // On a failure the message names the seed, the step and the action, so it can be replayed.
 import { describe, expect, it } from 'vitest';
 import {
-  autoBalance, canConnect, claimGoal, claimOrder, connect, cutWire, cutWires, deleteNode, expandBoard, freeDeposits, placeNode,
-  pushUndo, raisePriority, recipesFor, redo, refundOf, setFilter, setMode, setRecipe, setWeight, splice, undo, upgrade, upgradeAll,
-  upgradeSaturatedWires, upgradeWire,
+  autoBalance, canConnect, canFavour, canRedo, canUndo, claimGoal, claimOrder, connect, cutWire, cutWires, deleteNode, expandBoard, favour,
+  favouredWire, freeDeposits, placeNode, pushUndo, raisePriority, recipesFor, redo, refundOf, setFilter, setMode, setRecipe, setWeight, splice,
+  undo, upgrade, upgradeAll, upgradeSaturatedWires, upgradeWire,
 } from '../src/actions';
+import { advice, applyAdvice, waitInfo } from '../src/advice';
 import { HOTBAR, MAT_IDS, MatId, NodeType, TECH_IDS, Track } from '../src/content';
 import { expansionCost, nodeCostAt, nodeUnlocked, research, upgradeValue } from '../src/economy';
+import { GOALS } from '../src/goals';
+import { orderView } from '../src/orders';
 import { outPortCount, tick } from '../src/sim';
-import { Game, RouterMode, Snapshot, snapshot } from '../src/state';
+import { Game, RouterMode, Snapshot, serialize, snapshot } from '../src/state';
 import { fresh } from './helpers';
 
 function prng(seed: number) {
@@ -86,6 +90,10 @@ function checkBoard(g: Game, where: string) {
   if (g.order) must(g.order.got >= 0 && g.order.got <= g.order.need, () => `${where}: order progress out of range`);
 }
 
+/** Goals whose card can be a wait, so that the adviser has something to say: saving credits, saving Data, Flow, an order. */
+const WAITING_GOALS = ['second-well', 'research-murk', 'make-spark', 'first-order', 'make-glyph', 'hold-flow', 'make-mist', 'build-fabricator']
+  .map((id) => GOALS.findIndex((x) => x.id === id));
+
 /** Play `steps` random actions and check the books after each one. Returns what happened, for the summary assertions. */
 function play(seed: number, steps: number, credits: number) {
   const rnd = prng(seed);
@@ -143,6 +151,53 @@ function play(seed: number, steps: number, credits: number) {
       if (what === 2) return w ? setFilter(g, w.id, rnd() < 0.3 ? null : pick(MAT_IDS)!) : false;
       if (what === 3) return w ? raisePriority(g, w.id) : false;
       return autoBalance(g, n.id);
+    },
+    // The one-press preset, on any wire of any node: only a wire leaving a Router with a choice is accepted.
+    favour: () => {
+      const n = rnd() < 0.8 ? pick(g.nodes.filter((x) => x.type === 'router')) : pick(g.nodes);
+      // A Router with nothing to choose between is given a second and third wire first, like any player would.
+      for (let i = g.wires.filter((x) => x.from === n?.id).length; n?.type === 'router' && i < 2 + int(2); i++) {
+        const to = pick(g.nodes)!;
+        if (canConnect(g, n.id, 0, to.id)) connect(g, n.id, 0, to.id);
+      }
+      const w = rnd() < 0.8 ? pick(g.wires.filter((x) => x.from === n?.id)) : pick(g.wires);
+      if (!n || !w) return false;
+      const could = canFavour(g, n.id, w.id);
+      const ok = favour(g, n.id, w.id);
+      must(ok === could, () => `seed ${seed}: canFavour said ${could}, favour did ${ok}`);
+      if (ok) must(favouredWire(g, n.id) === w.id && n.mode === 'ratio', () => `seed ${seed}: favour did not favour`);
+      return ok;
+    },
+    // Asking the adviser: it tries a dozen changes on copies of the game. None of it may show on the live game,
+    // in its save or in its undo and redo history.
+    advise: () => {
+      g.goal = { i: pick(WAITING_GOALS)!, ready: false };
+      tick(g, 0.05); // the unlocks of the goals before it
+      const before = serialize(g).replace(/"savedAt":\d+/, '');
+      const history = [canUndo(), canRedo()];
+      const tip = advice(g);
+      waitInfo(g);
+      orderView(g);
+      must(serialize(g).replace(/"savedAt":\d+/, '') === before, () => `seed ${seed}: asking for advice changed the game`);
+      must(canUndo() === history[0] && canRedo() === history[1], () => `seed ${seed}: asking for advice changed the undo history`);
+      if (history[0] && rnd() < 0.5) undo(g); // whatever comes off the stack is the player's own step
+      return !!tip;
+    },
+    // Following a tip is a normal action: paid for, and one undo step.
+    followTip: () => {
+      g.goal = { i: pick(WAITING_GOALS)!, ready: false };
+      tick(g, 0.05);
+      const tip = advice(g);
+      if (!tip) return false;
+      const credits = g.credits;
+      const ok = applyAdvice(g, tip);
+      must(ok, () => `seed ${seed}: a tip could not be followed: ${tip.text.mouse}`);
+      must(tip.research != null || Math.abs(credits - g.credits - (tip.cost ?? 0)) < 1e-6, () => `seed ${seed}: "${tip.text.mouse}" cost ${credits - g.credits}¢, not the ${tip.cost}¢ it said`);
+      if (!tip.research && rnd() < 0.5) {
+        must(undo(g), () => `seed ${seed}: a followed tip could not be undone`);
+        must(Math.abs(g.credits - credits) < 1e-6, () => `seed ${seed}: undoing a tip did not give its price back`);
+      }
+      return true;
     },
     splice: () => { const w = pick(g.wires); const n = pick(g.nodes); return w && n ? splice(g, w.id, n.id) : false; },
     expand: () => {
@@ -204,7 +259,8 @@ function play(seed: number, steps: number, credits: number) {
   add('place', 9); add('delete', 5); add('upgrade', 6); add('upgradeAll', 1); add('connect', 10); add('cut', 3); add('cutMany', 1);
   add('upgradeWire', 3); add('upgradeFullWires', 1); add('retool', 2); add('router', 3); add('splice', 3); add('expand', 1);
   add('undo', 6); add('redo', 4); add('move', 2); add('staleDrag', 2); add('remember', 2); add('wait', 6); add('claimGoal', 1);
-  add('claimOrder', 1); add('research', 1); add('refundQuote', 2); add('sellAndSink', 3);
+  add('claimOrder', 1); add('research', 1); add('refundQuote', 2); add('sellAndSink', 3); add('favour', 2);
+  add('advise', 2); add('followTip', 2);
 
   // When each machine (in each recipe it has had) was built or re-tooled. Undo and redo may bring an old machine
   // back, but never as a younger one: Flow ignores young producers, so that would be a way to hide a weak one.
@@ -243,6 +299,11 @@ describe('credits are conserved by every sequence of edits, undo and redo', () =
       expect(total[name] ?? 0, `"${name}" succeeded only ${total[name] ?? 0} times`).toBeGreaterThan(20);
     }
     expect(total.claimGoal ?? 0).toBeGreaterThan(0);
+    console.info(`property test: actions that succeeded: ${Object.entries(total).map(([k, n]) => `${k} ${n}`).join(', ')}`);
+    // The new actions: the Favour preset, and the adviser (asked, and followed).
+    expect(total.favour ?? 0, `"favour" succeeded only ${total.favour ?? 0} times`).toBeGreaterThan(20);
+    expect(total.advise ?? 0, `the adviser had a tip only ${total.advise ?? 0} times`).toBeGreaterThan(10);
+    expect(total.followTip ?? 0, `a tip was followed only ${total.followTip ?? 0} times`).toBeGreaterThan(10);
   });
 
   it('a player with almost no credits is never pushed below zero, and unaffordable undos are refused', () => {

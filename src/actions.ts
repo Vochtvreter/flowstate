@@ -6,7 +6,7 @@ import {
   recipeUnlocked, trackAvailable, upgradeCost, upgradeValue,
 } from './economy';
 import { graph, isMachine, isPass, isSink, outPortCount } from './sim';
-import { Game, GNode, RouterMode, Snapshot, Wire, makeNode, makeWire, restore, shelve, snap, snapshot } from './state';
+import { Game, GNode, RouterMode, Snapshot, Wire, isLookahead, makeNode, makeWire, restore, shelve, snap, snapshot } from './state';
 
 export { claimGoal } from './goals';
 export { claimOrder } from './orders';
@@ -43,9 +43,12 @@ export function act(g: Game, fn: () => number | false): boolean {
     g.credits += batchSpent;
     return false;
   }
-  undoStack.push({ state: before, spent: r + batchSpent });
-  if (undoStack.length > 200) undoStack.shift();
-  redoStack.length = 0;
+  // The history is the live game's: a look-ahead copy (src/forecast.ts) changes, but leaves no step behind.
+  if (!isLookahead(g)) {
+    undoStack.push({ state: before, spent: r + batchSpent });
+    if (undoStack.length > 200) undoStack.shift();
+    redoStack.length = 0;
+  }
   g.rev++;
   return true;
 }
@@ -72,7 +75,7 @@ function sameStructure(g: Game, before: Snapshot): boolean {
  * restoring that snapshot for free would hand back a node whose refund was already paid.
  */
 export function pushUndo(g: Game, before: Snapshot): boolean {
-  if (!sameStructure(g, before)) return false;
+  if (isLookahead(g) || !sameStructure(g, before)) return false;
   undoStack.push({ state: before, spent: 0 });
   redoStack.length = 0;
   return true;
@@ -83,7 +86,7 @@ export const canRedo = () => redoStack.length > 0;
 
 export function undo(g: Game): boolean {
   const e = undoStack[undoStack.length - 1];
-  if (!e) return false;
+  if (!e || isLookahead(g)) return false;
   // Undoing a delete takes its refund back: refuse if that refund has been spent.
   if (g.credits + e.spent < -1e-6) {
     g.events.push({ kind: 'toast', text: 'Not enough credits to undo that' });
@@ -98,7 +101,7 @@ export function undo(g: Game): boolean {
 
 export function redo(g: Game): boolean {
   const e = redoStack[redoStack.length - 1];
-  if (!e) return false;
+  if (!e || isLookahead(g)) return false;
   if (e.spent > g.credits + 1e-6) {
     g.events.push({ kind: 'toast', text: 'Not enough credits to redo that' });
     return false;
