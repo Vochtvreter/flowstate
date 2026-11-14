@@ -6,6 +6,7 @@
  *   npm run pacing -- --summary                    only the table
  *   npm run pacing -- --policy=slow --seed=2       one run: full report with the event timeline
  *   npm run pacing -- --profile=<name>             what-if numbers from tools/pacing-profiles.ts
+ *   npm run pacing -- --set=tech.P4=a800,node.assembler.base=1000    one-off what-if numbers (see applyOverrides)
  *   other flags: --minutes=<n>  --quiet (no timeline)  --seeds=1,2,3
  *
  * The bot imports the game's own modules and only ever calls what a player can do (src/actions.ts,
@@ -30,13 +31,13 @@ import {
   setWeight, upgrade, upgradeWire,
 } from '../src/actions';
 import {
-  cycleTime, expansionCost, fmt, has, maxLevel, maxPipeTier, nodeCost, pipeCap, readyTechs, recipeOf, recipeUnlocked, research,
-  saturation, techAvailable, techEta, trackAvailable, upgradeCost, upgradeCostAt, wellRate,
+  cycleTime, demandRate, expansionCost, flowMult, fmt, has, maxLevel, maxPipeTier, nodeCost, pipeCap, readyTechs, recipeOf, recipeUnlocked, research,
+  saturation, techAvailable, techEta, trackAvailable, upgradeCost, upgradeCostAt, valueOf, wellRate,
 } from '../src/economy';
 import { GOALS, MAIN_GOALS, activeGoal, rewardText } from '../src/goals';
 import { graph, isMachine, tick } from '../src/sim';
 import { Game, GNode, Reward, Stats, Status, Wire, newGame } from '../src/state';
-import { PROFILES, Profile } from './pacing-profiles';
+import { PROFILES, Profile, applyOverrides } from './pacing-profiles';
 
 // =====================================================================================
 // Policies: who is playing
@@ -199,12 +200,18 @@ interface Want {
   novel?: boolean;
   /** Nodes whose status should be left to settle after this action. */
   settle?: number[];
+  /** Cannot be bought yet (its tech is still being saved for), but the player knows it is coming and keeps credits back for it. */
+  locked?: boolean;
 }
 interface Port { n: GNode; port: number }
 
 interface Minute {
   t: number; credits: number; income: number; data: Record<DataTier, number>; dataRate: Record<DataTier, number>;
   nodes: number; techs: number; actions: number; idle: number; spent: number; flow: number;
+  /** Share of this minute's sales value that was paid at full price (the rest went as surplus). */
+  full: number;
+  /** Materials sold over their demand rate at the end of the minute. */
+  glut: string;
 }
 
 // =====================================================================================
@@ -246,7 +253,7 @@ class Bot {
   firstNode: Partial<Record<NodeType, number>> = {};
   minutes_: Minute[] = [];
   actions = 0;
-  mIncome = 0; mData: Record<DataTier, number> = { a: 0, b: 0, g: 0 }; mActions = 0; mIdle = 0; mSpent = 0;
+  mIncome = 0; mWorth = 0; mData: Record<DataTier, number> = { a: 0, b: 0, g: 0 }; mActions = 0; mIdle = 0; mSpent = 0;
   rewardTotal: Required<Reward> = { credits: 0, a: 0, b: 0, g: 0 };
   lastNewAt = 0;
   lastNewWhat = '';
@@ -540,6 +547,9 @@ class Bot {
     }
 
     // --- G3: Labs. One per Data tier that still buys something; fed from ports that sell their surplus ---
+    // A material that an unlocked recipe needs, with no machine built for it yet, is about to be wired into one.
+    const spokenFor = (m: MatId) => Object.values(RECIPES).some((r) =>
+      r.inputs.length > 1 && recipeUnlocked(g, r) && !g.nodes.some((n) => n.recipe === r.id) && r.inputs.some((i) => i[0] === m));
     if (has(g, 'R1')) {
       const knowsRouter = has(g, 'L1') && (g.goal.i > goalIndex('route-lab') || goal?.id === 'route-lab');
       for (const tier of TIERS) {
@@ -591,7 +601,7 @@ class Bot {
         const forGoal = goal?.id === 'route-lab' && !g.nodes.some((n) => n.type === 'router') && tier === 'a';
         if (knowsRouter && ((hungryLab && !from) || forGoal)) {
           // Study the cheap stuff and sell the dear: the least valuable stream first, then the biggest.
-          const cand = feeders.filter((p) => direct(p) && !this.routerOn(p) && !this.feedsMachine(p) && !this.noRouter.has(this.key(p)))
+          const cand = feeders.filter((p) => direct(p) && !this.routerOn(p) && !this.feedsMachine(p) && !this.noRouter.has(this.key(p)) && !spokenFor(this.portMat(p.n, p.port)!))
             .sort((a, b) => MATERIALS[this.portMat(a.n, a.port)!].value - MATERIALS[this.portMat(b.n, b.port)!].value || this.spare(b) - this.spare(a))[0];
           // While the goal card is waiting on this Data, feeding the Lab comes before everything else.
           const urgent = forGoal || savingData.has(tier);
@@ -743,6 +753,22 @@ class Bot {
       }
     }
 
+    // --- the goal card names a machine whose tech is still being saved for: keep the credits for it ---
+    if (goal) {
+      const ahead: Record<string, [NodeType, string]> = {
+        'make-glyph': ['assembler', 'glyph'], 'make-prism': ['assembler', 'prism'], 'build-fabricator': ['fabricator', 'lens'],
+        'make-coil': ['assembler', 'coil'], 'make-dynamo': ['fabricator', 'dynamo'], 'make-paradox': ['fabricator', 'paradox'],
+      };
+      const next = ahead[goal.id];
+      if (next && !recipeUnlocked(g, RECIPES[next[1]]) && !g.nodes.some((n) => n.recipe === next[1])) {
+        W.push({
+          cls: 'new', kind: 'build', cost: nodeCost(g, next[0]), novel: true, locked: true,
+          label: `build ${NODE_DEFS[next[0]].name} (${RECIPES[next[1]].name}) once ${TECHS[RECIPES[next[1]].tech].name} is researched`,
+          run: () => false,
+        });
+      }
+    }
+
     // --- the goal card asks for something this policy would not do unprompted ---
     if (goal?.id === 'upgrade-well') {
       const n = g.nodes.find((x) => x.type === 'well');
@@ -817,7 +843,7 @@ class Bot {
       };
     }
     const wants = this.wants();
-    const can = (w: Want) => w.cost <= g.credits + 1e-6;
+    const can = (w: Want) => !w.locked && w.cost <= g.credits + 1e-6;
     const fix = wants.find((w) => w.cls === 'fix' && can(w));
     if (fix) return fix;
     const news = wants.filter((w) => w.cls === 'new').sort((a, b) => a.cost - b.cost);
@@ -829,12 +855,14 @@ class Bot {
     let cap = Infinity;
     let saving = false;
     if (target) {
-      const eta = (target.cost - g.credits) / Math.max(g.creditRate, 1e-6);
+      const eta = Math.max(0, target.cost - g.credits) / Math.max(g.creditRate, 1e-6);
       // Only a never-had toy is worth sitting on credits for; for "one more of the same" the player keeps tinkering.
       saving = !!target.novel && eta <= this.P.patience;
       cap = target.cost * (saving ? this.P.pettyShare : this.P.growShareOfTarget);
     }
-    const buy = news.find((w) => can(w) && (!target || !target.novel || w.cost <= cap));
+    // "One more of the same" (another Well, another Refiner, more board) never comes out of the money put aside for a new toy.
+    const spare = target?.novel ? target.cost * this.P.pettyShare : Infinity;
+    const buy = news.find((w) => can(w) && w.cost <= spare);
     if (buy) return buy;
     const grows = wants.filter((w) => w.cls === 'grow').sort((a, b) => a.cost - b.cost);
     const grow = grows.find((w) => can(w) && w.cost <= cap);
@@ -1009,6 +1037,7 @@ class Bot {
     for (let i = 0; i < steps; i++) {
       tick(g, CFG.dt);
       this.mIncome += g.tickAcc.credits;
+      for (const m in g.tickAcc.sold) this.mWorth += (g.tickAcc.sold[m as MatId] ?? 0) * valueOf(g, m as MatId) * flowMult(g);
       for (const k of TIERS) {
         const d = g.tickAcc.data[k];
         this.mData[k] += d;
@@ -1027,7 +1056,12 @@ class Bot {
           t: nextSample, credits: g.credits, income: this.mIncome / 60,
           data: { ...g.data }, dataRate: { a: this.mData.a / 60, b: this.mData.b / 60, g: this.mData.g / 60 },
           nodes: g.nodes.length, techs: g.techs.length, actions: this.mActions, idle: this.mIdle, spent: this.mSpent, flow: g.flow,
+          // sales = full + surplusShare × rest, so full = (sales − share × worth) / (1 − share), as a share of all sales
+          full: this.mWorth > 0 ? Math.max(0, Math.min(1, (this.mIncome - RULES.demand.surplusShare * this.mWorth) / ((1 - RULES.demand.surplusShare) * this.mIncome))) : 1,
+          glut: (Object.keys(MATERIALS) as MatId[]).filter((m) => (g.soldRate[m] ?? 0) > demandRate(g, m) * 1.05)
+            .map((m) => `${MATERIALS[m].name} ${f1(g.soldRate[m] ?? 0)}/${f1(demandRate(g, m))}`).join(', '),
         });
+        this.mWorth = 0;
         this.mIncome = 0;
         this.mData = { a: 0, b: 0, g: 0 };
         this.mActions = 0;
@@ -1241,9 +1275,9 @@ function report(bot: Bot, profile: Profile, profileName: string, timeline: boole
 
   P();
   P('== PER MINUTE (rates are averages over that minute; idle = seconds with free hands and nothing useful to do) ==');
-  P(' min  credits    ¢/s  spent      α    α/s      β    β/s      γ    γ/s  flow nodes techs  acts  idle');
+  P(' min  credits    ¢/s  spent      α    α/s      β    β/s      γ    γ/s  flow nodes techs  acts  idle  full-price  sold over demand (sold/demand per s)');
   for (const m of bot.minutes_) {
-    P(`${pad(m.t / 60, 4)} ${pad(fmt(m.credits), 8)} ${pad(f1(m.income), 6)} ${pad(fmt(m.spent), 6)} ${pad(Math.floor(m.data.a), 6)} ${pad(f1(m.dataRate.a), 6)} ${pad(Math.floor(m.data.b), 6)} ${pad(f1(m.dataRate.b), 6)} ${pad(Math.floor(m.data.g), 6)} ${pad(f1(m.dataRate.g), 6)} ${pad(Math.round(m.flow * 100) + '%', 5)} ${pad(m.nodes, 5)} ${pad(m.techs, 5)} ${pad(m.actions, 5)} ${pad(Math.round(m.idle), 5)}`);
+    P(`${pad(m.t / 60, 4)} ${pad(fmt(m.credits), 8)} ${pad(f1(m.income), 6)} ${pad(fmt(m.spent), 6)} ${pad(Math.floor(m.data.a), 6)} ${pad(f1(m.dataRate.a), 6)} ${pad(Math.floor(m.data.b), 6)} ${pad(f1(m.dataRate.b), 6)} ${pad(Math.floor(m.data.g), 6)} ${pad(f1(m.dataRate.g), 6)} ${pad(Math.round(m.flow * 100) + '%', 5)} ${pad(m.nodes, 5)} ${pad(m.techs, 5)} ${pad(m.actions, 5)} ${pad(Math.round(m.idle), 5)} ${pad(Math.round(m.full * 100) + '%', 10)}   ${m.glut}`);
   }
 
   P();
@@ -1357,6 +1391,7 @@ function main() {
   let profileName = 'current';
   let quiet = false;
   let onlySummary = false;
+  const overrides: string[] = [];
   for (const a of process.argv.slice(2)) {
     const m = /^--([a-zA-Z]+)(?:=(.*))?$/.exec(a);
     if (!m) continue;
@@ -1368,6 +1403,7 @@ function main() {
     else if (k === 'minutes' && v) minutes = Number(v);
     else if (k === 'quiet') quiet = true;
     else if (k === 'summary') onlySummary = true;
+    else if (k === 'set' && v) overrides.push(v);
   }
   const profile = PROFILES[profileName];
   if (!profile) {
@@ -1379,6 +1415,8 @@ function main() {
     return;
   }
   profile.apply?.();
+  for (const o of overrides) applyOverrides(o);
+  const what = [profileName !== 'current' ? `profile "${profileName}": ${profile.describe}` : '', ...overrides.map((o) => `--set=${o}`)].filter(Boolean).join('  ');
   const play = (p: Policy, s: number) => {
     const bot = new Bot(p, s, minutes ?? (p.fast ? CFG.minutesFast : CFG.minutesSlow));
     bot.run();
@@ -1389,6 +1427,7 @@ function main() {
   if (policy) {
     // One run in full.
     const bot = play(POLICIES[policy], seed ?? 1);
+    if (what) say(`WHAT-IF: ${what}`);
     say(report(bot, profile, profileName, !quiet));
     say('');
     say(paybackReport());
@@ -1405,7 +1444,7 @@ function main() {
     }
   }
   if (!onlySummary) for (const bot of firsts) say(report(bot, profile, profileName, false) + '\n');
-  if (profileName !== 'current') say(`profile "${profileName}": ${profile.describe}`);
+  if (what) say(`WHAT-IF: ${what}`);
   say(summary(results));
   say('');
   say(paybackReport());
