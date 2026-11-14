@@ -5,8 +5,9 @@
 //
 // For the other tracks:
 //   - `#app.phone` (and `html.phone`) is set here; `html[data-input]` is 'touch' or 'mouse'.
-//   - CSS variables on `#app.phone`: --top-h (top bar), --hot-h (bottom hotbar), --lift (height of
-//     an open bottom sheet), --shift (width of a sheet docked at the side, short landscape screens).
+//   - CSS variables on `#app.phone`: --top-h (top bar), --hot-h (bottom hotbar), --strip-h (how far
+//     the strip reaches down the stage), --lift (height of an open bottom sheet), --shift (width
+//     of a sheet docked at the side, on short landscape screens).
 //   - `#thumb-slot` sits just above the hotbar: put a Claim button in it and it is in thumb reach.
 //   - Anything in `#stage` with the class `strip-item` joins the strip at the top (see phone.css).
 import { MATERIALS, NODE_DEFS } from '../content';
@@ -218,6 +219,8 @@ function sync() {
   const line = env.phone ? hintLine() : '';
   setHidden(hint, !line);
   if (line) setHTML(hintText, line);
+  // How tall the strip is decides how tall a sheet may be (see phone.css), so that comes first.
+  setStyle(app, '--strip-h', (env.phone ? cover().top : 0) + 'px');
   const { lift, shift } = sheetSize();
   setStyle(app, '--lift', lift + 'px');
   setStyle(app, '--shift', shift + 'px');

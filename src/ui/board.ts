@@ -170,7 +170,8 @@ export function toClient(p: Pt): Pt {
 
 /**
  * Keep some of the board on screen, so a long pan or an edge scroll can never lose it: at least
- * `keep` pixels of the plot (and the Expand button under it) stay inside the stage on each axis.
+ * `keep` pixels of the plot stay inside the stage on each axis (which leaves room for the Expand
+ * button under it).
  */
 function clampView() {
   const g = ui.g;
@@ -179,7 +180,7 @@ function clampView() {
   const v = ui.view;
   const keepX = Math.min(140, r.width * 0.4), keepY = Math.min(140, r.height * 0.4);
   v.x = Math.max(keepX - g.board.w * v.k, Math.min(r.width - keepX, v.x));
-  v.y = Math.max(keepY - (g.board.h + 90) * v.k, Math.min(r.height - keepY, v.y));
+  v.y = Math.max(keepY - g.board.h * v.k, Math.min(r.height - keepY, v.y));
 }
 
 function applyView() {
@@ -1516,7 +1517,9 @@ function tapEmpty(p: Pt) {
   const t = tapWire;
   if (!t) return;
   const g = ui.g;
-  const near = snapTarget(p, (n) => canConnect(g, t.from, t.port, n.id), TAP_SNAP_PX);
+  // A mouse has been shown where the wire would snap: a click takes exactly that. A finger gets a
+  // smaller margin, since nothing showed it which node a near miss would count for.
+  const near = snapTarget(p, (n) => canConnect(g, t.from, t.port, n.id), t.hover ? SNAP_PX : TAP_SNAP_PX);
   if (near) return tapNode(near.id);
   disarm();
   // Right beside the port there is no room to build: that tap only cancels.
@@ -1995,8 +1998,12 @@ function onUp(e: PointerEvent) {
       if (d.moved) break;
       if (d.place) {
         if (ui.placing) placeAt(p, false);
-      } else if (tapWire) tapEmpty(p);
-      else if (ui.sel) select(null);
+      } else if (tapWire) {
+        // (The gesture is wound up first: the build menu this may open draws with the wire preview.)
+        endDrag();
+        tapEmpty(p);
+        return;
+      } else if (ui.sel) select(null);
       break;
     case 'node':
       if (!d.moved && tapWire) tapNode(d.id);
