@@ -3,23 +3,21 @@ import './styles/tech.css';
 import './styles/hud.css';
 import './styles/feel.css';
 import './styles/phone.css';
-import { MATERIALS, TECHS } from './content';
 import { clearHistory, cutWire, deleteNode, nodeById, redo, refundOf, undo } from './actions';
 import { fmt, fmtTime, has, offlineCap } from './economy';
 import { offlineGains, tick } from './sim';
 import { clearSave, loadGame, newGame, saveGame } from './state';
-import { GameEvent } from './state';
 import {
   cancelGesture, ensureVisible, fitView, initBoard, jumpTo, pickRadial, radialOpen, settleGesture, startPlacing,
   updateBoard, updateSlow, zoomBy,
 } from './ui/board';
 import { invalidateLayout } from './ui/dom';
 import { fx, initFx } from './ui/fx';
-import { matGlyph } from './ui/icons';
 import { hotbarTypes, initPanels, renderPanels, tickPanels } from './ui/panels';
 import { closeTech, initTech, openTech, renderTech } from './ui/tech';
 import { initFeel } from './ui/feel';
-import { initHud } from './ui/hud';
+import { hudAnchors, initHud } from './ui/hud';
+import { backToStart, initScreens, isStarted, screenOpen, screensApi, showStart } from './ui/hud-screens';
 import { initPhone } from './ui/phone';
 import { emitBeat, emitFrame, emitGame, emitNewGame, initToasts, onSignal, select, toast, touch, ui } from './ui/ui';
 
@@ -28,54 +26,62 @@ const STEP = 0.05;
 const SLOW_STEP = 0.25;
 const $ = <T extends HTMLElement>(id: string) => document.getElementById(id) as T;
 
-function showAway(seconds: number, gains: { credits: number; a: number; b: number; g: number }) {
-  if (gains.credits < 1 && gains.a < 1) return;
-  const modal = $('modal');
-  const parts = [`<span style="color:#FFC857">+${fmt(gains.credits)}¢</span>`];
-  if (gains.a >= 1) parts.push(`<span style="color:#5EEAD4">+${fmt(gains.a)}α</span>`);
-  if (gains.b >= 1) parts.push(`<span style="color:#C4A1FF">+${fmt(gains.b)}β</span>`);
-  if (gains.g >= 1) parts.push(`<span style="color:#FF8FB1">+${fmt(gains.g)}γ</span>`);
-  modal.innerHTML = `<div class="card"><h2>While you were away</h2><p>Your supply line kept running for <b>${fmtTime(seconds)}</b>.</p>
-    <div class="gains mono">${parts.join(' · ')}</div><button id="collect">Collect</button></div>`;
-  modal.classList.add('open');
-  $('collect').addEventListener('click', () => modal.classList.remove('open'));
+/** When the loaded save was written (ms), until the player presses Continue; null for a new game. */
+let resumedFrom: number | null = null;
+
+/** Nothing is saved before the player has pressed Start: a game nobody began is not a save to continue. */
+function save() {
+  if (isStarted()) saveGame(ui.g);
+}
+
+/** Erase everything and return to the start screen. The one way a game is replaced. */
+function resetGame() {
+  clearSave();
+  ui.g = newGame();
+  resumedFrom = null;
+  clearHistory();
+  ui.menuOpen = false;
+  ui.placing = null;
+  select(null);
+  if (ui.techOpen) closeTech();
+  fitView();
+  emitNewGame();
+  backToStart();
+  renderPanels(true);
+}
+
+/** The game starts running. A loaded save is first credited with the time it was away. */
+function begin() {
+  const g = ui.g;
+  const from = resumedFrom;
+  resumedFrom = null;
+  if (from == null || g.paused) return null;
+  const away = (Date.now() - from) / 1000;
+  if (away <= 30) return null;
+  const seconds = Math.min(away, offlineCap(g));
+  return { seconds, gains: offlineGains(g, seconds) };
 }
 
 function boot() {
   const loaded = loadGame();
   ui.g = loaded ?? newGame();
+  resumedFrom = loaded ? loaded.savedAt : null;
   initToasts($('toasts'));
   initFx($<HTMLCanvasElement>('fx'));
   initBoard($('board'));
   initTech($('tech'));
   initPanels(
-    { top: $('top'), hot: $('hot'), insp: $('insp'), obj: $('objective'), alert: $('alert'), mini: $<HTMLCanvasElement>('mini'), zoom: $('zoom') },
-    {
-      openTech,
-      reset: () => {
-        clearSave();
-        ui.g = newGame();
-        clearHistory();
-        ui.menuOpen = false;
-        ui.placing = null;
-        select(null);
-        fitView();
-        emitNewGame();
-      },
-    },
+    { top: $('top'), hot: $('hot'), insp: $('insp'), mini: $<HTMLCanvasElement>('mini'), zoom: $('zoom') },
+    { openTech, reset: resetGame },
   );
+  initScreens({ reset: resetGame, begin });
   // Feature modules: each owns its own file and subscribes through the hooks in ui/ui.ts.
   initHud();
   initFeel();
   initPhone();
   fitView();
-  if (loaded) {
-    const away = (Date.now() - loaded.savedAt) / 1000;
-    if (away > 30 && !loaded.paused) {
-      const secs = Math.min(away, offlineCap(ui.g));
-      showAway(secs, offlineGains(ui.g, secs));
-    }
-  }
+  // The start screen ("Continue" when there is a save). `?play` in the URL skips it.
+  showStart(!!loaded);
   ui.g.events.length = 0;
   renderPanels();
   window.addEventListener('resize', () => {
@@ -83,45 +89,23 @@ function boot() {
     touch();
   });
   window.addEventListener('keydown', onKey);
-  window.addEventListener('beforeunload', () => saveGame(ui.g));
+  window.addEventListener('beforeunload', save);
   document.addEventListener('visibilitychange', () => {
-    if (document.hidden) saveGame(ui.g);
+    if (document.hidden) save();
   });
-  setInterval(() => saveGame(ui.g), 10000);
+  setInterval(save, 10000);
   // Test hooks. `ui` and `tick` are relied on by scripts; the rest are there for convenience.
-  (window as unknown as Record<string, unknown>).flowstate = { ui, tick, fx, view: { fit: fitView, zoomBy, jumpTo }, onSignal };
+  (window as unknown as Record<string, unknown>).flowstate = {
+    ui, tick, fx, view: { fit: fitView, zoomBy, jumpTo }, onSignal, hud: { ...screensApi, anchors: hudAnchors },
+  };
   requestAnimationFrame(frame);
-}
-
-/**
- * Everything the simulation wants the player to notice arrives here, once per event.
- * This is the place to hang toasts, effects and sound. Kinds this build does not know are skipped.
- */
-function onGameEvent(ev: GameEvent) {
-  switch (ev.kind) {
-    case 'milestone':
-      toast(`${matGlyph(ev.mat, 18)}<span><b>First ${MATERIALS[ev.mat].name}!</b> Milestone bonus <span class="mono" style="color:#FFC857">+${fmt(ev.reward)}¢</span></span>`, 'good', 4500);
-      break;
-    case 'tech': {
-      const t = TECHS[ev.id];
-      if (t) toast(`<span><b>${t.name}</b> unlocked: ${t.unlocks.join(', ')}</span>`, 'good', 5000);
-      break;
-    }
-    case 'toast':
-      toast(ev.text, 'bad');
-      break;
-    default:
-      break;
-  }
 }
 
 function drainEvents() {
   const g = ui.g;
   if (!g.events.length) return;
-  for (const ev of g.events.splice(0)) {
-    onGameEvent(ev);
-    emitGame(ev);
-  }
+  // Toasts, effects and sound all hang on these (the HUD's toasts are in ui/hud-toasts.ts).
+  for (const ev of g.events.splice(0)) emitGame(ev);
 }
 
 let last = performance.now();
@@ -144,8 +128,10 @@ function frame(now: number) {
 
 function step(now: number) {
   const g = ui.g;
-  let dt = (now - last) / 1000;
+  const real = (now - last) / 1000;
   last = now;
+  // Behind the start screen nothing moves: no ticks, no wire dots, no beats.
+  let dt = isStarted() ? real : 0;
   if (dt > 5) {
     // The tab was in the background: credit the time away in one go.
     if (!g.paused) {
@@ -201,6 +187,8 @@ function onKey(e: KeyboardEvent) {
   const g = ui.g;
   const t = e.target as HTMLElement;
   if (t && (t.tagName === 'INPUT' || t.tagName === 'TEXTAREA')) return;
+  // The start screen, the summary and the time-away card take the keyboard for themselves.
+  if (screenOpen()) return;
   const mod = e.ctrlKey || e.metaKey;
   const k = e.key.toLowerCase();
   // Before a key changes the board, a node still being dragged is dropped, so the two cannot tangle.
@@ -251,7 +239,8 @@ function onKey(e: KeyboardEvent) {
       const n = nodeById(g, ui.sel.id);
       if (n) {
         const refund = refundOf(g, n);
-        deleteNode(g, n.id);
+        // A refusal (the last Well) raises its own toast, and the node stays selected.
+        if (!deleteNode(g, n.id)) return renderPanels();
         if (refund > 0) toast(`Refunded <b>${fmt(refund)}¢</b>`, 'good');
       }
     } else if (ui.sel?.kind === 'wire') cutWire(g, ui.sel.id);

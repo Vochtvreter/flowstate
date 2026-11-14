@@ -1,1 +1,225 @@
 /* hud styles: owned by the hud track */
+
+/* ---------- the HUD layer ----------
+   A column over the board that takes no input itself: the strip (goal card with the order beside
+   it, the alert chip under them) at the top, toasts at the bottom.
+   #hud-strip, #hud-row and #goal are never positioned or transformed. That is deliberate: on a
+   phone the Claim button is positioned against #hud (the whole stage) while staying inside the card. */
+#hud { position: absolute; inset: 0; display: flex; flex-direction: column; align-items: center; padding: 14px 14px 0; pointer-events: none; }
+#hud-strip { z-index: 10; display: flex; flex-direction: column; align-items: center; gap: 8px; width: 100%; min-width: 0; }
+#hud-row { display: flex; flex-wrap: wrap; justify-content: center; align-items: flex-start; gap: 8px 10px; width: 100%; min-width: 0; }
+#goal, #order, #hud-alert { pointer-events: auto; }
+/* Toasts are centred by the column, not by a half-width offset, so they can use the whole stage on a narrow screen. */
+#hud #toasts { left: 12px; right: 12px; transform: none; }
+/* While the tech tree covers the board, a goal that is ready rides above it (the tree is 40, toasts
+   50) as one slim bar: title, reward, Claim. The order and the alert wait underneath. */
+#hud-strip.over-tech { z-index: 45; }
+#hud-strip.over-tech #order, #hud-strip.over-tech #hud-alert, #hud-strip.over-tech .gc-head, #hud-strip.over-tech .gc-lbl { display: none; }
+
+/* ---------- goal card ---------- */
+#goal { flex: 0 1 500px; min-width: 0; max-width: 100%; display: flex; align-items: center; gap: 14px; padding: 11px 14px 12px 16px; border-radius: 14px; background: #141d33; border: 1px solid #34467a; box-shadow: 0 10px 30px rgba(0, 0, 0, 0.45); color: #dbe6ff; }
+#goal[data-ready='1'] { background: #0f2219; border-color: #2f8f58; box-shadow: 0 0 0 4px rgba(74, 222, 128, 0.1), 0 10px 30px rgba(0, 0, 0, 0.5); }
+#goal.done { flex-basis: auto; padding: 7px 14px; border-radius: 999px; background: #121929; border-color: var(--border); box-shadow: none; }
+.gc-main { flex: 1 1 200px; min-width: 0; display: flex; flex-direction: column; gap: 5px; }
+.gc-head { display: flex; align-items: center; justify-content: space-between; gap: 10px; min-height: 20px; }
+.gc-step { font-size: 10.5px; font-weight: 700; letter-spacing: 0.09em; text-transform: uppercase; color: #9db8ff; white-space: nowrap; }
+.gc-done { display: inline-flex; align-items: center; gap: 4px; font-size: 10.5px; font-weight: 700; letter-spacing: 0.09em; text-transform: uppercase; color: #4ade80; }
+.gc-title { margin: 0; font-family: var(--disp); font-size: 17px; font-weight: 700; line-height: 21px; color: #fff; }
+.gc-hint { margin: 0; font-size: 12.5px; line-height: 17px; color: #c9d3e8; }
+.gc-prog { display: flex; align-items: center; gap: 10px; margin-top: 2px; font-size: 11.5px; color: #c9d3e8; }
+.gc-num { white-space: nowrap; }
+.gc-num b { font-weight: 600; color: var(--text); }
+.gc-rewards { display: flex; align-items: center; gap: 5px; flex-wrap: wrap; justify-content: flex-end; }
+div.gc-rewards { justify-content: flex-start; margin-top: 2px; }
+.gc-lbl { font-size: 10.5px; font-weight: 600; letter-spacing: 0.06em; text-transform: uppercase; color: var(--muted); margin-right: 2px; }
+.gc-free { display: flex; align-items: center; gap: 8px; font-size: 12px; color: var(--muted); }
+.gc-free svg { color: #4ade80; }
+.gc-free b { color: var(--text); font-weight: 600; }
+.pbar { flex: 1; min-width: 40px; height: 6px; border-radius: 3px; background: #1e2740; overflow: hidden; }
+.pbar span { display: block; height: 100%; border-radius: 3px; background: var(--c, var(--sel)); transform-origin: 0 50%; transition: transform 0.25s linear; }
+/* Reward chips: credits and Data in their own colour, new things by name. */
+.rw { --c: #9db8ff; display: inline-flex; align-items: center; gap: 4px; height: 20px; padding: 0 7px; border-radius: 6px; font-size: 11.5px; font-weight: 600; line-height: 20px; white-space: nowrap; color: var(--c); background: color-mix(in srgb, var(--c) 14%, #131a28); border: 1px solid color-mix(in srgb, var(--c) 30%, #1e2740); }
+.rw.new { --c: #dbe6ff; font-size: 11px; }
+[data-ready='1'] .rw { height: 24px; padding: 0 9px; font-size: 13px; line-height: 24px; }
+
+#hud-strip.over-tech #goal { flex: 0 1 auto; gap: 14px; padding: 6px 6px 6px 16px; border-radius: 16px; }
+#hud-strip.over-tech .gc-main { flex: 0 1 auto; flex-direction: row; align-items: center; flex-wrap: wrap; gap: 4px 12px; }
+#hud-strip.over-tech .gc-title { font-size: 15px; line-height: 19px; }
+#hud-strip.over-tech div.gc-rewards { margin-top: 0; }
+#hud-strip.over-tech .claim { min-width: 96px; height: 44px; border-radius: 12px; font-size: 16px; }
+
+/* The tip line: what to do while waiting. */
+.gc-tip { display: flex; align-items: center; gap: 10px; margin-top: 3px; padding-top: 7px; border-top: 1px dashed #2a3a63; font-size: 12px; line-height: 16px; color: #c9d3e8; }
+.gc-tiptxt { flex: 1; min-width: 0; }
+.gc-tiptxt b { display: inline-block; margin-right: 7px; padding: 0 6px; border-radius: 5px; font-size: 10px; font-weight: 700; letter-spacing: 0.07em; line-height: 16px; text-transform: uppercase; color: #0b1430; background: #9db8ff; }
+.gc-tiptxt i { display: block; font-style: normal; color: var(--muted); }
+.gc-show { flex: none; position: relative; height: 28px; padding: 0 11px; border-radius: 8px; border: 1px solid #3a4a70; background: #1f2840; font-size: 12px; font-weight: 600; white-space: nowrap; }
+.gc-show:hover { background: #263252; }
+
+/* ---------- Claim ----------
+   The loudest thing on screen: a filled green button with a rim that breathes behind it and a halo
+   that keeps leaving it. Both run on transform and opacity, and both are pseudo-elements: the
+   button's own box never moves, so a script (or a finger) aiming at it always finds it at rest. */
+.claim { flex: none; position: relative; z-index: 0; min-width: 116px; height: 56px; padding: 0 24px; border: 0; border-radius: 14px; background: #4ade80; color: #04240f; font-family: var(--disp); font-size: 19px; font-weight: 700; letter-spacing: 0.01em; box-shadow: 0 6px 22px rgba(74, 222, 128, 0.35), inset 0 -3px 0 rgba(0, 0, 0, 0.16); }
+.claim::before { content: ''; position: absolute; inset: -4px; z-index: -1; border-radius: 18px; background: #4ade80; opacity: 0.25; pointer-events: none; animation: claim-breathe 1.5s ease-in-out infinite; }
+.claim::after { content: ''; position: absolute; inset: -5px; border-radius: 19px; border: 2px solid #4ade80; opacity: 0; pointer-events: none; animation: claim-halo 1.5s ease-out infinite; }
+.claim:hover { background: #6cf09a; }
+.claim.sm { min-width: 74px; height: 44px; padding: 0 14px; border-radius: 12px; font-size: 15px; }
+.claim.sm::before { border-radius: 16px; }
+.claim.sm::after { border-radius: 17px; }
+@keyframes claim-breathe { 50% { transform: scale(1.05, 1.1); opacity: 0.6; } }
+@keyframes claim-halo { 0% { transform: scale(0.96); opacity: 0.8; } 75%, 100% { transform: scale(1.13, 1.3); opacity: 0; } }
+
+/* ---------- order chip ---------- */
+#order { flex: 0 1 256px; min-width: 0; display: flex; align-items: center; gap: 10px; padding: 9px 10px; border-radius: 14px; background: #131a2a; border: 1px solid var(--border); box-shadow: 0 10px 30px rgba(0, 0, 0, 0.45); font-size: 12.5px; color: var(--text); }
+#order[data-ready='1'] { flex-basis: 316px; background: #0f2219; border-color: #2f8f58; }
+.oc-ico { flex: none; width: 36px; height: 36px; border-radius: 10px; background: #182033; display: flex; align-items: center; justify-content: center; }
+.oc-main { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 4px; }
+.oc-lbl { font-size: 10px; font-weight: 700; letter-spacing: 0.09em; line-height: 12px; text-transform: uppercase; color: var(--muted); }
+.oc-line { line-height: 16px; }
+.oc-line b { font-weight: 600; white-space: nowrap; }
+.oc-main .pbar { flex: none; height: 4px; }
+.oc-pay { display: flex; align-items: center; gap: 5px; flex-wrap: wrap; }
+#order .rw { height: 20px; padding: 0 7px; font-size: 11.5px; line-height: 20px; }
+
+/* ---------- bottleneck chip ---------- */
+#hud-alert { max-width: 100%; }
+.alertchip { display: flex; align-items: center; gap: 9px; max-width: 100%; min-height: 34px; padding: 3px 4px 3px 12px; border-radius: 999px; border: 1px solid #3a3040; background: #191f2e; box-shadow: 0 8px 22px rgba(0, 0, 0, 0.45); font-size: 12.5px; line-height: 16px; color: var(--text); text-align: left; }
+.alertchip:hover { background: #1f2638; }
+.alertchip .dot { flex: none; width: 8px; height: 8px; border-radius: 50%; background: var(--warn); }
+.alertchip .dot.starved { background: var(--bad); }
+.alertchip b { font-weight: 600; }
+.al-go { flex: none; display: flex; align-items: center; height: 26px; padding: 0 11px; border-radius: 999px; border: 1px solid #3a4a70; background: #1f2840; font-size: 12px; font-weight: 600; }
+
+/* ---------- top bar ---------- */
+/* The Flow ring sits around the credits coin without moving it: the ring hangs outside the button. */
+.flowbtn { flex: none; position: relative; display: flex; align-items: center; justify-content: center; width: 26px; height: 26px; padding: 0; border: 0; border-radius: 50%; background: none; cursor: default; }
+.flowbtn.on { cursor: pointer; }
+.flowbtn.on::after { content: ''; position: absolute; inset: -9px; border-radius: 50%; }
+.flowring { position: absolute; left: -5px; top: -5px; transform: rotate(-90deg); pointer-events: none; }
+.fr-trk { fill: none; stroke: #2a3550; stroke-width: 3; }
+/* The arc is stepped with the panels, never eased: see hud-flow.ts. */
+.fr-val { fill: none; stroke: #5ce1ff; stroke-width: 3; stroke-linecap: round; stroke-dasharray: 0 100; }
+.flowpct { margin-left: 3px; padding: 2px 6px; border-radius: 6px; font-size: 11.5px; font-weight: 600; color: #5ce1ff; background: rgba(92, 225, 255, 0.1); }
+#app.flow-state .fr-val { stroke: #fff; }
+#app.flow-state .flowpct { color: #06222b; background: #5ce1ff; }
+.res.credits { padding-left: 10px; }
+.techbtn .badge b { font-weight: 700; }
+.techbtn .badge .bw { margin-left: 4px; }
+
+/* Nothing overflows down to 1024px: the logo loses its word, then the Data chips their rates. */
+@media (max-width: 1240px) {
+  .logo span { display: none; }
+  .logo { width: auto; }
+  #top { padding-left: 14px; }
+}
+@media (max-width: 1100px) {
+  .res.data .nums i { display: none; }
+  .res.data { padding: 0 10px 0 7px; gap: 7px; }
+  .resrow { gap: 7px; }
+  .techbtn .bw, .techbtn .kbd { display: none; }
+}
+
+/* ---------- Market inspector: demand gauges ---------- */
+.dg { display: flex; flex-direction: column; gap: 5px; padding: 2px 0 4px; }
+.dg + .dg { padding-top: 10px; border-top: 1px solid var(--line); }
+.dg-inc { color: var(--credits); font-weight: 600; }
+.dg-bar { position: relative; height: 10px; border-radius: 5px; background: #1e2740; }
+.dg-full, .dg-over { position: absolute; left: 0; top: 0; bottom: 0; width: 100%; transform-origin: 0 50%; transition: transform 0.2s linear; }
+.dg-full { border-radius: 5px 0 0 5px; background: var(--c); }
+/* Past the mark: the same colour, striped and faded, because it sells cheap. */
+.dg-over { border-radius: 0 5px 5px 0; background: repeating-linear-gradient(135deg, var(--c) 0 3px, transparent 3px 6px); opacity: 0.55; }
+.dg-line { position: absolute; top: -4px; bottom: -4px; width: 2px; margin-left: -1px; border-radius: 1px; background: #fff; }
+.dg-line::after { content: 'full price'; position: absolute; left: 50%; bottom: 100%; transform: translateX(-50%); font-style: normal; font-size: 9px; line-height: 11px; letter-spacing: 0.04em; text-transform: uppercase; color: var(--muted); white-space: nowrap; }
+.dg .row { margin-bottom: 9px; }
+.dg-cap { font-size: 11.5px; line-height: 15px; color: var(--muted); }
+.dg-cap b { color: var(--text); font-weight: 600; }
+.dg-warn { color: #fcd34d; }
+.dg-flow { font-size: 11px; color: #5ce1ff; }
+
+/* ---------- start screen ---------- */
+/* The board shows through, dimmed. It does not run until Start is pressed. */
+#start { position: absolute; inset: 0; z-index: 80; display: flex; align-items: center; justify-content: center; padding: 16px; background: rgba(6, 9, 15, 0.66); transition: opacity 0.25s ease; }
+#start.out { opacity: 0; pointer-events: none; }
+.start-card { display: flex; flex-direction: column; align-items: center; max-width: 100%; padding: 34px 48px 26px; border-radius: 24px; background: #101827; border: 1px solid #2a3550; box-shadow: 0 30px 80px rgba(0, 0, 0, 0.6); text-align: center; }
+.start-card h1 { margin: 12px 0 0; font-family: var(--disp); font-size: 46px; font-weight: 700; line-height: 1.05; letter-spacing: -0.02em; }
+.start-card p { margin: 8px 0 26px; font-size: 15px; color: #c9d3e8; }
+.start-go { min-width: 230px; height: 58px; padding: 0 28px; border: 0; border-radius: 15px; background: var(--sel); color: #0b1430; font-family: var(--disp); font-size: 20px; font-weight: 700; box-shadow: 0 8px 26px rgba(122, 162, 255, 0.35); }
+.start-go:hover { background: #93b4ff; }
+.start-new { min-height: 44px; margin-top: 6px; padding: 0 16px; border: 0; background: none; color: var(--muted); font-size: 13px; text-decoration: underline; text-underline-offset: 3px; }
+.start-new:hover { color: var(--text); }
+
+/* ---------- end-of-demo summary ---------- */
+#summary { position: absolute; inset: 0; z-index: 70; display: flex; padding: 16px; overflow-y: auto; background: rgba(5, 8, 14, 0.76); }
+.sum-card { width: min(620px, 100%); margin: auto; padding: 28px 28px 22px; border-radius: 24px; background: #101827; border: 1px solid #2a3550; box-shadow: 0 30px 80px rgba(0, 0, 0, 0.6); text-align: center; animation: sum-in 0.35s cubic-bezier(0.2, 0.9, 0.3, 1); }
+@keyframes sum-in { from { transform: translateY(16px) scale(0.97); opacity: 0; } }
+.sum-ico { width: 64px; height: 64px; margin: 0 auto; border-radius: 50%; display: flex; align-items: center; justify-content: center; color: #fff; background: radial-gradient(circle, #2a3963 0%, #17203a 70%); border: 1px solid #3a4a70; }
+.sum-top h2 { margin: 12px 0 4px; font-family: var(--disp); font-size: 34px; font-weight: 700; line-height: 1.1; letter-spacing: -0.01em; }
+.sum-top p { margin: 0; font-size: 14px; color: #c9d3e8; }
+.sum-grid { display: grid; grid-template-columns: repeat(12, minmax(0, 1fr)); gap: 10px; margin: 22px 0; }
+.sum-stat { grid-column: span 3; display: flex; flex-direction: column; gap: 4px; padding: 12px 6px 11px; border-radius: 14px; background: #151d30; border: 1px solid var(--line); }
+.sum-stat.big { grid-column: span 4; padding: 16px 6px 14px; }
+.sum-stat b { font-size: 20px; font-weight: 600; line-height: 1.1; }
+.sum-stat.big b { font-size: 28px; color: var(--credits); }
+.sum-stat span { font-size: 11.5px; color: var(--muted); }
+.sum-actions { display: flex; flex-direction: column; align-items: center; }
+.sum-go { min-width: 230px; height: 56px; padding: 0 28px; border: 0; border-radius: 15px; background: #4ade80; color: #04240f; font-family: var(--disp); font-size: 19px; font-weight: 700; box-shadow: 0 8px 26px rgba(74, 222, 128, 0.3); }
+.sum-go:hover { background: #6cf09a; }
+.sum-over { min-height: 44px; margin-top: 4px; padding: 0 16px; border: 0; background: none; color: var(--muted); font-size: 13px; text-decoration: underline; text-underline-offset: 3px; }
+.sum-over:hover { color: var(--text); }
+@media (max-width: 560px) {
+  .sum-card { padding: 22px 16px 16px; }
+  .sum-top h2 { font-size: 28px; }
+  .sum-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 8px; margin: 16px 0; }
+  .sum-stat, .sum-stat.big { grid-column: span 1; padding: 11px 6px 10px; }
+  .sum-stat.big:first-child { grid-column: span 2; }
+  .sum-stat.big b { font-size: 24px; }
+  .start-card { padding: 28px 24px 20px; }
+  .start-card h1 { font-size: 40px; }
+}
+
+/* ---------- touch ----------
+   A finger gets 44px targets, and is never shown a key. */
+html[data-input='touch'] #hints, html[data-input='touch'] .kbd { display: none; }
+html[data-input='touch'] .alertchip { min-height: 44px; }
+html[data-input='touch'] .gc-show { height: 36px; padding: 0 14px; }
+html[data-input='touch'] .gc-show::after { content: ''; position: absolute; inset: -4px 0; }
+
+/* ---------- narrow stage ----------
+   Below 700px the card takes the width there is, and Claim drops under the text at full width. */
+@media (max-width: 700px) {
+  #hud { padding: 8px 8px 0; }
+  #goal { flex-wrap: wrap; gap: 10px; padding: 10px 12px 11px; }
+  #goal .claim { flex: 1 1 100%; }
+  .gc-title { font-size: 15.5px; line-height: 19px; }
+}
+
+/* ---------- phone ----------
+   One full-width strip at the top: goal, order under it, alert, then toasts. The Claim button
+   leaves the card for the bottom of the stage, in thumb reach. A layout whose bottom bar or sheet
+   covers the foot of the stage sets --hud-bottom-inset to that height. While the inspector sheet or
+   the tech tree is open, Claim stays in the card at the top instead, where neither can cover it. */
+#app.phone #hud { padding: 8px 8px 0; align-items: stretch; }
+#app.phone #hud-strip { align-items: stretch; gap: 6px; }
+#app.phone #hud-row { flex-direction: column; flex-wrap: nowrap; align-items: stretch; gap: 6px; }
+#app.phone #goal, #app.phone #order { flex: none; }
+#app.phone #goal { flex-wrap: wrap; gap: 10px; padding: 9px 12px 10px; border-radius: 12px; }
+#app.phone #goal.done { align-self: center; }
+#app.phone #order { border-radius: 12px; }
+#app.phone .gc-title { font-size: 15.5px; line-height: 19px; }
+#app.phone #hud-alert { align-self: center; }
+#app.phone #goal .claim { flex: 1 1 100%; }
+#app.phone #goal .claim::before { animation-name: claim-breathe-wide; }
+#app.phone #goal .claim::after { animation-name: claim-halo-wide; }
+#app.phone:not(:has(#insp.open)) #hud-strip:not(.over-tech) #goal .claim { position: absolute; left: 12px; right: 12px; bottom: calc(12px + var(--hud-bottom-inset, 0px)); height: 58px; }
+@keyframes claim-breathe-wide { 50% { transform: scale(1.012, 1.08); opacity: 0.6; } }
+@keyframes claim-halo-wide { 0% { transform: scale(0.99, 0.96); opacity: 0.8; } 75%, 100% { transform: scale(1.03, 1.3); opacity: 0; } }
+#app.phone #toasts { position: static; transform: none; align-self: center; margin-top: 6px; max-width: 100%; }
+#app.phone .toast { max-width: 100%; }
+#app.phone .start-go, #app.phone .sum-go { min-width: 0; width: 100%; }
+
+@media (prefers-reduced-motion: reduce) {
+  .claim::before, .claim::after, .sum-card { animation: none !important; }
+  .claim::after { opacity: 0.6; }
+  .pbar span, .dg-full, .dg-over, #start { transition: none; }
+}
