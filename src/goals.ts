@@ -206,9 +206,10 @@ export const GOALS: Goal[] = [
   },
   {
     id: 'silt-exit', title: 'Give the Silt somewhere to go',
+    // The condition needs the Refiner running, and it also stops when Ink has nowhere to go: say so.
     hint: hint(
-      'The Ink Refiner stops when Silt piles up: drag from its second port and pick Void.',
-      'The Ink Refiner stops when Silt piles up: tap its second port, tap an empty spot and pick Void.',
+      'The Ink Refiner stops when Ink or Silt piles up: sell the Ink at the Market, then drag from the second port and pick Void for the Silt.',
+      'The Ink Refiner stops when Ink or Silt piles up: sell the Ink at the Market, then tap the second port, tap an empty spot and pick Void for the Silt.',
     ),
     done: siltHandled,
     reward: { a: 20 },
@@ -227,7 +228,7 @@ export const GOALS: Goal[] = [
       'An order counts items sold at any Market: send enough of what it asks for there, then tap Claim on the order.',
     ),
     done: (g) => g.stats.ordersFilled >= 1,
-    progress: (g) => (g.order ? [g.order.got, g.order.need, MATERIALS[g.order.mat].name] : null),
+    progress: (g) => (g.order ? [Math.floor(g.order.got + 1e-9), g.order.need, MATERIALS[g.order.mat].name] : null),
     reward: { techs: ['L1', 'C1'] },
   },
   {
