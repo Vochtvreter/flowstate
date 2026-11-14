@@ -7,8 +7,9 @@
 // For the other modules:
 //   - `#app.phone` (and `html.phone`) is set here; `html[data-input]` is 'touch' or 'mouse'.
 //   - CSS variables on `#app`: --strip-h (how far the strip reaches down the stage; 0 outside the
-//     phone layout), --lift (height of an open bottom sheet), --shift (width of a sheet docked at
-//     the side, on short landscape screens). phone.css adds --top-h and --hot-h (the two bars).
+//     phone layout), --strip-b (the same, on every layout), --lift (height of an open bottom
+//     sheet), --shift (width of a sheet docked at the side, on short landscape screens). phone.css
+//     adds --top-h and --hot-h (the two bars).
 //   - The strip is the HUD's: #goal, #order and #hud-alert inside #hud-strip. It is measured, never
 //     moved, here; its phone layout and the place of the Claim button are CSS (hud.css, "phone seating").
 //   - `#app.carrying` while a node is being moved, `#app.building` while the build sheet is open,
@@ -314,6 +315,8 @@ function sync() {
   if (setClass(app, 'fold', fold)) sizeRev++;
   // How tall the strip is decides how tall a sheet may be (see phone.css), so that comes first.
   let moved = setStyle(app, '--strip-h', c.top + 'px');
+  // (--strip-b is the same on every layout: where the strip ends, for whatever wants to sit under it.)
+  setStyle(app, '--strip-b', (stripNow?.bottom ?? 0) + 'px');
   if (setStyle(app, '--lift', c.bottom + 'px')) moved = true;
   if (setStyle(app, '--shift', c.right + 'px')) moved = true;
   // While the build menu is up the player is choosing from it: the floating controls step aside.

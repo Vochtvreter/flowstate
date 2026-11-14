@@ -151,8 +151,9 @@ html.phone body { position: fixed; inset: 0; width: 100%; }
   pointer-events: none; transform: translateY(calc(-1 * var(--lift, 0px))); transition: transform 0.22s cubic-bezier(0.2, 0.8, 0.2, 1);
 }
 #thumb-slot > * { pointer-events: auto; max-width: 100%; }
-/* The same line helps a finger on a wider screen (a tablet has the desktop layout): there it sits at the foot of the board. */
-html[data-input='touch'] #app:not(.phone) #thumb-slot { display: flex; position: absolute; left: 50%; bottom: 18px; z-index: 12; transform: translateX(-50%); max-width: calc(100% - 32px); pointer-events: none; }
+/* The same line helps a finger on a wider screen (a tablet has the desktop layout). There it sits
+   just under the strip (--strip-b, measured in phone.ts): the foot of the board belongs to toasts. */
+html[data-input='touch'] #app:not(.phone) #thumb-slot { display: flex; position: absolute; left: 50%; top: calc(var(--strip-b, 0px) + 10px); z-index: 12; transform: translateX(-50%); max-width: calc(100% - 32px); pointer-events: none; }
 #tap-hint { display: flex; align-items: center; gap: 4px; min-height: 44px; padding: 0 0 0 14px; border-radius: 22px; background: #17213a; border: 1px solid #34467a; color: #dbe6ff; font-size: 13px; line-height: 17px; box-shadow: 0 10px 30px rgba(0, 0, 0, 0.5); }
 #tap-hint button { flex: none; width: 44px; height: 44px; border: 0; border-radius: 50%; background: transparent; color: #9db8ff; display: flex; align-items: center; justify-content: center; padding: 0; }
 #app.phone #fabs {
