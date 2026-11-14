@@ -1239,9 +1239,12 @@ function updateGhost() {
   // On a deposit the ghost is only an outline with its caption underneath, so the deposit's own label stays readable.
   setClass(ghostEl, 'outline', onDeposit);
   const hint = ok ? `${fmt(cost)}¢ · ${env.touch ? 'tap' : 'click'} to place` : why;
+  // In the phone layout a line above the hotbar already says "tap the board to place": the card
+  // itself has room for the price only at that type size.
+  const brief = ok && env.phone ? `${fmt(cost)}¢` : hint;
   setHTML(ghostEl, onDeposit
     ? `<span class="cap">${nodeIcon(p.type, 15)}${label} · <span class="mono">${hint}</span></span>`
-    : `${nodeIcon(p.type, 20)}<span>${label}<small class="mono">${hint}</small></span>`);
+    : `${nodeIcon(p.type, 20)}<span>${label}<small class="mono">${brief}</small></span>`);
 }
 
 export function startPlacing(type: NodeType, recipe?: string | null) {

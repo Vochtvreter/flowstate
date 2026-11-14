@@ -227,6 +227,10 @@ html.phone body { position: fixed; inset: 0; width: 100%; }
 #app.phone #expand small { font-size: 15px; }
 #app.phone #ghost { font-size: 15px; }
 #app.phone #ghost small, #app.phone #ghost .cap { font-size: 15px; }
+/* The caption under a deposit starts at the deposit's left edge: centred, it is wider than the
+   card at this size and runs off the screen when the deposit is near the edge. */
+#app.phone #ghost .cap { left: 0; transform: none; }
+#app.phone #ghost .cap .mono, #app.phone #ghost small.mono { font-family: inherit; font-variant-numeric: tabular-nums; }
 
 /* ================= 3. short landscape screens ================= */
 /* There is no height for a sheet across the bottom, so sheets stand at the right-hand side
