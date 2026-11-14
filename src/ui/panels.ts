@@ -5,18 +5,19 @@
 // and attributes (see addTopItem). The other panels still describe themselves as an HTML string;
 // makePanel() skips the write when the string is unchanged, patches the existing elements in
 // place when it is not, and holds off while the player is pressing or touch-scrolling the panel.
-import { DATA_COLORS, DATA_NAMES, DataTier, HOTBAR, MATERIALS, MatId, NODE_DEFS, NodeType, PIPES, RECIPES, TECHS, Track } from '../content';
+import { DATA_COLORS, DATA_NAMES, DataTier, HOTBAR, MATERIALS, MatId, NODE_DEFS, NodeType, PIPES, RECIPES, RULES, TECHS, Tech, Track } from '../content';
 import {
-  autoBalance, canRedo, canUndo, cutWire, deleteNode, materialsAt, nodeById, raisePriority, recipesFor, redo, refundOf,
-  setFilter, setMode, setRecipe, setWeight, undo, upgrade, upgradeAll, upgradeSaturatedWires, upgradeWire,
+  autoBalance, canRedo, canUndo, cutWire, deleteNode, favour, favouredWire, materialsAt, nodeById, raisePriority,
+  recipesFor, redo, refundOf, setFilter, setMode, setRecipe, setWeight, undo, upgrade, upgradeAll, upgradeSaturatedWires, upgradeWire,
 } from '../actions';
 import {
   TRACK_INFO, costText, cycleTime, dataYield, fmt, fmtInt, fmtRate, has, labRate, maxLevel, maxPipeTier,
-  nodeCost, nodeUnlocked, readyTechs, recipeOf, trackAvailable, upgradeCost, wellRate,
+  nodeCost, nodeUnlocked, readyTechs, recipeOf, techAvailable, trackAvailable, upgradeCost, wellRate,
 } from '../economy';
 import { graph, isMachine, passCap } from '../sim';
 import { Game, GNode, RouterMode, Wire } from '../state';
 import { boardRect, jumpTo, startPlacing, fitView, zoomBy } from './board';
+import { marked, pressedMark, tendMark } from './advice-show';
 import { Panel, el, invalidateLayout, makePanel, setAnchor, setAttr, setClass, setHTML, setHidden, setText } from './dom';
 import { nodeSize } from './geom';
 import { marketSection } from './hud-market';
@@ -94,7 +95,9 @@ export function initPanels(refs: {
     renderZoom();
   });
 
-  delegate(inspEl, (a, args) => {
+  delegate(inspEl, (a, args, pressed) => {
+    // A control that a tip pointed at ("Show me") loses its ring the moment it is pressed.
+    pressedMark(pressed.dataset.testid);
     inspectorAction(a, args, hooks.openTech);
     renderPanels(true);
   });
@@ -132,6 +135,7 @@ function inspectorAction(a: string, args: string[], openTech: (id?: string) => v
     else if (a === 'wplus') { const w = g.wires.find((x) => x.id === Number(args[0])); if (w) setWeight(g, w.id, w.weight + 1); }
     else if (a === 'wminus') { const w = g.wires.find((x) => x.id === Number(args[0])); if (w) setWeight(g, w.id, w.weight - 1); }
     else if (a === 'prio') raisePriority(g, Number(args[0]));
+    else if (a === 'favour') favour(g, n.id, Number(args[0]));
     else if (a === 'filter') {
       const w = g.wires.find((x) => x.id === Number(args[0]));
       if (w) {
@@ -156,9 +160,13 @@ const pct = (frac: number) => Math.round(Math.max(0, Math.min(1, frac)) * 1000) 
 const tok = (m: MatId, q?: number) =>
   `<span class="tok">${matGlyph(m, 13)}${q != null ? `<span class="mono">${q}</span> ` : ''}${MATERIALS[m].name}</span>`;
 
+/** A tech's price with each kind of Data in its own colour: "1,180α 100β". Read from TECHS, never written out here. */
+const techPrice = (t: Tech) => (['a', 'b', 'g'] as DataTier[]).filter((k) => t.cost[k])
+  .map((k) => `<span class="mono" style="color:${DATA_COLORS[k]}">${fmt(t.cost[k]!)}${DATA_NAMES[k]}</span>`).join(' ') || costText(t);
+
 function buyBtn(act: string, cost: number, credits: number, label?: string, testid?: string): string {
   const ok = credits + 1e-6 >= cost;
-  return `<button class="buy${ok ? ' ok' : ''}" data-act="${act}" ${testid ? `data-testid="${testid}"` : ''}>${ok ? '' : `<span class="fill" style="width:${pct(credits / Math.max(1, cost))}%"></span>`}<span class="lab">${label ?? ''}${fmt(cost)}¢</span></button>`;
+  return `<button class="buy${ok ? ' ok' : ''}${testid ? marked(testid) : ''}" data-act="${act}" ${testid ? `data-testid="${testid}"` : ''}>${ok ? '' : `<span class="fill" style="width:${pct(credits / Math.max(1, cost))}%"></span>`}<span class="lab">${label ?? ''}${fmt(cost)}¢</span></button>`;
 }
 
 // ---------- top bar ----------
@@ -498,16 +506,21 @@ function upgradeSection(g: Game, n: GNode): string {
   if (!def.tracks.length) return '';
   const rows = def.tracks.map((t) => {
     if (!trackAvailable(g, n, t)) {
-      return `<div class="uprow locked"><div><b>${TRACK_INFO[t].name}</b><small>Research Efficiency Tuning · <span style="color:#5EEAD4">80α</span></small></div><button class="buy dashed" data-act="tech:U1"><span class="lab">View tech</span></button></div>`;
+      // The track is behind a tech (Efficiency: Efficiency Tuning). It is only mentioned once that tech can
+      // be researched: before then its price is in a kind of Data the player has not met.
+      const tech = TECHS.U1;
+      if (t !== 'eff' || !tech || !techAvailable(g, tech)) return '';
+      return `<div class="uprow locked"><div><b>${TRACK_INFO[t].name}</b><small>Research ${esc(tech.name)} · ${techPrice(tech)}</small></div><button class="buy dashed" data-act="tech:${tech.id}"><span class="lab">View tech</span></button></div>`;
     }
     const lv = n.lv[t];
     const max = maxLevel(g, t);
-    if (lv >= max) return `<div class="uprow"><div><b>${TRACK_INFO[t].name} <span class="mono muted">Lv ${lv}</span></b><small>Maxed${t === 'speed' && !has(g, 'U2') ? ' · Overclock raises the cap' : ''}</small></div></div>`;
+    if (lv >= max) return `<div class="uprow"><div><b>${TRACK_INFO[t].name} <span class="mono muted">Lv ${lv}</span></b><small>Maxed${t === 'speed' && TECHS.U2 && !has(g, 'U2') ? ` · ${esc(TECHS.U2.name)} raises the cap` : ''}</small></div></div>`;
     const cost = upgradeCost(n, t);
-    const bulk = has(g, 'S1') ? `<button class="link" data-act="upgall:${t}" title="Upgrade every ${def.name} by one level" aria-label="Upgrade every ${def.name} by one level">all</button>` : '';
+    const all = `upgall-${t}`;
+    const bulk = has(g, 'S1') ? `<button class="link${marked(all)}" data-act="upgall:${t}" data-testid="${all}" title="Upgrade every ${def.name} by one level" aria-label="Upgrade every ${def.name} by one level">Upgrade all</button>` : '';
     return `<div class="uprow"><div><b>${TRACK_INFO[t].name} <span class="mono muted">Lv ${lv} → ${lv + 1}</span></b><small>${TRACK_INFO[t].desc(n)}</small></div>${bulk}${buyBtn(`upg:${t}`, cost, g.credits, '', `upg-${t}`)}</div>`;
   }).join('');
-  return `<div class="sec"><span class="lbl">Upgrades</span>${rows}</div>`;
+  return rows ? `<div class="sec"><span class="lbl">Upgrades</span>${rows}</div>` : '';
 }
 
 function routerSection(g: Game, n: GNode): string {
@@ -519,6 +532,7 @@ function routerSection(g: Game, n: GNode): string {
     ? `<button data-act="mode:${m.id}" class="${n.mode === m.id ? 'on' : ''}" data-testid="mode-${m.id}">${m.name}</button>`
     : `<button data-act="tech:${m.tech}" class="lockedseg">${icon('lock', 11)}${m.name}</button>`).join('');
   const total = wires.reduce((s, w) => s + w.rate, 0) || 1;
+  const favoured = favouredWire(g, n.id);
   const rows = wires.map((w, i) => {
     const d = nodeById(g, w.to);
     const name = d ? NODE_DEFS[d.type].name + (d.recipe ? ` (${RECIPES[d.recipe].name})` : '') : '?';
@@ -526,7 +540,16 @@ function routerSection(g: Game, n: GNode): string {
     if (n.mode === 'ratio') ctl = `<button class="step" data-act="wminus:${w.id}" aria-label="Decrease weight">${icon('minus', 12)}</button><span class="mono w">${w.weight}</span><button class="step" data-act="wplus:${w.id}" aria-label="Increase weight" data-testid="wplus">${icon('plus', 12)}</button>`;
     else if (n.mode === 'priority') ctl = `<span class="mono w">#${i + 1}</span>${i > 0 ? `<button class="step" data-act="prio:${w.id}" aria-label="Raise priority">${icon('up', 12)}</button>` : '<span class="step ghost"></span>'}`;
     else if (n.mode === 'filter') ctl = `<button class="filt" data-act="filter:${w.id}">${w.filter ? matGlyph(w.filter, 12) + MATERIALS[w.filter].name : 'any'}</button>`;
-    return `<div class="rrow"><span class="dest">→ ${esc(name)}</span>${ctl}<div class="bar"><span style="width:${pct(w.rate / total)}%;background:#9DB8FF"></span></div><span class="mono rate">${fmtRate(w.rate)}/s</span></div>`;
+    // Favour: one press sends this wire the bigger share (favour() in src/actions.ts: Ratio mode, 3 to 1).
+    // The wire that has it says so; a Router with a single wire has nothing to favour it over.
+    let fav = '';
+    if (wires.length > 1) {
+      const id = `favour-${w.id}`;
+      fav = favoured === w.id
+        ? `<span class="fav on" data-testid="${id}" aria-label="This wire gets the bigger share">${icon('check', 11)}Favoured</span>`
+        : `<button class="fav${marked(id)}" data-act="favour:${w.id}" data-testid="${id}" title="Send this wire ${RULES.router.favour} of every ${RULES.router.favour + RULES.router.rest * (wires.length - 1)} items" aria-label="Favour the wire to ${esc(name)}">Favour</button>`;
+    }
+    return `<div class="rrow${fav ? ' hasfav' : ''}" data-key="w${w.id}"><span class="dest">→ ${esc(name)}</span>${ctl}<div class="bar"><span style="width:${pct(w.rate / total)}%;background:#9DB8FF"></span></div><span class="mono rate">${fmtRate(w.rate)}/s</span>${fav}</div>`;
   }).join('');
   const help: Record<RouterMode, string> = {
     even: 'Splits evenly and skips outputs that are full.',
@@ -534,7 +557,9 @@ function routerSection(g: Game, n: GNode): string {
     priority: 'Fills #1 first. The rest only get the overflow.',
     filter: 'Each wire carries one material, or anything if set to "any".',
   };
-  const bal = has(g, 'S3') ? `<button class="ghostbtn" data-act="autobal">Auto-balance</button>` : has(g, 'L4') ? `<button class="ghostbtn dashed" data-act="tech:S3">Auto-balance · 150β</button>` : '';
+  const s3 = TECHS.S3;
+  const bal = !s3 ? '' : has(g, s3.id) ? `<button class="ghostbtn" data-act="autobal">${esc(s3.name)}</button>`
+    : has(g, 'L4') ? `<button class="ghostbtn dashed" data-act="tech:${s3.id}">${esc(s3.name)} · ${techPrice(s3)}</button>` : '';
   return `<div class="sec"><span class="lbl">Mode</span><div class="seg">${seg}</div><div class="note">${help[n.mode]}</div>
     ${wires.length ? rows : `<div class="note">${isTouch() ? 'Tap the output port, then tap a node to add a destination.' : 'Drag wires from the output port to add destinations.'}</div>`}${bal ? `<div class="st-actions">${bal}</div>` : ''}</div>`;
 }
@@ -570,8 +595,10 @@ function nodeInspector(g: Game, n: GNode): string {
   body += upgradeSection(g, n);
   const refund = refundOf(g, n);
   const fixed = n.type === 'well';
+  // Demand is not mentioned before it has ever mattered (g.seenSurplus): the Market's line stops at its first sentence.
+  const blurb = n.type === 'market' && !g.seenSurplus ? def.blurb.split('. ')[0].replace(/\.?$/, '.') : def.blurb;
   return `<div class="sec head"><div class="hicon">${n.type === 'well' && n.material ? matGlyph(n.material, 22) : isMachine(n) && n.recipe ? matGlyph(RECIPES[n.recipe].outputs[0][0], 22) : nodeIcon(n.type, 22)}</div>
-      <div class="htxt"><h2>${esc(title)}</h2><p>${esc(def.blurb)}</p></div>
+      <div class="htxt"><h2>${esc(title)}</h2><p>${esc(blurb)}</p></div>
       <button class="ibtn bare" data-act="close" aria-label="Close inspector">${icon('close', 16)}</button></div>
     <div class="scroll">${body}</div>
     <div class="foot"><button class="fbtn" data-act="dup" ${fixed ? 'disabled' : ''}>Duplicate <span class="kbd">Ctrl D</span></button>
@@ -585,7 +612,7 @@ function wireInspector(g: Game, w: Wire): string {
   const canUp = w.tier < maxPipeTier(g);
   const sat = w.rate >= cap * 0.97;
   let up = '';
-  if (canUp) up = `<div class="uprow"><div><b>${next.name}</b><small>carries ${next.cap}/s</small></div>${buyBtn('wireup', next.cost, g.credits, '', 'wire-up')}</div><div class="st-actions"><button class="ghostbtn" data-act="wireall">Upgrade all saturated wires</button></div>`;
+  if (canUp) up = `<div class="uprow"><div><b>${next.name}</b><small>carries ${next.cap}/s</small></div>${buyBtn('wireup', next.cost, g.credits, '', 'wire-up')}</div><div class="st-actions"><button class="ghostbtn" data-act="wireall">Upgrade every full wire</button></div>`;
   else if (next) up = `<div class="uprow locked"><div><b>${next.name}</b><small>Research ${TECHS[next.tech!].name}</small></div><button class="buy dashed" data-act="tech:${next.tech}"><span class="lab">View tech</span></button></div>`;
   else up = `<div class="note">Top tier.</div>`;
   return `<div class="sec head"><div class="hicon">${mats[0] ? matGlyph(mats[0], 22) : icon('minus', 22)}</div>
@@ -597,12 +624,14 @@ function wireInspector(g: Game, w: Wire): string {
       <div class="bar"><span style="width:${pct(w.rate / cap)}%;background:${mats[0] ? MATERIALS[mats[0]].color : '#9DB8FF'}"></span></div></div>
       <div class="sec"><span class="lbl">Pipe</span>${up}</div>
     </div>
-    <div class="foot"><button class="fbtn danger" data-act="cut">Cut wire${w.paid > 0 ? ` · <span class="mono">+${fmt(w.paid)}¢</span>` : ''}</button></div>`;
+    <div class="foot"><button class="fbtn danger${marked('cut-wire')}" data-act="cut" data-testid="cut-wire">Cut wire${w.paid > 0 ? ` · <span class="mono">+${fmt(w.paid)}¢</span>` : ''}</button></div>`;
 }
 
 function renderInspector(force: boolean) {
   const g = ui.g;
   const sel = ui.sel;
+  // A ring that a tip put on a control ("Show me") goes when something else is selected.
+  tendMark();
   let html = '';
   if (sel?.kind === 'node') {
     const n = nodeById(g, sel.id);
