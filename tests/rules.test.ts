@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { connect, cutWire, placeNode, setMode, setRecipe, upgrade } from '../src/actions';
-import { MATERIALS, MatId, NODE_DEFS, PIPES, RECIPES, RULES, TECHS } from '../src/content';
+import { MATERIALS, MatId, NODE_DEFS, NodeType, PIPES, RECIPES, RULES, TECHS } from '../src/content';
 import { cycleTime, demandBurst, demandInfo, expansionCost, flowMult, price, saturation, sellValue, upgradeCostAt, wellRate } from '../src/economy';
 import { countsForFlow, flowInfo, flowProducers, inFlowState, isFlowing, worstProducer } from '../src/flow';
 import { Game, START, newGame } from '../src/state';
@@ -14,12 +14,12 @@ describe('numbers (2.6)', () => {
   it('Shard is lime; machine and tech prices are the ones tuned with the pacing bot', () => {
     expect(MATERIALS.shard.color).toBe('#B8F26B');
     expect(NODE_DEFS.assembler.base).toBe(600);
-    expect(NODE_DEFS.fabricator.base).toBe(6400);
+    expect(NODE_DEFS.fabricator.base).toBe(6600);
     // The Processing spine the goal chain asks for.
     expect(TECHS.P2.cost).toEqual({ a: 45 });
     expect(TECHS.P3.cost).toEqual({ a: 180 });
     expect(TECHS.P4.cost).toEqual({ a: 800 });
-    expect(TECHS.P5.cost).toEqual({ a: 900 });
+    expect(TECHS.P5.cost).toEqual({ a: 850 });
     expect(TECHS.P7.cost).toEqual({ a: 700, b: 150 });
     // Free play needs all three kinds of Data, and Reclamation cannot be had before the first Lens.
     expect(TECHS.P6.cost).toEqual({ a: 300, g: 25 });
@@ -58,10 +58,13 @@ describe('numbers (2.6)', () => {
     expect([0, 1].map((l) => upgradeCostAt('assembler', 'speed', l))).toEqual([100, 160]);
     expect([0, 1].map((l) => upgradeCostAt('fabricator', 'speed', l))).toEqual([400, 640]);
     expect([0, 1].map((l) => upgradeCostAt('lab', 'speed', l))).toEqual([50, 80]);
-    // Efficiency and Buffer are a share of the node's base price.
-    expect(upgradeCostAt('refiner', 'eff', 0)).toBe(75);
-    expect(upgradeCostAt('refiner', 'buffer', 0)).toBe(20);
-    expect(upgradeCostAt('silo', 'buffer', 0)).toBe(80);
+    // Efficiency and Buffer have their own tables: a dearer machine does not make them dearer.
+    expect(['refiner', 'assembler', 'fabricator'].map((t) => upgradeCostAt(t as NodeType, 'eff', 0))).toEqual([75, 300, 1200]);
+    expect(upgradeCostAt('refiner', 'eff', 1)).toBe(120);
+    expect(['refiner', 'assembler', 'fabricator', 'silo'].map((t) => upgradeCostAt(t as NodeType, 'buffer', 0))).toEqual([20, 80, 320, 80]);
+    for (const type of ['refiner', 'assembler', 'fabricator'] as NodeType[]) {
+      expect(upgradeCostAt(type, 'eff', 0), type).toBeLessThan(NODE_DEFS[type].base * 2);
+    }
   });
 
   it('a first or second Speed level pays for itself in one to three minutes where the input exists', () => {

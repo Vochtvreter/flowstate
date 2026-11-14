@@ -5,7 +5,8 @@
 // reward (event 'goal-claimed'), moves on, and checks the next goal at once, so a goal the player has
 // already met is ready the moment it is reached. Rewards are not undoable.
 //
-// Reward sizes are a first pass: tune them in the GOALS table below.
+// Reward sizes are in the GOALS table below, tuned with `npm run pacing`. Through "Build a Lab and feed it"
+// the credits paid so far always cover the next purchase the card asks for (tests/playthrough.test.ts).
 import { MATERIALS, MatId, NodeType, RULES, TECHS } from './content';
 import { endDemo, expansionCost, grantTech, has, nodeCost, nodeCount, upgradeCost } from './economy';
 import { graph } from './graph';
@@ -117,7 +118,7 @@ const hint = (mouse: string, touch: string = mouse) => ({ mouse, touch });
 
 // ---------- the chain ----------
 
-/** Ordered goals: 22 for the demo, then free play. Reward sizes are first-pass numbers to tune. */
+/** Ordered goals: 22 for the demo, then free play. */
 export const GOALS: Goal[] = [
   {
     id: 'wire-market', title: 'Wire the Well to the Market',

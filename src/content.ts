@@ -90,7 +90,7 @@ export const NODE_DEFS: Record<NodeType, NodeDef> = {
   well: { type: 'well', name: 'Well', base: 10, growth: 1.15, tracks: ['speed'], verb: 'extract', blurb: 'Extracts a raw material. Must sit on a deposit.' },
   refiner: { type: 'refiner', name: 'Refiner', base: 50, growth: 1.15, tech: 'P1', tracks: ['speed', 'eff', 'buffer'], verb: 'refine', blurb: 'One input in, something better out.' },
   assembler: { type: 'assembler', name: 'Assembler', base: 600, growth: 1.15, tech: 'P4', tracks: ['speed', 'eff', 'buffer'], verb: 'assemble', blurb: 'Combines two inputs.' },
-  fabricator: { type: 'fabricator', name: 'Fabricator', base: 6400, growth: 1.15, tech: 'P7', tracks: ['speed', 'eff', 'buffer'], verb: 'fabricate', blurb: 'Combines up to three inputs.' },
+  fabricator: { type: 'fabricator', name: 'Fabricator', base: 6600, growth: 1.15, tech: 'P7', tracks: ['speed', 'eff', 'buffer'], verb: 'fabricate', blurb: 'Combines up to three inputs.' },
   router: { type: 'router', name: 'Router', base: 25, growth: 1.1, tech: 'L1', tracks: [], verb: 'split', blurb: 'Splits a stream by ratio, priority or filter.' },
   merger: { type: 'merger', name: 'Merger', base: 25, growth: 1.1, tech: 'L2', tracks: [], verb: 'merge', blurb: 'A junction: many wires in, one stream out.' },
   silo: { type: 'silo', name: 'Silo', base: 200, growth: 1.2, tech: 'L5', tracks: ['buffer'], verb: 'store', blurb: 'A big buffer that smooths bursts.' },
@@ -154,7 +154,14 @@ const T = (
 ): Tech => ({ id, name, branch, col, row, cost, requires, desc, unlocks, ...extra });
 
 /**
- * Tech prices are the pacing bot's "proposed" numbers (see docs/PITCH_PLAN.md 2.6).
+ * Tech prices as tuned with the pacing bot (`npm run pacing`, docs/CONTENT.md). The reasoning, so that the
+ * next change keeps it:
+ *  - The Processing spine the goal chain asks for (P2 → P3 → P4 → P5 → P7) never costs more than about
+ *    three minutes of the Data a slow player's un-upgraded Labs bring in at that point.
+ *  - Side techs are impulse buys: cheap next to the spine tech they compete with, so every kind of player
+ *    picks them up along the way. α for what is useful before the first Glyph, β after it.
+ *  - Anything that only matters after the demo costs γ, which does not exist before the first Lens, and the
+ *    late Processing techs need all three kinds of Data, so studying Tier 1 items never stops paying.
  * P1, R1, L1 and C1 are goal rewards (src/goals.ts) and cannot be bought.
  */
 export const TECHS: Record<string, Tech> = Object.fromEntries([
@@ -163,7 +170,7 @@ export const TECHS: Record<string, Tech> = Object.fromEntries([
   T('P2', 'Murk Deposits', 'processing', 1, 0, { a: 45 }, ['R1'], 'Extract Murk and refine it into Ink. It leaves Silt behind, so you also get the Void to dump it.', ['Murk Wells', 'Recipe: 2 Murk → Ink + Silt', 'Void node']),
   T('P3', 'Ember Deposits', 'processing', 2, 0, { a: 180 }, ['P2'], 'Extract Ember and refine it into Spark.', ['Ember Wells', 'Recipe: 2 Ember → Spark']),
   T('P4', 'Assembly', 'processing', 3, 0, { a: 800 }, ['P3'], 'Machines with two inputs. Ink and Spark make Glyph, your first Tier 2 item and the source of β Data.', ['Assembler', 'Recipe: Ink + Spark → Glyph']),
-  T('P5', 'Breeze Deposits', 'processing', 4, 0, { a: 900 }, ['P4'], 'Extract Breeze, refine it into Mist, and combine Mist with Shard into Prism.', ['Breeze Wells', 'Recipe: 2 Breeze → Mist', 'Recipe: 2 Shard + Mist → Prism']),
+  T('P5', 'Breeze Deposits', 'processing', 4, 0, { a: 850 }, ['P4'], 'Extract Breeze, refine it into Mist, and combine Mist with Shard into Prism.', ['Breeze Wells', 'Recipe: 2 Breeze → Mist', 'Recipe: 2 Shard + Mist → Prism']),
   T('P7', 'Fabrication', 'processing', 5, 0, { a: 700, b: 150 }, ['P5'], 'Three-input machines. Prism and Glyph become Lens, the first Tier 3 item and the source of γ Data.', ['Fabricator', 'Recipe: Prism + 2 Glyph → Lens']),
   T('P9', 'Paradox', 'processing', 6, 0, { a: 2500, b: 500, g: 400 }, ['P8'], 'The capstone. Lens, Dynamo and raw Breeze fold into a Paradox.', ['Recipe: Lens + Dynamo + 4 Breeze → Paradox']),
   T('U1', 'Efficiency Tuning', 'processing', 1, 1, { b: 40 }, ['P1'], 'A new upgrade track for machines: some crafts consume no inputs.', ['Efficiency upgrades on machines']),
@@ -207,7 +214,7 @@ export const EXPANSION_DEPOSITS: MatId[][] = [
 ];
 
 // =====================================================================================
-// RULES: tunables. First-pass numbers from docs/PITCH_PLAN.md section 2; tune them here.
+// RULES: tunables. The rules are docs/PITCH_PLAN.md section 2; the numbers were tuned with `npm run pacing`.
 // (Prices are in the tables above, goal rewards and wording in src/goals.ts.)
 // =====================================================================================
 
@@ -287,20 +294,20 @@ export const RULES = {
     step: 0.1,
   },
 
-  /** Board expansion number n (0-based) costs base × growth^n. */
+  /** Board expansion number n (0-based) costs base × growth^n: 200, 500, 1,250, 3,125... */
   expansion: { base: 200, growth: 2.5 },
 
   /**
-   * Upgrades. Level L of a track (0-based) costs its first-level price × growth^L.
-   * Speed is priced per node type so that a first or second level pays for itself in one to three minutes
-   * when the extra input exists (`npm run pacing` prints the table). Efficiency and Buffer cost a share of
-   * the node's base price (at least minBase).
+   * Upgrades. Level L of a track (0-based) costs its first-level price × growth^L; the tables give the
+   * first-level price per node type (a type missing from a table falls back to `fallback` × its base price).
+   * Speed is sized so that a first or second level pays for itself in one to three minutes when the extra
+   * input exists (`npm run pacing` prints the table). Efficiency is a slower investment: three to five minutes.
    */
   upgrade: {
     growth: 1.6,
     speed: { well: 50, refiner: 32, assembler: 100, fabricator: 400, lab: 50 } as Partial<Record<NodeType, number>>,
-    eff: 1.5,
-    buffer: 0.4,
-    minBase: 10,
+    eff: { refiner: 75, assembler: 300, fabricator: 1200 } as Partial<Record<NodeType, number>>,
+    buffer: { refiner: 20, assembler: 80, fabricator: 320, silo: 80 } as Partial<Record<NodeType, number>>,
+    fallback: 0.5,
   },
 };
