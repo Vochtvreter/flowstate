@@ -1,5 +1,5 @@
 import { NodeType } from '../content';
-import { Game } from '../state';
+import { Game, GameEvent } from '../state';
 
 export interface Selection { kind: 'node' | 'wire'; id: number }
 
@@ -61,6 +61,38 @@ export function signal<K extends keyof Signals>(kind: K, detail: Signals[K]) {
   const list = listeners[kind];
   if (list) for (const fn of list) fn(detail);
 }
+
+// ---------- hooks for feature modules ----------
+// The HUD, feel and phone modules subscribe here rather than editing main.ts. main.ts calls the
+// emit functions: every simulation event, every animation frame, and whenever ui.g is replaced.
+
+const gameFns: ((ev: GameEvent) => void)[] = [];
+const frameFns: ((dt: number) => void)[] = [];
+const beatFns: (() => void)[] = [];
+const newGameFns: (() => void)[] = [];
+
+/** Every simulation event (see GameEvent in state.ts), once, in order. */
+export const onGame = (fn: (ev: GameEvent) => void) => void gameFns.push(fn);
+/** Every animation frame, after the board has been updated. `dt` is in seconds (0 after a long pause). */
+export const onFrame = (fn: (dt: number) => void) => void frameFns.push(fn);
+/** Four times a second, with the panels: the place for text that follows the game. */
+export const onBeat = (fn: () => void) => void beatFns.push(fn);
+/** ui.g was replaced (reset or a loaded save): drop anything cached about the old game. */
+export const onNewGame = (fn: () => void) => void newGameFns.push(fn);
+
+const run = <A extends unknown[]>(fns: ((...a: A) => void)[], ...a: A) => {
+  for (const fn of fns) {
+    try {
+      fn(...a);
+    } catch (err) {
+      console.error(err);
+    }
+  }
+};
+export const emitGame = (ev: GameEvent) => run(gameFns, ev);
+export const emitFrame = (dt: number) => run(frameFns, dt);
+export const emitBeat = () => run(beatFns);
+export const emitNewGame = () => run(newGameFns);
 
 // ---------- toasts ----------
 

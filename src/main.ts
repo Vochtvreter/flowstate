@@ -1,4 +1,8 @@
 import './style.css';
+import './styles/tech.css';
+import './styles/hud.css';
+import './styles/feel.css';
+import './styles/phone.css';
 import { MATERIALS, TECHS } from './content';
 import { clearHistory, cutWire, deleteNode, nodeById, redo, refundOf, undo } from './actions';
 import { fmt, fmtTime, has, offlineCap } from './economy';
@@ -14,7 +18,10 @@ import { fx, initFx } from './ui/fx';
 import { matGlyph } from './ui/icons';
 import { hotbarTypes, initPanels, renderPanels, tickPanels } from './ui/panels';
 import { closeTech, initTech, openTech, renderTech } from './ui/tech';
-import { initToasts, onSignal, select, toast, touch, ui } from './ui/ui';
+import { initFeel } from './ui/feel';
+import { initHud } from './ui/hud';
+import { initPhone } from './ui/phone';
+import { emitBeat, emitFrame, emitGame, emitNewGame, initToasts, onSignal, select, toast, touch, ui } from './ui/ui';
 
 const STEP = 0.05;
 /** Seconds between refresh beats for on-board numbers and panels (see the frame loop). */
@@ -53,9 +60,14 @@ function boot() {
         ui.placing = null;
         select(null);
         fitView();
+        emitNewGame();
       },
     },
   );
+  // Feature modules: each owns its own file and subscribes through the hooks in ui/ui.ts.
+  initHud();
+  initFeel();
+  initPhone();
   fitView();
   if (loaded) {
     const away = (Date.now() - loaded.savedAt) / 1000;
@@ -106,7 +118,10 @@ function onGameEvent(ev: GameEvent) {
 function drainEvents() {
   const g = ui.g;
   if (!g.events.length) return;
-  for (const ev of g.events.splice(0)) onGameEvent(ev);
+  for (const ev of g.events.splice(0)) {
+    onGameEvent(ev);
+    emitGame(ev);
+  }
 }
 
 let last = performance.now();
@@ -162,6 +177,7 @@ function step(now: number) {
   }
   updateBoard(dt);
   tickPanels(dt);
+  emitFrame(dt);
   slow += dt;
   techTimer += dt;
   // Refreshing text costs the browser a full rendering pass, so it is done on a slow beat. The
@@ -173,6 +189,7 @@ function step(now: number) {
     beat = !beat;
     updateSlow(beat ? 'nodes' : 'wires');
     renderPanels();
+    emitBeat();
   }
   if (ui.techOpen && techTimer >= 0.5) {
     techTimer = 0;
