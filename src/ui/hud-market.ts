@@ -1,9 +1,10 @@
-// The Market inspector: one demand gauge per material. Owned by the HUD track.
+// The Market inspector: what sells here, and (once demand has ever mattered) one demand gauge per
+// material. Owned by the HUD track.
 //
 // A gauge is a single bar. Its fill is what is being sold per second; a tick marks how much the
 // buyers take at full price. Whatever is past the tick sells cheap and is drawn striped. Under it,
 // the same thing in words, and the income on the right.
-import { MATERIALS, MAT_IDS, MatId } from '../content';
+import { MATERIALS, MAT_IDS, MatId, TECHS } from '../content';
 import { materialsAt } from '../actions';
 import { demandInfo, fmt, fmtRate, has } from '../economy';
 import { graph } from '../sim';
@@ -30,9 +31,20 @@ function gauge(g: Game, m: MatId): string {
   </div>`;
 }
 
+/** One plain line: the material, how much of it sells and for what, and what that earns. */
+function plain(g: Game, m: MatId): string {
+  const d = demandInfo(g, m);
+  return `<div class="mrow" data-key="${m}" data-testid="sell-${m}"><span class="mr-name">${matGlyph(m, 12)} ${MATERIALS[m].name}</span><span class="mono mr-rate">${fmtRate(d.rate)}/s · ${fmt(d.unitPrice)}¢ each</span><span class="mono dg-inc">+${fmtRate(d.income)}¢/s</span></div>`;
+}
+
 /**
- * Gauges for what arrives at this Market. With Market Lens, every other material sold at any
- * Market is listed below them as well.
+ * What arrives at this Market. With Market Lens, every other material sold at any Market is listed below
+ * as well.
+ *
+ * Demand (full price up to a rate, a quarter beyond it) is only shown once it has mattered: until something
+ * has sold over its demand for the first time (g.seenSurplus, raised with the 'surplus' event) a material is
+ * one plain line, with no gauge and no word about limits. In sixty scripted runs nothing sold over demand
+ * before the first Lens, so a gauge there would only be something to puzzle over.
  */
 export function marketSection(g: Game, n: GNode): string {
   const here = new Set<MatId>();
@@ -41,11 +53,12 @@ export function marketSection(g: Game, n: GNode): string {
   const others = has(g, 'C1') ? MAT_IDS.filter((m) => !here.has(m) && (g.soldRate[m] ?? 0) > 0.005) : [];
   const bonus = demandInfo(g, 'glint').mult - 1;
   const flow = bonus > 0.005 ? `<span class="dg-flow mono">Flow +${Math.round(bonus * 100)}%</span>` : '';
-  let html = `<div class="sec"><div class="row"><span class="lbl">Selling here</span>${flow}</div>
-    ${mine.map((m) => gauge(g, m)).join('') || '<div class="note">Nothing arrives here yet. Wire something in to sell it.</div>'}
-    <div class="note">Buyers pay full price up to the mark on each bar. Anything past it sells cheap, so a mix of materials earns more than a flood of one.</div></div>`;
+  const row = g.seenSurplus ? gauge : plain;
+  let html = `<div class="sec" data-testid="${g.seenSurplus ? 'market-gauges' : 'market-plain'}"><div class="row"><span class="lbl">Selling here</span>${flow}</div>
+    ${mine.map((m) => row(g, m)).join('') || '<div class="note">Nothing arrives here yet. Wire something in to sell it.</div>'}
+    ${g.seenSurplus ? '<div class="note">Buyers pay full price up to the mark on each bar. Anything past it sells cheap, so a mix of materials earns more than a flood of one.</div>' : ''}</div>`;
   if (others.length) {
-    html += `<div class="sec"><div class="row"><span class="lbl">At your other Markets</span><span class="dg-flow">Market Lens</span></div>${others.map((m) => gauge(g, m)).join('')}</div>`;
+    html += `<div class="sec"><div class="row"><span class="lbl">At your other Markets</span><span class="dg-flow">${TECHS.C1?.name ?? ''}</span></div>${others.map((m) => row(g, m)).join('')}</div>`;
   }
   return html;
 }
