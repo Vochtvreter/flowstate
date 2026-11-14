@@ -207,6 +207,9 @@ html[data-input='touch'] #tech .kbd { display: none; }
 #app.phone #tech .tt .c { font-size: 12px; line-height: 16px; }
 #app.phone #tech .tt .gl { font-size: 10.5px; line-height: 16px; }
 #app.phone #tech .tt .pb { bottom: 4px; }
+/* A full-width row has no room to swell: a smaller wake-up. */
+#app.phone #tech .tt.wake { animation-name: tt-wake-row; }
+@keyframes tt-wake-row { 0% { transform: scale(0.98); } 35% { transform: scale(1.025); } 100% { transform: scale(1); } }
 /* A chevron says the row opens. */
 #app.phone #tech .tt .tx::after { content: ''; position: absolute; right: 14px; top: 50%; width: 7px; height: 7px; margin-top: -4px; border-right: 2px solid currentColor; border-top: 2px solid currentColor; transform: rotate(45deg); opacity: 0.4; }
 #app.phone #tech .tt .tx { padding-right: 18px; }

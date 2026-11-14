@@ -493,11 +493,16 @@ export function renderTech(force = false) {
   // Notice what has just become ready, owned or visible, for a one-off animation.
   for (const [id, f] of fresh) if (f.until && now > f.until) fresh.delete(id);
   const opening = seen.size === 0;
+  let raise = false;
   for (const x of tiles) {
     const was = seen.get(x.t.id);
     if (was !== x.state && !opening) {
-      if (x.state === 'rdy') fresh.set(x.t.id, { kind: 'wake', until: 0 });
-      else if (x.state === 'own') fresh.set(x.t.id, { kind: 'won', until: 0 });
+      if (x.state === 'rdy') {
+        fresh.set(x.t.id, { kind: 'wake', until: 0 });
+        // The tech the tree is open on has just become affordable: on a phone, bring its sheet up with the
+        // Research button, unless a finger is on the screen.
+        if (x.t.id === ui.techSel && !sheet && !panel.busy()) raise = sheet = true;
+      } else if (x.state === 'own') fresh.set(x.t.id, { kind: 'won', until: 0 });
       else if (!was) fresh.set(x.t.id, { kind: 'new', until: 0 });
     }
     seen.set(x.t.id, x.state);
@@ -531,7 +536,7 @@ export function renderTech(force = false) {
   if (force && scrollTo) {
     settleScroll(scrollTo === 'top');
     scrollTo = null;
-  }
+  } else if (raise && phone) settleScroll(false);
 }
 
 /** After a press moved the selection: bring the selected tile (and, on a phone, the active tab) into view. */
