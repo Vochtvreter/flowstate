@@ -1,20 +1,26 @@
 /**
  * Pacing bot: a headless, DOM-free simulated FIRST-TIME player.
  *
- *   npm run pacing                       play 30 minutes of the current build and print the report
- *   npm run pacing -- --policy=mainline  a focused player who saves Data for the Processing branch
- *   npm run pacing -- --profile=proposed what-if numbers from tools/pacing-profiles.ts
+ *   npm run pacing                          play 30 minutes of the current build and print the report
+ *   npm run pacing -- --policy=mainline     a focused player who saves Data for the Processing branch
+ *   npm run pacing -- --profile=proposed    what-if numbers and rewards from tools/pacing-profiles.ts
  *   npm run pacing -- --seed=3 --minutes=45 --quiet
+ *   other flags: --patience=<s>  --sharedLab  --noExpand
  *
  * The bot imports the game's own modules, so it always plays the real rules. It models a human,
  * not an optimiser: one action every few seconds, no look-ahead, and a greedy policy
  *   research what is affordable -> fix what is red -> build the new toy -> grow the bottleneck.
  * Everything worth tweaking is in CFG below. Rewards (goal chain, orders) plug in through
- * `hooks` on a profile (tools/pacing-profiles.ts) and are called every tick.
+ * `hooks` on a profile (tools/pacing-profiles.ts); each hook is called once per tick and may grant
+ * credits or Data. Profiles can also change content numbers in memory, so a tuning idea can be
+ * measured before anyone edits src/.
+ *
+ * The report has five parts: (a) event timeline, (b) per-minute table, (c) when each tech was
+ * researched and each material first made, (d) dead stretches, (e) where the content runs out.
  */
 declare const process: { argv: string[]; stdout: { write(s: string): void } };
 
-import { DATA_YIELD, DataTier, MATERIALS, MatId, NODE_DEFS, NodeType, PIPES, RECIPES, Recipe, TECHS, Tech, Track } from '../src/content';
+import { DATA_YIELD, DataTier, MATERIALS, MatId, NODE_DEFS, NodeType, PIPES, RECIPES, TECHS, Tech, Track } from '../src/content';
 import { clearHistory, connect, cutWire, expandBoard, freeDeposits, materialsAt, placeNode, upgrade, upgradeWire } from '../src/actions';
 import {
   expansionCost, fmt, has, maxLevel, maxPipeTier, nodeCost, pipeCap, readyTechs, recipeOf, recipeUnlocked, research, saturation,
@@ -595,7 +601,8 @@ class Bot {
     let saving = false;
     if (target) {
       const eta = (target.cost - g.credits) / Math.max(g.creditRate, 1e-6);
-      saving = eta <= CFG.patience;
+      // Only a never-had toy is worth sitting on credits for; for "one more of the same" the player keeps tinkering.
+      saving = !!target.novel && eta <= CFG.patience;
       cap = target.cost * (saving ? CFG.pettyShare : CFG.growShareOfTarget);
     }
     const buy = news.find((w) => can(w) && (!target || !target.novel || w.cost <= cap));
@@ -694,7 +701,7 @@ class Bot {
   hookCtx(): HookCtx {
     const g = this.g;
     return {
-      g, t: g.time,
+      g, t: g.time, income: 0, dataIncome: { a: 0, b: 0, g: 0 },
       grant: (r, why) => this.grant(r, why),
       count: (type) => g.nodes.filter((n) => n.type === type).length,
       made: (mat) => !!g.made[mat as MatId],
@@ -710,6 +717,10 @@ class Bot {
       tick(g, CFG.dt);
       this.mIncome += g.tickAcc.credits;
       for (const k of TIERS) this.mData[k] += g.tickAcc.data[k];
+      // 30-second averages: the game's own rates (3 s) jump every time a buffer empties into the Market
+      const k = 1 - Math.exp(-CFG.dt / 30);
+      ctx.income += (g.tickAcc.credits / CFG.dt - ctx.income) * k;
+      for (const d of TIERS) ctx.dataIncome[d] += (g.tickAcc.data[d] / CFG.dt - ctx.dataIncome[d]) * k;
       ctx.t = g.time;
       for (const h of this.profile.hooks ?? []) h.onTick(ctx);
       this.drainEvents();

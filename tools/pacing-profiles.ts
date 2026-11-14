@@ -20,6 +20,10 @@ export interface HookCtx {
   g: Game;
   /** Game time in seconds. */
   t: number;
+  /** Market income in credits per second, averaged over about 30 seconds. */
+  income: number;
+  /** Data income per second by tier, averaged over about 30 seconds. */
+  dataIncome: Record<DataTier, number>;
   /** Pay the player. Shows up in the timeline as a reward line. */
   grant(r: Reward, why: string): void;
   /** Number of nodes of a type on the board. */
@@ -78,11 +82,11 @@ export function orders(opts: { from: number; every: number; seconds: number; dat
     onTick(c) {
       if (c.t < next) return;
       next += opts.every;
-      const credits = Math.round(c.g.creditRate * opts.seconds);
+      const credits = Math.round(c.income * opts.seconds);
       if (credits < 1) return;
       const d = opts.dataSeconds ?? 0;
       c.grant(
-        { credits, a: Math.round(c.g.dataRate.a * d), b: Math.round(c.g.dataRate.b * d), g: Math.round(c.g.dataRate.g * d) },
+        { credits, a: Math.round(c.dataIncome.a * d), b: Math.round(c.dataIncome.b * d), g: Math.round(c.dataIncome.g * d) },
         `order delivered (${opts.seconds}s of income)`,
       );
     },
@@ -107,37 +111,38 @@ export const PROFILES: Record<string, Profile> = {
     describe: 'Recommended numbers: goal chain + orders, steeper Data prices, smaller late milestones.',
     startCredits: 0,
     apply() {
-      // --- α techs: cheap side techs every ~40-70 s, the Processing spine carries the weight ---
+      // --- α: side techs are quick beats, the Processing spine (P2 → P3 → P4) carries the weight ---
       cost('C1', { a: 10 });
-      cost('L1', { a: 20 });
-      cost('P2', { a: 30 });
-      cost('L2', { a: 50 });
-      cost('R2', { a: 60 });
-      cost('L5', { a: 80 });
-      cost('P3', { a: 90 });
-      cost('L3', { a: 100 });
-      cost('S1', { a: 100 });
-      cost('R4', { a: 100 });
-      cost('C2', { a: 150 });
-      cost('L4', { a: 200 });
-      cost('U1', { a: 280 });
-      cost('P4', { a: 500 });
-      // --- α + β ---
-      cost('P6', { a: 300, b: 40 });
-      cost('P5', { a: 600 });
-      cost('L6', { a: 300, b: 40 });
-      cost('R3', { b: 80 });
-      cost('L7', { b: 120 });
-      cost('U2', { b: 150 });
-      cost('C4', { b: 160 });
-      cost('S3', { b: 200 });
-      cost('P7', { a: 900, b: 400 });
+      cost('L1', { a: 25 });
+      cost('P2', { a: 45 });
+      cost('R2', { a: 80 });
+      cost('L2', { a: 100 });
+      cost('P3', { a: 150 });
+      cost('L5', { a: 170 });
+      cost('L3', { a: 190 });
+      cost('S1', { a: 210 });
+      cost('R4', { a: 210 });
+      cost('C2', { a: 240 });
+      cost('L4', { a: 270 });
+      cost('U1', { a: 310 });
+      cost('P4', { a: 1000 });
+      // --- α + β: one new line or tool every 60-120 s between Glyph and Lens ---
+      cost('P6', { a: 300, b: 30 });
+      cost('R3', { b: 100 });
+      cost('P5', { a: 1500 });
+      cost('L6', { a: 400, b: 60 });
+      cost('L7', { b: 150 });
+      cost('U2', { b: 180 });
+      cost('C4', { b: 200 });
+      cost('S3', { b: 250 });
+      cost('P7', { a: 2000, b: 800 });
       // --- γ ---
-      cost('P8', { b: 600, g: 150 });
-      cost('C5', { g: 120 });
-      cost('L8', { g: 250 });
-      cost('P9', { b: 1200, g: 500 });
-      void NODE_DEFS;
+      cost('C5', { g: 60 });
+      cost('P8', { b: 400, g: 80 });
+      cost('L8', { g: 200 });
+      cost('P9', { b: 700, g: 400 });
+      // --- machines ---
+      NODE_DEFS.fabricator.base = 3000;
     },
     // T1 firsts keep value × 30 (they fund the next step); T2 pays × 15, T3 × 10.
     milestone: (mat, game) => {
@@ -145,32 +150,39 @@ export const PROFILES: Record<string, Profile> = {
       return tier >= 3 ? Math.round(game / 3) : tier === 2 ? Math.round(game / 2) : game;
     },
     hooks: [
-      earlyUnlock('P1', (c) => c.g.lifetime >= 30),
+      earlyUnlock('P1', (c) => c.g.lifetime >= 40),
       goalChain([
-        { text: 'wire the Well to the Market', done: (c) => c.g.wires.length >= 1, reward: { credits: 15 } },
-        { text: 'place a second Well and wire it', done: (c) => c.count('well') >= 2 && c.g.wires.length >= 2, reward: { credits: 15 } },
-        { text: 'build a Refiner', done: (c) => c.count('refiner') >= 1, reward: { credits: 20 } },
+        { text: 'wire the Well to the Market', done: (c) => c.g.wires.length >= 1, reward: { credits: 12 } },
+        { text: 'place a second Well and wire it', done: (c) => c.count('well') >= 2 && c.g.wires.length >= 2, reward: { credits: 20 } },
+        { text: 'build a Refiner', done: (c) => c.count('refiner') >= 1, reward: { credits: 15 } },
         { text: 'build a Lab', done: (c) => c.count('lab') >= 1, reward: { a: 10 } },
-        { text: 'research your first tech', done: (c) => techs(c) >= 1, reward: { credits: 40 } },
-        { text: 'make Ink', done: (c) => c.made('ink'), reward: { a: 20 } },
-        { text: 'get rid of the Silt', done: (c) => c.count('void') >= 1, reward: { credits: 60 } },
-        { text: 'expand the board', done: (c) => c.g.board.expansions >= 1, reward: { credits: 80 } },
-        { text: 'own 5 Wells', done: (c) => c.count('well') >= 5, reward: { a: 40 } },
-        { text: 'make Spark', done: (c) => c.made('spark'), reward: { credits: 150 } },
-        { text: 'research 8 techs', done: (c) => techs(c) >= 8, reward: { credits: 200 } },
-        { text: 'earn 5¢ per second', done: (c) => c.g.creditRate >= 5, reward: { a: 100 } },
-        { text: 'research Assembly', done: (c) => c.g.techs.includes('P4'), reward: { credits: 300 } },
-        { text: 'make Glyph', done: (c) => c.made('glyph'), reward: { b: 20 } },
-        { text: 'build a second Lab', done: (c) => c.count('lab') >= 2, reward: { credits: 300 } },
-        { text: 'make Clay', done: (c) => c.made('clay'), reward: { b: 30 } },
-        { text: 'make Prism', done: (c) => c.made('prism'), reward: { credits: 500 } },
-        { text: 'make Coil', done: (c) => c.made('coil'), reward: { b: 60 } },
-        { text: 'earn 25¢ per second', done: (c) => c.g.creditRate >= 25, reward: { credits: 800 } },
+        { text: 'research your first tech', done: (c) => techs(c) >= 1, reward: { credits: 30 } },
+        { text: 'make Ink', done: (c) => c.made('ink'), reward: { a: 15 } },
+        { text: 'get rid of the Silt', done: (c) => c.count('void') >= 1, reward: { credits: 40 } },
+        { text: 'expand the board', done: (c) => c.g.board.expansions >= 1, reward: { credits: 60 } },
+        { text: 'own 5 Wells', done: (c) => c.count('well') >= 5, reward: { a: 30 } },
+        { text: 'make Spark', done: (c) => c.made('spark'), reward: { credits: 100 } },
+        { text: 'earn 5¢ per second', done: (c) => c.income >= 5, reward: { a: 50 } },
+        { text: 'research Assembly', done: (c) => c.g.techs.includes('P4'), reward: { credits: 200 } },
+        { text: 'make Glyph', done: (c) => c.made('glyph'), reward: { b: 15 } },
+        { text: 'sell 10 Glyph', done: (c) => (c.g.sold.glyph ?? 0) >= 10, reward: { credits: 200 } },
+        { text: 'make Clay', done: (c) => c.made('clay'), reward: { b: 20 } },
+        { text: 'make Prism', done: (c) => c.made('prism'), reward: { credits: 400 } },
+        { text: 'make Coil', done: (c) => c.made('coil'), reward: { b: 40 } },
+        { text: 'research 20 techs', done: (c) => techs(c) >= 20, reward: { credits: 600 } },
         { text: 'research Fabrication', done: (c) => c.g.techs.includes('P7'), reward: { credits: 1500 } },
         { text: 'make Lens', done: (c) => c.made('lens'), reward: { g: 30 } },
+        { text: 'research Dynamo', done: (c) => c.g.techs.includes('P8'), reward: { credits: 1500 } },
         { text: 'make Dynamo', done: (c) => c.made('dynamo'), reward: { credits: 3000 } },
       ]),
-      orders({ from: 240, every: 100, seconds: 30, dataSeconds: 15 }),
+      orders({ from: 240, every: 120, seconds: 20, dataSeconds: 10 }),
     ],
   },
+};
+
+/** The proposed numbers without the goal chain and the orders: shows how much of the curve the rewards carry. */
+PROFILES['proposed-bare'] = {
+  describe: 'Proposed tech prices, milestones and Fabricator price, but no goal chain and no orders.',
+  apply: PROFILES.proposed.apply,
+  milestone: PROFILES.proposed.milestone,
 };
