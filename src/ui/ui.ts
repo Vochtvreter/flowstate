@@ -58,6 +58,19 @@ export interface Signals {
    * in client pixels.
    */
   tip: { state: 'shown' | 'stale' | 'gone'; at: { x: number; y: number } };
+  /**
+   * The player pressed "Show me" on a tip, and the interface has already selected and framed what it is
+   * about. Whoever can point should now act the suggestion out. At most one of these is set:
+   *  - `wire`: connect `from`'s output port `port` (0 when absent) to `to`;
+   *  - `build`: build a `type`, either from `from`'s output port `port` into empty space, or (a Well) on
+   *    deposit `deposit` from the build bar;
+   *  - `press`: press the control with this `data-testid` (an upgrade button, Favour, Research, Cut wire).
+   */
+  showme: {
+    wire?: { from: number; to: number; port?: number };
+    build?: { type: NodeType; from?: number; port?: number; deposit?: number };
+    press?: string;
+  };
 }
 
 const listeners: { [K in keyof Signals]?: ((detail: Signals[K]) => void)[] } = {};
