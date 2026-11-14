@@ -1,1 +1,107 @@
 /* feel styles: owned by the feel track */
+
+/* ---------- layers ----------
+   54  .cel-wash   the colour wash of a big celebration
+   55  .cel        the celebration card
+   56  #fx-top     particles that fly over the panels and the card (made by fx.ts)
+   All of it is under the modal (60), the summary (70) and the start screen (80), and none of it takes
+   input (the card swallows presses for its first 0.4 s only, see celebrate.ts). */
+#fx-top { position: absolute; left: 0; top: 0; pointer-events: none; z-index: 56; }
+
+/* ---------- mute button ---------- */
+[data-testid='mute'].off { color: var(--dim); }
+#app.phone [data-testid='mute'] { width: 44px; height: 44px; }
+
+/* ---------- board polish ---------- */
+/* A new node drops in, squashes as it lands and settles. (board.ts adds .pop once, for 320 ms.) */
+#nodes .node.pop { animation: feel-drop 0.3s cubic-bezier(0.25, 0.8, 0.35, 1) both; transform-origin: 50% 100%; }
+@keyframes feel-drop {
+  0% { transform: translateY(-18px) scale(0.9, 1.1); opacity: 0; }
+  42% { transform: translateY(0) scale(1.08, 0.88); opacity: 1; }
+  70% { transform: translateY(0) scale(0.975, 1.04); }
+  100% { transform: none; }
+}
+/* A wire carrying all it can glows a little more than one that is merely flowing. */
+g.wire.sat .glow { stroke-opacity: 0.27; }
+g.wire.sat .base { stroke-opacity: 0.58; }
+
+/* ---------- Flow State ----------
+   The HUD sets .flow-state on #app while the whole line runs flat out. The board's edge glows and
+   breathes, and wires brighten. Everything eases in and out: leaving is gentle, not a punishment. */
+#feel-edge { position: absolute; inset: 0; z-index: 2; pointer-events: none; opacity: 0; transition: opacity 2.6s ease; box-shadow: inset 0 0 90px 4px rgba(92, 225, 255, 0.22), inset 0 0 16px 1px rgba(92, 225, 255, 0.42); }
+#app.flow-state #feel-edge { opacity: 1; transition-duration: 1.5s; animation: feel-breathe 4.4s ease-in-out 1.5s infinite; }
+@keyframes feel-breathe { 50% { opacity: 0.68; } }
+#app.flow-state g.wire:not(.stalled) .base { stroke-opacity: 0.52; }
+#app.flow-state g.wire:not(.stalled) .glow { stroke-opacity: 0.18; }
+#app.flow-state g.wire.sat .glow { stroke-opacity: 0.3; }
+
+/* ---------- big celebrations ---------- */
+.cel-wash { --peak: 0.36; position: absolute; inset: 0; z-index: 54; pointer-events: none; opacity: 0; background: radial-gradient(ellipse 70% 60% at 50% 48%, color-mix(in srgb, var(--c) 78%, transparent) 0%, color-mix(in srgb, var(--c) 26%, transparent) 45%, transparent 78%); animation: cel-wash var(--life, 1.9s) linear both; will-change: opacity; }
+.cel-wash.k-lab { --peak: 0.4; }
+.cel-wash.k-glyph { --peak: 0.5; animation-name: cel-wash-late; }
+.cel-wash.k-lens { --peak: 0.6; }
+/* Flow State is cool and slow: the wash swells twice, like breathing, instead of flashing. */
+.cel-wash.k-flow { --peak: 0.3; animation-name: cel-wash-breathe; animation-timing-function: ease-in-out; }
+.cel-wash.out { transition: opacity 0.3s ease; opacity: 0 !important; animation: none; }
+@keyframes cel-wash { 0% { opacity: 0; } 8% { opacity: var(--peak); } 40% { opacity: calc(var(--peak) * 0.55); } 100% { opacity: 0; } }
+/* The Glyph's flash waits for the two streams to meet. */
+@keyframes cel-wash-late { 0% { opacity: 0; } 12% { opacity: calc(var(--peak) * 0.3); } 22% { opacity: var(--peak); } 55% { opacity: calc(var(--peak) * 0.5); } 100% { opacity: 0; } }
+@keyframes cel-wash-breathe { 0% { opacity: 0; } 24% { opacity: var(--peak); } 50% { opacity: calc(var(--peak) * 0.45); } 74% { opacity: var(--peak); } 100% { opacity: 0; } }
+
+.cel { position: absolute; inset: 0; z-index: 55; display: flex; align-items: center; justify-content: center; padding: 16px; pointer-events: none; }
+.cel.block { pointer-events: auto; }
+.cel-card { display: flex; flex-direction: column; align-items: center; gap: 6px; min-width: 240px; max-width: min(440px, 100%); padding: 22px 30px 20px; border-radius: 22px; text-align: center; background: rgba(13, 18, 30, 0.9); border: 1.5px solid color-mix(in srgb, var(--c) 55%, #27324a); box-shadow: 0 24px 70px rgba(0, 0, 0, 0.55), 0 0 60px color-mix(in srgb, var(--c) 22%, transparent); animation: cel-in 0.42s cubic-bezier(0.2, 1.5, 0.4, 1) both; will-change: transform, opacity; }
+.cel.out .cel-card { animation: cel-out 0.32s ease-in both; }
+@keyframes cel-in { from { transform: translateY(14px) scale(0.72); opacity: 0; } }
+@keyframes cel-out { to { transform: translateY(-16px) scale(0.97); opacity: 0; } }
+.cel-glyph { position: relative; width: 104px; height: 104px; margin-bottom: 6px; border-radius: 50%; display: flex; align-items: center; justify-content: center; color: var(--c); background: color-mix(in srgb, var(--c) 14%, #131a2a); border: 2px solid color-mix(in srgb, var(--c) 60%, transparent); }
+.cel-glyph > svg, .cel-star { animation: cel-pop 0.5s cubic-bezier(0.2, 1.6, 0.4, 1) 0.12s both; }
+.cel-star { font-size: 56px; line-height: 1; }
+@keyframes cel-pop { from { transform: scale(0.2) rotate(-25deg); opacity: 0; } }
+/* Two rings leave the glyph, one after the other. */
+.cel-glyph > i { position: absolute; inset: -2px; border-radius: 50%; border: 2px solid var(--c); opacity: 0; animation: cel-ring 1.1s ease-out 0.15s both; }
+.cel-glyph > i + i { animation-delay: 0.45s; }
+@keyframes cel-ring { from { transform: scale(1); opacity: 0.7; } to { transform: scale(1.75); opacity: 0; } }
+.cel-title { font-family: var(--disp); font-size: 34px; font-weight: 700; letter-spacing: -0.01em; line-height: 1.1; color: #fff; }
+.cel-line { font-size: 15px; line-height: 1.35; color: #c9d3e8; }
+
+/* Escalation: each is a little larger than the last. */
+.k-lab .cel-title { font-size: 36px; }
+.k-glyph .cel-card { padding: 26px 36px 24px; }
+.k-glyph .cel-glyph { width: 124px; height: 124px; }
+.k-glyph .cel-title { font-size: 42px; }
+/* The glyph itself appears when the two streams arrive. */
+.k-glyph .cel-glyph > svg { animation-delay: 0.56s; animation-duration: 0.6s; }
+.k-glyph .cel-glyph > i { animation-delay: 0.6s; }
+.k-glyph .cel-glyph > i + i { animation-delay: 0.9s; }
+.k-flow .cel-card { animation: cel-in-soft 0.9s ease-out both; border-radius: 28px; }
+.k-flow.out .cel-card { animation: cel-out 0.32s ease-in both; }
+.k-flow .cel-glyph > svg { animation: cel-fade 1.2s ease-out both; }
+.k-flow .cel-glyph > i { animation-duration: 2.6s; animation-timing-function: ease-in-out; }
+.k-flow .cel-glyph > i + i { animation-delay: 1.2s; }
+@keyframes cel-in-soft { from { transform: scale(0.94); opacity: 0; } }
+.k-lens .cel-card { padding: 30px 44px 28px; box-shadow: 0 24px 70px rgba(0, 0, 0, 0.55), 0 0 90px rgba(255, 255, 255, 0.28); }
+.k-lens .cel-glyph { width: 140px; height: 140px; }
+.k-lens .cel-title { font-size: 50px; }
+.k-lens .cel-line { font-size: 17px; }
+
+/* Calm version (prefers-reduced-motion): the card fades in and out, nothing else moves. */
+@keyframes cel-fade { from { opacity: 0; } }
+@keyframes cel-fade-out { to { opacity: 0; } }
+.cel.calm .cel-card { animation: cel-fade 0.4s ease-out both; }
+.cel.calm.out .cel-card { animation: cel-fade-out 0.3s ease-in both; }
+.cel.calm .cel-glyph > svg, .cel.calm .cel-star { animation: none; }
+.cel.calm .cel-glyph > i { display: none; }
+
+#app.phone .cel-card { min-width: 0; width: min(320px, 100%); padding: 20px 20px 18px; }
+#app.phone .cel-title { font-size: 30px; }
+#app.phone .k-glyph .cel-title { font-size: 34px; }
+#app.phone .k-lens .cel-title { font-size: 38px; }
+#app.phone .k-lens .cel-glyph { width: 116px; height: 116px; }
+
+@media (prefers-reduced-motion: reduce) {
+  #nodes .node.pop { animation: none; }
+  #app.flow-state #feel-edge { animation: none; }
+  #feel-edge { transition-duration: 0.4s; }
+  .cel-wash { display: none; }
+}
