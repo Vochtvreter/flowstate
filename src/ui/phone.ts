@@ -16,7 +16,7 @@
 //     `#app.hint-open` while the goal card shows its hint on a phone held sideways (where it folds).
 //   - `#thumb-slot` holds the one-line "tap where…" hint, for touch input on any screen.
 //   - `swipeToDismiss()` below works for any sheet.
-//   - For scripts: `flowstate.phone.cover()` and `.strip()` return what the camera is told.
+//   - For scripts: `flowstate.phone.cover()`, `.strip()` and `.corner()` return what the camera is told.
 import { MATERIALS, NODE_DEFS } from '../content';
 import { canUndo, undo } from '../actions';
 import {
