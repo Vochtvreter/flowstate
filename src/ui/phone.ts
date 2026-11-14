@@ -117,8 +117,10 @@ function cover(): Insets {
 /**
  * Let a sheet be swiped down by its grab handle or its header to dismiss it. The sheet follows
  * the finger; past a quarter of its height, or with a quick flick (400 px a second), it goes.
+ * Any sheet can use this: give it a `.sheet-grab` child (phone.css draws the handle) and call
+ * this once; `dismiss` should take away whatever class shows the sheet.
  */
-function swipeToDismiss(sheet: HTMLElement, dismiss: () => void) {
+export function swipeToDismiss(sheet: HTMLElement, dismiss: () => void) {
   let id = -1, x0 = 0, y0 = 0, dy = 0, on = false;
   let settle = 0;
   // Where the finger was about a tenth of a second ago, for its speed at the moment it lifts.
@@ -126,7 +128,7 @@ function swipeToDismiss(sheet: HTMLElement, dismiss: () => void) {
   sheet.addEventListener('pointerdown', (e) => {
     if (!env.phone || id !== -1 || (e.pointerType === 'mouse' && e.button !== 0)) return;
     const t = e.target as HTMLElement;
-    if (!t.closest('.grab, .sec.head, .bhead') || t.closest('button')) return;
+    if (!t.closest('.sheet-grab, .sec.head, .bhead') || t.closest('button')) return;
     id = e.pointerId;
     x0 = e.clientX;
     y0 = e.clientY;
@@ -250,7 +252,7 @@ export function initPhone() {
   app = document.getElementById('app')!;
   stage = document.getElementById('stage')!;
   insp = document.getElementById('insp');
-  build = document.getElementById('build');
+  build = document.getElementById('build-sheet');
 
   // Wording follows the pointer in use. Until the first press, a device whose only pointer is a
   // finger is taken to be touch, so the very first hint already says "tap".

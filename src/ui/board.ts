@@ -399,7 +399,7 @@ export function initBoard(root: HTMLElement) {
   tempEnd = boardEl.querySelector('#temp-end')!;
   knifeLine = boardEl.querySelector('#knife')!;
   appEl = boardEl.closest<HTMLElement>('#app');
-  buildEl = el(`<div id="build" role="dialog" aria-label="Build menu"></div>`);
+  buildEl = el(`<div id="build-sheet" role="dialog" aria-label="Build menu"></div>`);
   (boardEl.parentElement ?? boardEl).appendChild(buildEl);
 
   boardEl.addEventListener('pointerdown', onDown);
@@ -2159,7 +2159,7 @@ function openBuildSheet(state: RadialState) {
       </button>`;
     })
     .join('');
-  buildEl.innerHTML = `<div class="grab" aria-hidden="true"></div>
+  buildEl.innerHTML = `<div class="sheet-grab" aria-hidden="true"></div>
     <div class="bhead"><span class="bt">${state.mat ? matGlyph(state.mat, 18) : ''}<span>${title}</span></span>
       <button class="ibtn bare" data-act="close" aria-label="Close">${icon('close', 18)}</button></div>
     <div class="bopts">${opts}</div>`;

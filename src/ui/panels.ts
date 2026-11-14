@@ -49,7 +49,7 @@ export function initPanels(refs: {
   hotPanel = makePanel(hotEl);
   // The inspector's own frame: a grab handle (shown when it is a bottom sheet) and the body that
   // is patched. The frame is never rebuilt, so the sheet can be dragged while its contents refresh.
-  inspEl.innerHTML = `<div class="grab" aria-hidden="true"></div><div class="insp-body"></div>`;
+  inspEl.innerHTML = `<div class="sheet-grab" aria-hidden="true"></div><div class="insp-body"></div>`;
   inspPanel = makePanel(inspEl.querySelector<HTMLElement>('.insp-body')!);
   objPanel = makePanel(objEl);
   alertPanel = makePanel(alertEl);
