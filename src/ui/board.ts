@@ -2,13 +2,13 @@
 // Anything that moves every frame (wire dots, floating gains) is drawn by fx.ts on one canvas.
 import { MATERIALS, MatId, NODE_DEFS, NodeType, PIPES, RECIPES, Recipe, TECHS } from '../content';
 import {
-  act, canConnect, connect, cutWires, expandBoard, freeDeposits, materialsAt, nodeById, placeNode, pushUndo, splice,
+  act, canConnect, connect, cutWires, expandBoard, freeDeposits, materialsAt, nodeById, placeNode, splice,
 } from '../actions';
 import {
   expansionCost, fmt, fmtRate, labRate, matUnlocked, nodeCost, nodeUnlocked, recipeOf, recipeUnlocked,
 } from '../economy';
 import { bagTotal, graph, isMachine, isSink, outPortCount } from '../sim';
-import { GRID, Game, GNode, Wire, snap, snapshot } from '../state';
+import { GRID, Game, GNode, Wire, snap } from '../state';
 import { anchorPt, cachedRect, el, invalidateLayout, pulseAnchor, setClass, setHTML, setStyle, setText, svgEl } from './dom';
 import {
   Beacon, Flow, floater, flowPoint, fly, frameFx, invalidateFx, makeFlow, setBeacons, setFlowPath, setFlows,
@@ -1320,21 +1320,19 @@ function dropNode(d: Extract<Drag, { kind: 'node' }>) {
     const loose = !g.wires.some((x) => x.from === n.id || x.to === n.id);
     const over = loose ? wireNear({ x: n.x + w / 2, y: n.y + h / 2 }, 18) : null;
     const spot = freeSpot(n.x, n.y, w, h, n.id);
-    n.x = spot.x;
-    n.y = spot.y;
-    if (n.x !== d.x0 || n.y !== d.y0 || over) {
-      // The "before" picture is taken now, with only this node put back where it started.
-      // Taking it at press time would also roll back anything else done during the drag.
-      const before = snapshot(g);
-      const sn = before.nodes.find((s) => s.id === n.id);
-      if (sn) {
-        sn.x = d.x0;
-        sn.y = d.y0;
-      }
-      pushUndo(g, before);
-      if (over) splice(g, over.id, n.id);
-    }
-    g.rev++;
+    // The node goes back to where it started for a moment, so that the undo step is taken now
+    // (at press time it would also roll back anything else done during the drag) and shows only
+    // this node moving. Move and splice are one step: a single undo puts the node back.
+    n.x = d.x0;
+    n.y = d.y0;
+    if (spot.x !== d.x0 || spot.y !== d.y0 || over) {
+      act(g, () => {
+        n.x = spot.x;
+        n.y = spot.y;
+        if (over) splice(g, over.id, n.id);
+        return 0;
+      });
+    } else g.rev++;
   }
   select({ kind: 'node', id: d.id });
 }
