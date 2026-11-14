@@ -256,9 +256,16 @@ export const RULES = {
     rate: {
       /** Seconds of smoothing on the displayed number. */
       smooth: 1.5,
-      /** How many whole gulps are remembered. A pattern that repeats within half of them is measured exactly. */
-      gulps: 12,
-      /** With no repeat found, average over the most recent gulps that together last at least this long. */
+      /**
+       * How many whole gulps are remembered. A pattern that repeats within half of them is measured exactly:
+       * a machine with Efficiency skips its inputs on every third to sixth craft, which makes a round of up to
+       * a dozen gulps on the wire that feeds it.
+       */
+      gulps: 32,
+      /**
+       * A round must hold over the gulps of the last this many seconds before it is believed. With no repeat
+       * found, the most recent gulps that together last at least this long are averaged.
+       */
       window: 8,
       /** Flow that has not paused for this long is steady, not a gulp: it is measured directly. */
       steadyAfter: 8,
@@ -296,8 +303,10 @@ export const RULES = {
     /**
      * The first time a material keeps selling over its demand for `seconds` (surplus sales no more than `gap`
      * apart), g.seenSurplus is set and a 'surplus' event raised: the interface introduces the demand gauge then.
+     * The gap is longer than the slowest craft (a Paradox takes 12 s): a machine hands over whole items, so a
+     * line that is over demand makes one surplus sale per craft, seconds apart, for as long as it runs.
      */
-    notice: { seconds: 3, gap: 5 },
+    notice: { seconds: 3, gap: 13 },
   },
 
   /** 2.3 Flow. */

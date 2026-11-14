@@ -3,6 +3,7 @@ import { connect, cutWire, deleteNode, expandBoard, placeNode, setMode, setRecip
 import { MATERIALS, MAT_IDS, MatId, NODE_DEFS, NodeType, PIPES, RECIPES, RULES, TECHS } from '../src/content';
 import { cycleTime, dataYield, demandBurst, demandInfo, expansionCost, flowMult, nodeCostAt, price, saturation, sellValue, upgradeCostAt, wellRate } from '../src/economy';
 import { countsForFlow, flowInfo, flowProducers, inFlowState, isFlowing, worstProducer } from '../src/flow';
+import { tick } from '../src/sim';
 import { Game, START, deserialize, newGame, serialize } from '../src/state';
 import { fresh, market, rich, run, take, throughput, well, wire } from './helpers';
 
@@ -552,6 +553,40 @@ describe('demand with two prices (2.2)', () => {
     run(g, 120);
     expect(g.seenSurplus).toBe(false);
     expect(take(g, 'surplus').length).toBe(0);
+  });
+
+  it('notices a slow machine too: whole items every few seconds, each sale over demand', () => {
+    // Two Fabricators' worth of Lens (two every 6 s against a demand of one every 4 s) sell 18% under full
+    // price for as long as they run. The over-demand sales come 6 s apart, and a Paradox line's up to 12 s.
+    for (const [mat, every, n] of [['lens', 6, 2], ['paradox', 12, 2]] as const) {
+      const g = rich();
+      const silo = placeNode(g, 'silo', 400, 100)!;
+      connect(g, silo.id, 0, market(g).id);
+      const before = g.credits;
+      let next = 0;
+      for (let t = 0; t < 120; t += 0.05) {
+        if (t >= next) {
+          silo.inb[mat] = (silo.inb[mat] ?? 0) + n;
+          next += every;
+        }
+        tick(g, 0.05);
+      }
+      expect(g.credits - before, mat).toBeLessThan(0.9 * (g.sold[mat] ?? 0) * MATERIALS[mat].value);
+      expect(g.seenSurplus, mat).toBe(true);
+      expect(take(g, 'surplus').map((e) => e.mat), mat).toEqual([mat]);
+    }
+    // One whole item now and then, under demand on average, is not: a Lens every 6 s.
+    const g = rich();
+    const silo = placeNode(g, 'silo', 400, 100)!;
+    connect(g, silo.id, 0, market(g).id);
+    for (let t = 0, next = 0; t < 120; t += 0.05) {
+      if (t >= next) {
+        silo.inb.lens = (silo.inb.lens ?? 0) + 1;
+        next += 6;
+      }
+      tick(g, 0.05);
+    }
+    expect(g.seenSurplus).toBe(false);
   });
 
   it('Wider Demand raises the full-price rate', () => {
