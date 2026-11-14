@@ -6,7 +6,7 @@ import {
   recipeUnlocked, trackAvailable, upgradeCost, upgradeValue,
 } from './economy';
 import { graph, isMachine, isPass, isSink, outPortCount } from './sim';
-import { Game, GNode, RouterMode, Snapshot, Wire, makeNode, makeWire, restore, snap, snapshot } from './state';
+import { Game, GNode, RouterMode, Snapshot, Wire, makeNode, makeWire, restore, shelve, snap, snapshot } from './state';
 
 export { claimGoal } from './goals';
 export { claimOrder } from './orders';
@@ -210,6 +210,7 @@ export function deleteNode(g: Game, id: number): boolean {
     const refund = refundOf(g, n);
     g.wires = g.wires.filter((w) => w.from !== id && w.to !== id);
     g.nodes = g.nodes.filter((o) => o.id !== id);
+    shelve(g, n); // an undo brings it back as it was, contents and age included
     g.credits += refund;
     return -refund;
   });
@@ -252,6 +253,7 @@ export function setRecipe(g: Game, id: number, recipeId: string): boolean {
       }
       return true;
     });
+    shelve(g, { ...n, inb: { ...n.inb }, outb: { ...n.outb } }); // so that an undo is exact
     n.recipe = recipeId;
     n.inb = {};
     n.outb = {};

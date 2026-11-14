@@ -362,7 +362,7 @@ export function clearSave() {
 // ---------- structure snapshots (undo) ----------
 
 export interface Snapshot {
-  nodes: Pick<GNode, 'id' | 'type' | 'x' | 'y' | 'recipe' | 'material' | 'depositId' | 'lv' | 'paid' | 'mode'>[];
+  nodes: Pick<GNode, 'id' | 'type' | 'x' | 'y' | 'recipe' | 'material' | 'depositId' | 'lv' | 'paid' | 'mode' | 'born'>[];
   wires: Pick<Wire, 'id' | 'from' | 'port' | 'to' | 'tier' | 'paid' | 'weight' | 'filter'>[];
 }
 
@@ -370,7 +370,7 @@ export function snapshot(g: Game): Snapshot {
   return {
     nodes: g.nodes.map((n) => ({
       id: n.id, type: n.type, x: n.x, y: n.y, recipe: n.recipe, material: n.material,
-      depositId: n.depositId, lv: { ...n.lv }, paid: n.paid, mode: n.mode,
+      depositId: n.depositId, lv: { ...n.lv }, paid: n.paid, mode: n.mode, born: n.born,
     })),
     wires: g.wires.map((w) => ({
       id: w.id, from: w.from, port: w.port, to: w.to, tier: w.tier, paid: w.paid, weight: w.weight, filter: w.filter,
@@ -378,17 +378,52 @@ export function snapshot(g: Game): Snapshot {
   };
 }
 
-/** Restore structure from a snapshot, keeping runtime buffers of nodes that survive unchanged. */
+/**
+ * Nodes that have left the board (deleted, taken off by an undo or redo, or re-tooled), kept so that
+ * bringing one back restores it exactly as it was: buffers, progress, utilisation and age.
+ * Without this a node that came back was brand new, which emptied a Silo on undo and let "delete, undo"
+ * reset a machine's age so that Flow stopped counting it.
+ * One entry per node id, and a node comes off the shelf when it goes back on the board, so its contents
+ * exist in exactly one place and can never be duplicated.
+ */
+const shelves = new WeakMap<Game, Map<number, GNode>>();
+const SHELF_SIZE = 400;
+
+/** Remember a node (as it is right now) that is about to leave the board or be wiped. */
+export function shelve(g: Game, n: GNode) {
+  let shelf = shelves.get(g);
+  if (!shelf) shelves.set(g, (shelf = new Map()));
+  shelf.delete(n.id);
+  shelf.set(n.id, n);
+  if (shelf.size > SHELF_SIZE) shelf.delete(shelf.keys().next().value as number);
+}
+
+/** Restore structure from a snapshot, keeping the runtime state (buffers, progress, age) of every node that is unchanged or comes back. */
 export function restore(g: Game, s: Snapshot) {
   const oldN = new Map(g.nodes.map((n) => [n.id, n]));
   const oldW = new Map(g.wires.map((w) => [w.id, w]));
+  const shelf = shelves.get(g);
+  const matches = (n: GNode | undefined, sn: Snapshot['nodes'][number]) => !!n && n.recipe === sn.recipe && n.type === sn.type;
+  const kept = new Set<number>();
   g.nodes = s.nodes.map((sn) => {
-    const prev = oldN.get(sn.id);
-    const fresh = makeNode(g, sn.type, sn.x, sn.y);
-    g.nextId--; // makeNode consumed an id we do not need
-    const keepRuntime = prev && prev.recipe === sn.recipe && prev.type === sn.type;
-    return { ...(keepRuntime ? prev : fresh), ...sn, lv: { ...sn.lv } };
+    const live = oldN.get(sn.id);
+    const shelved = shelf?.get(sn.id);
+    let from: GNode;
+    if (matches(live, sn)) {
+      from = live!;
+      kept.add(sn.id);
+    } else if (matches(shelved, sn)) {
+      from = shelved!;
+      shelf!.delete(sn.id);
+    } else {
+      // Never seen in this shape: a new node, with the age the snapshot recorded.
+      from = makeNode(g, sn.type, sn.x, sn.y);
+      g.nextId--; // makeNode consumed an id we do not need
+    }
+    return { ...from, ...sn, lv: { ...sn.lv } };
   });
+  // Whatever this took off the board goes on the shelf as it is now.
+  for (const n of oldN.values()) if (!kept.has(n.id)) shelve(g, n);
   g.wires = s.wires.map((sw) => {
     const prev = oldW.get(sw.id);
     const fresh = makeWire(g, sw.from, sw.port, sw.to);
