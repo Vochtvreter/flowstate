@@ -1,1 +1,250 @@
-/* tech styles: owned by the tech track */
+/* Tech tree overlay (src/ui/tech.ts). Every rule is scoped to #tech.
+   Desktop comes first: branch rows beside a detail column. The phone layout (#app.phone) is at the end:
+   a full-screen sheet with branch tabs, 56px rows and the detail as a bottom sheet. */
+
+#tech {
+  --rdy: #5eead4;
+  position: absolute; left: 0; right: 0; top: 56px; bottom: 0; z-index: 40;
+  display: none; grid-template-columns: minmax(0, 1fr) 340px; grid-template-rows: auto auto minmax(0, 1fr);
+  grid-template-areas: 'head head' 'goal goal' 'tree detail';
+  background: #0a0e16;
+}
+#tech.open { display: grid; animation: tech-in 0.16s ease-out; }
+/* Nothing in here is text to select; a long press or a double tap must not select or zoom. */
+#tech { -webkit-user-select: none; user-select: none; -webkit-touch-callout: none; }
+#tech button { -webkit-tap-highlight-color: transparent; touch-action: manipulation; }
+@keyframes tech-in { from { opacity: 0; transform: translateY(6px); } }
+
+/* ---------- header: title, Data in hand, close ---------- */
+#tech .thead { grid-area: head; display: flex; align-items: center; gap: 14px; min-height: 64px; padding: 8px 16px 8px 24px; border-bottom: 1px solid var(--line); }
+#tech .ttl { flex: 1 1 auto; min-width: 0; }
+#tech .ttl h1 { margin: 0; font-family: var(--disp); font-size: 22px; font-weight: 700; letter-spacing: -0.01em; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+#tech .ttl p { margin: 2px 0 0; font-size: 12.5px; color: var(--muted); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+#tech .tdata { flex: none; display: flex; gap: 8px; }
+#tech .dc { display: inline-flex; align-items: baseline; height: 36px; line-height: 34px; padding: 0 11px; border-radius: 10px; background: #131a28; border: 1px solid color-mix(in srgb, var(--c) 28%, #1e2740); color: var(--c); font-size: 14px; white-space: nowrap; }
+#tech .dc b { font-size: 15px; font-weight: 600; color: var(--text); margin-right: 1px; }
+#tech .dc i { font-style: normal; font-size: 10.5px; margin-left: 7px; opacity: 0.85; }
+#tech .tclose { flex: none; display: inline-flex; align-items: center; gap: 8px; height: 40px; padding: 0 12px 0 10px; border-radius: 10px; border: 1px solid var(--border); background: #121929; color: var(--text); font-size: 13px; font-weight: 600; white-space: nowrap; }
+/* Key names are for people with a keyboard. */
+html[data-input='touch'] #tech .kbd { display: none; }
+
+/* A goal is waiting on the board: one bar that takes the player back to claim it. */
+#tech .tgoal { grid-area: goal; display: flex; align-items: center; gap: 10px; min-height: 44px; padding: 6px 16px 6px 24px; border: 0; border-bottom: 1px solid #5a4718; background: #2a2110; color: var(--credits); font-size: 13px; text-align: left; animation: tgoal-in 0.35s cubic-bezier(0.2, 1.4, 0.4, 1); }
+#tech .tgoal svg { flex: none; }
+#tech .tgoal .gt { flex: 1; min-width: 0; display: flex; align-items: baseline; gap: 8px; color: #f3e3bd; }
+#tech .tgoal .gt b { flex: none; color: var(--credits); font-weight: 700; }
+#tech .tgoal .gt span { min-width: 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+#tech .tgoal .go { flex: none; padding: 5px 12px; border-radius: 999px; background: var(--credits); color: #1a1405; font-size: 12.5px; font-weight: 700; white-space: nowrap; }
+@keyframes tgoal-in { from { opacity: 0; transform: translateY(-8px); } }
+
+#tech .ttabs { grid-area: tabs; display: none; }
+
+/* ---------- the tree: one row per branch ---------- */
+#tech .tree { grid-area: tree; overflow-x: hidden; overflow-y: auto; overscroll-behavior: contain; padding: 0 24px 14px; }
+#tech .tbranch { display: grid; grid-template-columns: 150px minmax(0, 1fr); gap: 8px 18px; padding: 13px 0; border-top: 1px solid #1a2234; }
+#tech .tbranch:first-child { border-top: 0; }
+#tech .bh h2 { margin: 3px 0 0; font-family: var(--disp); font-size: 15px; font-weight: 700; }
+#tech .bh p { margin: 3px 0 0; font-size: 11.5px; line-height: 15px; color: var(--muted); }
+#tech .bh { grid-column: 1; grid-row: 1 / span 2; }
+#tech .tlist, #tech .towned { grid-column: 2; min-width: 0; }
+#tech .tlist { display: grid; grid-template-columns: repeat(auto-fill, minmax(200px, 1fr)); gap: 8px 10px; align-content: start; }
+/* What is already owned follows as a row of small ticked chips. */
+#tech .towned { display: flex; flex-wrap: wrap; gap: 6px 8px; }
+#tech .tlist:empty, #tech .towned:empty { display: none; }
+#tech .more { margin: 0; padding-top: 10px; border-top: 1px solid #1a2234; font-size: 11.5px; line-height: 15px; color: var(--dim); }
+
+/* ---------- a tech: tile on desktop, row on a phone ---------- */
+#tech .tt { position: relative; display: flex; align-items: center; gap: 10px; min-width: 0; min-height: 58px; padding: 8px 12px 10px; border-radius: 12px; border: 1px solid #2c3854; background: #121929; color: var(--text); text-align: left; }
+#tech .tt .ti { flex: none; width: 28px; height: 28px; border-radius: 8px; display: flex; align-items: center; justify-content: center; background: #1b2438; color: #a9b6d0; }
+#tech .tt .tx { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 2px; }
+#tech .tt .n { font-size: 13px; font-weight: 600; line-height: 17px; }
+#tech .tt .c { font-size: 11.5px; line-height: 15px; color: var(--muted); }
+#tech .tt .c b { font-weight: 600; }
+#tech .tt .gl { display: inline-block; margin-left: 7px; padding: 0 6px; border-radius: 999px; background: var(--credits); color: #1a1405; font-style: normal; font-size: 9.5px; font-weight: 700; line-height: 15px; letter-spacing: 0.05em; text-transform: uppercase; vertical-align: 1px; }
+#tech .tt.sel { outline: 2px solid var(--sel); outline-offset: 2px; }
+
+/* Owned: quiet and ticked. */
+#tech .tt.own { min-height: 32px; gap: 6px; padding: 4px 12px 4px 6px; border-radius: 10px; background: transparent; border-color: #1b2437; color: #8f9bb5; }
+#tech .tt.own .ti { width: 22px; height: 22px; background: transparent; color: #46a396; }
+#tech .tt.own .n { font-size: 12.5px; font-weight: 500; }
+#tech .tt.own .c { display: none; color: var(--dim); }
+
+/* Ready: the accent, breathing gently. The glow is a layer of its own, so only its opacity animates. */
+#tech .tt.rdy { background: #0f2421; border-color: var(--rdy); }
+#tech .tt.rdy .ti { background: var(--rdy); color: #062b25; }
+#tech .tt.rdy .st { color: var(--rdy); font-weight: 600; }
+#tech .tt.rdy::after { content: ''; position: absolute; inset: -1px; border-radius: inherit; pointer-events: none; box-shadow: 0 0 0 3px rgba(94, 234, 212, 0.2), 0 0 22px rgba(94, 234, 212, 0.32); animation: tt-breathe 2.2s ease-in-out infinite; }
+@keyframes tt-breathe { 0%, 100% { opacity: 0.3; } 50% { opacity: 1; } }
+
+/* Saving up: a bar along the bottom edge. */
+#tech .tt .pb { position: absolute; left: 12px; right: 12px; bottom: 5px; height: 3px; border-radius: 2px; background: #222c44; overflow: hidden; }
+#tech .tt .pb i { display: block; height: 100%; border-radius: 2px; transform-origin: 0 50%; transition: transform 0.5s linear; }
+
+/* From a goal: not for sale. */
+#tech .tt.goal { background: #121a2c; border: 1px dashed #3a4c80; }
+#tech .tt.goal .ti { background: #1a2644; color: #9db8ff; }
+#tech .tt.goal .c { color: #a9bbe8; }
+
+/* One step ahead: a silhouette. */
+#tech .tt.veil { background: transparent; border: 1px dashed #27324a; color: #8793ad; }
+#tech .tt.veil .ti { background: transparent; color: #5d6880; }
+#tech .tt.veil .c { color: var(--dim); }
+
+/* One-off moments: a tech becomes ready, is researched, or comes into view. */
+#tech .tt.wake { z-index: 1; animation: tt-wake 0.9s cubic-bezier(0.2, 1.5, 0.4, 1); }
+#tech .tt.wake::before { content: ''; position: absolute; inset: 0; border-radius: inherit; background: #d9fff8; opacity: 0; pointer-events: none; animation: tt-flash 0.9s ease-out; }
+@keyframes tt-wake { 0% { transform: scale(0.94); } 35% { transform: scale(1.07); } 100% { transform: scale(1); } }
+@keyframes tt-flash { from { opacity: 0.55; } to { opacity: 0; } }
+#tech .tt.won .ti { animation: tt-tick 0.6s cubic-bezier(0.2, 1.6, 0.4, 1); }
+#tech .tt.won::before { content: ''; position: absolute; inset: 0; border-radius: inherit; background: var(--rdy); opacity: 0; pointer-events: none; animation: tt-flash 0.9s ease-out; }
+@keyframes tt-tick { from { transform: scale(0.2); } }
+#tech .tt.new { animation: tt-new 0.4s ease-out; }
+@keyframes tt-new { from { opacity: 0; transform: translateY(8px); } }
+
+/* ---------- detail: what it does, what it costs, Research ---------- */
+#tech .tdetail { grid-area: detail; display: flex; flex-direction: column; min-width: 0; min-height: 0; background: var(--chrome); border-left: 1px solid var(--line); }
+#tech .dbody { flex: 1 1 auto; min-height: 0; overflow-y: auto; overscroll-behavior: contain; display: flex; flex-direction: column; gap: 10px; padding: 18px 20px 20px; }
+#tech .dtop { display: flex; align-items: center; gap: 6px; min-height: 24px; }
+#tech .tag { font-size: 10.5px; font-weight: 700; letter-spacing: 0.08em; text-transform: uppercase; color: #9db8ff; padding: 3px 8px; border-radius: 6px; background: #17213a; white-space: nowrap; }
+#tech .tag.goal { color: #1a1405; background: var(--credits); }
+#tech .dhide { display: none; }
+#tech .dbody h2 { margin: 0; font-family: var(--disp); font-size: 24px; font-weight: 700; line-height: 1.15; }
+#tech .desc { margin: 0; font-size: 13px; line-height: 19px; color: #c9d3e8; }
+#tech .dbody .lbl { margin-top: 8px; }
+#tech .unl { margin: 0; padding: 0; list-style: none; display: flex; flex-direction: column; gap: 6px; font-size: 13px; line-height: 18px; }
+#tech .unl li { display: flex; gap: 9px; }
+#tech .unl li::before { content: '+'; flex: none; width: 10px; color: var(--rdy); font-weight: 700; }
+#tech .costs { display: flex; flex-direction: column; gap: 6px; }
+#tech .cost { display: flex; align-items: center; gap: 10px; min-height: 20px; }
+#tech .cost > b { flex: none; font-size: 16px; font-weight: 600; }
+#tech .cbar { flex: 1; min-width: 24px; height: 6px; border-radius: 3px; background: #1e2740; overflow: hidden; }
+#tech .cbar i { display: block; height: 100%; border-radius: 3px; transform-origin: 0 50%; transition: transform 0.5s linear; }
+#tech .have { flex: none; display: inline-flex; align-items: center; gap: 5px; font-size: 12px; color: var(--muted); white-space: nowrap; }
+#tech .have b { color: var(--text); font-weight: 600; }
+#tech .cost.ok .have svg { color: var(--rdy); }
+#tech .hint { margin: 0; font-size: 12px; line-height: 17px; color: var(--muted); }
+#tech .gnote { display: flex; gap: 10px; margin-top: 6px; padding: 12px; border-radius: 12px; border: 1px dashed #3a4c80; background: #121a2c; color: #9db8ff; }
+#tech .gnote svg { flex: none; margin-top: 1px; }
+#tech .gnote b { display: block; font-size: 13px; line-height: 18px; color: var(--text); }
+#tech .gnote span { display: block; margin-top: 3px; font-size: 12px; line-height: 17px; color: #a9bbe8; }
+#tech .dgo { align-self: flex-start; height: 40px; padding: 0 14px; border-radius: 10px; border: 1px solid #3a4a70; background: #151d30; color: var(--text); font-size: 13px; font-weight: 600; }
+#tech .qbox { display: flex; align-items: center; gap: 10px; min-height: 36px; margin-top: 4px; padding: 0; border: 0; background: transparent; color: #c9d3e8; font-size: 12.5px; text-align: left; }
+#tech .sw { flex: none; position: relative; width: 34px; height: 20px; border-radius: 10px; background: #26314b; transition: background 0.15s; }
+#tech .sw::after { content: ''; position: absolute; left: 2px; top: 2px; width: 16px; height: 16px; border-radius: 50%; background: #8f9bb5; transition: transform 0.15s, background 0.15s; }
+#tech .qbox.on .sw { background: color-mix(in srgb, var(--sel) 55%, #26314b); }
+#tech .qbox.on .sw::after { transform: translateX(14px); background: #fff; }
+
+#tech .dfoot { flex: none; display: flex; flex-direction: column; gap: 10px; padding: 12px 20px 18px; border-top: 1px solid var(--line); background: var(--chrome); }
+#tech .rbtn { position: relative; overflow: hidden; display: flex; align-items: center; justify-content: center; gap: 10px; width: 100%; height: 48px; border-radius: 12px; border: 1px solid #3a4a70; background: #151d30; color: #c9d3e8; font-size: 15px; font-weight: 700; }
+#tech .rbtn .fill { position: absolute; inset: 0; background: rgba(196, 161, 255, 0.2); transform-origin: 0 50%; transition: transform 0.5s linear; }
+#tech .rbtn .lab { position: relative; }
+#tech .rbtn.ok { background: var(--rdy); border-color: var(--rdy); color: #062b25; box-shadow: 0 0 22px rgba(94, 234, 212, 0.25); }
+#tech .rbtn.ok:active { transform: scale(0.98); }
+#tech .rbtn.ok .kbd { position: relative; border-color: rgba(6, 43, 37, 0.35); background: rgba(6, 43, 37, 0.12); color: #062b25; }
+#tech .rbtn.wake { animation: rbtn-wake 0.6s cubic-bezier(0.2, 1.5, 0.4, 1); }
+@keyframes rbtn-wake { 0% { transform: scale(0.97); } 40% { transform: scale(1.03); } 100% { transform: scale(1); } }
+#tech .owned { display: flex; align-items: center; gap: 8px; height: 48px; font-size: 14px; font-weight: 600; color: var(--rdy); }
+
+/* Hover is for pointers that can hover; on touch it would stick to the last thing tapped. */
+@media (hover: hover) {
+  #tech .tclose:hover, #tech .dgo:hover { background: #1a2338; }
+  #tech .tt:hover { background: #172036; }
+  #tech .tt.own:hover, #tech .tt.veil:hover { background: #10172580; }
+  #tech .tt.rdy:hover { background: #12302b; }
+  #tech .tt.goal:hover { background: #162038; }
+  #tech .rbtn.ok:hover, #tech .tgoal:hover .go { filter: brightness(1.08); }
+}
+
+/* A narrow window that is not a phone: headings sit above their tiles and the detail column slims down. */
+@media (max-width: 900px) {
+  #tech { grid-template-columns: minmax(0, 1fr) 300px; }
+  #tech .tbranch { grid-template-columns: minmax(0, 1fr); }
+  #tech .bh, #tech .tlist, #tech .towned { grid-column: 1; grid-row: auto; }
+  #tech .tgoal { padding-left: 16px; }
+  #tech .tlist { grid-template-columns: repeat(auto-fill, minmax(170px, 1fr)); }
+  #tech .ttl p { display: none; }
+}
+
+/* ---------- phone: full-screen sheet, branch tabs, rows, detail as a bottom sheet ---------- */
+#app.phone #tech {
+  top: 0; grid-template-columns: minmax(0, 1fr); grid-template-rows: auto auto auto minmax(0, 1fr) auto;
+  grid-template-areas: 'head' 'goal' 'tabs' 'tree' 'detail';
+  padding: env(safe-area-inset-top) env(safe-area-inset-right) 0 env(safe-area-inset-left);
+}
+#app.phone #tech .thead { min-height: 56px; gap: 8px; padding: 6px 6px 6px 14px; border-bottom: 0; }
+#app.phone #tech .ttl h1 { font-size: 17px; }
+#app.phone #tech .ttl p { display: none; }
+#app.phone #tech .tdata { gap: 6px; }
+#app.phone #tech .dc { height: 30px; line-height: 28px; padding: 0 8px; font-size: 13px; }
+#app.phone #tech .dc b { font-size: 13px; }
+#app.phone #tech .dc i { display: none; }
+#app.phone #tech .tclose { width: 44px; height: 44px; padding: 0; justify-content: center; border: 0; background: transparent; }
+#app.phone #tech .tclose .lab, #app.phone #tech .tclose .kbd { display: none; }
+
+#app.phone #tech .tgoal { min-height: 52px; padding: 6px 12px 6px 14px; }
+#app.phone #tech .tgoal .gt { flex-direction: column; align-items: stretch; gap: 1px; line-height: 17px; }
+#app.phone #tech .tgoal .go { padding: 8px 12px; }
+#app.phone #tech .ttabs { display: flex; gap: 0; padding: 0 6px; overflow-x: auto; overflow-y: hidden; scrollbar-width: none; overscroll-behavior: contain; border-bottom: 1px solid var(--line); }
+#app.phone #tech .ttabs::-webkit-scrollbar { display: none; }
+#tech .ttab { position: relative; flex: 1 0 auto; display: inline-flex; align-items: center; justify-content: center; gap: 6px; min-width: 60px; height: 46px; padding: 0 9px; border: 0; background: transparent; color: var(--muted); font-size: 13.5px; font-weight: 600; white-space: nowrap; }
+#tech .ttab.on { color: var(--text); }
+#tech .ttab.on::after { content: ''; position: absolute; left: 8px; right: 8px; bottom: 0; height: 3px; border-radius: 3px 3px 0 0; background: var(--sel); }
+#tech .ttab .dot { flex: none; width: 8px; height: 8px; border-radius: 50%; background: var(--rdy); box-shadow: 0 0 8px rgba(94, 234, 212, 0.7); }
+
+#app.phone #tech .tree { padding: 10px 12px calc(16px + env(safe-area-inset-bottom)); touch-action: pan-y; -webkit-overflow-scrolling: touch; }
+#app.phone #tech.sheet .tree { padding-bottom: 16px; }
+#app.phone #tech .tbranch { display: block; padding: 0; border: 0; }
+#app.phone #tech .bh h2 { display: none; }
+#app.phone #tech .bh p { margin: 0 2px 8px; }
+#app.phone #tech .tlist, #app.phone #tech .towned { display: grid; grid-template-columns: minmax(0, 1fr); gap: 6px; }
+#app.phone #tech .tlist:empty, #app.phone #tech .towned:empty { display: none; }
+#app.phone #tech .tlist:not(:empty) + .towned { margin-top: 6px; }
+#app.phone #tech .tt, #app.phone #tech .tt.own { height: 56px; min-height: 56px; padding: 0 14px 0 12px; gap: 12px; border-radius: 12px; }
+#app.phone #tech .tt .ti, #app.phone #tech .tt.own .ti { width: 30px; height: 30px; }
+#app.phone #tech .tt .n, #app.phone #tech .tt.own .n { font-size: 14px; font-weight: 600; line-height: 18px; }
+#app.phone #tech .tt.own .c { display: block; }
+#app.phone #tech .tt .n, #app.phone #tech .tt .c { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+#app.phone #tech .tt .c { font-size: 12px; line-height: 16px; }
+#app.phone #tech .tt .gl { font-size: 10.5px; line-height: 16px; }
+#app.phone #tech .tt .pb { bottom: 4px; }
+/* A full-width row has no room to swell: a smaller wake-up. */
+#app.phone #tech .tt.wake { animation-name: tt-wake-row; }
+@keyframes tt-wake-row { 0% { transform: scale(0.98); } 35% { transform: scale(1.025); } 100% { transform: scale(1); } }
+/* A chevron says the row opens. */
+#app.phone #tech .tt .tx::after { content: ''; position: absolute; right: 14px; top: 50%; width: 7px; height: 7px; margin-top: -4px; border-right: 2px solid currentColor; border-top: 2px solid currentColor; transform: rotate(45deg); opacity: 0.4; }
+#app.phone #tech .tt .tx { padding-right: 18px; }
+#app.phone #tech .more { margin-top: 12px; padding: 12px 2px 0; }
+
+#app.phone #tech .tdetail { max-height: 46vh; max-height: min(46dvh, 440px); padding-bottom: env(safe-area-inset-bottom); border-left: 0; border-top: 1px solid #2c3854; border-radius: 18px 18px 0 0; box-shadow: 0 -14px 34px rgba(0, 0, 0, 0.55); animation: tech-sheet 0.2s ease-out; }
+@keyframes tech-sheet { from { opacity: 0; transform: translateY(28px); } }
+#app.phone #tech .dbody { padding: 12px 16px 14px; gap: 8px; }
+#app.phone #tech .dbody h2 { font-size: 21px; }
+#app.phone #tech .dhide { display: flex; align-items: center; justify-content: center; width: 44px; height: 44px; margin: -6px -10px -6px 0; padding: 0; border: 0; border-radius: 12px; background: transparent; color: #c9d3e8; }
+#app.phone #tech .dgo { height: 44px; }
+#app.phone #tech .qbox { min-height: 44px; font-size: 13px; }
+#app.phone #tech .dfoot { gap: 8px; padding: 10px 14px 12px; }
+#app.phone #tech .rbtn { height: 50px; font-size: 16px; }
+#app.phone #tech .rbtn .kbd { display: none; }
+#app.phone #tech .owned { height: 44px; }
+
+@media (orientation: portrait) {
+  /* Upright, the detail is a sheet the player opens by tapping a row. */
+  #app.phone #tech:not(.sheet) .tdetail { display: none; }
+  #app.phone #tech:not(.sheet) .tt.sel { outline: 0; }
+}
+@media (orientation: landscape) {
+  /* On its side there is no height for a bottom sheet: the detail sits beside the list, always open. */
+  #app.phone #tech { grid-template-columns: minmax(0, 1fr) minmax(280px, 42%); grid-template-rows: auto auto auto minmax(0, 1fr); grid-template-areas: 'head head' 'goal goal' 'tabs detail' 'tree detail'; }
+  #app.phone #tech .thead { min-height: 48px; padding-top: 2px; padding-bottom: 2px; }
+  #app.phone #tech .tgoal { min-height: 44px; }
+  #app.phone #tech .tgoal .gt { flex-direction: row; align-items: baseline; gap: 8px; }
+  #app.phone #tech .tree, #app.phone #tech.sheet .tree { padding-bottom: calc(12px + env(safe-area-inset-bottom)); }
+  #app.phone #tech .tdetail { max-height: none; border-top: 0; border-left: 1px solid var(--line); border-radius: 0; box-shadow: none; animation: none; }
+  #app.phone #tech .dhide { display: none; }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  #tech.open, #tech .tt, #tech .tt::before, #tech .tt::after, #tech .tt .ti, #tech .rbtn, #tech .tdetail, #tech .tgoal { animation: none !important; }
+  #tech .tt.rdy::after { opacity: 0.7; }
+  #tech .tt .pb i, #tech .cbar i, #tech .rbtn .fill, #tech .sw, #tech .sw::after { transition: none; }
+}
