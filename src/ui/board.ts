@@ -79,6 +79,8 @@ type Drag =
   | { kind: 'wirePress'; wireId: number; sx: number; sy: number }
   | { kind: 'knife'; a: Pt; b: Pt };
 let drag: Drag | null = null;
+/** The pointer that owns `drag`. Other pointers (a second finger) cannot steer it. */
+let dragPointer = -1;
 
 interface RadialOpt { type: NodeType; recipe?: string; label: string; sub: string; cost: number; locked?: string; glyph: string }
 interface RadialState { at: Pt; opts: RadialOpt[]; dir: 'consume' | 'produce'; from: number; port: number; to: number; mat: MatId | null; a: Pt }
@@ -205,7 +207,9 @@ export function initBoard(root: HTMLElement) {
   boardEl.addEventListener('pointerdown', onDown);
   boardEl.addEventListener('pointermove', onMove);
   boardEl.addEventListener('pointerup', onUp);
-  boardEl.addEventListener('pointercancel', abortDrag);
+  boardEl.addEventListener('pointercancel', (e) => {
+    if (e.pointerId === dragPointer) abortDrag();
+  });
   // The board never scrolls natively (touch-action: none), but unless the touch moves are also
   // claimed here Chromium still counts a quick drag as the start of a fling, and then swallows the
   // click of any tap in the next half second, wherever on the page it lands. Controls act on click
@@ -1133,6 +1137,10 @@ function startWire(from: number, port: number, e: PointerEvent, p: Pt): boolean 
 }
 
 function onDown(e: PointerEvent) {
+  // A press while a gesture is still going (a second finger, or a release that never reached us)
+  // finishes that gesture first, so a node in mid-move is dropped properly rather than left behind.
+  finishDrag();
+  dragPointer = e.pointerId;
   if (e.button === 1 || e.button === 2) {
     if (ui.placing) {
       ui.placing = null;
@@ -1196,6 +1204,7 @@ function onDown(e: PointerEvent) {
 }
 
 function onMove(e: PointerEvent) {
+  if (drag && e.pointerId !== dragPointer) return;
   const p = toWorld(e.clientX, e.clientY);
   mouse = p;
   const g = ui.g;
@@ -1330,10 +1339,17 @@ function dropNode(d: Extract<Drag, { kind: 'node' }>) {
   select({ kind: 'node', id: d.id });
 }
 
+/** End whatever gesture is in progress: a node being moved is dropped where it is, anything else is abandoned. */
+function finishDrag() {
+  if (!drag) return;
+  if (drag.kind === 'node') dropNode(drag);
+  endDrag();
+}
+
 function onUp(e: PointerEvent) {
   const g = ui.g;
   const d = drag;
-  if (!d) return;
+  if (!d || e.pointerId !== dragPointer) return;
   const p = toWorld(e.clientX, e.clientY);
   switch (d.kind) {
     case 'pan':
@@ -1559,7 +1575,5 @@ export function cancelGesture() {
  * and cannot get mixed up with what happens next.
  */
 export function settleGesture() {
-  if (drag?.kind !== 'node') return;
-  dropNode(drag);
-  endDrag();
+  if (drag?.kind === 'node') finishDrag();
 }
