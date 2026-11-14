@@ -159,7 +159,7 @@ export const GOALS: Goal[] = [
       'Tap the Refiner\'s port, then tap the Market so its Shard gets sold.',
     ),
     done: (g) => (g.sold.shard ?? 0) >= 1,
-    reward: { credits: 60, techs: ['R1'] },
+    reward: { credits: 70, techs: ['R1'] },
     big: true,
   },
   {
@@ -173,7 +173,7 @@ export const GOALS: Goal[] = [
       const well = g.nodes.find((n) => n.type === 'well');
       return well ? saving(g, upgradeCost(well, 'speed')) : null;
     },
-    reward: { credits: 30 },
+    reward: { credits: 50 },
   },
   {
     id: 'feed-lab', title: 'Build a Lab and feed it',
@@ -293,7 +293,7 @@ export const GOALS: Goal[] = [
     hint: hint('Keep an eye on the order card: send what it asks for to a Market, then claim it.'),
     done: (g) => g.stats.ordersFilled >= 3,
     progress: (g) => [Math.min(g.stats.ordersFilled, 3), 3, 'orders'],
-    reward: { credits: 900, b: 60 },
+    reward: { credits: 1200, b: 60 },
   },
   {
     id: 'build-fabricator', title: 'Build a Fabricator',

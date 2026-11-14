@@ -17,6 +17,13 @@
  * no look-ahead, and a fixed order of attention:
  *   claim what is ready -> research what is affordable -> fix what is red -> build the new toy -> grow.
  *
+ * Two habits of this player move the fast policies' clock by minutes, so they are spelled out:
+ *  - it keeps studying: a Lab keeps what it is getting for as long as any tech is left to buy with that
+ *    Data. It only stops adding wires, Routers and Lab upgrades for Data it is not short of right now, and
+ *    cuts the feed when nothing at all is left to research with it;
+ *  - it keeps tinkering: while saving for a new machine it still buys every upgrade that costs under 3% of
+ *    that machine's price (pettyShare). --pettyBudget measures a more disciplined saver.
+ *
  * Three policies (POLICIES below):
  *   mainline  fast (one action per 3–4 s), saves Data for the Processing branch the goal card asks for
  *   greedy    fast, buys the cheapest affordable tech the moment it can
@@ -1227,7 +1234,10 @@ function checks(r: Result): Check[] {
 
 // ---------- upgrade payback (worked out from the content tables, no bot needed) ----------
 
-interface Payback { what: string; level: number; cost: number; gain: number; seconds: number; note: string; other: number; otherNote: string }
+interface Payback { what: string; level: number; cost: number; gain: number; seconds: number; note: string; other: number; otherNote: string; demo: boolean }
+
+/** Recipes the demo's goal chain asks for; the rest is free play and is listed without a verdict. */
+const DEMO_RECIPES = ['shard', 'ink', 'spark', 'mist', 'glyph', 'prism', 'lens'];
 
 /** What a first and second Speed level cost and earn, for every Well and machine. */
 function paybacks(): Payback[] {
@@ -1245,7 +1255,7 @@ function paybacks(): Payback[] {
       const raw = more * MATERIALS[m].value;
       rows.push({
         what: `${MATERIALS[m].name} Well`, level: level + 1, cost, gain: refined, seconds: cost / refined, note: `refined into ${r ? r.name : '?'}`,
-        other: cost / raw, otherNote: 'sold raw',
+        other: cost / raw, otherNote: 'sold raw', demo: true,
       });
     }
   }
@@ -1258,7 +1268,7 @@ function paybacks(): Payback[] {
       const net = more * (worth(r.outputs) - worth(r.inputs));
       rows.push({
         what: `${NODE_DEFS[r.machine].name} (${r.name})`, level: level + 1, cost, gain: gross, seconds: cost / gross, note: 'input was backing up',
-        other: cost / net, otherNote: 'input was selling at full price',
+        other: cost / net, otherNote: 'input was selling at full price', demo: DEMO_RECIPES.includes(r.id),
       });
     }
   }
@@ -1369,10 +1379,10 @@ function report(bot: Bot, profile: Profile, profileName: string, timeline: boole
 function paybackReport(): string {
   const out: string[] = [];
   const [lo, hi] = TARGETS.payback;
-  out.push(`== UPGRADE PAYBACK: what the first two Speed levels cost and earn (target ${lo}–${hi}s where the input exists) ==`);
+  out.push(`== UPGRADE PAYBACK: what the first two Speed levels cost and earn (target ${lo}–${hi}s where the input exists; "—" = free play, not judged) ==`);
   for (const p of paybacks()) {
-    const ok = p.seconds >= lo && p.seconds <= hi;
-    out.push(`  ${ok ? 'ok  ' : 'MISS'}  ${padR(p.what, 22)} L${p.level} ${pad(fmt(p.cost) + '¢', 7)}  +${pad(f1(p.gain), 5)}¢/s → ${pad(Math.round(p.seconds), 4)}s (${p.note})   ${pad(isFinite(p.other) ? Math.round(p.other) : '∞', 5)}s if ${p.otherNote}`);
+    const ok = Math.round(p.seconds) >= lo && Math.round(p.seconds) <= hi;
+    out.push(`  ${!p.demo ? '—   ' : ok ? 'ok  ' : 'MISS'}  ${padR(p.what, 22)} L${p.level} ${pad(fmt(p.cost) + '¢', 7)}  +${pad(f1(p.gain), 5)}¢/s → ${pad(Math.round(p.seconds), 4)}s (${p.note})   ${pad(isFinite(p.other) ? Math.round(p.other) : '∞', 5)}s if ${p.otherNote}`);
   }
   return out.join('\n');
 }

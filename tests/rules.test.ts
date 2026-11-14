@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import { connect, cutWire, placeNode, setMode, setRecipe, upgrade } from '../src/actions';
-import { MATERIALS, NODE_DEFS, PIPES, RULES, TECHS } from '../src/content';
-import { demandBurst, demandInfo, flowMult, price, saturation, sellValue } from '../src/economy';
+import { MATERIALS, MatId, NODE_DEFS, PIPES, RECIPES, RULES, TECHS } from '../src/content';
+import { cycleTime, demandBurst, demandInfo, expansionCost, flowMult, price, saturation, sellValue, upgradeCostAt, wellRate } from '../src/economy';
 import { countsForFlow, flowInfo, flowProducers, inFlowState, isFlowing, worstProducer } from '../src/flow';
 import { Game, START, newGame } from '../src/state';
 import { fresh, market, rich, run, take, throughput, well, wire } from './helpers';
@@ -11,16 +11,84 @@ describe('numbers (2.6)', () => {
     expect(PIPES.map((p) => p.cap)).toEqual([4, 8, 16, 32]);
   });
 
-  it('Shard is lime, the Fabricator costs 3,000 and tech prices are the proposed ones', () => {
+  it('Shard is lime; machine and tech prices are the ones tuned with the pacing bot', () => {
     expect(MATERIALS.shard.color).toBe('#B8F26B');
-    expect(NODE_DEFS.fabricator.base).toBe(3000);
+    expect(NODE_DEFS.assembler.base).toBe(600);
+    expect(NODE_DEFS.fabricator.base).toBe(6400);
+    // The Processing spine the goal chain asks for.
     expect(TECHS.P2.cost).toEqual({ a: 45 });
-    expect(TECHS.P3.cost).toEqual({ a: 150 });
-    expect(TECHS.P4.cost).toEqual({ a: 1000 });
-    expect(TECHS.P5.cost).toEqual({ a: 1500 });
-    expect(TECHS.P7.cost).toEqual({ a: 2000, b: 800 });
-    expect(TECHS.P9.cost).toEqual({ b: 700, g: 400 });
-    expect(TECHS.L8.cost).toEqual({ g: 200 });
+    expect(TECHS.P3.cost).toEqual({ a: 180 });
+    expect(TECHS.P4.cost).toEqual({ a: 800 });
+    expect(TECHS.P5.cost).toEqual({ a: 900 });
+    expect(TECHS.P7.cost).toEqual({ a: 700, b: 150 });
+    // Free play needs all three kinds of Data, and Reclamation cannot be had before the first Lens.
+    expect(TECHS.P6.cost).toEqual({ a: 300, g: 25 });
+    expect(TECHS.P8.cost).toEqual({ a: 1200, b: 300, g: 100 });
+    expect(TECHS.P9.cost).toEqual({ a: 2500, b: 500, g: 400 });
+  });
+
+  it('side techs are impulse buys: none costs more than a third of the spine tech it competes with', () => {
+    // Before the first Glyph only α exists, and every α side tech is small next to Assembly.
+    for (const id of ['R2', 'L2', 'L3', 'S1', 'C2']) {
+      expect(Object.keys(TECHS[id].cost), id).toEqual(['a']);
+      expect(TECHS[id].cost.a!, id).toBeLessThanOrEqual(0.35 * TECHS.P4.cost.a!);
+    }
+    // After it, the β side techs are either small next to Fabrication's β price or dearer than it.
+    for (const id of ['L5', 'L4', 'L6', 'U1', 'S3', 'L7', 'R3', 'C4']) {
+      expect(Object.keys(TECHS[id].cost), id).toEqual(['b']);
+      const b = TECHS[id].cost.b!;
+      expect(b <= 90 || b > TECHS.P7.cost.b!, `${id} at ${b}β`).toBe(true);
+    }
+    // Nothing that is only useful after the demo can be bought before γ exists.
+    for (const id of ['P6', 'P8', 'P9', 'U2', 'C5', 'L8']) expect(TECHS[id].cost.g, id).toBeGreaterThan(0);
+  });
+
+  it('prices board expansions at 200 × 2.5ⁿ', () => {
+    const g = fresh();
+    expect(expansionCost(g)).toBe(200);
+    g.board.expansions = 1;
+    expect(expansionCost(g)).toBe(500);
+    g.board.expansions = 2;
+    expect(expansionCost(g)).toBe(1250);
+  });
+
+  it('prices Speed upgrades per node type, growing 1.6× per level', () => {
+    expect([0, 1, 2].map((l) => upgradeCostAt('well', 'speed', l))).toEqual([50, 80, 128]);
+    expect([0, 1, 2].map((l) => upgradeCostAt('refiner', 'speed', l))).toEqual([32, 51, 82]);
+    expect([0, 1].map((l) => upgradeCostAt('assembler', 'speed', l))).toEqual([100, 160]);
+    expect([0, 1].map((l) => upgradeCostAt('fabricator', 'speed', l))).toEqual([400, 640]);
+    expect([0, 1].map((l) => upgradeCostAt('lab', 'speed', l))).toEqual([50, 80]);
+    // Efficiency and Buffer are a share of the node's base price.
+    expect(upgradeCostAt('refiner', 'eff', 0)).toBe(75);
+    expect(upgradeCostAt('refiner', 'buffer', 0)).toBe(20);
+    expect(upgradeCostAt('silo', 'buffer', 0)).toBe(80);
+  });
+
+  it('a first or second Speed level pays for itself in one to three minutes where the input exists', () => {
+    const probe = well(fresh());
+    const worth = (list: [MatId, number][]) => list.reduce((s, [m, q]) => s + (MATERIALS[m].value < 1 ? 0 : MATERIALS[m].value * q), 0);
+    const check = (what: string, cost: number, gain: number) => {
+      const seconds = Math.round(cost / gain);
+      expect(seconds, `${what}: ${cost}¢ for +${gain.toFixed(2)}¢/s`).toBeGreaterThanOrEqual(60);
+      expect(seconds, `${what}: ${cost}¢ for +${gain.toFixed(2)}¢/s`).toBeLessThanOrEqual(180);
+    };
+    // Wells: the extra raw material is refined by a machine that has room for it.
+    for (const raw of ['glint', 'murk', 'ember', 'breeze'] as MatId[]) {
+      const r = Object.values(RECIPES).find((x) => x.inputs.length === 1 && x.inputs[0][0] === raw)!;
+      for (const level of [0, 1]) {
+        const rate = (lv: number) => wellRate({ ...probe, material: raw, lv: { speed: lv, eff: 0, buffer: 0 } });
+        const more = rate(level + 1) - rate(level);
+        check(`${raw} Well L${level + 1}`, upgradeCostAt('well', 'speed', level), (more / r.inputs[0][1]) * worth(r.outputs));
+      }
+    }
+    // Machines of the demo: the extra input was backing up, so everything the faster machine makes is a gain.
+    for (const id of ['shard', 'ink', 'spark', 'mist', 'glyph', 'prism', 'lens']) {
+      const r = RECIPES[id];
+      for (const level of [0, 1]) {
+        const rate = (lv: number) => 1 / cycleTime({ ...probe, lv: { speed: lv, eff: 0, buffer: 0 } }, r);
+        check(`${id} L${level + 1}`, upgradeCostAt(r.machine, 'speed', level), (rate(level + 1) - rate(level)) * worth(r.outputs));
+      }
+    }
   });
 });
 

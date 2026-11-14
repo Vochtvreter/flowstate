@@ -55,18 +55,21 @@ describe('goal chain: the table (2.4)', () => {
     }
   });
 
-  it('pays the rewards in the plan', () => {
+  it('pays the rewards of the plan, as tuned with the pacing bot', () => {
     const reward = (id: string) => goalById(id)!.reward;
     expect(reward('wire-market')).toEqual({ credits: 12 });
     expect(reward('second-well')).toEqual({ credits: 10 });
     expect(reward('wire-all-wells')).toEqual({ credits: 50, techs: ['P1'] });
-    expect(reward('sell-shard')).toEqual({ credits: 60, techs: ['R1'] });
+    expect(reward('sell-shard')).toEqual({ credits: 70, techs: ['R1'] });
+    expect(reward('upgrade-well')).toEqual({ credits: 50 });
     expect(reward('feed-lab')).toEqual({ a: 15 });
     expect(reward('make-spark')).toEqual({ a: 25, unlock: 'orders' });
     expect(reward('first-order')).toEqual({ techs: ['L1', 'C1'] });
-    expect(reward('make-glyph').unlock).toBe('flow');
+    expect(reward('make-glyph')).toEqual({ credits: 300, unlock: 'flow' });
     expect(reward('hold-flow')).toEqual({ credits: 300 });
-    expect(reward('three-orders')).toEqual({ credits: 300, b: 30 });
+    expect(reward('make-prism')).toEqual({ credits: 600, b: 40 });
+    expect(reward('three-orders')).toEqual({ credits: 1200, b: 60 });
+    expect(reward('build-fabricator')).toEqual({ b: 40 });
     expect(reward('make-lens')).toEqual({ unlock: 'end' });
     expect(rewardText(reward('wire-all-wells'))).toBe('Refining + 50¢');
     expect(rewardText(reward('make-spark'))).toBe('Orders + 25α');
@@ -228,10 +231,10 @@ describe('goal chain: conditions and progress', () => {
 
     at(g, 'make-glyph');
     g.techs = ['P1', 'R1', 'P2', 'P3'];
-    expect(goalView(g)!.progress).toEqual([20, 1000, 'α']);
+    expect(goalView(g)!.progress).toEqual([20, TECHS.P4.cost.a, 'α']);
     g.techs.push('P4');
     g.credits = 100;
-    expect(goalView(g)!.progress).toEqual([100, 400, '¢']);
+    expect(goalView(g)!.progress).toEqual([100, nodeCost(g, 'assembler'), '¢']);
   });
 
   it('numbers the card and words the hint for the input in use', () => {
@@ -348,7 +351,7 @@ describe('goal chain: the first minutes, played for real', () => {
     claim('build-refiner');
     connect(g, r.id, 0, m.id);
     run(g, 6);
-    claim('sell-shard'); // the Lab + 60¢
+    claim('sell-shard'); // the Lab + 70¢
     expect(has(g, 'R1')).toBe(true);
     expect(upgrade(g, w1.id, 'speed')).toBe(true);
     run(g, 0.5);
@@ -370,7 +373,7 @@ describe('goal chain: the first minutes, played for real', () => {
     expect(waited).toBeLessThan(90);
     run(g, 0.1);
     claim('research-murk');
-    expect(g.stats.fromGoals).toBe(12 + 10 + 50 + 20 + 60 + 30 + 40);
+    expect(g.stats.fromGoals).toBe(12 + 10 + 50 + 20 + 70 + 50 + 40);
     expect(g.stats.nodesBuilt).toBe(3);
     expect(g.stats.wiresMade).toBe(5);
   });
