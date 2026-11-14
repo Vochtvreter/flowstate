@@ -459,9 +459,10 @@ describe('damaged and old saves cannot poison the game', () => {
   });
 
   it('Data left far below zero by the old time-away bug is reset, so research is possible again', () => {
-    const raw = { ...oldSave(), data: { a: -10760, b: 0, g: 0 }, queue: [] };
+    const raw = { ...oldSave(), data: { a: -10760, b: 0, g: 0 }, queue: [], credits: -75 };
     const g = deserialize(JSON.stringify(raw))!;
     expect(g.data.a).toBe(0);
+    expect(g.credits).toBe(0); // the old undo bug could leave credits below zero too
     run(g, 60);
     expect(g.data.a).toBeGreaterThan(10);
   });

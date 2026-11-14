@@ -318,9 +318,10 @@ export function deserialize(json: string): Game | null {
     if (!raw || raw.v !== 1 || !Array.isArray(raw.nodes)) return null;
     const base = newGame();
     const g: Game = { ...base, ...raw, rev: 1, events: [], tickAcc: base.tickAcc };
-    // Totals must be numbers whatever the save says. Data is never negative: the build before this one
-    // could leave α thousands below zero after time away, which would lock the tech tree for good.
-    g.credits = num(raw.credits, 0);
+    // Totals must be numbers whatever the save says, and never negative: the build before this one could
+    // leave α thousands below zero after time away (which would lock the tech tree for good) and credits
+    // below zero after an undo.
+    g.credits = pos(raw.credits);
     g.lifetime = pos(raw.lifetime);
     g.time = pos(raw.time);
     g.savedAt = num(raw.savedAt, base.savedAt);
