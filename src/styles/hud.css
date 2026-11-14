@@ -184,6 +184,16 @@ html[data-input='touch'] #hints, html[data-input='touch'] .kbd { display: none; 
 html[data-input='touch'] .alertchip { min-height: 44px; }
 html[data-input='touch'] .gc-show { height: 36px; padding: 0 14px; }
 html[data-input='touch'] .gc-show::after { content: ''; position: absolute; inset: -4px 0; }
+html[data-input='touch'] .menu button { height: 44px; }
+/* Inside the inspector: full-height buttons, and a wider reach around the small ones. */
+html[data-input='touch'] #insp .buy, html[data-input='touch'] #insp .fbtn, html[data-input='touch'] #insp .ghostbtn, html[data-input='touch'] #insp .recipelist button { height: 44px; }
+html[data-input='touch'] #insp .seg button { height: 40px; }
+html[data-input='touch'] #insp .ibtn.bare { width: 44px; height: 44px; }
+html[data-input='touch'] #insp .step, html[data-input='touch'] #insp .filt, html[data-input='touch'] #insp .link { position: relative; }
+html[data-input='touch'] #insp .step { width: 32px; height: 32px; }
+html[data-input='touch'] #insp .filt { height: 32px; }
+html[data-input='touch'] #insp .step::after, html[data-input='touch'] #insp .filt::after { content: ''; position: absolute; inset: -6px; }
+html[data-input='touch'] #insp .link::after { content: ''; position: absolute; inset: -14px -8px; }
 
 /* ---------- narrow stage ----------
    Below 700px the card takes the width there is, and Claim drops under the text at full width. */
