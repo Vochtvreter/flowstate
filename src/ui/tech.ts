@@ -137,7 +137,7 @@ function aboutText(seconds: number): string {
   if (seconds <= 5) return 'a few seconds';
   if (seconds < 90) return `about ${Math.ceil(seconds / 5) * 5} s`;
   if (seconds < 3600) return `about ${Math.ceil(seconds / 60)} min`;
-  return `about ${Math.ceil(seconds / 360) / 10} h`;
+  return 'over an hour';
 }
 
 /** The kind of Data this tech is short of that nothing is making, if any. */

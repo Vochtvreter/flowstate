@@ -234,6 +234,7 @@ html[data-input='touch'] #tech .kbd { display: none; }
   #app.phone #tech { grid-template-columns: minmax(0, 1fr) minmax(280px, 42%); grid-template-rows: auto auto auto minmax(0, 1fr); grid-template-areas: 'head head' 'goal goal' 'tabs detail' 'tree detail'; }
   #app.phone #tech .thead { min-height: 48px; padding-top: 2px; padding-bottom: 2px; }
   #app.phone #tech .tgoal { min-height: 44px; }
+  #app.phone #tech .tgoal .gt { flex-direction: row; align-items: baseline; gap: 8px; }
   #app.phone #tech .tree, #app.phone #tech.sheet .tree { padding-bottom: calc(12px + env(safe-area-inset-bottom)); }
   #app.phone #tech .tdetail { max-height: none; border-top: 0; border-left: 1px solid var(--line); border-radius: 0; box-shadow: none; animation: none; }
   #app.phone #tech .dhide { display: none; }
