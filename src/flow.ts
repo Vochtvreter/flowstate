@@ -1,22 +1,24 @@
 // Flow: the share of Wells and machines running flat out. DOM-free. Numbers are in RULES.flow (src/content.ts).
 //
-// - Producers are Wells and machines that have at least one wire and are older than RULES.flow.minAge,
-//   so building never lowers Flow. Changing a machine's recipe makes it "new" again.
+// - Producers are Wells and machines older than RULES.flow.minAge whose output can reach a Market or a Lab
+//   along some path of wires, so building never lowers Flow and a line that makes nothing anyone uses
+//   (six Wells into a Void) is not a line. Changing a machine's recipe makes it "new" again.
+//   Cutting a weak producer off still hides it, at the price of everything it made.
 // - A producer is flowing when its utilisation (n.util, not n.status) is at least RULES.flow.flowing.
 // - g.flow is the flowing share smoothed over a few seconds. Once g.flowOn is set (a goal reward),
 //   sales are multiplied by flowMult(g) from src/economy.ts.
 // - Flow State: the raw share at 100% for RULES.flow.stateSeconds with enough producers.
 import { RULES } from './content';
 import { flowMult } from './economy';
-import { isMachine, isWired } from './graph';
+import { isMachine, reachesUse } from './graph';
 import { Game, GNode } from './state';
 
 const F = RULES.flow;
 
 export const isProducer = (n: GNode) => n.type === 'well' || isMachine(n);
 
-/** Does this node count toward Flow right now? */
-export const countsForFlow = (g: Game, n: GNode) => isProducer(n) && g.time - n.born >= F.minAge && isWired(g, n);
+/** Does this node count toward Flow right now? A Well or machine, old enough, whose output can end up sold or studied. */
+export const countsForFlow = (g: Game, n: GNode) => isProducer(n) && g.time - n.born >= F.minAge && reachesUse(g, n);
 
 export const isFlowing = (n: GNode) => n.util >= F.flowing;
 

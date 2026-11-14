@@ -516,9 +516,10 @@ describe('Flow (2.3)', () => {
     expect(g.flow).toBeGreaterThan(0.99);
     // A machine with no wire at all sits idle but does not count.
     const loose = placeNode(g, 'refiner', 700, 600)!;
-    // A new, starved machine has a wire but is not counted until it is 20 s old.
+    // A new, starved machine on its way to the Market is not counted until it is 20 s old.
     const young = placeNode(g, 'assembler', 900, 300)!;
     connect(g, wells[0], 0, young.id);
+    connect(g, young.id, 0, market(g).id);
     // A Lab that gets nothing is not a producer.
     const lab = placeNode(g, 'lab', 900, 500)!;
     connect(g, wells[1], 0, lab.id);
@@ -535,6 +536,50 @@ describe('Flow (2.3)', () => {
     expect(g.flow).toBeCloseTo(6 / 7, 1);
     expect(worstProducer(g)).toBe(young);
     expect(countsForFlow(g, loose)).toBe(false);
+  });
+
+  it('counts only producers whose output can reach a Market or a Lab', () => {
+    // Six Wells into a Void are not a supply line: no producers, no Flow, no Flow State.
+    const g = rich();
+    g.flowOn = true;
+    const sink = placeNode(g, 'void', 600, 300)!;
+    const wells = [well(g).id];
+    for (const dep of [2, 3, 4, 5]) wells.push(placeNode(g, 'well', 0, 0, { depositId: dep })!.id);
+    expandBoard(g);
+    wells.push(placeNode(g, 'well', 0, 0, { depositId: g.deposits[g.deposits.length - 1].id })!.id);
+    expect(wells.length).toBe(6);
+    for (const id of wells) connect(g, id, 0, sink.id);
+    run(g, 60);
+    expect(g.nodes.filter((n) => n.type === 'well').every((n) => n.util > 0.99)).toBe(true); // all running flat out
+    expect(flowInfo(g)).toMatchObject({ producers: 0, flowing: 0 });
+    expect(g.flow).toBe(0);
+    expect(g.flowHold).toBe(0);
+    expect(take(g, 'flow-state').length).toBe(0);
+    expect(inFlowState(g)).toBe(false);
+    expect(flowMult(g)).toBe(1);
+
+    // A path counts however long it is: Well → Refiner → Merger → Lab makes both the Well and the Refiner producers.
+    const refiner = placeNode(g, 'refiner', 400, 100)!;
+    const merger = placeNode(g, 'merger', 700, 100)!;
+    connect(g, wells[0], 0, refiner.id);
+    connect(g, refiner.id, 0, merger.id);
+    run(g, 25);
+    expect(countsForFlow(g, refiner)).toBe(false); // the Merger leads nowhere yet
+    expect(countsForFlow(g, well(g))).toBe(false);
+    connect(g, merger.id, 0, placeNode(g, 'lab', 900, 100)!.id);
+    expect(countsForFlow(g, refiner)).toBe(true);
+    expect(countsForFlow(g, well(g))).toBe(true);
+    expect(flowInfo(g).producers).toBe(2);
+    // One of two outputs is enough: an Ink Refiner that sells its Ink counts even though the Silt is dumped.
+    const ink = placeNode(g, 'refiner', 400, 400, { recipe: 'ink' })!;
+    connect(g, wells[2], 0, ink.id);
+    connect(g, ink.id, 1, sink.id);
+    run(g, 25);
+    expect(countsForFlow(g, ink)).toBe(false);
+    connect(g, ink.id, 0, market(g).id);
+    expect(countsForFlow(g, ink)).toBe(true);
+    // The other Wells still pour into the Void and still do not count.
+    expect(flowInfo(g).producers).toBe(4);
   });
 
   it('changing a recipe makes a machine new again', () => {
@@ -615,6 +660,7 @@ describe('Flow (2.3)', () => {
     cutWire(g, g.wires.find((w) => w.from === wells[3])!.id);
     const dead = placeNode(g, 'assembler', 900, 300)!;
     connect(g, wells[3], 0, dead.id);
+    connect(g, dead.id, 0, market(g).id); // what it made could be sold, so the Well still counts
     run(g, 30);
     expect(g.flowStreak).toBe(0);
     expect(inFlowState(g)).toBe(false);
@@ -623,7 +669,7 @@ describe('Flow (2.3)', () => {
 
     // Fix it: a new streak, a second event, and it is no longer the first.
     connect(g, wells[3], 0, market(g).id);
-    cutWire(g, g.wires.find((w) => w.to === dead.id)!.id);
+    deleteNode(g, dead.id);
     run(g, 30);
     const second = take(g, 'flow-state');
     expect(second.length).toBe(1);
@@ -652,8 +698,11 @@ describe('Flow (2.3)', () => {
     // Two of six producers back up: 67% is not enough.
     cutWire(g, g.wires.find((w) => w.from === wells[3])!.id);
     cutWire(g, g.wires.find((w) => w.from === wells[4])!.id);
-    connect(g, wells[3], 0, placeNode(g, 'assembler', 900, 300)!.id);
-    connect(g, wells[4], 0, placeNode(g, 'assembler', 900, 500)!.id);
+    for (const [id, y] of [[wells[3], 300], [wells[4], 500]]) {
+      const dead = placeNode(g, 'assembler', 900, y)!;
+      connect(g, id, 0, dead.id);
+      connect(g, dead.id, 0, market(g).id);
+    }
     run(g, 30);
     expect(g.flow).toBeLessThan(0.74);
     expect(g.flowHold).toBe(0);
