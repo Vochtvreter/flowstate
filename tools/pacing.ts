@@ -8,6 +8,8 @@
  *   npm run pacing -- --profile=<name>             what-if numbers from tools/pacing-profiles.ts
  *   npm run pacing -- --set=tech.P4=a800,node.assembler.base=1000    one-off what-if numbers (see applyOverrides)
  *   other flags: --minutes=<n>  --quiet (no timeline)  --seeds=1,2,3
+ *                --pettyBudget=<0..1>  what-if for the player, not the game: how much of their income a
+ *                                      player who is saving for a new toy still spends on small upgrades
  *
  * The bot imports the game's own modules and only ever calls what a player can do (src/actions.ts,
  * research, claimGoal, claimOrder), so goals, orders, Flow, demand and machines-first fan-out are the
@@ -71,8 +73,10 @@ export interface Policy {
   expandsUnasked: boolean;
   /** If the next new toy is this many seconds of income away (or less), save for it... */
   patience: number;
-  /** ...and meanwhile only buy things under this share of its price. */
+  /** ...and meanwhile only buy things under this share of its price... */
   pettyShare: number;
+  /** ...for no more than this share of what has come in since the saving began (1 = no limit). */
+  pettyBudget: number;
   /** While the toy is further away than that, upgrades may cost up to this share of its price. */
   growShareOfTarget: number;
 }
@@ -91,7 +95,7 @@ export const POLICIES: Record<string, Policy> = {
     firstActionDelay: 6, actionSeconds: FAST_HANDS, claimDelay: [1, 3], noticeDelay: 4, settleTime: 10,
     techPolicy: 'mainline', impulseShare: 0.35,
     fixesAmber: true, upgradesLabs: true, expandsUnasked: true,
-    patience: 150, pettyShare: 0.03, growShareOfTarget: 0.25,
+    patience: 150, pettyShare: 0.03, pettyBudget: 1, growShareOfTarget: 0.25,
   },
   greedy: {
     name: 'greedy', fast: true,
@@ -99,7 +103,7 @@ export const POLICIES: Record<string, Policy> = {
     firstActionDelay: 6, actionSeconds: FAST_HANDS, claimDelay: [1, 3], noticeDelay: 4, settleTime: 10,
     techPolicy: 'greedy', impulseShare: 1,
     fixesAmber: true, upgradesLabs: true, expandsUnasked: true,
-    patience: 150, pettyShare: 0.03, growShareOfTarget: 0.25,
+    patience: 150, pettyShare: 0.03, pettyBudget: 1, growShareOfTarget: 0.25,
   },
   slow: {
     name: 'slow', fast: false,
@@ -107,7 +111,7 @@ export const POLICIES: Record<string, Policy> = {
     firstActionDelay: 12, actionSeconds: SLOW_HANDS, claimDelay: [8, 16], noticeDelay: 8, settleTime: 20,
     techPolicy: 'mainline', impulseShare: 0.35,
     fixesAmber: false, upgradesLabs: false, expandsUnasked: false,
-    patience: 150, pettyShare: 0.03, growShareOfTarget: 0.25,
+    patience: 150, pettyShare: 0.03, pettyBudget: 1, growShareOfTarget: 0.25,
   },
 };
 
@@ -342,6 +346,31 @@ class Bot {
     return list[0] ?? null;
   }
 
+  /**
+   * The Data the player is short of right now: what the goal card shows them saving up
+   * ("Research Breeze Deposits: 400 / 900 α"), plus
+   *  - mainline: whatever the next tech of the Processing branch still lacks;
+   *  - greedy: whatever any tech they could research now still lacks.
+   * Data that is only wanted for techs further off is "for later": the Labs keep what they are getting,
+   * but the player does not go out of their way for it, and Routers go back to selling.
+   */
+  shortTiers(): Set<DataTier> {
+    const g = this.g;
+    const short = new Set<DataTier>();
+    const unit = g.goal.ready ? undefined : activeGoal(g)?.progress?.(g)?.[2];
+    if (unit === 'α') short.add('a');
+    if (unit === 'β') short.add('b');
+    if (unit === 'γ') short.add('g');
+    const lacking = (t: Tech) => { for (const k of TIERS) if ((t.cost[k] ?? 0) > g.data[k]) short.add(k); };
+    if (this.P.techPolicy === 'mainline') {
+      const next = this.nextPathTech();
+      if (next && techAvailable(g, next)) lacking(next);
+    } else {
+      for (const t of Object.values(TECHS)) if (techAvailable(g, t) && !CFG.techSkip.includes(t.id)) lacking(t);
+    }
+    return short;
+  }
+
   /** Is there still something to buy with this Data that the player does not have the Data for? */
   tierNeeded(tier: DataTier): boolean {
     let remaining = 0;
@@ -485,15 +514,7 @@ class Bot {
       return true;
     };
     const saturated = (w: Wire) => w.rate >= pipeCap(w.tier) * 0.95;
-    // The Data the player is saving up: what the goal card shows ("Research Breeze Deposits: 400 / 900 α"),
-    // and for a player who follows the Processing branch, whatever its next tech is still short of.
-    const unit = goal?.progress?.(g)?.[2];
-    const savingData = new Set<DataTier>();
-    if (unit === 'α') savingData.add('a');
-    if (unit === 'β') savingData.add('b');
-    if (unit === 'γ') savingData.add('g');
-    const nextTech = P.techPolicy === 'mainline' ? this.nextPathTech() : null;
-    if (nextTech && techAvailable(g, nextTech)) for (const k of TIERS) if ((nextTech.cost[k] ?? 0) > g.data[k]) savingData.add(k);
+    const short = this.shortTiers();
     // The Silt lesson: once the goal card has explained the Void, a byproduct port gets one straight away.
     const knowsVoid = g.goal.i > goalIndex('silt-exit') || goal?.id === 'silt-exit';
 
@@ -591,30 +612,30 @@ class Bot {
           continue;
         }
         const direct = (p: Port) => this.outs(p.n, p.port).some((w) => w.to === lab.id);
-        const hungryLab = !this.busy(lab) && lab.util < 0.9;
+        // Only Data the player is short of right now is worth more wires, Routers or Lab upgrades.
+        const forGoal = goal?.id === 'route-lab' && !g.nodes.some((n) => n.type === 'router') && tier === 'a';
+        const urgent = short.has(tier) || !this.ins(lab).length;
+        const hungryLab = urgent && !this.busy(lab) && lab.util < 0.9;
         const from = feeders.find((p) => !direct(p) && !this.routerOn(p));
         if (hungryLab && from) {
           W.push({ cls: 'fix', kind: 'wire', cost: 0, settle: [lab.id], label: `wire ${this.name(from.n)} → Lab (${GREEK[tier]})`, run: () => !!connect(g, from.n.id, from.port, lab.id) });
         }
         // Every feeder is wired and the Lab still has room: route more of a stream to it (the lesson of the Router goal).
         // Only on ports that feed no machine: a Router is served like a machine and would take half of its input.
-        const forGoal = goal?.id === 'route-lab' && !g.nodes.some((n) => n.type === 'router') && tier === 'a';
         if (knowsRouter && ((hungryLab && !from) || forGoal)) {
           // Study the cheap stuff and sell the dear: the least valuable stream first, then the biggest.
           const cand = feeders.filter((p) => direct(p) && !this.routerOn(p) && !this.feedsMachine(p) && !this.noRouter.has(this.key(p)) && !spokenFor(this.portMat(p.n, p.port)!))
             .sort((a, b) => MATERIALS[this.portMat(a.n, a.port)!].value - MATERIALS[this.portMat(b.n, b.port)!].value || this.spare(b) - this.spare(a))[0];
-          // While the goal card is waiting on this Data, feeding the Lab comes before everything else.
-          const urgent = forGoal || savingData.has(tier);
           if (cand) {
             W.push({
-              cls: urgent ? 'new' : 'grow', kind: 'build', cost: nodeCost(g, 'router'), novel: urgent, settle: [lab.id],
+              cls: 'new', kind: 'build', cost: nodeCost(g, 'router'), novel: true, settle: [lab.id],
               label: `build Router from ${this.name(cand.n)} (${forGoal ? 'goal' : `more ${GREEK[tier]}`})`,
               run: () => !!this.buildFrom(cand, 'router'),
             });
           }
         }
         // A Lab that is full while its feeders still sell the rest: study faster.
-        if (P.upgradesLabs && !this.busy(lab) && lab.util >= 0.9 && lab.lv.speed < maxLevel(g, 'speed') && feeders.length) {
+        if (P.upgradesLabs && urgent && !this.busy(lab) && lab.util >= 0.9 && lab.lv.speed < maxLevel(g, 'speed') && feeders.length) {
           speedWant(lab, `Lab is full, more ${GREEK[tier]}`);
         }
       }
@@ -798,13 +819,15 @@ class Bot {
         W.push({ cls: 'fix', kind: 'wire', cost: 0, label: 'wire Router → Market', run: () => !!connect(g, r.id, 0, market.id) });
         continue;
       }
-      // Study most of it while that Data is short; sell most of it while an order asks for the material.
+      // Study most of it while that Data is short; sell most of it while an order asks for the material,
+      // or when the Data is only wanted for later; sell all of it when there is nothing left to research with it.
       const ordered = !!g.order && !g.order.ready && g.order.mat === m;
       let want: [number, number] = CFG.studyRatio;
       let why = `more ${GREEK[tier]}`;
       if (goal?.id === 'route-lab') why = 'goal';
       else if (!this.tierNeeded(tier)) { want = [0, 1]; why = `no ${GREEK[tier]} left to spend`; }
       else if (ordered) { want = CFG.sellRatio; why = `the order wants ${MATERIALS[m].name}`; }
+      else if (!this.shortTiers().has(tier)) { want = CFG.sellRatio; why = `enough ${GREEK[tier]} for now`; }
       if (r.mode === 'ratio' && toLab.weight === want[0] && toMarket.weight === want[1]) continue;
       W.push({
         cls: want[0] === 0 ? 'grow' : 'fix', kind: 'route', cost: 0, settle: [lab.id],
@@ -823,6 +846,10 @@ class Bot {
 
   /** True when the only thing left to do is tap a Claim button the player has not got round to yet. */
   dawdling = false;
+  /** Saving for a new toy: its price, lifetime credits when the saving began, and what has gone on small things since. */
+  savingFor: number | null = null;
+  savingBase = 0;
+  pettySpent = 0;
 
   decide(): Want | null {
     const g = this.g;
@@ -860,13 +887,30 @@ class Bot {
       saving = !!target.novel && eta <= this.P.patience;
       cap = target.cost * (saving ? this.P.pettyShare : this.P.growShareOfTarget);
     }
+    // The toy cannot be bought yet (its tech is not researched) and its price is already in the bank:
+    // keep that much back and spend the rest freely.
+    const reserve = target?.locked && g.credits >= target.cost ? g.credits - target.cost : 0;
+    if (reserve > 0) {
+      saving = false;
+      cap = Math.max(cap, reserve);
+    }
+    // While saving, small purchases come out of a budget: a share of what has been earned since the saving began.
+    if (saving && target) {
+      if (this.savingFor !== target.cost) {
+        this.savingFor = target.cost;
+        this.savingBase = g.lifetime;
+        this.pettySpent = 0;
+      }
+    } else this.savingFor = null;
+    const budget = saving && this.P.pettyBudget < 1 ? this.P.pettyBudget * (g.lifetime - this.savingBase) - this.pettySpent : Infinity;
+    const petty = (w: Want): Want => (saving ? { ...w, run: () => { const ok = w.run(); if (ok) this.pettySpent += w.cost; return ok; } } : w);
     // "One more of the same" (another Well, another Refiner, more board) never comes out of the money put aside for a new toy.
-    const spare = target?.novel ? target.cost * this.P.pettyShare : Infinity;
-    const buy = news.find((w) => can(w) && w.cost <= spare);
-    if (buy) return buy;
+    const spare = target?.novel ? Math.max(target.cost * this.P.pettyShare, reserve) : Infinity;
+    const buy = news.find((w) => can(w) && w.cost <= spare && w.cost <= budget);
+    if (buy) return petty(buy);
     const grows = wants.filter((w) => w.cls === 'grow').sort((a, b) => a.cost - b.cost);
-    const grow = grows.find((w) => can(w) && w.cost <= cap);
-    if (grow) return grow;
+    const grow = grows.find((w) => can(w) && w.cost <= cap && w.cost <= budget);
+    if (grow) return petty(grow);
     if ((g.goal.ready && isFinite(this.goalClaimAt)) || (g.order?.ready && isFinite(this.orderClaimAt))) {
       this.dawdling = true;
       return null;
@@ -1404,6 +1448,7 @@ function main() {
     else if (k === 'quiet') quiet = true;
     else if (k === 'summary') onlySummary = true;
     else if (k === 'set' && v) overrides.push(v);
+    else if (k === 'pettyBudget' && v) for (const pol of Object.values(POLICIES)) pol.pettyBudget = Number(v);
   }
   const profile = PROFILES[profileName];
   if (!profile) {
