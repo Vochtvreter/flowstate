@@ -398,8 +398,38 @@ export function rewardText(r: GoalReward): string {
 
 // ---------- ticking and claiming ----------
 
+/** Grant the techs and switch on the feature a goal's reward carries. Safe to repeat: whatever is already there is left alone. */
+function applyUnlocks(g: Game, r: GoalReward) {
+  for (const id of r.techs ?? []) grantTech(g, id);
+  if (r.unlock === 'orders' && !g.ordersOn) {
+    g.ordersOn = true;
+    g.events.push({ kind: 'unlock', what: 'orders', text: 'Orders unlocked.' });
+    startOrders(g);
+  } else if (r.unlock === 'flow' && !g.flowOn) {
+    g.flowOn = true;
+    g.events.push({ kind: 'unlock', what: 'flow', text: 'Flow meter unlocked: the more of your line runs flat out, the better your prices.' });
+  } else if (r.unlock === 'end') endDemo(g);
+}
+
+/** How far down the chain each game's unlocks have been checked. */
+const unlocksChecked = new WeakMap<Game, number>();
+
+/**
+ * Keep the game consistent with its place in the chain: the index stays inside the list, and every goal
+ * already claimed has its techs and its feature. In normal play this does nothing; it repairs a save that
+ * says "goal 17" without the Flow meter (which goal 16 could then never finish) or without the Router.
+ */
+function repairChain(g: Game) {
+  if (g.goal.i > GOALS.length) g.goal = { i: GOALS.length, ready: false };
+  const from = unlocksChecked.get(g) ?? 0;
+  if (from >= g.goal.i) return;
+  for (let i = from; i < g.goal.i; i++) applyUnlocks(g, GOALS[i].reward);
+  unlocksChecked.set(g, g.goal.i);
+}
+
 /** Check the active goal. Called every tick; cheap. */
 export function tickGoal(g: Game) {
+  repairChain(g);
   if (g.goal.ready) return;
   const goal = GOALS[g.goal.i];
   if (!goal || !goal.done(g)) return;
@@ -423,15 +453,7 @@ export function claimGoal(g: Game): boolean {
   g.data.g += r.g ?? 0;
   g.goal = { i: index + 1, ready: false };
   g.events.push({ kind: 'goal-claimed', goal: goal.id, index, reward: r, big: !!goal.big, text: `${goal.title}: ${rewardText(r)}` });
-  for (const id of r.techs ?? []) grantTech(g, id);
-  if (r.unlock === 'orders' && !g.ordersOn) {
-    g.ordersOn = true;
-    g.events.push({ kind: 'unlock', what: 'orders', text: 'Orders unlocked.' });
-    startOrders(g);
-  } else if (r.unlock === 'flow' && !g.flowOn) {
-    g.flowOn = true;
-    g.events.push({ kind: 'unlock', what: 'flow', text: 'Flow meter unlocked: the more of your line runs flat out, the better your prices.' });
-  } else if (r.unlock === 'end') endDemo(g);
+  applyUnlocks(g, r);
   // A goal the player has already met is ready at once.
   tickGoal(g);
   return true;

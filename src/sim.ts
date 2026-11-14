@@ -7,7 +7,7 @@ import { updateFlow } from './flow';
 import { tickGoal } from './goals';
 import { Graph, graph, isMachine, isPass, isSink } from './graph';
 import { tickOrders } from './orders';
-import { Bag, Game, GNode, Status, Wire, deserialize, serialize } from './state';
+import { Bag, Game, GNode, Status, Wire, cloneGame } from './state';
 
 export { graph, isMachine, isPass, isSink };
 export type { Graph };
@@ -372,7 +372,7 @@ export interface AwayGains { credits: number; a: number; b: number; g: number }
 export function offlineGains(g: Game, seconds: number): AwayGains {
   const gains: AwayGains = { credits: 0, a: 0, b: 0, g: 0 };
   if (!g.ended || !(seconds > 0)) return gains;
-  const copy = deserialize(serialize(g));
+  const copy = cloneGame(g);
   if (!copy) return gains;
   const A = RULES.away;
   copy.queue = []; // the estimate must not research anything

@@ -1,4 +1,4 @@
-import { DataTier, MATERIALS, MatId, NodeType, RECIPES, RULES, TECHS } from './content';
+import { DataTier, MATERIALS, MatId, NODE_DEFS, NodeType, RECIPES, RULES, TECHS } from './content';
 
 export type Status = 'working' | 'blocked' | 'starved' | 'idle';
 export type RouterMode = 'even' | 'ratio' | 'priority' | 'filter';
@@ -266,22 +266,47 @@ const KEY = 'flowstate-save-v1';
 /** True while the page is in a background tab. Always false outside a browser. */
 const pageHidden = () => typeof document !== 'undefined' && !!document.hidden;
 
-export function serialize(g: Game): string {
-  // A hidden tab is not simulating, so the time away starts at the last save made while visible.
-  if (!pageHidden()) g.savedAt = Date.now();
+/** The game as JSON, without the fields that are rebuilt on load. Does not touch the game. */
+function toJson(g: Game): string {
   const { rev, events, tickAcc, ...rest } = g;
   return JSON.stringify(rest);
 }
 
+export function serialize(g: Game): string {
+  // A hidden tab is not simulating, so the time away starts at the last save made while visible.
+  if (!pageHidden()) g.savedAt = Date.now();
+  return toJson(g);
+}
+
+/** An independent copy of the game, exactly what saving and loading would give. The original is not touched (not even its save time). */
+export function cloneGame(g: Game): Game | null {
+  return deserialize(toJson(g));
+}
+
 const num = (v: unknown, fallback: number) => (typeof v === 'number' && isFinite(v) ? v : fallback);
+/** A finite number that is not negative. */
+const pos = (v: unknown, fallback = 0) => Math.max(0, num(v, fallback));
+
+/** A per-material table from a save: known materials with finite, non-negative numbers only. */
+function loadBag(v: unknown): Bag {
+  const out: Bag = {};
+  if (!v || typeof v !== 'object') return out;
+  for (const k in v as Record<string, unknown>) {
+    const n = (v as Record<string, unknown>)[k];
+    if (MATERIALS[k as MatId] && typeof n === 'number' && isFinite(n) && n >= 0) out[k as MatId] = n;
+  }
+  return out;
+}
 
 /** A saved order, with every field checked. null if it is missing or asks for something that no longer exists. */
 function loadOrder(o: Partial<Order> | null | undefined): Order | null {
   if (!o || typeof o !== 'object' || !MATERIALS[o.mat as MatId] || !(num(o.need, 0) > 0)) return null;
-  const r: Reward = o.reward ?? {};
+  const r: Reward = o.reward && typeof o.reward === 'object' ? o.reward : {};
+  const need = num(o.need, 0);
   return {
-    mat: o.mat as MatId, need: num(o.need, 0), base: num(o.base, 0), got: num(o.got, 0),
-    reward: { credits: num(r.credits, 0), a: num(r.a, 0), b: num(r.b, 0), g: num(r.g, 0) },
+    mat: o.mat as MatId, need, base: pos(o.base), got: Math.min(need, pos(o.got)),
+    // A reward can never take anything away.
+    reward: { credits: pos(r.credits), a: pos(r.a), b: pos(r.b), g: pos(r.g) },
     created: num(o.created, 0), lastProgress: num(o.lastProgress, 0), ready: !!o.ready,
   };
 }
@@ -293,9 +318,19 @@ export function deserialize(json: string): Game | null {
     if (!raw || raw.v !== 1 || !Array.isArray(raw.nodes)) return null;
     const base = newGame();
     const g: Game = { ...base, ...raw, rev: 1, events: [], tickAcc: base.tickAcc };
+    // Totals must be numbers whatever the save says. Data is never negative: the build before this one
+    // could leave α thousands below zero after time away, which would lock the tech tree for good.
+    g.credits = num(raw.credits, 0);
+    g.lifetime = pos(raw.lifetime);
+    g.time = pos(raw.time);
+    g.savedAt = num(raw.savedAt, base.savedAt);
+    g.data = { a: pos(raw.data?.a), b: pos(raw.data?.b), g: pos(raw.data?.g) };
+    g.sold = loadBag(raw.sold);
+    g.soldRate = loadBag(raw.soldRate);
     // Drop anything that references content that no longer exists.
     for (const n of g.nodes) {
       if (n.recipe && !RECIPES[n.recipe]) n.recipe = null;
+      if (n.material && !MATERIALS[n.material]) n.material = null;
       n.gain = 0;
       n.gainB = {};
       n.grace = 3;
@@ -313,11 +348,14 @@ export function deserialize(json: string): Game | null {
       else stats[k] = num(raw.stats?.[k], 0);
     }
     g.stats = stats;
+    // The index is checked against the goal list, and the unlocks of claimed goals re-applied, by tickGoal() (src/goals.ts).
     g.goal = { i: Math.max(0, Math.floor(num(raw.goal?.i, 0))), ready: !!raw.goal?.ready };
-    const bag = (v: unknown): Bag => (v && typeof v === 'object' ? { ...(v as Bag) } : {});
-    g.madeAt = bag(raw.madeAt);
-    for (const m in g.made) if (g.made[m as MatId] && g.madeAt[m as MatId] == null) g.madeAt[m as MatId] = 0;
-    g.demandLeft = bag(raw.demandLeft);
+    const made: Game['made'] = {};
+    if (raw.made && typeof raw.made === 'object') for (const m in raw.made) if (MATERIALS[m as MatId] && raw.made[m]) made[m as MatId] = true;
+    g.made = made;
+    g.madeAt = loadBag(raw.madeAt);
+    for (const m in g.made) if (g.madeAt[m as MatId] == null) g.madeAt[m as MatId] = 0;
+    g.demandLeft = loadBag(raw.demandLeft);
     g.flowOn = !!raw.flowOn;
     g.ordersOn = !!raw.ordersOn;
     g.flow = Math.max(0, Math.min(1, num(raw.flow, 0)));
@@ -328,6 +366,8 @@ export function deserialize(json: string): Game | null {
     g.order = loadOrder(raw.order);
     // A save from before the `ended` flag that already has a Lens is past the demo.
     g.ended = typeof raw.ended === 'boolean' ? raw.ended : !!g.made[RULES.capstone];
+    // The build before this one let the last Well be deleted. A board with no Well and no money for one is stuck: pay for one.
+    if (!g.nodes.some((n) => n.type === 'well')) g.credits = Math.max(g.credits, NODE_DEFS.well.base);
     return g;
   } catch {
     return null;
