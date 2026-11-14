@@ -175,8 +175,13 @@ export function addTopItem(slot: 'res' | 'actions', item: TopItem, before?: Elem
 }
 
 let creditsNum: HTMLElement;
+/** How long the credits number takes to roll to a new value, in seconds. */
+const ROLL = 0.3;
 let shownCredits = NaN;
 let shownInt = NaN;
+let rollFrom = 0;
+let rollTo = NaN;
+let rollT = ROLL;
 let sinceWrite = 0;
 let rolledGame: Game | null = null;
 
@@ -189,26 +194,42 @@ function creditsItem(): TopItem {
 }
 
 /**
- * The credits number chases its real value, closing most of the gap in about 300 ms. Call every frame.
- * The text itself is written at most 20 times a second while it rolls through a jump, and 10 times a
- * second while it just ticks up with income: each write costs the browser a full rendering pass,
- * and the eye cannot tell the difference.
+ * Roll the credits number to its real value over ROLL seconds (ease-out). Call every frame.
+ * Changes of a credit or two are shown at once, so slow early income still ticks on the beat.
+ * The text is written at most ~20 times a second during a roll and ~10 times a second while it
+ * simply ticks up with income: each write costs the browser a full rendering pass, and the eye
+ * cannot tell the difference.
  */
 export function tickPanels(dt: number) {
   const g = ui.g;
   const target = g.credits;
-  let gap = 0;
   if (g !== rolledGame || !isFinite(shownCredits)) {
+    // First frame, or a different game (reset): no roll.
     rolledGame = g;
-    shownCredits = target;
+    shownCredits = rollTo = target;
+    rollT = ROLL;
     sinceWrite = 1;
-  } else if (shownCredits !== target) {
-    gap = target - shownCredits;
-    shownCredits = Math.abs(gap) < 0.5 ? target : shownCredits + gap * (1 - Math.exp(-dt / 0.1));
+  } else if (target !== rollTo) {
+    if (Math.abs(target - shownCredits) < 2) {
+      shownCredits = target;
+      rollT = ROLL;
+    } else {
+      rollFrom = shownCredits;
+      rollT = 0;
+    }
+    rollTo = target;
   }
+  const rolling = rollT < ROLL;
+  if (rolling) {
+    rollT = Math.min(ROLL, rollT + dt);
+    const left = 1 - rollT / ROLL;
+    shownCredits = rollTo + (rollFrom - rollTo) * left * left * left;
+  }
+  const landed = rolling && rollT >= ROLL; // the exact value is always shown the moment a roll ends
   sinceWrite += dt;
   const whole = Math.floor(shownCredits);
-  if (whole === shownInt || sinceWrite < (Math.abs(gap) > 12 ? 0.045 : 0.095)) return;
+  if (whole === shownInt) return;
+  if (!landed && sinceWrite < (rolling ? 0.045 : 0.095)) return;
   shownInt = whole;
   sinceWrite = 0;
   creditsNum.textContent = fmtInt(whole);

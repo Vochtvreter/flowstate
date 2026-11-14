@@ -845,13 +845,14 @@ export function updateBoard(dt: number) {
       showGains();
     }
   }
-  // The tech tree covers the whole board, so there is nothing to draw behind it.
-  if (!ui.techOpen) frameFx(dt, ui.view, g.paused);
+  // The tech tree covers the whole board, so wire dots are not drawn behind it.
+  frameFx(dt, ui.view, g.paused, ui.techOpen);
 }
 
 // ---------- placement ----------
 
-const GAP_X = 20, GAP_Y = 8;
+/** Clear space kept around a card when it is nudged into place: room for ports at the sides and a status pill on top. */
+const GAP_X = 20, GAP_Y = 20;
 let ringOffsets: Int16Array | null = null;
 
 /** Grid offsets ordered by distance, for "nearest free spot" searches. */

@@ -516,17 +516,23 @@ function drawParticles(c: CanvasRenderingContext2D, dt: number) {
 
 // ---------- frame ----------
 
-/** Advance and draw everything. Call once per animation frame. */
-export function frameFx(dt: number, view: { x: number; y: number; k: number }, paused: boolean) {
+/**
+ * Advance and draw everything. Call once per animation frame.
+ * `covered` means the board cannot be seen (a full-screen overlay is up): wire dots and port pulses
+ * are then skipped, but particles still run, so an `onArrive` callback is never left waiting.
+ */
+export function frameFx(dt: number, view: { x: number; y: number; k: number }, paused: boolean, covered = false) {
   if (!ctx || !canvas) return;
   if (sizeDirty) resize();
-  const total = stepFlows(dt, view, paused);
+  const total = covered ? 0 : stepFlows(dt, view, paused);
   beaconClock += Math.min(dt, 0.1);
   let pulsing = false;
-  for (const b of beacons) {
-    if (onScreen(b, view)) {
-      pulsing = true;
-      break;
+  if (!covered) {
+    for (const b of beacons) {
+      if (onScreen(b, view)) {
+        pulsing = true;
+        break;
+      }
     }
   }
   if (!total && !live && !pulsing) {
