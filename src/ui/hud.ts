@@ -3,8 +3,9 @@
 // Owned by the HUD track. Subscribes through the hooks in ui.ts and panels.ts.
 //
 // What other modules can rely on:
-//  - Anchors (dom.ts): 'goal' is the Claim button while there is one, otherwise the card; 'order' is
-//    the order chip (null while hidden); 'flow' is the Flow ring (null until it is unlocked).
+//  - Anchors (dom.ts): 'goal' is the Claim button while there is one, otherwise the card (for half
+//    a second after a claim it is still the place where Claim was pressed); 'order' is the order
+//    chip (null while hidden); 'flow' is the Flow ring (null until it is unlocked).
 //  - #goal carries data-goal="<id>" and data-ready="0|1"; the buttons are data-testid="claim",
 //    "advice-show" and "order-claim".
 //  - The whole strip is patched in place (makePanel), so a press never lands on a rebuilt element
@@ -49,8 +50,10 @@ export function initHud() {
   // pointer is still down inside the strip.
   delegate(stripEl, (a, args) => {
     const g = ui.g;
-    if (a === 'claim') claimGoal(g);
-    else if (a === 'claim-order') claimOrder(g);
+    if (a === 'claim') {
+      const pressed = goalEl.querySelector('[data-testid="claim"]')?.getBoundingClientRect();
+      if (claimGoal(g) && pressed) holdGoalAnchor(pressed);
+    } else if (a === 'claim-order') claimOrder(g);
     else if (a === 'show') showAdvice();
     else if (a === 'jump') jumpTo(Number(args[0]));
     renderPanels(true);
@@ -68,6 +71,7 @@ export function initHud() {
     tipKey = '';
     tip = null;
     anchorKey = '';
+    standUntil = 0;
     alertNode = -1;
   });
 }
@@ -263,6 +267,29 @@ function renderAlert(g: Game, force: boolean) {
 
 let anchorKey = '';
 
+// The effects that answer a claim run a frame after the press, when the Claim button may already
+// be gone. For a moment after a claim the 'goal' anchor therefore stays where the button was (an
+// invisible stand-in keeps its place), so coins leave from under the pointer or the thumb and not
+// from the middle of the card, which on a phone is at the other end of the screen.
+const HOLD_ANCHOR_MS = 500;
+let stand: HTMLElement | null = null;
+let standUntil = 0;
+
+function holdGoalAnchor(r: DOMRect) {
+  if (!stand) {
+    stand = document.createElement('i');
+    stand.setAttribute('aria-hidden', 'true');
+    stand.style.cssText = 'position:fixed;visibility:hidden;pointer-events:none';
+    document.body.appendChild(stand);
+  }
+  stand.style.left = `${r.left}px`;
+  stand.style.top = `${r.top}px`;
+  stand.style.width = `${r.width}px`;
+  stand.style.height = `${r.height}px`;
+  standUntil = performance.now() + HOLD_ANCHOR_MS;
+  anchorKey = '';
+}
+
 function renderHud(force: boolean) {
   const g = ui.g;
   renderGoal(g, force);
@@ -273,10 +300,11 @@ function renderHud(force: boolean) {
   setClass(stripEl, 'over-tech', ui.techOpen && g.goal.ready);
   // The anchors are pointed at what is on screen whenever the layout of the strip may have changed.
   const claim = goalEl.querySelector('[data-testid="claim"]');
-  const key = `${g.goal.i}|${claim ? 1 : 0}|${g.order ? 1 : 0}${g.order?.ready ? 1 : 0}|${alertEl.hasAttribute('hidden') ? 0 : 1}|${ui.techOpen ? 1 : 0}|${tip ? 1 : 0}`;
+  const held = !claim && !!stand && performance.now() < standUntil;
+  const key = `${g.goal.i}|${claim ? 1 : 0}|${g.order ? 1 : 0}${g.order?.ready ? 1 : 0}|${alertEl.hasAttribute('hidden') ? 0 : 1}|${ui.techOpen ? 1 : 0}|${tip ? 1 : 0}|${held ? 1 : 0}`;
   if (key !== anchorKey) {
     anchorKey = key;
-    setAnchor('goal', claim ?? goalEl);
+    setAnchor('goal', claim ?? (held ? stand! : goalEl));
     setAnchor('order', orderEl);
   }
 }
