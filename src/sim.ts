@@ -351,11 +351,15 @@ function gulpRate(past: number[], dt: number): { est: number; max: number } {
   for (let i = 1; i < past.length; i += 2) max = Math.max(max, past[i]);
   const same = (a: number, b: number) =>
     Math.abs(past[2 * a] - past[2 * b]) <= 0.02 * past[2 * a] + 1e-6 && Math.abs(past[2 * a + 1] - past[2 * b + 1]) <= 2 * dt + 1e-6;
-  // A round of k gulps must repeat at least once, and hold over the last six gulps: two equal gulps in a
-  // row are not yet a pattern of one.
+  // How many of the newest gulps make up the last `window` seconds (all of them, if they are shorter than that).
+  let recent = 0;
+  for (let seconds = 0; recent < m && seconds < R.window; recent++) seconds += past[2 * (m - 1 - recent) + 1];
+  // A round of k gulps must repeat at least once, and hold over the last six gulps and over everything in the
+  // window: two equal gulps in a row are not yet a pattern of one, and neither are six when the seventh of
+  // every round is a different one (a Router topping up a full Silo).
   let take = 0;
   for (let k = 1; k <= m / 2 && !take; k++) {
-    const back = Math.min(m, Math.max(2 * k, 6));
+    const back = Math.min(m, Math.max(2 * k, 6, recent));
     let repeats = true;
     for (let i = m - back + k; i < m && repeats; i++) repeats = same(i, i - k);
     if (repeats) take = k;

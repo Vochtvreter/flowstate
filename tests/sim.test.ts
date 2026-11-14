@@ -261,6 +261,57 @@ describe('wire rates are steady when a machine takes its inputs in gulps', () =>
     expect(seen[0].naiveHi - seen[0].naiveLo).toBeGreaterThan(0.2); // 0.33/s used to read anywhere from 0.2 to 0.5
   });
 
+  it('a long round is exact too: with Efficiency a machine skips its inputs on every fifth or sixth craft', () => {
+    // The Glyph line again, with Efficiency on the Assembler and on the Ink Refiner: the Assembler now asks
+    // for Ink on four crafts out of five, and a round of the pattern on the Ink wire is eight gulps and 30 s.
+    const g = rich();
+    g.techs.push('U1');
+    const m = market(g);
+    const ink = placeNode(g, 'refiner', 400, 400)!;
+    const spark = placeNode(g, 'refiner', 400, 540)!;
+    connect(g, placeNode(g, 'well', 0, 0, { depositId: 3 })!.id, 0, ink.id);
+    connect(g, placeNode(g, 'well', 0, 0, { depositId: 4 })!.id, 0, spark.id);
+    connect(g, ink.id, 1, placeNode(g, 'void', 700, 650)!.id);
+    const glyph = placeNode(g, 'assembler', 700, 450, { recipe: 'glyph' })!;
+    const ids = [connect(g, ink.id, 0, glyph.id)!.id, connect(g, ink.id, 0, m.id)!.id, connect(g, spark.id, 0, glyph.id)!.id, connect(g, glyph.id, 0, m.id)!.id];
+    connect(g, spark.id, 0, m.id);
+    upgrade(g, glyph.id, 'eff');
+    upgrade(g, glyph.id, 'eff');
+    upgrade(g, ink.id, 'eff');
+    run(g, 180);
+    const seen = watch(g, 600, ids);
+    const real = [4 / 15, 0.5 - 4 / 15, 4 / 15, 1 / 3];
+    seen.forEach((w, i) => {
+      expect(w.real, `wire ${i}`).toBeCloseTo(real[i], 3);
+      expect(w.lo, `wire ${i}`).toBeGreaterThan(real[i] * 0.98);
+      expect(w.hi, `wire ${i}`).toBeLessThan(real[i] * 1.02);
+    });
+    expect((seen[0].naiveHi - seen[0].naiveLo) / real[0]).toBeGreaterThan(0.5);
+  });
+
+  it('a run of equal gulps and then an odd one is one round, not a pattern of one: a Router topping up a full Silo', () => {
+    // The Refiner takes two Glint from the Silo every 2 s; the Router refills that in six short gulps and a
+    // longer one. Six equal gulps in a row used to be read as the whole pattern, 22% high, once every round.
+    const g = rich();
+    for (let i = 0; i < 4; i++) upgrade(g, well(g).id, 'speed'); // 2.44 Glint/s
+    const router = placeNode(g, 'router', 300, 100)!;
+    const silo = placeNode(g, 'silo', 450, 100)!;
+    const r = placeNode(g, 'refiner', 600, 100, { recipe: 'shard' })!;
+    connect(g, well(g).id, 0, router.id);
+    const fill = connect(g, router.id, 0, silo.id)!;
+    const sell = connect(g, router.id, 0, market(g).id)!;
+    connect(g, silo.id, 0, r.id);
+    connect(g, r.id, 0, market(g).id);
+    silo.inb.glint = 199; // as good as full
+    run(g, 60);
+    const [toSilo, toMarket] = watch(g, 300, [fill.id, sell.id]);
+    expect(toSilo.real).toBeCloseTo(1, 3);
+    expect(toSilo.lo).toBeGreaterThan(0.98);
+    expect(toSilo.hi).toBeLessThan(1.02);
+    expect(toMarket.lo).toBeGreaterThan(toMarket.real * 0.98);
+    expect(toMarket.hi).toBeLessThan(toMarket.real * 1.02);
+  });
+
   it('still follows a change within seconds: starting, speeding up, stopping', () => {
     const g = rich();
     upgrade(g, well(g).id, 'speed');
