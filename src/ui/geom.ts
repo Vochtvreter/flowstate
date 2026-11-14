@@ -99,3 +99,18 @@ export function distToPolyline(p: Pt, pts: Pt[]): number {
 }
 
 export const matColor = (m: MatId | null) => (m ? MATERIALS[m].color : '#8C97AD');
+
+// ---------- camera ----------
+
+export interface View { x: number; y: number; k: number }
+
+/**
+ * The view after two fingers have moved. `v0`, `m0` and `d0` are the view, the fingers' midpoint
+ * (board-local pixels) and their spread when the pair formed; `m1` and `d1` are the midpoint and
+ * spread now. The board point that was under the midpoint stays under it, whatever `clampK` does
+ * to the zoom, so fingers that move together pan and fingers that spread zoom about their middle.
+ */
+export function pinchView(v0: View, m0: Pt, d0: number, m1: Pt, d1: number, clampK: (k: number) => number): View {
+  const k = clampK((v0.k * d1) / d0);
+  return { x: m1.x - ((m0.x - v0.x) / v0.k) * k, y: m1.y - ((m0.y - v0.y) / v0.k) * k, k };
+}

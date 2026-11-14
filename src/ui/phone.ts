@@ -8,8 +8,12 @@
 //   - CSS variables on `#app.phone`: --top-h (top bar), --hot-h (bottom hotbar), --strip-h (how far
 //     the strip reaches down the stage), --lift (height of an open bottom sheet), --shift (width
 //     of a sheet docked at the side, on short landscape screens).
-//   - `#thumb-slot` sits just above the hotbar: put a Claim button in it and it is in thumb reach.
-//   - Anything in `#stage` with the class `strip-item` joins the strip at the top (see phone.css).
+//   - `#thumb-slot` sits just above the hotbar (and rises above an open sheet): put a Claim button
+//     in it and it is in thumb reach. It only shows in the phone layout.
+//   - `#objective`, `#alert`, `#toasts` and anything else in `#stage` with the class `strip-item`
+//     form the strip at the top of the board (see phone.css); `strip-wide` gives a row of its own.
+//   - `#app.carrying` while a node is being moved, `#app.building` while the build sheet is open.
+//   - `swipeToDismiss()` below works for any sheet.
 import { MATERIALS, NODE_DEFS } from '../content';
 import { canUndo, undo } from '../actions';
 import { armedPort, cancelArmed, cancelGesture, closeRadial, fitView, refreshBoard, settleGesture } from './board';

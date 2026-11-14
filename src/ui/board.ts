@@ -1,5 +1,13 @@
 // The board: world rendering (DOM nodes + SVG wires, patched by id) and every pointer gesture.
 // Anything that moves every frame (wire dots, floating gains) is drawn by fx.ts on one canvas.
+//
+// Gestures, for mouse and finger alike:
+//   - drag from a port to wire; drop on empty board for the build menu (a fan, or a sheet on a phone);
+//   - or tap a port to arm it, then tap what its wire should go to (see `tapWire`);
+//   - drag a card to move it, drag empty board to pan, wheel or two fingers to zoom;
+//   - a dragged wire or card scrolls the board when it nears the edge.
+// A finger is matched to ports and wires by distance on screen (see `touchHit`), not by what the
+// browser says is under it. What the phone layout changes here is read from phone-env.ts.
 import { MATERIALS, MatId, NODE_DEFS, NodeType, PIPES, RECIPES, Recipe, TECHS } from '../content';
 import {
   act, canConnect, connect, cutWires, expandBoard, freeDeposits, materialsAt, nodeById, placeNode, splice,
@@ -13,7 +21,7 @@ import { anchorPt, cachedRect, el, invalidateLayout, pulseAnchor, setClass, setH
 import {
   Beacon, Flow, floater, flowPoint, fly, frameFx, invalidateFx, makeFlow, setBeacons, setFlowPath, setFlows,
 } from './fx';
-import { NODE_W, Port, Pt, bezierAt, inPorts, matColor, nodeSize, outPorts, pathD, segmentsCross, wireEnds } from './geom';
+import { NODE_W, Port, Pt, bezierAt, inPorts, matColor, nodeSize, outPorts, pathD, pinchView, segmentsCross, wireEnds } from './geom';
 import { esc, icon, matGlyph, matShape, nodeIcon } from './icons';
 import { env } from './phone-env';
 import { diagnose } from './status';
@@ -1642,12 +1650,11 @@ function movePinch(d: Extract<Drag, { kind: 'pinch' }>) {
   const a = fingers.get(d.a), b = fingers.get(d.b);
   if (!a || !b) return;
   const r = rectOf();
-  const mx = (a.x + b.x) / 2 - r.left, my = (a.y + b.y) / 2 - r.top;
-  const k = clampK((d.vk * Math.max(30, Math.hypot(a.x - b.x, a.y - b.y))) / d.dist);
-  // The board point that was under the midpoint when the pair formed stays under the midpoint.
-  ui.view.x = mx - ((d.mx - d.vx) / d.vk) * k;
-  ui.view.y = my - ((d.my - d.vy) / d.vk) * k;
-  ui.view.k = k;
+  const now = { x: (a.x + b.x) / 2 - r.left, y: (a.y + b.y) / 2 - r.top };
+  const v = pinchView({ x: d.vx, y: d.vy, k: d.vk }, { x: d.mx, y: d.my }, d.dist, now, Math.max(30, Math.hypot(a.x - b.x, a.y - b.y)), clampK);
+  ui.view.x = v.x;
+  ui.view.y = v.y;
+  ui.view.k = v.k;
   applyView();
 }
 
