@@ -37,11 +37,11 @@ function waitEnds(copy: Game, limit: number, dt = 0.1): number {
 }
 
 /** How the same wait goes with the tip and without it. */
-function trial(g: Game, a: Advice, limit = 900) {
+function trial(g: Game, a: Advice, limit = 900, dt = 0.1) {
   const withTip = lookahead(g)!;
   const without = lookahead(g)!;
   const applied = applyAdvice(withTip, a);
-  return { applied, tip: applied ? waitEnds(withTip, limit) : Infinity, idle: waitEnds(without, limit), withTip, without };
+  return { applied, tip: applied ? waitEnds(withTip, limit, dt) : Infinity, idle: waitEnds(without, limit, dt), withTip, without };
 }
 
 /** Wording every tip must keep to. */
@@ -232,6 +232,37 @@ describe('advice: the repertoire, one board at a time', () => {
     }
     // More Lab is what this board needs: a faster Lab, a second one, or Lab Speed.
     expect([...seen].some((x) => x === 'upgrade lab' || x === 'build lab' || x === 'research R2'), [...seen].join()).toBe(true);
+  });
+
+  it('Data wait: a tech that pays for itself inside the wait is worth its price', () => {
+    const g = midGame();
+    const lab = g.nodes.find((n) => n.type === 'lab')!;
+    for (const n of g.nodes) if ((n.recipe === 'ink' || n.type === 'well') && n.id !== well(g).id) connect(g, n.id, 0, lab.id);
+    connect(g, g.nodes.find((n) => n.recipe === 'ink')!.id, 1, lab.id);
+    run(g, 30);
+    expect(lab.util).toBeGreaterThan(0.95); // far more on offer than one Lab can study
+    at(g, 'make-glyph'); // 800 α
+    run(g, 0.1);
+    g.credits = 0; // nothing can be bought with credits
+    g.data.a = 60;
+    const a = advice(g)!;
+    expect(a.kind).toBe('data');
+    expect(a.research).toBe('R2');
+    expect(a.text.mouse).toBe('Open the Tech tree and research Lab Speed (50α): your Lab is full, and this doubles how fast Labs study.');
+    expect(a.text.touch).toBe('Tap Tech and research Lab Speed (50α): your Lab is full, and this doubles how fast Labs study.');
+    expect(a.cost).toBe(0);
+    checkWording(a);
+    const t = trial(g, a, 2000);
+    expect(t.tip).toBeLessThan(t.idle - 20); // although it spends 50 of the α being saved
+    expect(applyAdvice(g, a)).toBe(true);
+    expect(g.techs).toContain('R2');
+    expect(g.data.a).toBeCloseTo(10, 0);
+    // With less α than it costs, it is not on offer.
+    const h = midGame();
+    at(h, 'make-glyph');
+    run(h, 0.1);
+    h.data.a = 40;
+    expect(adviceTrials(h)!.trials.some((x) => /research/.test(x.text))).toBe(false);
   });
 
   it('credits wait: sell what backs up or is not sold at all', () => {
@@ -455,6 +486,50 @@ describe('advice: the repertoire, one board at a time', () => {
   });
 });
 
+describe('advice: a long save, followed tip by tip', () => {
+  it('every tip is true, and between them they use the dearer parts of the repertoire', () => {
+    // 7,700¢ to go for the Fabricator on a few credits a second, with Bulk Upgrade and Data to spare.
+    const g = midGame();
+    g.techs.push('P4', 'P5', 'P7', 'S1');
+    g.data = { a: 5000, b: 5000, g: 0 };
+    g.credits = 100;
+    at(g, 'build-fabricator');
+    run(g, 0.1);
+    const kinds: string[] = [];
+    const said: string[] = [];
+    let last = Infinity;
+    for (let i = 0; i < 14; i++) {
+      const a = advice(g);
+      if (!a) break;
+      expect(a.kind).toBe('credits');
+      checkWording(a);
+      expect(a.cost ?? 0).toBeLessThanOrEqual(g.credits + 1e-6);
+      const t = trial(g, a, 6000, 0.25);
+      expect(t.applied, a.text.mouse).toBe(true);
+      expect(t.tip, a.text.mouse).toBeLessThan(t.idle);
+      kinds.push(a.research ? 'research' : a.cut ? 'cut' : a.all ? 'upgrade all' : a.upgrade ? 'upgrade' : a.build ? `build ${a.build}` : a.favour ? 'favour' : 'wire');
+      said.push(a.text.mouse);
+      expect(applyAdvice(g, a)).toBe(true);
+      run(g, 20);
+      // The wait really does get shorter as the tips are followed.
+      const eta = waitInfo(g)!.eta;
+      if (i >= 2) expect(eta, said.join(' | ')).toBeLessThan(last);
+      last = eta;
+    }
+    expect(kinds.length).toBeGreaterThanOrEqual(8);
+    expect(kinds, kinds.join()).toContain('build well');
+    expect(kinds, kinds.join()).toContain('build refiner');
+    expect(kinds, kinds.join()).toContain('upgrade all');
+    // A Refiner built by a tip arrives wired at both ends and working.
+    const built = said.find((x) => /pick Refiner/.test(x))!;
+    expect(built).toMatch(/^Drag from (the|a|an) \w+ Well's port into empty space, pick Refiner \(\d+¢\) and wire it to the Market: \w+ sells for more than the \w+ it is made of\.$/);
+    expect(g.nodes.filter((n) => n.type === 'refiner').every((n) => n.util > 0.5)).toBe(true);
+    // By now raw Glint sells over its demand, and the adviser knows: Wider Demand is on its list.
+    const glut = adviceTrials(g)!.trials.filter((x) => /over demand/.test(x.text));
+    if (g.seenSurplus) expect(glut.length).toBeGreaterThan(0);
+  });
+});
+
 describe('advice: how it behaves', () => {
   it('never touches the live game, and keeps its verdict until the board or the clock moves on', () => {
     const g = midGame();
@@ -563,8 +638,11 @@ describe('every tip on a real board is affordable, can be done, and is true', ()
     expect(kinds.has('data')).toBe(true);
     expect(kinds.has('credits')).toBe(true);
     const what = (a: Advice) => (a.cut ? 'cut' : a.favour ? 'favour' : a.research ? 'research' : a.build ? `build ${a.build}` : a.upgrade ? 'upgrade' : 'wire');
-    const seen = new Set(cases.map((c) => what(c.a)));
-    for (const x of ['wire', 'upgrade', 'build lab', 'build well', 'cut']) expect([...seen], x).toContain(x);
+    const count: Record<string, number> = {};
+    for (const c of cases) count[what(c.a)] = (count[what(c.a)] ?? 0) + 1;
+    for (const x of ['wire', 'upgrade', 'build lab', 'build well', 'cut']) expect(Object.keys(count), x).toContain(x);
+    // Which parts of the repertoire real boards exercised; the rest is covered on built boards above.
+    console.info(`adviser: tips collected from real boards, by action: ${Object.entries(count).map(([k, n]) => `${k} ${n}`).join(', ')}`);
   });
 
   it('affordable and worded properly', () => {
