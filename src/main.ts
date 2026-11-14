@@ -4,15 +4,21 @@ import { clearHistory, cutWire, deleteNode, nodeById, redo, refundOf, undo } fro
 import { fmt, fmtTime, has, offlineCap } from './economy';
 import { offlineGains, tick } from './sim';
 import { clearSave, loadGame, newGame, saveGame } from './state';
+import { GameEvent } from './state';
 import {
-  cancelGesture, ensureVisible, fitView, initBoard, pickRadial, radialOpen, startPlacing, updateBoard, updateSlow,
+  cancelGesture, ensureVisible, fitView, initBoard, jumpTo, pickRadial, radialOpen, settleGesture, startPlacing,
+  updateBoard, updateSlow, zoomBy,
 } from './ui/board';
+import { invalidateLayout } from './ui/dom';
+import { fx, initFx } from './ui/fx';
 import { matGlyph } from './ui/icons';
-import { hotbarTypes, initPanels, renderPanels } from './ui/panels';
+import { hotbarTypes, initPanels, renderPanels, tickPanels } from './ui/panels';
 import { closeTech, initTech, openTech, renderTech } from './ui/tech';
-import { initToasts, select, toast, touch, ui } from './ui/ui';
+import { initToasts, onSignal, select, toast, touch, ui } from './ui/ui';
 
 const STEP = 0.05;
+/** Seconds between refresh beats for on-board numbers and panels (see the frame loop). */
+const SLOW_STEP = 0.25;
 const $ = <T extends HTMLElement>(id: string) => document.getElementById(id) as T;
 
 function showAway(seconds: number, gains: { credits: number; a: number; b: number; g: number }) {
@@ -32,6 +38,7 @@ function boot() {
   const loaded = loadGame();
   ui.g = loaded ?? newGame();
   initToasts($('toasts'));
+  initFx($<HTMLCanvasElement>('fx'));
   initBoard($('board'));
   initTech($('tech'));
   initPanels(
@@ -59,39 +66,68 @@ function boot() {
   }
   ui.g.events.length = 0;
   renderPanels();
-  window.addEventListener('resize', () => touch());
+  window.addEventListener('resize', () => {
+    invalidateLayout();
+    touch();
+  });
   window.addEventListener('keydown', onKey);
   window.addEventListener('beforeunload', () => saveGame(ui.g));
   document.addEventListener('visibilitychange', () => {
     if (document.hidden) saveGame(ui.g);
   });
   setInterval(() => saveGame(ui.g), 10000);
-  (window as unknown as Record<string, unknown>).flowstate = { ui, tick };
+  // Test hooks. `ui` and `tick` are relied on by scripts; the rest are there for convenience.
+  (window as unknown as Record<string, unknown>).flowstate = { ui, tick, fx, view: { fit: fitView, zoomBy, jumpTo }, onSignal };
   requestAnimationFrame(frame);
+}
+
+/**
+ * Everything the simulation wants the player to notice arrives here, once per event.
+ * This is the place to hang toasts, effects and sound. Kinds this build does not know are skipped.
+ */
+function onGameEvent(ev: GameEvent) {
+  switch (ev.kind) {
+    case 'milestone':
+      toast(`${matGlyph(ev.mat, 18)}<span><b>First ${MATERIALS[ev.mat].name}!</b> Milestone bonus <span class="mono" style="color:#FFC857">+${fmt(ev.reward)}¢</span></span>`, 'good', 4500);
+      break;
+    case 'tech': {
+      const t = TECHS[ev.id];
+      if (t) toast(`<span><b>${t.name}</b> unlocked: ${t.unlocks.join(', ')}</span>`, 'good', 5000);
+      break;
+    }
+    case 'toast':
+      toast(ev.text, 'bad');
+      break;
+    default:
+      break;
+  }
 }
 
 function drainEvents() {
   const g = ui.g;
   if (!g.events.length) return;
-  for (const ev of g.events.splice(0)) {
-    if (ev.kind === 'milestone') {
-      toast(`${matGlyph(ev.mat, 18)}<span><b>First ${MATERIALS[ev.mat].name}!</b> Milestone bonus <span class="mono" style="color:#FFC857">+${fmt(ev.reward)}¢</span></span>`, 'good', 4500);
-    } else if (ev.kind === 'tech') {
-      const t = TECHS[ev.id];
-      toast(`<span><b>${t.name}</b> unlocked: ${t.unlocks.join(', ')}</span>`, 'good', 5000);
-    } else toast(ev.text, 'bad');
-  }
+  for (const ev of g.events.splice(0)) onGameEvent(ev);
 }
 
 let last = performance.now();
 let acc = 0;
 let slow = 0;
+let beat = false;
 let techTimer = 0;
 let seenUi = -1;
 let seenRev = -1;
 let seenSel = '';
 
 function frame(now: number) {
+  // Whatever goes wrong in one frame, the next one is always scheduled.
+  try {
+    step(now);
+  } finally {
+    requestAnimationFrame(frame);
+  }
+}
+
+function step(now: number) {
   const g = ui.g;
   let dt = (now - last) / 1000;
   last = now;
@@ -125,18 +161,23 @@ function frame(now: number) {
     seenSel = selKey;
   }
   updateBoard(dt);
+  tickPanels(dt);
   slow += dt;
   techTimer += dt;
-  if (slow >= 0.2) {
+  // Refreshing text costs the browser a full rendering pass, so it is done on a slow beat. The
+  // board's share is split over alternate beats to keep each of those frames short: node cards on
+  // one, wires on the next (twice a second each). Panels are cheap when nothing changed, so they
+  // are checked on every beat.
+  if (slow >= SLOW_STEP) {
     slow = 0;
-    updateSlow();
+    beat = !beat;
+    updateSlow(beat ? 'nodes' : 'wires');
     renderPanels();
   }
   if (ui.techOpen && techTimer >= 0.5) {
     techTimer = 0;
     renderTech();
   }
-  requestAnimationFrame(frame);
 }
 
 function onKey(e: KeyboardEvent) {
@@ -145,6 +186,8 @@ function onKey(e: KeyboardEvent) {
   if (t && (t.tagName === 'INPUT' || t.tagName === 'TEXTAREA')) return;
   const mod = e.ctrlKey || e.metaKey;
   const k = e.key.toLowerCase();
+  // Before a key changes the board, a node still being dragged is dropped, so the two cannot tangle.
+  if ((mod && (k === 'z' || k === 'y' || k === 'd')) || k === 'delete' || k === 'backspace') settleGesture();
   if (mod && k === 'z') {
     e.preventDefault();
     if (e.shiftKey) redo(g);
@@ -164,8 +207,9 @@ function onKey(e: KeyboardEvent) {
   }
   if (mod || e.altKey) return;
   if (k === 'escape') {
-    if (radialOpen()) cancelGesture();
-    else if (ui.techOpen) closeTech();
+    // Escape first backs out of whatever the pointer is in the middle of.
+    if (cancelGesture()) return renderPanels();
+    if (ui.techOpen) closeTech();
     else if (ui.menuOpen) { ui.menuOpen = false; touch(); }
     else if (ui.placing) { ui.placing = null; touch(); }
     else if (ui.sel) select(null);

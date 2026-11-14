@@ -16,14 +16,19 @@ button:focus-visible { outline: 2px solid var(--sel); outline-offset: 2px; }
 .grow { flex: 1; }
 .muted { color: var(--muted); }
 .bad { color: #fca5a5; }
+/* `hidden` wins over any display rule, so persistent elements can simply be switched off. */
+[hidden] { display: none !important; }
 
 #app { display: grid; grid-template-columns: 72px minmax(0, 1fr) auto; grid-template-rows: 56px minmax(0, 1fr); height: 100vh; position: relative; }
 
 /* ---------- top bar ---------- */
 #top { grid-column: 1 / -1; display: flex; align-items: center; gap: 8px; padding: 0 14px 0 20px; background: var(--chrome); border-bottom: 1px solid var(--line); z-index: 30; }
 .logo { display: flex; align-items: center; gap: 10px; width: 150px; font-family: var(--disp); font-size: 19px; font-weight: 700; letter-spacing: -0.01em; }
-.resrow { display: flex; gap: 10px; align-items: center; }
+/* The counters change many times a second; on their own layer that repaints a strip, not the page. */
+.resrow { display: flex; gap: 10px; align-items: center; will-change: transform; }
 .res { --c: var(--credits); display: flex; align-items: center; gap: 9px; height: 40px; padding: 0 13px 0 8px; border-radius: 12px; background: #131a28; border: 1px solid color-mix(in srgb, var(--c) 28%, #1e2740); }
+/* The coin is pulsed when coins land on it; keeping it on a layer of its own means the pulse starts and stops for free. */
+.res.credits .sym { will-change: transform; }
 .res .sym { width: 24px; height: 24px; border-radius: 7px; display: flex; align-items: center; justify-content: center; font-family: var(--disp); font-weight: 700; font-size: 14px; color: var(--c); background: color-mix(in srgb, var(--c) 18%, #131a28); }
 .res .nums { display: flex; flex-direction: column; line-height: 1; }
 .res .nums b { font-size: 15px; font-weight: 600; }
@@ -34,6 +39,8 @@ button:focus-visible { outline: 2px solid var(--sel); outline-offset: 2px; }
 .res.ghost { border: 1px dashed #2a3550; background: transparent; }
 .res.ghost .sym { color: var(--dim); background: #181e2c; }
 .res.ghost .hint { font-size: 11px; color: var(--dim); }
+.res.ghost .nums, .res:not(.ghost) .hint { display: none; }
+.acts { display: flex; align-items: center; gap: 8px; }
 .ibtn { width: 36px; height: 36px; border-radius: 10px; border: 1px solid var(--border); background: #121929; color: #c9d3e8; display: flex; align-items: center; justify-content: center; padding: 0; }
 .ibtn:hover:not(:disabled) { background: #1a2338; }
 .ibtn:disabled { opacity: 0.35; }
@@ -74,7 +81,9 @@ button:focus-visible { outline: 2px solid var(--sel); outline-offset: 2px; }
 #plot { position: absolute; left: 0; top: 0; border: 1.5px dashed #243049; border-radius: 18px; pointer-events: none; }
 #plot-label { position: absolute; left: 16px; top: -9px; padding: 0 8px; background: var(--canvas); font-size: 11px; color: var(--dim); }
 #wires, #overlay { position: absolute; left: 0; top: 0; overflow: visible; pointer-events: none; }
-#nodes, #chips, #deposits, #floaters { position: absolute; left: 0; top: 0; }
+#nodes, #chips, #deposits { position: absolute; left: 0; top: 0; }
+/* Wire dots and particles. It sits above the board and below the HUD, and never takes input. */
+#fx { position: absolute; left: 0; top: 0; pointer-events: none; }
 
 .deposit { --c: #64748b; position: absolute; width: 172px; height: 72px; border: 1.5px dashed color-mix(in srgb, var(--c) 45%, #1e2740); border-radius: 14px; display: flex; align-items: center; gap: 10px; padding: 0 14px; background: color-mix(in srgb, var(--c) 5%, transparent); pointer-events: none; }
 .deposit .dn { font-size: 12px; font-weight: 600; color: color-mix(in srgb, var(--c) 70%, #fff); }
@@ -86,65 +95,95 @@ button:focus-visible { outline: 2px solid var(--sel); outline-offset: 2px; }
 /* wires */
 g.wire path { fill: none; stroke-linecap: round; }
 g.wire .hit { stroke: transparent; stroke-width: 18px; pointer-events: stroke; cursor: pointer; }
-g.wire .base { stroke: currentColor; opacity: 0.3; }
-g.wire .dots { stroke: currentColor; stroke-dasharray: 0 16; }
-g.wire .glow { stroke: currentColor; opacity: 0; }
-g.wire.sat .glow { opacity: 0.16; }
-g.wire.sat .base { opacity: 0.5; }
-g.wire.stalled .base { stroke-dasharray: 5 7; opacity: 0.55; stroke-width: 2px !important; }
-g.wire.stalled .dots { display: none; }
-g.wire.sel .glow { opacity: 0.35; stroke: var(--sel); }
-g.wire:hover .base { opacity: 0.6; }
-#temp-wire { fill: none; stroke-width: 3px; stroke-dasharray: 2 8; stroke-linecap: round; display: none; }
-#knife { stroke: #f87171; stroke-width: 2px; stroke-dasharray: 6 5; display: none; }
-.chip { position: absolute; transform: translate(-50%, -50%); font-size: 10.5px; line-height: 14px; padding: 2px 7px; border-radius: 999px; background: #0e1422; border: 1px solid var(--border); color: #c9d3e8; white-space: nowrap; pointer-events: none; }
-.chip.stalled { color: #8c97ad; }
-.chip.sat { color: #0b0f17; background: var(--warn); border-color: var(--warn); font-weight: 600; }
+/* Wire strokes are faded with stroke-opacity, never opacity: an opacity on each path makes the
+   browser split the board into dozens of compositor layers, which is slow to draw. */
+g.wire .base { stroke: currentColor; stroke-opacity: 0.34; }
+/* A wide, faint stroke under every flowing wire reads as a soft glow and costs nothing per frame. */
+g.wire .glow { stroke: currentColor; stroke-opacity: 0.1; }
+g.wire.sat .glow { stroke-opacity: 0.2; }
+g.wire.sat .base { stroke-opacity: 0.5; }
+g.wire.stalled .base { stroke-dasharray: 5 7; stroke-opacity: 0.55; }
+g.wire.stalled:not(.new) .base { stroke-width: 2px !important; }
+g.wire.stalled .glow { stroke-opacity: 0; }
+g.wire.sel .glow { stroke-opacity: 0.35; stroke: var(--sel); }
+g.wire:hover .base { stroke-opacity: 0.6; }
+/* A wire that has just been connected swells for a moment. */
+g.wire.new .base { animation: wire-in 0.15s ease-out; stroke-dasharray: none; }
+g.wire.new .glow { animation: wire-glow 0.25s ease-out; }
+@keyframes wire-in { from { stroke-width: 11px; stroke-opacity: 0.95; } }
+@keyframes wire-glow { from { stroke-opacity: 0.5; } }
+#temp-wire { fill: none; stroke-width: 3px; stroke-dasharray: 2 8; stroke-linecap: round; stroke-opacity: 0.9; }
+#temp-wire.snap { stroke-dasharray: none; stroke-width: 4px; stroke-opacity: 1; }
+#temp-end { stroke: var(--canvas); stroke-width: 2px; }
+#knife { stroke: #f87171; stroke-width: 2px; stroke-dasharray: 6 5; }
+#temp-wire:not(.on), #temp-end:not(.on), #knife:not(.on) { display: none; }
+.chip { position: absolute; width: 0; height: 0; display: flex; align-items: center; justify-content: center; pointer-events: none; }
+.chip i { flex: none; font-style: normal; font-size: 10.5px; line-height: 14px; padding: 2px 7px; border-radius: 999px; background: #0e1422; border: 1px solid var(--border); color: #c9d3e8; white-space: nowrap; }
+.chip.stalled i { color: #8c97ad; }
+.chip.sat i { color: #0b0f17; background: var(--warn); border-color: var(--warn); font-weight: 600; }
 .far .chip, .far .port-label { display: none; }
 
 /* nodes */
+/* Cards and chips have fixed sizes, so a text change inside one is laid out without touching the rest of the board. */
+.node, .chip { contain: layout size style; }
 .node { position: absolute; background: var(--node); border: 1px solid var(--border); border-radius: 14px; padding: 0 12px; display: flex; gap: 10px; align-items: center; box-shadow: 0 10px 28px rgba(0, 0, 0, 0.45); cursor: pointer; }
 .node.compact { padding: 0 10px; gap: 8px; }
 .node.sel { border-color: var(--sel); box-shadow: 0 0 0 5px rgba(122, 162, 255, 0.16), 0 10px 28px rgba(0, 0, 0, 0.45); }
 .node.target { border-color: #fff; box-shadow: 0 0 0 5px rgba(255, 255, 255, 0.18); }
 .node.dragging { z-index: 5; cursor: grabbing; }
+/* New nodes pop in once; the class is removed afterwards so it can never replay. */
+.node.pop { animation: pop-in 0.24s cubic-bezier(0.2, 1.4, 0.4, 1); }
+@keyframes pop-in { from { transform: scale(0.8); opacity: 0; } }
+/* The node a wire has just been connected to: its outline flashes. */
+.node.flash::after { content: ''; position: absolute; inset: -3px; border-radius: 16px; border: 2px solid #fff; pointer-events: none; animation: flash 0.2s ease-out forwards; }
+@keyframes flash { from { opacity: 1; } to { opacity: 0; } }
 .node .txt { min-width: 0; flex: 1; }
-.nt { font-size: 13px; font-weight: 600; line-height: 16px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-.ns { font-size: 10.5px; line-height: 14px; color: var(--muted); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+/* No overflow clipping on card text: each clipped box is a separate piece for the compositor to
+   track, and a text change inside one forces it to re-plan every layer. Long lines are cut in
+   script instead (see nodeSub in board.ts). */
+.nt { font-size: 13px; font-weight: 600; line-height: 16px; white-space: nowrap; }
+.ns { font-size: 10.5px; line-height: 14px; color: var(--muted); white-space: nowrap; }
 .nr { font-size: 11px; line-height: 15px; color: #c9d3e8; white-space: nowrap; }
 .ring { position: relative; width: 40px; height: 40px; flex: none; }
-.ring svg { position: absolute; left: 0; top: 0; }
+.ring > svg { position: absolute; left: 0; top: 0; }
 .ring .glyph { position: absolute; inset: 0; display: flex; align-items: center; justify-content: center; color: #c9d3e8; }
 .ring.flat { width: 34px; height: 34px; border-radius: 10px; background: #182033; }
 .compact .ring.flat { width: 30px; height: 30px; }
 .t-lab .ring.flat { background: #2c2350; }
 .t-lab .ring .glyph { color: #c4a1ff; }
 .trk { fill: none; stroke: #222c42; stroke-width: 3; }
-.val { fill: none; stroke-width: 3; stroke-linecap: round; stroke: var(--ok); stroke-dasharray: 0 100; transition: stroke-dasharray 0.25s linear; }
+/* The arc starts at twelve o'clock through a dash offset rather than a rotation, and it steps
+   rather than glides: a transition here repaints the whole board layer on every frame it runs. */
+.val { fill: none; stroke-width: 3; stroke-linecap: round; stroke: var(--ok); stroke-dasharray: 0 100; stroke-dashoffset: 25; }
 .node[data-st='blocked'] .val, .node[data-st='victim'] .val { stroke: var(--warn); }
 .node[data-st='starved'] .val { stroke: var(--bad); }
 .node[data-st='idle'] .val { stroke: var(--idle); }
 .node[data-st='idle'] { border-style: dashed; }
 .node[data-st='blocked']:not(.sel) { border-color: #5a4718; }
 .node[data-st='starved']:not(.sel) { border-color: #6a2a31; }
+/* Wells stay calm: a blocked Well changes its ring colour and nothing else. */
+.node.t-well[data-st='blocked']:not(.sel):not(.target) { border-color: var(--border); }
 .pill { position: absolute; top: -9px; right: 10px; font-size: 9.5px; font-weight: 700; letter-spacing: 0.03em; padding: 2px 8px; border-radius: 999px; line-height: 14px; background: #1e2638; color: #c9d3e8; border: 1px solid #34405c; }
 .pill:empty { display: none; }
 .pill[data-kind='blocked'] { background: #33270c; color: #fcd34d; border-color: #5a4718; }
 .pill[data-kind='starved'] { background: #3a1518; color: #fca5a5; border-color: #6a2a31; }
-.port { position: absolute; width: 14px; height: 14px; border-radius: 50%; border: 2px solid var(--canvas); transform: translateY(-50%); box-shadow: 0 0 0 1px rgba(255, 255, 255, 0.1); cursor: crosshair; }
+/* Ports are centred with a margin, not a transform, and an open port's pulse is drawn on the
+   effects canvas (fx.ts beacons): nothing here animates. */
+.port { position: absolute; width: 14px; height: 14px; margin-top: -7px; border-radius: 50%; border: 2px solid var(--canvas); box-shadow: 0 0 0 1px rgba(255, 255, 255, 0.1); cursor: crosshair; }
 .port::after { content: ''; position: absolute; inset: -9px; border-radius: 50%; }
 .port.in { left: -8px; }
 .port.out { right: -8px; }
-.port:hover { transform: translateY(-50%) scale(1.35); }
-.port.out.open { animation: pulse 1.6s ease-in-out infinite; }
-@keyframes pulse { 0%, 100% { box-shadow: 0 0 0 1px rgba(255, 255, 255, 0.1); } 50% { box-shadow: 0 0 0 6px rgba(255, 255, 255, 0.16); } }
-.port-label { position: absolute; right: -8px; transform: translate(100%, -50%); padding-left: 6px; font-size: 10px; color: var(--muted); pointer-events: none; white-space: nowrap; }
+.port:hover { transform: scale(1.35); }
+.port.out.open { box-shadow: 0 0 0 1.5px rgba(255, 255, 255, 0.22); }
+.port-label { position: absolute; left: 100%; margin: -7px 0 0 8px; padding-left: 6px; font-size: 10px; line-height: 14px; color: var(--muted); pointer-events: none; white-space: nowrap; }
 #ghost { position: absolute; display: none; align-items: center; gap: 10px; padding: 0 12px; border-radius: 14px; border: 1.5px dashed var(--sel); background: rgba(122, 162, 255, 0.1); color: #dbe6ff; font-size: 13px; font-weight: 600; pointer-events: none; }
 #ghost small { display: block; font-size: 10px; font-weight: 400; color: #a9bbe8; }
 #ghost.bad { border-color: var(--bad); background: rgba(248, 113, 113, 0.08); color: #fca5a5; }
 #ghost.bad small { color: #fca5a5; }
-.floater { position: absolute; transform: translate(-50%, -100%); font-size: 12px; font-weight: 600; pointer-events: none; white-space: nowrap; animation: rise 0.9s ease-out forwards; }
-@keyframes rise { from { opacity: 0.95; margin-top: 0; } to { opacity: 0; margin-top: -26px; } }
+/* Over a deposit the ghost is only a frame, with its caption underneath, so the deposit's label stays readable. */
+#ghost.outline { background: transparent; border-style: solid; border-width: 2px; padding: 0; margin: -1px 0 0 -1px; }
+#ghost .cap { position: absolute; left: 50%; top: 100%; transform: translateX(-50%); margin-top: 7px; display: flex; align-items: center; gap: 6px; padding: 3px 9px; border-radius: 8px; background: #17213a; border: 1px solid #34467a; font-size: 11.5px; white-space: nowrap; }
+#ghost.bad .cap { background: #24131a; border-color: #5a2630; }
 #expand { position: absolute; width: 260px; height: 60px; border-radius: 14px; border: 1.5px dashed #3a4a70; background: rgba(122, 162, 255, 0.05); color: #9db8ff; display: flex; align-items: center; gap: 12px; padding: 0 14px; text-align: left; }
 #expand b { display: block; font-size: 13px; color: var(--text); font-weight: 600; }
 #expand i { font-style: normal; color: #8c97ad; }
@@ -175,7 +214,8 @@ g.wire:hover .base { opacity: 0.6; }
 #alert .dot { width: 8px; height: 8px; border-radius: 50%; background: var(--warn); }
 #alert .dot.starved { background: var(--bad); }
 #alert button { height: 28px; padding: 0 10px; border-radius: 8px; border: 1px solid #3a4a70; background: #1f2840; font-size: 12px; font-weight: 600; }
-#toasts { position: absolute; left: 50%; bottom: 20px; transform: translateX(-50%); display: flex; flex-direction: column; gap: 8px; align-items: center; z-index: 12; pointer-events: none; }
+/* Above the tech tree (40), below the modal (60): a toast is the only answer some actions get. */
+#toasts { position: absolute; left: 50%; bottom: 20px; transform: translateX(-50%); display: flex; flex-direction: column; gap: 8px; align-items: center; z-index: 50; pointer-events: none; }
 .toast { display: flex; align-items: center; gap: 10px; padding: 9px 14px; border-radius: 12px; background: #191f2e; border: 1px solid var(--border); font-size: 12.5px; box-shadow: 0 10px 30px rgba(0, 0, 0, 0.5); animation: pop 0.18s ease-out; max-width: 520px; }
 .toast.good { border-color: #2f5c55; background: #10241f; }
 .toast.bad { border-color: #5a2630; background: #24131a; }
