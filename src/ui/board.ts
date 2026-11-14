@@ -1497,7 +1497,8 @@ function openRadial(state: RadialState) {
   radial = state;
   const g = ui.g;
   const n = state.opts.length;
-  const R = n >= 6 ? 142 : 122;
+  // Wide enough that neighbouring slots never overlap, however the fan is turned.
+  const R = n >= 8 ? 180 : n === 7 ? 158 : n >= 6 ? 142 : 122;
   // Keep the whole menu on screen; the node is built wherever the menu ends up.
   const rect = rectOf();
   const raw = toScreen(state.at);
