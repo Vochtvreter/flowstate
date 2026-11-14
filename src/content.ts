@@ -185,7 +185,7 @@ export const TECHS: Record<string, Tech> = Object.fromEntries([
   T('P5', 'Breeze Deposits', 'processing', 4, 0, { a: 1420 }, ['P4'], 'Extract Breeze, refine it into Mist, and combine Mist with Shard into Prism.', ['Breeze Wells', 'Recipe: 2 Breeze → Mist', 'Recipe: 2 Shard + Mist → Prism']),
   T('P7', 'Fabrication', 'processing', 5, 0, { a: 1180, b: 100 }, ['P5'], 'Three-input machines. Prism and Glyph become Lens, the first Tier 3 item and the source of γ Data.', ['Fabricator', 'Recipe: Prism + 2 Glyph → Lens']),
   T('P9', 'Paradox', 'processing', 6, 0, { a: 2500, b: 500, g: 450 }, ['P8'], 'The capstone. Lens, Dynamo and raw Breeze fold into a Paradox.', ['Recipe: Lens + Dynamo + 4 Breeze → Paradox']),
-  T('U1', 'Efficiency Tuning', 'processing', 1, 1, { b: 40 }, ['P1'], 'A new upgrade track for machines: some crafts consume no inputs.', ['Efficiency upgrades on machines']),
+  T('U1', 'Efficiency Tuning', 'processing', 1, 1, { b: 40 }, ['P1', 'P4'], 'A new upgrade track for machines: some crafts consume no inputs.', ['Efficiency upgrades on machines']),
   T('U2', 'Overclock', 'processing', 2, 1, { g: 60 }, ['U1'], 'Raises the level cap on Speed upgrades from 10 to 25.', ['Speed level cap 25']),
   T('P6', 'Reclamation', 'processing', 4, 1, { a: 300, g: 25 }, ['P4'], 'Turn Silt, the byproduct clogging your Ink line, into Clay, then into Coil.', ['Recipe: 3 Silt → Clay', 'Recipe: Spark + 2 Clay → Coil']),
   T('P8', 'Dynamo', 'processing', 5, 1, { a: 1200, b: 300, g: 100 }, ['P6', 'P7'], 'Coil, Glyph and Prism spin up a Dynamo.', ['Recipe: 2 Coil + Glyph + Prism → Dynamo']),

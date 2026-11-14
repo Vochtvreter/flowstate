@@ -1,7 +1,10 @@
 import { describe, expect, it } from 'vitest';
 import { connect, cutWire, deleteNode, expandBoard, placeNode, setMode, setRecipe, upgrade, upgradeWire } from '../src/actions';
 import { MATERIALS, MAT_IDS, MatId, NODE_DEFS, NodeType, PIPES, RECIPES, RULES, TECHS } from '../src/content';
-import { cycleTime, dataYield, demandBurst, demandInfo, expansionCost, flowMult, nodeCostAt, price, saturation, sellValue, upgradeCostAt, wellRate } from '../src/economy';
+import {
+  cycleTime, dataYield, demandBurst, demandInfo, expansionCost, flowMult, nodeCostAt, price, research, saturation, sellValue, techAvailable,
+  upgradeCostAt, wellRate,
+} from '../src/economy';
 import { countsForFlow, flowInfo, flowProducers, inFlowState, isFlowing, worstProducer } from '../src/flow';
 import { tick } from '../src/sim';
 import { Game, START, deserialize, newGame, serialize } from '../src/state';
@@ -50,6 +53,19 @@ describe('numbers (2.6)', () => {
     }
     // Nothing that is only useful after the demo can be bought before γ exists.
     for (const id of ['P6', 'P8', 'P9', 'U2', 'C5', 'L8']) expect(TECHS[id].cost.g, id).toBeGreaterThan(0);
+  });
+
+  it('Efficiency Tuning waits for Assembly: it costs β, and there is no β before the first Glyph', () => {
+    // It used to hang on Refining alone, and sat in the tree with a β price ten minutes before any β existed.
+    expect(TECHS.U1.requires).toEqual(['P1', 'P4']);
+    const g = fresh();
+    g.techs = ['P1', 'R1', 'P2', 'P3'];
+    g.data = { a: 1e6, b: 1e6, g: 1e6 };
+    expect(techAvailable(g, TECHS.U1)).toBe(false);
+    expect(research(g, 'U1')).toBe(false);
+    g.techs.push('P4');
+    expect(techAvailable(g, TECHS.U1)).toBe(true);
+    expect(research(g, 'U1')).toBe(true);
   });
 
   it('a Lab makes Data by tier, except from Silt: a by-product is worth 1 α, not 3', () => {
