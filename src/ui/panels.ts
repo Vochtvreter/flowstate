@@ -1,4 +1,5 @@
-// Top bar, hotbar, inspector, objective line, bottleneck alert and minimap.
+// Top bar, hotbar, inspector and minimap. (The goal card, order chip and alert chip are in hud.ts,
+// which joins every refresh through onPanels().)
 //
 // How these refresh: the top bar is built once from persistent items that patch their own text
 // and attributes (see addTopItem). The other panels still describe themselves as an HTML string;
@@ -11,13 +12,15 @@ import {
 } from '../actions';
 import {
   TRACK_INFO, costText, cycleTime, dataYield, fmt, fmtInt, fmtRate, has, labRate, maxLevel, maxPipeTier,
-  nodeCost, nodeUnlocked, price, readyTechs, recipeOf, saturation, trackAvailable, upgradeCost, wellRate,
+  nodeCost, nodeUnlocked, readyTechs, recipeOf, trackAvailable, upgradeCost, wellRate,
 } from '../economy';
 import { graph, isMachine, passCap } from '../sim';
 import { Game, GNode, RouterMode, Wire } from '../state';
 import { boardRect, jumpTo, startPlacing, fitView, zoomBy } from './board';
 import { Panel, el, invalidateLayout, makePanel, setAnchor, setAttr, setClass, setHTML, setHidden, setText } from './dom';
 import { nodeSize } from './geom';
+import { marketSection } from './hud-market';
+import { isTouch, withKey } from './hud-words';
 import { esc, icon, matGlyph, nodeIcon } from './icons';
 import { diagnose, matName } from './status';
 import { delegate, select, toast, touch, ui } from './ui';
@@ -25,30 +28,29 @@ import { delegate, select, toast, touch, ui } from './ui';
 let topEl: HTMLElement;
 let hotEl: HTMLElement;
 let inspEl: HTMLElement;
-let objEl: HTMLElement;
-let alertEl: HTMLElement;
 let mini: HTMLCanvasElement;
 let zoomEl: HTMLElement;
 let zoomLabel: HTMLElement;
 let hotPanel: Panel;
 let inspPanel: Panel;
-let objPanel: Panel;
-let alertPanel: Panel;
+
+const extraRenders: ((force: boolean) => void)[] = [];
+/**
+ * Join every panel refresh: `fn` runs at the end of renderPanels(), with the same `force` flag.
+ * This is how HUD parts that live in other files (hud.ts) stay in step with the panels.
+ */
+export const onPanels = (fn: (force: boolean) => void) => void extraRenders.push(fn);
 
 export function initPanels(refs: {
-  top: HTMLElement; hot: HTMLElement; insp: HTMLElement; obj: HTMLElement; alert: HTMLElement; mini: HTMLCanvasElement; zoom: HTMLElement;
+  top: HTMLElement; hot: HTMLElement; insp: HTMLElement; mini: HTMLCanvasElement; zoom: HTMLElement;
 }, hooks: { openTech: (id?: string) => void; reset: () => void }) {
   topEl = refs.top;
   hotEl = refs.hot;
   inspEl = refs.insp;
-  objEl = refs.obj;
-  alertEl = refs.alert;
   mini = refs.mini;
   zoomEl = refs.zoom;
   hotPanel = makePanel(hotEl);
   inspPanel = makePanel(inspEl);
-  objPanel = makePanel(objEl);
-  alertPanel = makePanel(alertEl);
   buildTop();
   zoomEl.innerHTML = `<button class="ibtn" data-act="out" aria-label="Zoom out">${icon('minus', 14)}</button><span class="mono zl"></span><button class="ibtn" data-act="in" aria-label="Zoom in">${icon('plus', 14)}</button><button class="ibtn" data-act="fit" aria-label="Fit board (F)" title="Fit board (F)">${icon('fit', 14)}</button>`;
   zoomLabel = zoomEl.querySelector('.zl')!;
@@ -63,19 +65,21 @@ export function initPanels(refs: {
     else if (a === 'tech') hooks.openTech();
     else if (a === 'menu') { ui.menuOpen = !ui.menuOpen; touch(); }
     else if (a === 'reset') {
+      ui.menuOpen = false;
       if (confirm('Start over? This erases your whole supply line and all research.')) hooks.reset();
     }
     renderPanels(true);
   });
+  // A press anywhere else closes the menu.
+  window.addEventListener('pointerdown', (e) => {
+    if (!ui.menuOpen || (e.target instanceof Element && e.target.closest('.menuwrap'))) return;
+    ui.menuOpen = false;
+    touch();
+  }, true);
 
   delegate(hotEl, (a, args) => {
     if (a === 'place') startPlacing(args[0] as never);
     else if (a === 'locked') hooks.openTech(args[0]);
-    renderPanels(true);
-  });
-
-  delegate(alertEl, (a, args) => {
-    if (a === 'jump') jumpTo(Number(args[0]));
     renderPanels(true);
   });
 
@@ -113,7 +117,8 @@ function inspectorAction(a: string, args: string[], openTech: (id?: string) => v
       toast(c ? `Upgraded ${c} ${NODE_DEFS[n.type].name}${c > 1 ? 's' : ''}` : 'Not enough credits', c ? 'good' : 'bad');
     } else if (a === 'del') {
       const refund = refundOf(g, n);
-      deleteNode(g, n.id);
+      // A refusal (the last Well) raises its own toast and leaves the node selected.
+      if (!deleteNode(g, n.id)) return;
       select(null);
       if (refund > 0) toast(`Refunded <b>${fmt(refund)}¢</b>`, 'good');
     } else if (a === 'dup') startPlacing(n.type, n.recipe);
@@ -236,19 +241,34 @@ export function tickPanels(dt: number) {
   creditsNum.textContent = fmtInt(whole);
 }
 
+// A Data chip stays out of the bar until the player has had that kind of Data, and then stays in.
+const dataSeen = new WeakMap<Game, Partial<Record<DataTier, boolean>>>();
+
+function everHad(g: Game, k: DataTier): boolean {
+  let seen = dataSeen.get(g);
+  if (!seen) dataSeen.set(g, (seen = {}));
+  if (!seen[k] && (g.data[k] > 0 || g.dataRate[k] > 0 || g.techs.some((t) => (TECHS[t]?.cost[k] ?? 0) > 0))) seen[k] = true;
+  return !!seen[k];
+}
+
+const DATA_ABOUT: Record<DataTier, string> = {
+  a: 'α Data: Labs make it from raw and Tier 1 items. Spend it in the Tech tree.',
+  b: 'β Data: Labs make it from Tier 2 items such as Glyph. Spend it in the Tech tree.',
+  g: 'γ Data: Labs make it from Tier 3 items such as Lens. Spend it in the Tech tree.',
+};
+
 function dataItem(k: DataTier): TopItem {
-  const hint = k === 'a' ? 'Build a Lab' : k === 'b' ? 'Study a T2 item' : 'Study a T3 item';
-  const e = el(`<div class="res" style="--c:${DATA_COLORS[k]}"><span class="sym">${DATA_NAMES[k]}</span><div class="nums"><b class="mono"></b><i class="mono"></i></div><span class="hint">${hint}</span></div>`);
+  const e = el(`<div class="res data data-${k}" style="--c:${DATA_COLORS[k]}" title="${DATA_ABOUT[k]}" hidden><span class="sym">${DATA_NAMES[k]}</span><div class="nums"><b class="mono"></b><i class="mono"></i></div></div>`);
   const num = e.querySelector('b')!;
   const rate = e.querySelector('i')!;
+  // Effects fly Data to the symbol, as coins fly to the credits coin.
+  setAnchor(`data-${k}`, e.querySelector('.sym')!);
   return {
     el: e,
     update(g) {
-      const on = has(g, 'R1');
-      setHidden(e, !on);
-      if (!on) return;
-      const seen = g.data[k] > 0 || g.dataRate[k] > 0 || g.techs.some((t) => (TECHS[t]?.cost[k] ?? 0) > 0);
-      setClass(e, 'ghost', !seen);
+      const seen = everHad(g, k);
+      // A chip appearing moves its neighbours: cached positions are measured again.
+      if (setHidden(e, !seen)) invalidateLayout();
       setAttr(e, 'data-testid', seen ? `data-${k}` : null);
       if (!seen) return;
       setText(num, fmtInt(g.data[k]));
@@ -257,6 +277,8 @@ function dataItem(k: DataTier): TopItem {
   };
 }
 
+// Every piece of the bar has a class of its own (t-undo, t-redo, t-pause, t-sep, t-tech, t-menu,
+// and .res.credits / .res.data-a|b|g on the left), so a narrow layout can hide them one by one.
 function buildTop() {
   topEl.innerHTML = `
     <div class="logo"><svg viewBox="0 0 28 28" width="26" height="26" aria-hidden="true"><circle cx="6" cy="8" r="4" fill="#FFD84D"/><circle cx="22" cy="20" r="4" fill="#5CE1FF"/><path d="M10 8c8 0 4 12 8 12" class="ic" style="color:#9DB8FF"/></svg><span>flowstate</span></div>
@@ -269,40 +291,59 @@ function buildTop() {
   addTopItem('res', creditsItem());
   for (const k of ['a', 'b', 'g'] as DataTier[]) addTopItem('res', dataItem(k));
 
-  const undoBtn = el(`<button class="ibtn" data-act="undo" aria-label="Undo (Ctrl+Z)" title="Undo (Ctrl+Z)">${icon('undo')}</button>`);
-  addTopItem('actions', { el: undoBtn, update: () => void setAttr(undoBtn, 'disabled', canUndo() ? null : '') });
-  const redoBtn = el(`<button class="ibtn" data-act="redo" aria-label="Redo (Ctrl+Shift+Z)" title="Redo (Ctrl+Shift+Z)">${icon('redo')}</button>`);
-  addTopItem('actions', { el: redoBtn, update: () => void setAttr(redoBtn, 'disabled', canRedo() ? null : '') });
-  const pauseBtn = el(`<button class="ibtn" data-act="pause"></button>`);
+  // Labels name a key only for a mouse-and-keyboard player.
+  const label = (b: HTMLElement, text: string, key: string) => {
+    const full = withKey(text, key);
+    setAttr(b, 'aria-label', full);
+    setAttr(b, 'title', full);
+  };
+  const undoBtn = el(`<button class="ibtn t-undo" data-act="undo">${icon('undo')}</button>`);
+  addTopItem('actions', {
+    el: undoBtn,
+    update() {
+      setAttr(undoBtn, 'disabled', canUndo() ? null : '');
+      label(undoBtn, 'Undo', 'Ctrl+Z');
+    },
+  });
+  const redoBtn = el(`<button class="ibtn t-redo" data-act="redo">${icon('redo')}</button>`);
+  addTopItem('actions', {
+    el: redoBtn,
+    update() {
+      setAttr(redoBtn, 'disabled', canRedo() ? null : '');
+      label(redoBtn, 'Redo', 'Ctrl+Shift+Z');
+    },
+  });
+  const pauseBtn = el(`<button class="ibtn t-pause" data-act="pause"></button>`);
   addTopItem('actions', {
     el: pauseBtn,
     update(g) {
-      const label = `${g.paused ? 'Resume' : 'Pause'} (P)`;
       setClass(pauseBtn, 'on', g.paused);
-      setAttr(pauseBtn, 'aria-label', label);
-      setAttr(pauseBtn, 'title', label);
+      label(pauseBtn, g.paused ? 'Resume' : 'Pause', 'P');
       setHTML(pauseBtn, icon(g.paused ? 'play' : 'pause'));
     },
   });
-  addTopItem('actions', { el: el(`<span class="sep"></span>`), update() {} });
+  addTopItem('actions', { el: el(`<span class="sep t-sep"></span>`), update() {} });
 
-  const techBtn = el(`<button class="techbtn" data-act="tech">${icon('tree')}Tech tree<span class="badge"></span><span class="kbd">R</span></button>`);
+  const techBtn = el(`<button class="techbtn t-tech" data-act="tech">${icon('tree')}<span class="tlab">Tech tree</span><span class="badge" hidden><b class="mono"></b><span class="bw">ready</span></span><span class="kbd">R</span></button>`);
   const badge = techBtn.querySelector('.badge')!;
+  const badgeNum = badge.querySelector('b')!;
   addTopItem('actions', {
     el: techBtn,
     update(g) {
       const on = has(g, 'R1');
-      setHidden(techBtn, !on);
+      if (setHidden(techBtn, !on)) invalidateLayout();
       setAttr(techBtn, 'data-testid', on ? 'open-tech' : null);
       if (!on) return;
       const ready = readyTechs(g).length;
       setClass(techBtn, 'ready', ready > 0);
       setHidden(badge, !ready);
-      if (ready) setText(badge, `${ready} ready`);
+      setAttr(techBtn, 'data-ready', String(ready));
+      setText(badgeNum, String(ready));
+      setAttr(techBtn, 'aria-label', ready ? `Tech tree, ${ready} ready to research` : 'Tech tree');
     },
   });
 
-  const menuWrap = el(`<div class="menuwrap"><button class="ibtn" data-act="menu" aria-label="Menu" title="Menu">${icon('gear')}</button><div class="menu" hidden><button data-act="reset">Reset game…</button></div></div>`);
+  const menuWrap = el(`<div class="menuwrap t-menu"><button class="ibtn" data-act="menu" aria-label="Menu" title="Menu">${icon('gear')}</button><div class="menu" hidden><button data-act="reset">New game…</button></div></div>`);
   const menu = menuWrap.querySelector('.menu')!;
   addTopItem('actions', { el: menuWrap, update: () => void setHidden(menu, !ui.menuOpen) });
 }
@@ -355,7 +396,7 @@ function statusBlock(g: Game, n: GNode): string {
   let actions = '';
   if (dx.problem === 'idle') {
     title = n.recipe ? 'Idle: nothing connected' : 'Idle: no recipe';
-    body = n.recipe ? 'Drag a wire from a source into this machine.' : 'Connect an input and the recipe is picked for you, or choose one below.';
+    body = n.recipe ? (isTouch() ? 'Tap a source\'s port, then tap this machine.' : 'Drag a wire from a source into this machine.') : 'Connect an input and the recipe is picked for you, or choose one below.';
   } else if (dx.problem === 'starved' && r) {
     const need = (r.inputs.find((i) => i[0] === dx.mat)?.[1] ?? 0) / cycleTime(n, r);
     let got = 0;
@@ -372,7 +413,7 @@ function statusBlock(g: Game, n: GNode): string {
     }
   } else if (dx.problem === 'blocked') {
     title = `Blocked: ${matName(dx.mat)} output is full`;
-    if (dx.openPort) body = `${matName(dx.mat)} has nowhere to go. Drag from its port into empty space to send it somewhere.`;
+    if (dx.openPort) body = `${matName(dx.mat)} has nowhere to go. ${isTouch() ? 'Tap its port, then tap an empty spot' : 'Drag from its port into empty space'} to send it somewhere.`;
     else {
       body = 'Whatever is downstream cannot keep up.';
       if (dx.culprit != null) actions += `<button class="ghostbtn" data-act="jump:${dx.culprit}">Jump to the cause</button>`;
@@ -427,7 +468,7 @@ function upgradeSection(g: Game, n: GNode): string {
     const max = maxLevel(g, t);
     if (lv >= max) return `<div class="uprow"><div><b>${TRACK_INFO[t].name} <span class="mono muted">Lv ${lv}</span></b><small>Maxed${t === 'speed' && !has(g, 'U2') ? ' · Overclock raises the cap' : ''}</small></div></div>`;
     const cost = upgradeCost(n, t);
-    const bulk = has(g, 'S1') ? `<button class="link" data-act="upgall:${t}" title="Upgrade every ${def.name} by one level">all</button>` : '';
+    const bulk = has(g, 'S1') ? `<button class="link" data-act="upgall:${t}" title="Upgrade every ${def.name} by one level" aria-label="Upgrade every ${def.name} by one level">all</button>` : '';
     return `<div class="uprow"><div><b>${TRACK_INFO[t].name} <span class="mono muted">Lv ${lv} → ${lv + 1}</span></b><small>${TRACK_INFO[t].desc(n)}</small></div>${bulk}${buyBtn(`upg:${t}`, cost, g.credits, '', `upg-${t}`)}</div>`;
   }).join('');
   return `<div class="sec"><span class="lbl">Upgrades</span>${rows}</div>`;
@@ -459,18 +500,7 @@ function routerSection(g: Game, n: GNode): string {
   };
   const bal = has(g, 'S3') ? `<button class="ghostbtn" data-act="autobal">Auto-balance</button>` : has(g, 'L4') ? `<button class="ghostbtn dashed" data-act="tech:S3">Auto-balance · 150β</button>` : '';
   return `<div class="sec"><span class="lbl">Mode</span><div class="seg">${seg}</div><div class="note">${help[n.mode]}</div>
-    ${wires.length ? rows : '<div class="note">Drag wires from the output port to add destinations.</div>'}${bal ? `<div class="st-actions">${bal}</div>` : ''}</div>`;
-}
-
-function marketSection(g: Game, n: GNode): string {
-  const sold = (Object.keys(g.soldRate) as MatId[]).filter((m) => (g.soldRate[m] ?? 0) > 0.005);
-  const lens = has(g, 'C1');
-  const rows = sold.map((m) => {
-    const sat = saturation(g, m);
-    return `<div class="mrow">${matGlyph(m, 12)}<span class="mn">${MATERIALS[m].name}</span><div class="bar"><span style="width:${pct(sat)}%;background:${MATERIALS[m].color}"></span></div><span class="mono rate">${lens ? fmt(price(g, m)) + '¢' : Math.round(sat * 100) + '%'}</span></div>`;
-  }).join('');
-  return `<div class="sec"><span class="lbl">Selling · all markets</span>${rows || '<div class="note">Nothing arriving yet.</div>'}
-    <div class="note">Bars show how much of the full price you still get. Flooding a material lowers its price, so sell a mix.${lens ? '' : ' Market Lens shows exact prices.'}</div></div>`;
+    ${wires.length ? rows : `<div class="note">${isTouch() ? 'Tap the output port, then tap a node to add a destination.' : 'Drag wires from the output port to add destinations.'}</div>`}${bal ? `<div class="st-actions">${bal}</div>` : ''}</div>`;
 }
 
 function labSection(g: Game, n: GNode): string {
@@ -551,41 +581,6 @@ function renderInspector(force: boolean) {
   inspPanel.render(html, force);
 }
 
-// ---------- objective + alert ----------
-
-function objective(g: Game): string | null {
-  const count = (t: string) => g.nodes.filter((n) => n.type === t).length;
-  if (!g.wires.length && g.lifetime < 5) return 'Drag from the <b>Well\'s glowing port</b> to the <b>Market</b> to start selling.';
-  if (count('well') < 2 && !has(g, 'P1')) return `Press <span class="kbd">1</span> and place a second <b>Well</b> on the empty deposit, then wire it to the Market.`;
-  if (!has(g, 'P1')) return `Earn <b>50¢</b> to unlock your first machine. <span class="mono">${Math.floor(g.lifetime)} / 50</span>`;
-  if (!count('refiner')) return 'Drag from a Well\'s port into <b>empty space</b> and pick <b>Refiner</b>.';
-  if (!has(g, 'R1')) return 'Wire the Refiner\'s output to the <b>Market</b>. Shard sells for more than Glint.';
-  if (!count('lab')) return 'Drag from the Refiner\'s port into empty space and pick <b>Lab</b> to start earning Data.';
-  if (!g.techs.some((t) => TECHS[t] && !TECHS[t].auto)) return 'Open the <b>Tech tree</b> <span class="kbd">R</span> and research something with your Data.';
-  return null;
-}
-
-function renderObjective(force: boolean) {
-  const g = ui.g;
-  const o = objective(g);
-  setHidden(objEl, !o);
-  if (o) objPanel.render(o, force);
-
-  // The single worst root-cause problem on the board.
-  let worst: { n: GNode; text: string } | null = null;
-  for (const n of g.nodes) {
-    const dx = diagnose(g, n);
-    if (!dx.problem || dx.victim || dx.problem === 'idle') continue;
-    if (n.type === 'well' && !dx.openPort) continue;
-    if (worst && worst.n.util <= n.util) continue;
-    const name = n.type === 'well' ? `${matName(n.material)} Well` : `${NODE_DEFS[n.type].name}${n.recipe ? ` (${RECIPES[n.recipe].name})` : ''}`;
-    worst = { n, text: dx.problem === 'starved' ? `<b>${name}</b> is starved of ${matName(dx.mat)}` : dx.openPort ? `<b>${name}</b>: ${matName(dx.mat)} has nowhere to go` : `<b>${name}</b> is blocked` };
-  }
-  const show = !!worst && !o;
-  setHidden(alertEl, !show);
-  if (show && worst) alertPanel.render(`<span class="dot ${worst.n.status}"></span><span>${worst.text}</span><button data-act="jump:${worst.n.id}">Jump</button>`, force);
-}
-
 // ---------- minimap + zoom ----------
 
 const ST_COLORS: Record<string, string> = { working: '#4ADE80', blocked: '#FBBF24', starved: '#F87171', idle: '#64748B' };
@@ -633,7 +628,7 @@ export function renderPanels(force = false) {
   renderTop();
   renderHot(force);
   renderInspector(force);
-  renderObjective(force);
   renderMini();
   renderZoom();
+  for (const fn of extraRenders) fn(force);
 }

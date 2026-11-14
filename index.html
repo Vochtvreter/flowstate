@@ -5,6 +5,7 @@
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>Flowstate</title>
   <meta name="description" content="An incremental game about wiring up a theoretical supply line.">
+  <link rel="icon" type="image/svg+xml" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 28 28'%3E%3Crect width='28' height='28' rx='6' fill='%230e1320'/%3E%3Cpath d='M10 8c8 0 4 12 8 12' fill='none' stroke='%239db8ff' stroke-width='2' stroke-linecap='round'/%3E%3Ccircle cx='6' cy='8' r='4' fill='%23ffd84d'/%3E%3Ccircle cx='22' cy='20' r='4' fill='%235ce1ff'/%3E%3C/svg%3E">
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;600&family=Space+Grotesk:wght@500;700&display=swap" rel="stylesheet">
@@ -16,9 +17,17 @@
     <div id="stage">
       <main id="board" aria-label="Supply line board"></main>
       <canvas id="fx" aria-hidden="true"></canvas>
-      <div id="objective" role="status"></div>
-      <div id="alert" role="status"></div>
-      <div id="toasts" aria-live="polite"></div>
+      <!-- The HUD layer: the goal card with the order beside it, the alert chip under them, and toasts. -->
+      <div id="hud">
+        <div id="hud-strip">
+          <div id="hud-row">
+            <section id="goal" aria-label="Current goal" data-testid="goal-card"></section>
+            <section id="order" aria-label="Current order" data-testid="order-chip" hidden></section>
+          </div>
+          <div id="hud-alert" role="status" hidden></div>
+        </div>
+        <div id="toasts" aria-live="polite"></div>
+      </div>
       <div id="hints">
         <span><span class="kbd">drag port</span> wire or build</span>
         <span><span class="kbd">⇧ drag</span> cut</span>
@@ -31,6 +40,8 @@
     <aside id="insp" aria-label="Inspector"></aside>
     <section id="tech" aria-label="Tech tree"></section>
     <div id="modal"></div>
+    <div id="summary" data-testid="summary" role="dialog" aria-modal="true" aria-label="Demo complete" hidden></div>
+    <div id="start" role="dialog" aria-modal="true" aria-label="Flowstate" hidden></div>
   </div>
   <script type="module" src="/src/main.ts"></script>
 </body>
