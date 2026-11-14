@@ -16,6 +16,7 @@ import {
 } from '../economy';
 import { graph, isMachine, passCap } from '../sim';
 import { Game, GNode, RouterMode, Wire } from '../state';
+import { isMuted, setMuted } from './audio';
 import { boardRect, jumpTo, startPlacing, fitView, zoomBy } from './board';
 import { Panel, el, invalidateLayout, makePanel, setAnchor, setAttr, setClass, setHTML, setHidden, setText } from './dom';
 import { nodeSize } from './geom';
@@ -61,11 +62,14 @@ export function initPanels(refs: {
 
   // Every handler ends with a forced refresh: the player has just pressed something here, so the
   // panel must answer at once even though the pointer is still down inside it.
-  delegate(topEl, (a) => {
+  delegate(topEl, (a, _args, el) => {
     const g = ui.g;
+    // Whatever is chosen from the gear menu, the menu closes behind it.
+    if (a !== 'menu' && ui.menuOpen && el.closest('.menu')) { ui.menuOpen = false; touch(); }
     if (a === 'undo') undo(g);
     else if (a === 'redo') redo(g);
     else if (a === 'pause') { g.paused = !g.paused; touch(); }
+    else if (a === 'sound') setMuted(!isMuted());
     else if (a === 'tech') hooks.openTech();
     else if (a === 'menu') { ui.menuOpen = !ui.menuOpen; touch(); }
     else if (a === 'reset') {
@@ -194,6 +198,31 @@ let rollT = ROLL;
 let lastCredits = NaN;
 let sinceWrite = 0;
 let rolledGame: Game | null = null;
+/** Whether the number on show was written for the phone's narrow bar. */
+let shownNarrow = false;
+
+/**
+ * A whole number in at most five characters once it reaches `from`: 12.3k, 123k, 1.23M, 12.3M, 123M, 1.23B.
+ * Rounded down, so the bar never shows more than the player has. Below `from` it is written out in full.
+ */
+export function shortNum(n: number, from: number): string {
+  const v = Math.floor(n);
+  if (v < from) return fmtInt(v);
+  for (const [unit, size] of [['B', 1e9], ['M', 1e6], ['k', 1e3]] as const) {
+    if (v < size) continue;
+    const x = v / size;
+    const places = x >= 100 ? 0 : x >= 10 ? 1 : 2;
+    const f = 10 ** places;
+    return (Math.floor(x * f) / f).toFixed(places) + unit;
+  }
+  return fmtInt(v);
+}
+
+// The phone's top bar is 360 px wide at its narrowest and has to hold the credits, the Flow bonus, three
+// kinds of Data, Tech and the menu. Written out, 12,345,678 alone takes a third of that, so there big
+// numbers are shortened: credits from 100,000 and Data from 10,000.
+const creditsText = (whole: number) => (env.phone ? shortNum(whole, 1e5) : fmtInt(whole));
+const dataText = (n: number) => (env.phone ? shortNum(n, 1e4) : fmtInt(n));
 
 function creditsItem(): TopItem {
   const e = el(`<div class="res credits" data-testid="credits"><span class="sym coin">¢</span><div class="nums"><b class="mono">0</b><i class="mono"></i></div></div>`);
@@ -238,11 +267,12 @@ export function tickPanels(dt: number) {
   const landed = rolling && rollT >= ROLL; // the exact value is always shown the moment a roll ends
   sinceWrite += dt;
   const whole = Math.floor(shownCredits);
-  if (whole === shownInt) return;
-  if (!landed && sinceWrite < (rolling ? 0.045 : 0.095)) return;
+  if (whole === shownInt && env.phone === shownNarrow) return;
+  if (!landed && sinceWrite < (rolling ? 0.045 : 0.095) && env.phone === shownNarrow) return;
   shownInt = whole;
+  shownNarrow = env.phone;
   sinceWrite = 0;
-  creditsNum.textContent = fmtInt(whole);
+  setText(creditsNum, creditsText(whole));
 }
 
 // A Data chip stays out of the bar until the player has had that kind of Data, and then stays in.
@@ -261,6 +291,10 @@ const DATA_ABOUT: Record<DataTier, string> = {
   g: 'γ Data: Labs make it from Tier 3 items such as Lens. Spend it in the Tech tree.',
 };
 
+/** The three Data chips share one wrapper, so a narrow bar can stack them as one block (see style.css). */
+let dataWrap: HTMLElement;
+const dataShown: Record<DataTier, boolean> = { a: false, b: false, g: false };
+
 function dataItem(k: DataTier): TopItem {
   const e = el(`<div class="res data data-${k}" style="--c:${DATA_COLORS[k]}" title="${DATA_ABOUT[k]}" hidden><span class="sym">${DATA_NAMES[k]}</span><div class="nums"><b class="mono"></b><i class="mono"></i></div></div>`);
   const num = e.querySelector('b')!;
@@ -274,8 +308,11 @@ function dataItem(k: DataTier): TopItem {
       // A chip appearing moves its neighbours: cached positions are measured again.
       if (setHidden(e, !seen)) invalidateLayout();
       setAttr(e, 'data-testid', seen ? `data-${k}` : null);
+      dataShown[k] = seen;
+      // How many kinds are on show decides how big the stacked block can set them.
+      setAttr(dataWrap, 'data-n', String(Number(dataShown.a) + Number(dataShown.b) + Number(dataShown.g)));
       if (!seen) return;
-      setText(num, fmtInt(g.data[k]));
+      setText(num, dataText(g.data[k]));
       setText(rate, `+${fmtRate(g.dataRate[k])}/s`);
     },
   };
@@ -283,6 +320,11 @@ function dataItem(k: DataTier): TopItem {
 
 // Every piece of the bar has a class of its own (t-undo, t-redo, t-pause, t-sep, t-tech, t-menu,
 // and .res.credits / .res.data-a|b|g on the left), so a narrow layout can hide them one by one.
+//
+// The phone layout (phone.css) keeps the logo mark, credits with the Flow ring, the Data block, Tech
+// and the gear. Undo, redo, pause and sound move into the gear menu there: the `.m-only` entries below,
+// which no other layout shows. (#top also carries `roomy` while a phone's bar has room for the word
+// "Tech", and `menu-open` while the menu is down.)
 function buildTop() {
   topEl.innerHTML = `
     <div class="logo"><svg viewBox="0 0 28 28" width="26" height="26" aria-hidden="true"><circle cx="6" cy="8" r="4" fill="#FFD84D"/><circle cx="22" cy="20" r="4" fill="#5CE1FF"/><path d="M10 8c8 0 4 12 8 12" class="ic" style="color:#9DB8FF"/></svg><span>flowstate</span></div>
@@ -293,7 +335,13 @@ function buildTop() {
   topSlots.actions = topEl.querySelector<HTMLElement>('.acts')!;
 
   addTopItem('res', creditsItem());
-  for (const k of ['a', 'b', 'g'] as DataTier[]) addTopItem('res', dataItem(k));
+  dataWrap = el(`<div class="datas" data-n="0"></div>`);
+  topSlots.res.appendChild(dataWrap);
+  for (const k of ['a', 'b', 'g'] as DataTier[]) {
+    const item = dataItem(k);
+    topItems.push(item);
+    dataWrap.appendChild(item.el);
+  }
 
   // Labels name a key only for a mouse-and-keyboard player.
   const label = (b: HTMLElement, text: string, key: string) => {
@@ -328,7 +376,7 @@ function buildTop() {
   });
   addTopItem('actions', { el: el(`<span class="sep t-sep"></span>`), update() {} });
 
-  const techBtn = el(`<button class="techbtn t-tech" data-act="tech">${icon('tree')}<span class="tlab">Tech tree</span><span class="badge" hidden><b class="mono"></b><span class="bw">ready</span></span><span class="kbd">R</span></button>`);
+  const techBtn = el(`<button class="techbtn t-tech" data-act="tech">${icon('tree')}<span class="tlab">Tech<span class="tl2"> tree</span></span><span class="badge" hidden><b class="mono"></b><span class="bw">ready</span></span><span class="kbd">R</span></button>`);
   const badge = techBtn.querySelector('.badge')!;
   const badgeNum = badge.querySelector('b')!;
   addTopItem('actions', {
@@ -344,12 +392,47 @@ function buildTop() {
       setAttr(techBtn, 'data-ready', String(ready));
       setText(badgeNum, String(ready));
       setAttr(techBtn, 'aria-label', ready ? `Tech tree, ${ready} ready to research` : 'Tech tree');
+      // Early on, a phone's bar has room for the word (the goal card says "Tap Tech"). Once the Flow
+      // bonus or a second kind of Data has joined the bar it has not, and by then the button is familiar.
+      setClass(topEl, 'roomy', !g.flowOn && !dataShown.b && !dataShown.g);
     },
   });
 
-  const menuWrap = el(`<div class="menuwrap t-menu"><button class="ibtn" data-act="menu" aria-label="Menu" title="Menu">${icon('gear')}</button><div class="menu" hidden><button data-act="reset">New game…</button></div></div>`);
-  const menu = menuWrap.querySelector('.menu')!;
-  addTopItem('actions', { el: menuWrap, update: () => void setHidden(menu, !ui.menuOpen) });
+  // A menu entry: what it does on the left, and for a switch how it stands on the right.
+  const mItem = (act: string) =>
+    `<button class="m-only" data-act="${act}" data-testid="menu-${act}" role="${act === 'sound' ? 'menuitemcheckbox' : 'menuitem'}"><span class="ml"></span><i class="ms"></i></button>`;
+  const menuWrap = el(`<div class="menuwrap t-menu"><button class="ibtn" data-act="menu" data-testid="menu" aria-label="Menu" title="Menu" aria-haspopup="menu">${icon('gear')}</button>`
+    + `<div class="menu" role="menu" hidden>${mItem('pause')}${mItem('sound')}${mItem('undo')}${mItem('redo')}`
+    + `<button class="danger" data-act="reset" data-testid="menu-reset" role="menuitem">New game…</button></div></div>`);
+  const gear = menuWrap.querySelector<HTMLElement>('[data-act="menu"]')!;
+  const menu = menuWrap.querySelector<HTMLElement>('.menu')!;
+  const [mPause, mSound, mUndo, mRedo] = [...menu.querySelectorAll<HTMLElement>('.m-only')];
+  const say = (b: HTMLElement, text: string, state = '') => {
+    setText(b.firstElementChild!, text);
+    setText(b.lastElementChild!, state);
+  };
+  say(mUndo, 'Undo');
+  say(mRedo, 'Redo');
+  addTopItem('actions', {
+    el: menuWrap,
+    update(g) {
+      setHidden(menu, !ui.menuOpen);
+      setAttr(gear, 'aria-expanded', ui.menuOpen ? 'true' : 'false');
+      // The tech tree lies over the board from just under the bar; while the menu is down the bar is
+      // lifted above the tree so the menu is not hidden behind it (see #top.menu-open in style.css).
+      setClass(topEl, 'menu-open', ui.menuOpen);
+      // On a phone the pause button is in here, so the gear itself shows that the game is paused.
+      setClass(gear, 'on', g.paused && env.phone);
+      say(mPause, g.paused ? 'Resume' : 'Pause', g.paused ? 'Paused' : '');
+      setClass(mPause, 'on', g.paused);
+      const muted = isMuted();
+      say(mSound, 'Sound', muted ? 'Off' : 'On');
+      setAttr(mSound, 'aria-checked', muted ? 'false' : 'true');
+      setClass(mSound, 'off', muted);
+      setAttr(mUndo, 'disabled', canUndo() ? null : '');
+      setAttr(mRedo, 'disabled', canRedo() ? null : '');
+    },
+  });
 }
 
 function renderTop() {
@@ -376,6 +459,7 @@ function renderHot(force: boolean) {
   }
   const now = performance.now();
   const became: NodeType[] = [];
+  const touchy = isTouch();
   let key = 0;
   let shownLocked = 0;
   const items = HOTBAR.map((type) => {
@@ -400,12 +484,13 @@ function renderHot(force: boolean) {
     const pulse = (affordUntil.get(type) ?? 0) > now;
     const k = key <= 9 ? key : 0;
     const price = cost === 0 ? 'free' : fmt(cost) + '¢';
-    const label = env.touch ? `${def.name}, ${price}${ok ? '' : ', not enough credits yet'}` : `${def.name}, key ${k}, ${cost} credits`;
+    // A finger is never told about a key: no number in the corner, none in the label.
+    const label = `${withKey(def.name, `key ${k}`)}, ${price}${ok ? '' : ', not enough credits yet'}`;
     return `<button class="hb${ok ? '' : ' poor'}${ui.placing?.type === type ? ' on' : ''}${pulse ? ' afford' : ''}" data-act="place:${type}" data-testid="hot-${type}" title="${def.name}: ${def.blurb}" aria-label="${label}">
-      ${ok ? '' : `<span class="fill" style="height:${pct(g.credits / Math.max(1, cost))}%"></span>`}<span class="k mono">${k}</span>${nodeIcon(type)}<span class="n">${def.name}</span><span class="p mono">${price}</span></button>`;
+      ${ok ? '' : `<span class="fill" style="height:${pct(g.credits / Math.max(1, cost))}%"></span>`}${touchy ? '' : `<span class="k mono">${k}</span>`}${nodeIcon(type)}<span class="n">${def.name}</span><span class="p mono">${price}</span></button>`;
   }).join('');
-  // The key hint is for keyboards: with a finger, Delete is a button in the inspector.
-  const tip = env.touch ? '' : `<div class="grow"></div><div class="hb tip" title="Select a node and press Delete. Everything is refunded in full.">${icon('trash')}<span class="p">Del = refund</span></div>`;
+  // The Delete key is for keyboards: with a finger, Delete is a button in the inspector, which shows the refund.
+  const tip = touchy ? '' : `<div class="grow"></div><div class="hb tip" title="Select a node and press Delete. Everything is refunded in full.">${icon('trash')}<span class="p">Del = refund</span></div>`;
   hotPanel.render(items + tip, force);
   for (const type of became) {
     const btn = hotEl.querySelector<HTMLElement>(`[data-testid="hot-${type}"]`);

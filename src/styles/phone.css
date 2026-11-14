@@ -64,9 +64,37 @@ html.phone body { position: fixed; inset: 0; width: 100%; }
   grid-template-rows: var(--top-h) minmax(0, 1fr) var(--hot-h);
   overflow: hidden;
 }
-#app.phone #top { grid-row: 1; grid-column: 1; }
-/* (Weak on purpose, like the other rules here for things another track owns: `#app.phone #top` beats it.) */
-#app.phone :where(#top) { min-width: 0; padding: env(safe-area-inset-top, 0px) var(--edge-r) 0 var(--edge-l); }
+#app.phone #top { grid-row: 1; grid-column: 1; min-width: 0; gap: 6px; padding: env(safe-area-inset-top, 0px) var(--edge-r) 0 var(--edge-l); }
+
+/* ----- top bar: logo mark, credits with the Flow ring and its bonus, Data, Tech, gear ----- */
+/* All of it has to fit 360 px with three kinds of Data on show. Undo, redo, pause and sound are in the
+   gear menu here (panels.ts), big numbers are shortened (12.3M), and Data is one block (style.css). */
+#app.phone .logo { flex: none; width: auto; }
+#app.phone .logo span { display: none; }
+#app.phone .resrow { gap: 6px; min-width: 0; }
+#app.phone .res { height: 44px; }
+#app.phone .res.credits { gap: 6px; padding: 0 6px 0 8px; }
+#app.phone .res.credits .nums b { font-size: 15px; }
+#app.phone .res .nums i { font-size: 10px; }
+#app.phone .flowpct { margin-left: 0; padding: 2px 4px; font-size: 11px; }
+#app.phone .datas { height: 44px; padding: 0 7px; }
+#app.phone .datas .res.data { gap: 5px; }
+#app.phone .acts { gap: 6px; }
+#app.phone .t-undo, #app.phone .t-redo, #app.phone .t-pause, #app.phone .t-sep, #app.phone #top [data-testid='mute'] { display: none; }
+#app.phone #top .ibtn { width: 44px; height: 44px; }
+#app.phone .techbtn { position: relative; justify-content: center; gap: 6px; height: 44px; min-width: 44px; padding: 0 10px; }
+#app.phone .techbtn .tlab, #app.phone .techbtn .tl2, #app.phone .techbtn .kbd, #app.phone .techbtn .bw { display: none; }
+/* The word shows while there is room for it: early in the game, and always on a phone held sideways. */
+#app.phone #top.roomy .techbtn .tlab { display: inline; }
+@media (min-width: 560px) {
+  #app.phone .techbtn .tlab { display: inline; }
+}
+/* How many techs are ready rides on the button's corner. */
+#app.phone .techbtn .badge { position: absolute; right: -3px; top: -3px; min-width: 18px; height: 18px; padding: 0 5px; font-size: 11px; line-height: 18px; text-align: center; box-shadow: 0 0 0 2px var(--chrome); }
+#app.phone .menu { top: 50px; min-width: 212px; }
+#app.phone .menu button { height: 44px; padding: 0 12px; font-size: 14px; }
+#app.phone .menu .m-only { display: flex; }
+#app.phone .menu .danger { margin-top: 5px; border-top: 1px solid var(--line); border-radius: 0 0 7px 7px; height: 45px; }
 #app.phone #stage { grid-row: 2; grid-column: 1; }
 /* The tech tree and the modal are another track's; these only keep them inside the shell. */
 #app.phone :where(#tech) { top: var(--top-h); }
