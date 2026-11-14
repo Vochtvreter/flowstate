@@ -1036,6 +1036,7 @@ export function updateSlow(part?: 'nodes' | 'wires') {
   }
   setClass(expandEl, 'ok', g.credits >= cost);
   if (ui.placing) updateGhost();
+  if (radial) refreshBuildSheet();
 }
 
 let gainTimer = 0;
@@ -2180,6 +2181,24 @@ function openBuildSheet(state: RadialState) {
   tempD = '';
   // Room for the card that will appear there (a consumer grows to the right of the spot, a producer to the left).
   reveal(state.dir === 'consume' ? state.at.x - 16 : state.at.x - NODE_W, state.at.y - 46, NODE_W + 16, 92);
+}
+
+/**
+ * While the sheet is open the player may be waiting to afford something on it: keep the buttons'
+ * "out of reach" look up to date. Only classes change, so nothing moves under a finger.
+ */
+function refreshBuildSheet() {
+  const r = radial;
+  if (!r || !buildEl.classList.contains('open')) return;
+  const credits = ui.g.credits;
+  const btns = buildEl.querySelectorAll<HTMLElement>('.bopt');
+  r.opts.forEach((o, i) => {
+    const b = btns[i];
+    if (!b || o.locked) return;
+    const afford = o.cost <= credits + 1e-6;
+    setClass(b, 'poor', !afford);
+    if (i === 0) setClass(b, 'best', afford);
+  });
 }
 
 function openRadial(state: RadialState) {
