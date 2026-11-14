@@ -19,7 +19,7 @@ import { activeGoal } from '../goals';
 import { Game } from '../state';
 import type { AdviceAnswer, AdviceRequest } from './advice-core';
 import { isStarted } from './hud-screens';
-import { onNewGame, touch } from './ui';
+import { onNewGame } from './ui';
 
 // ---------- what a verdict depends on ----------
 
@@ -93,7 +93,7 @@ function current(g: Game, a: AdviceAnswer | null, key: string): boolean {
 
 /** Ask the adviser again if its last answer no longer holds. Cheap; call it with every HUD refresh. */
 export function pollAdviser(g: Game) {
-  if (mode === 'off' || !isStarted()) return;
+  if (mode === 'off' || held || !isStarted()) return;
   const now = performance.now();
   if (pending) {
     if (now - pending.at > DEAD_MS) fail('no answer');
@@ -133,8 +133,9 @@ function receive(a: AdviceAnswer) {
     stats.errors++;
     console.error('adviser:', a.error);
   }
-  // The card shows it at the next frame instead of at the next beat.
-  touch();
+  // Nothing is redrawn for it here: the card picks the answer up at its next refresh, a quarter of a second
+  // away at most. (Asking for a redraw at once would also make the board and every panel look themselves
+  // over, for an answer that only the goal card shows.)
 }
 
 /** The worker cannot be used (any more): from now on the adviser runs on the page, in idle moments. */
@@ -190,6 +191,12 @@ export function initAdviser() {
     fresh = true;
     keySeen = '';
   });
+}
+
+let held = false;
+/** For scripts that measure what the adviser costs: while held, nothing is asked. */
+export function holdAdviser(on: boolean) {
+  held = on;
 }
 
 /** For scripts: how the adviser is being run and what it has cost. */

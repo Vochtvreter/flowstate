@@ -60,6 +60,8 @@ let changedAt = -1e9;
 let staleAt = Infinity;
 /** Real time since which the last answer has not been about the board as it is (0: it is). */
 let adrift = 0;
+/** A script put this tip here (offerTip): the adviser's answers are not consulted until the board changes. */
+let pinned = false;
 /** A signal that waits until the row is on screen, so that it can say where the Show me button is. */
 let announce: 'shown' | 'stale' | null = null;
 let buttonAt = { x: 0, y: 0 };
@@ -69,6 +71,7 @@ const sentence = (a: Advice) => (isTouch() ? a.text.touch : a.text.mouse);
 
 function drop(g: Game) {
   fading = null;
+  pinned = false;
   if (!shown) return;
   shown = null;
   shownAct = '';
@@ -96,6 +99,7 @@ function put(g: Game, a: Advice, act: string, swap = false) {
 
 /** Forget everything (a new game). */
 export function resetTips() {
+  pinned = false;
   shown = null;
   shownAct = '';
   fading = null;
@@ -127,7 +131,9 @@ export function tendTips(g: Game) {
   const covered = ui.techOpen || screenOpen();
   if (covered && !shown) quietFrom = g.time;
   const a = adviserAnswer();
-  if (a && a.key === boardKey(g)) {
+  if (pinned) {
+    // (Only the stale clock below runs.)
+  } else if (a && a.key === boardKey(g)) {
     adrift = 0;
     const tip = a.kind ? a.advice : null;
     // Not a wait at all: the card asks for something. The clock starts when the waiting does.
@@ -170,12 +176,13 @@ export const tipShown = (): Advice | null => shown;
 
 /**
  * For scripts: put this tip on the card now, as if the adviser had given it and the wait before a tip were
- * over. It stays until the board changes or the adviser's next answer disagrees.
+ * over. It stays, whatever the adviser says, until the board or the goal changes (or the goal is ready).
  */
 export function offerTip(g: Game, a: Advice) {
   quietKey = `${builtRev(g)}|${g.goal.i}`;
   quietFrom = g.time - TIP.delay;
   put(g, a, actOf(a));
+  pinned = true;
   announce = 'shown';
 }
 
