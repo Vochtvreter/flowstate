@@ -1,7 +1,10 @@
 import { describe, expect, it } from 'vitest';
 import {
-  canDelete, canUndo, connect, cutWire, deleteNode, placeNode, pushUndo, redo, refundOf, splice, undo, upgrade, upgradeWire,
+  canDelete, canFavour, canUndo, clearHistory, connect, cutWire, deleteNode, favour, favouredWire, placeNode, pushUndo, redo, refundOf,
+  setMode, setWeight, splice, undo, upgrade, upgradeWire,
 } from '../src/actions';
+import { RULES } from '../src/content';
+import { GOALS, goalById, routerFavoursLab } from '../src/goals';
 import { buyBackPrice, nodeCost, upgradeCost, upgradeValue } from '../src/economy';
 import { snapshot } from '../src/state';
 import { fresh, market, rich, run, take, well, wire } from './helpers';
@@ -214,5 +217,106 @@ describe('undo guards (section 7, bugs 1 and 6)', () => {
     undo(g);
     expect(g.credits).toBe(100);
     expect(canUndo()).toBe(false);
+  });
+});
+
+describe('Favour: the one-press Router preset', () => {
+  /** A Well feeding a Router that leads to a Lab and to the Market, still in Even mode. */
+  function routed() {
+    const g = rich();
+    const router = placeNode(g, 'router', 400, 100)!;
+    const lab = placeNode(g, 'lab', 700, 100)!;
+    connect(g, well(g).id, 0, router.id);
+    const toMarket = connect(g, router.id, 0, market(g).id)!;
+    const toLab = connect(g, router.id, 0, lab.id)!;
+    return { g, router, lab, toMarket, toLab };
+  }
+
+  it('puts the Router in Ratio mode, 3 : 1 toward the chosen wire, and the items follow', () => {
+    const { g, router, toMarket, toLab } = routed();
+    expect(router.mode).toBe('even');
+    expect(favouredWire(g, router.id)).toBeNull();
+    expect(canFavour(g, router.id, toLab.id)).toBe(true);
+    expect(favour(g, router.id, toLab.id)).toBe(true);
+    expect(router.mode).toBe('ratio');
+    expect([wire(g, toLab.id).weight, wire(g, toMarket.id).weight]).toEqual([RULES.router.favour, RULES.router.rest]);
+    expect([RULES.router.favour, RULES.router.rest]).toEqual([3, 1]);
+    expect(favouredWire(g, router.id)).toBe(toLab.id);
+    run(g, 40);
+    expect(wire(g, toLab.id).rate).toBeCloseTo(0.75, 1);
+    expect(wire(g, toMarket.id).rate).toBeCloseTo(0.25, 1);
+    // Pressing it again changes nothing and is refused; the other wire can be favoured instead.
+    expect(canFavour(g, router.id, toLab.id)).toBe(false);
+    expect(favour(g, router.id, toLab.id)).toBe(false);
+    expect(canFavour(g, router.id, toMarket.id)).toBe(true);
+    expect(favour(g, router.id, toMarket.id)).toBe(true);
+    expect(favouredWire(g, router.id)).toBe(toMarket.id);
+    expect([wire(g, toLab.id).weight, wire(g, toMarket.id).weight]).toEqual([1, 3]);
+  });
+
+  it('is one undo step, whatever mode and weights the Router had', () => {
+    const { g, router, toMarket, toLab } = routed();
+    setMode(g, router.id, 'priority');
+    setWeight(g, toMarket.id, 7);
+    setWeight(g, toLab.id, 2);
+    expect(favouredWire(g, router.id)).toBe(toMarket.id); // Priority favours its first wire
+    clearHistory();
+    expect(favour(g, router.id, toLab.id)).toBe(true);
+    expect(canUndo()).toBe(true);
+    expect(undo(g)).toBe(true);
+    expect(canUndo()).toBe(false); // one step, not three
+    expect(g.nodes.find((n) => n.id === router.id)!.mode).toBe('priority');
+    expect([wire(g, toMarket.id).weight, wire(g, toLab.id).weight]).toEqual([7, 2]);
+    expect(redo(g)).toBe(true);
+    expect(g.nodes.find((n) => n.id === router.id)!.mode).toBe('ratio');
+    expect([wire(g, toMarket.id).weight, wire(g, toLab.id).weight]).toEqual([1, 3]);
+    expect(g.credits).toBe(1e9 - 25 - 100); // free: only the Router and the Lab were paid for
+  });
+
+  it('with three wires the chosen one gets 3 and each of the others 1', () => {
+    const { g, router, toMarket, toLab } = routed();
+    const third = connect(g, router.id, 0, placeNode(g, 'void', 700, 400)!.id)!;
+    expect(favour(g, router.id, third.id)).toBe(true);
+    expect([toMarket, toLab, third].map((w) => wire(g, w.id).weight)).toEqual([1, 1, 3]);
+    expect(favouredWire(g, router.id)).toBe(third.id);
+    // Equal weights favour nobody.
+    setWeight(g, third.id, 1);
+    expect(favouredWire(g, router.id)).toBeNull();
+    expect(canFavour(g, router.id, third.id)).toBe(true);
+  });
+
+  it('refuses anything that is not a wire leaving a Router with a choice to make', () => {
+    const { g, router, lab, toLab } = routed();
+    const feed = g.wires.find((w) => w.to === router.id)!;
+    expect(canFavour(g, router.id, feed.id)).toBe(false); // the wire into the Router
+    expect(favour(g, router.id, feed.id)).toBe(false);
+    expect(canFavour(g, lab.id, toLab.id)).toBe(false); // not a Router
+    expect(canFavour(g, well(g).id, feed.id)).toBe(false);
+    expect(canFavour(g, 99999, toLab.id)).toBe(false);
+    expect(favouredWire(g, lab.id)).toBeNull();
+    // A Router with a single wire has nothing to favour it over.
+    const lone = placeNode(g, 'router', 400, 400)!;
+    const only = connect(g, lone.id, 0, market(g).id)!;
+    expect(canFavour(g, lone.id, only.id)).toBe(false);
+    expect(favour(g, lone.id, only.id)).toBe(false);
+    expect(favouredWire(g, lone.id)).toBeNull();
+    expect(router.mode).toBe('even'); // none of that touched anything
+  });
+
+  it('is what goal 13 asks for: one press on the Lab\'s wire completes "Route more to a Lab than to the Market"', () => {
+    const { g, router, toLab, toMarket } = routed();
+    g.goal = { i: GOALS.findIndex((x) => x.id === 'route-lab'), ready: false };
+    run(g, 1);
+    expect(routerFavoursLab(g)).toBe(false);
+    expect(favour(g, router.id, toMarket.id)).toBe(true); // the wrong wire does not count
+    run(g, 0.1);
+    expect(g.goal.ready).toBe(false);
+    expect(favour(g, router.id, toLab.id)).toBe(true);
+    run(g, 0.1);
+    expect(g.goal.ready).toBe(true);
+    const hint = goalById('route-lab')!.hint;
+    expect(hint.mouse).toContain('press Favour on the Lab\'s wire');
+    expect(hint.touch).toContain('tap Favour on the Lab\'s wire');
+    expect(hint.mouse).not.toMatch(/ratio/i);
   });
 });

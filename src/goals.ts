@@ -233,7 +233,10 @@ export const GOALS: Goal[] = [
   },
   {
     id: 'route-lab', title: 'Route more to a Lab than to the Market',
-    hint: hint('Build a Router from a machine\'s port, wire it to a Lab and to a Market, set it to Ratio and give the Lab the bigger share.'),
+    hint: hint(
+      'Build a Router from a machine\'s port and wire it to a Lab and to a Market, then select the Router and press Favour on the Lab\'s wire.',
+      'Build a Router from a machine\'s port and wire it to a Lab and to a Market, then tap the Router and tap Favour on the Lab\'s wire.',
+    ),
     done: routerFavoursLab,
     progress: (g) => (count(g, 'router') ? null : saving(g, nodeCost(g, 'router'))),
     reward: { a: 30 },
