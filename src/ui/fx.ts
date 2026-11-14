@@ -656,8 +656,61 @@ function stepParticles(dt: number) {
   }
 }
 
-function drawParticles(c: CanvasRenderingContext2D, layer: number) {
-  let font = '';
+// ---------- text ----------
+
+interface Sprite { canvas: HTMLCanvasElement; w: number; h: number; base: number; used: number }
+const sprites = new Map<string, Sprite>();
+const SPRITE_MAX = 40;
+let spriteClock = 0;
+let fontsWatched = false;
+
+/**
+ * A floater's text as a picture: bold, in its colour, with a dark outline. `w`, `h` and `base`
+ * (how far the baseline is below the top) are in CSS px; the picture is `ratio` times that.
+ * Kept while in use, so the "+1¢" of every Market each second is drawn once.
+ */
+function textSprite(text: string, color: string, size: number, ratio: number): Sprite {
+  const key = `${text}|${color}|${size}|${ratio}`;
+  let s = sprites.get(key);
+  if (s) {
+    s.used = ++spriteClock;
+    return s;
+  }
+  if (!fontsWatched && typeof document !== 'undefined' && document.fonts) {
+    // A picture made before the web font arrived shows the fallback face: start again when fonts load.
+    fontsWatched = true;
+    document.fonts.addEventListener('loadingdone', () => sprites.clear());
+  }
+  const canvas = document.createElement('canvas');
+  const c = canvas.getContext('2d')!;
+  const font = `700 ${size}px "Space Grotesk", Inter, system-ui, sans-serif`;
+  const pad = 4;
+  c.font = font;
+  const w = Math.ceil(c.measureText(text).width) + pad * 2, h = Math.ceil(size * 1.45) + pad * 2;
+  canvas.width = Math.ceil(w * ratio);
+  canvas.height = Math.ceil(h * ratio);
+  c.setTransform(ratio, 0, 0, ratio, 0, 0);
+  c.font = font;
+  c.textAlign = 'center';
+  c.textBaseline = 'alphabetic';
+  c.lineWidth = 3.5;
+  c.lineJoin = 'round';
+  c.strokeStyle = 'rgba(11, 15, 23, 0.9)';
+  c.fillStyle = color;
+  const base = pad + size * 1.08;
+  c.strokeText(text, w / 2, base);
+  c.fillText(text, w / 2, base);
+  s = { canvas, w, h, base, used: ++spriteClock };
+  sprites.set(key, s);
+  if (sprites.size > SPRITE_MAX) {
+    let oldest = '', when = Infinity;
+    for (const [k, v] of sprites) if (v.used < when) { when = v.used; oldest = k; }
+    sprites.delete(oldest);
+  }
+  return s;
+}
+
+function drawParticles(c: CanvasRenderingContext2D, layer: number, ratio: number) {
   const bit = 1 << layer;
   for (const p of pool) {
     if (p.kind === 0 || !(p.mask & bit) || p.t < 0) continue;
@@ -704,28 +757,14 @@ function drawParticles(c: CanvasRenderingContext2D, layer: number) {
         break;
       }
       case TEXT: {
+        // Drawn once into a small picture of its own, then stamped each frame: stroking text is the
+        // dearest thing a canvas does, and a floater lives for sixty frames.
+        const sp = textSprite(p.text, p.color, p.size, ratio);
         const rise = p.vy * (1 - (1 - u) * (1 - u));
-        const f = `700 ${p.size}px "Space Grotesk", Inter, system-ui, sans-serif`;
-        if (f !== font) c.font = font = f;
-        c.textAlign = 'center';
-        c.textBaseline = 'alphabetic';
-        c.globalAlpha = u < 0.65 ? 1 : 1 - (u - 0.65) / 0.35;
-        c.lineWidth = 3.5;
-        c.lineJoin = 'round';
-        c.strokeStyle = 'rgba(11, 15, 23, 0.9)';
-        c.fillStyle = p.color;
         // It pops in a little too big and settles, then rises.
         const s = u < 0.1 ? 0.6 + u * 6 : u < 0.22 ? 1.2 - ((u - 0.1) / 0.12) * 0.2 : 1;
-        let x = p.x, y = p.y - rise;
-        if (s !== 1) {
-          c.save();
-          c.translate(x, y);
-          c.scale(s, s);
-          x = y = 0;
-        }
-        c.strokeText(p.text, x, y);
-        c.fillText(p.text, x, y);
-        if (s !== 1) c.restore();
+        c.globalAlpha = u < 0.65 ? 1 : 1 - (u - 0.65) / 0.35;
+        c.drawImage(sp.canvas, p.x - (sp.w * s) / 2, p.y - rise - sp.base * s, sp.w * s, sp.h * s);
         break;
       }
       case RING: {
@@ -850,7 +889,7 @@ function frameBoard(c: CanvasRenderingContext2D, cv: HTMLCanvasElement, dt: numb
   // Overlays and particles work in client pixels: shift so that the canvas corner is where it is on screen.
   c.setTransform(dpr, 0, 0, dpr, -originX * dpr, -originY * dpr);
   if (over) for (const o of overlays[BOARD]) if (o.active()) o.draw(c, pdt);
-  if (parts) drawParticles(c, BOARD);
+  if (parts) drawParticles(c, BOARD, dpr);
 }
 
 /** One of the layers above the panels: wiped once when it empties, otherwise cleared and redrawn. */
@@ -870,7 +909,7 @@ function frameSurface(s: Surface, parts: number, list: Overlay[] | null, layer: 
   c.setTransform(s.ratio, 0, 0, s.ratio, -s.x * s.ratio, -s.y * s.ratio);
   c.clearRect(s.x, s.y, s.w, s.h);
   if (over) for (const o of list!) if (o.active()) o.draw(c, pdt);
-  if (parts) drawParticles(c, layer);
+  if (parts) drawParticles(c, layer, s.ratio);
 }
 
 /** Numbers for tests and tuning. `width`, `height` and `dpr` describe the board layer. */
