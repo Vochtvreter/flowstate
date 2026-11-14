@@ -1,4 +1,8 @@
-import { clearHistory } from '../src/actions';
+import { claimOrder, clearHistory } from '../src/actions';
+import { waitInfo, waitKind } from '../src/advice';
+import { TECHS } from '../src/content';
+import { research, techAffordable } from '../src/economy';
+import { activeGoal } from '../src/goals';
 import { tick } from '../src/sim';
 import { Game, GameEvent, newGame } from '../src/state';
 
@@ -41,4 +45,37 @@ export function throughput(g: Game, seconds: number, wireIds: number[], dt = 0.0
     wireIds.forEach((id, k) => (total[k] += g.wires.find((w) => w.id === id)?.flow ?? 0));
   }
   return total.map((t) => t / (steps * dt));
+}
+
+/**
+ * The real game: a plain copy (orders keep being rolled, exactly as in play), run at `dt`, with a stand-in
+ * player who claims a filled order ten seconds after it fills and does the card's research the moment it is
+ * affordable. Returns the seconds until the wait the game was in has ended, or Infinity after `limit`.
+ */
+export function realWaitEnds(copy: Game, limit: number, dt = 0.1): number {
+  const kind = waitKind(copy);
+  const goal = copy.goal.i;
+  const filled = copy.stats.ordersFilled;
+  let readySince: number | null = null;
+  const over = () => {
+    if (copy.goal.i !== goal || copy.goal.ready) return true;
+    if (kind === 'order') return copy.stats.ordersFilled > filled;
+    if (kind === 'flow') return false;
+    const step = activeGoal(copy)?.step?.(copy) ?? null;
+    if (step && 'tech' in step && techAffordable(copy, TECHS[step.tech])) research(copy, step.tech);
+    return waitInfo(copy) === null;
+  };
+  if (over()) return 0;
+  for (let t = dt; t <= limit; t += dt) {
+    tick(copy, dt);
+    if (copy.order?.ready) {
+      if (readySince == null) readySince = copy.time;
+      if (copy.time - readySince >= 10) {
+        claimOrder(copy);
+        readySince = null;
+      }
+    } else readySince = null;
+    if (over()) return t;
+  }
+  return Infinity;
 }

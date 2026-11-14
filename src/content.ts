@@ -165,10 +165,14 @@ const T = (
  * Tech prices as tuned with the pacing bot (`npm run pacing`, docs/CONTENT.md). The reasoning, so that the
  * next change keeps it:
  *  - The Processing spine the goal chain asks for (P2 → P3 → P4 → P5 → P7) is priced for the newcomer who
- *    does what the goal card says and follows the adviser's tips (src/advice.ts): each of its waits is three
- *    to three and a half minutes for that player, never four, and together they put the first Lens between
- *    20 and 25 minutes. The tips about double that player's α, so without them the same prices are a wait of
- *    seven to twenty minutes each: the spine is not priced for a player who ignores the adviser.
+ *    does what the goal card says, its "while you wait" lines included (Goal.meanwhile in src/goals.ts): each
+ *    of its waits is three to three and a half minutes for that player, never four, and together they put
+ *    the first Lens at about twenty minutes, with the adviser's tips or without them. (The lines roughly
+ *    triple that player's α. A player who reads only the hints and ignores the lines still needs most of an
+ *    hour: the spine is not priced for that.)
+ *  - Fabrication's α is the one spine price that is lower than the rest of the curve would suggest: by then
+ *    the two Assemblers take the Shard, Ink and Spark the Labs were studying, and a newcomer's α income falls
+ *    by a third. At 900 α the card's last wait is for the Fabricator's credits, not for the research.
  *  - Ember Deposits is the cheap one because a fast player has nothing else to do while it is saved for:
  *    past about 220 α their hands are idle for more than a minute.
  *  - Side techs are impulse buys: cheap next to the spine tech they compete with, so every kind of player
@@ -193,7 +197,7 @@ export const TECHS: Record<string, Tech> = Object.fromEntries([
   T('P3', 'Ember Deposits', 'processing', 2, 0, { a: 215 }, ['P2'], 'Extract Ember and refine it into Spark.', ['Ember Wells', 'Recipe: 2 Ember → Spark']),
   T('P4', 'Assembly', 'processing', 3, 0, { a: 1140 }, ['P3'], 'Machines with two inputs. Ink and Spark make Glyph, your first Tier 2 item and the source of β Data.', ['Assembler', 'Recipe: Ink + Spark → Glyph']),
   T('P5', 'Breeze Deposits', 'processing', 4, 0, { a: 1420 }, ['P4'], 'Extract Breeze, refine it into Mist, and combine Mist with Shard into Prism.', ['Breeze Wells', 'Recipe: 2 Breeze → Mist', 'Recipe: 2 Shard + Mist → Prism']),
-  T('P7', 'Fabrication', 'processing', 5, 0, { a: 1180, b: 100 }, ['P5'], 'Three-input machines. Prism and Glyph become Lens, the first Tier 3 item and the source of γ Data.', ['Fabricator', 'Recipe: Prism + 2 Glyph → Lens']),
+  T('P7', 'Fabrication', 'processing', 5, 0, { a: 900, b: 100 }, ['P5'], 'Three-input machines. Prism and Glyph become Lens, the first Tier 3 item and the source of γ Data.', ['Fabricator', 'Recipe: Prism + 2 Glyph → Lens']),
   T('P9', 'Paradox', 'processing', 6, 0, { a: 2500, b: 500, g: 450 }, ['P8'], 'The capstone. Lens, Dynamo and raw Breeze fold into a Paradox.', ['Recipe: Lens + Dynamo + 4 Breeze → Paradox']),
   T('U1', 'Efficiency Tuning', 'processing', 1, 1, { b: 40 }, ['P1', 'P4'], 'A new upgrade track for machines: some crafts consume no inputs.', ['Efficiency upgrades on machines']),
   T('U2', 'Overclock', 'processing', 2, 1, { g: 60 }, ['U1'], 'Raises the level cap on Speed upgrades from 10 to 25.', ['Speed level cap 25']),

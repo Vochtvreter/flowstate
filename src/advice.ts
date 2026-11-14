@@ -11,19 +11,35 @@
 //   advice(g)         one tip, or null
 //   applyAdvice(g, a) do what the tip says, through the normal actions (for bots and tests)
 //
-// Four things about how it judges, each learnt from a newcomer's run (`npm run pacing -- --policy=newcomer --trials`):
-//  - A goal that asks for a research and then a machine is one wait. While the machine's price is further
-//    off than the Data, the tips are about credits, from the first second of the goal: a newcomer who only
-//    heard about selling once the research was done saved for the Fabricator for four minutes longer.
+// Few tips, and large ones. The moves that matter most are on the goal cards themselves (Goal.meanwhile in
+// src/goals.ts), because the card is what every player reads. What is left for a tip:
+//  - It saves at least ADVICE.minSaves seconds (15), or it ends a wait that would otherwise never end, or it is
+//    a Flow tip that gets the producer it names flowing. A two-second tip costs more hand time than it saves.
+//  - After the player changes the board (following a tip, or anything else) the adviser says nothing for
+//    RULES.tips.quiet seconds (20): tips are for a player with free hands, and never arrive in a chain.
+//  - It never asks again for what has just been done to the same kind of node, for RULES.tips.repeatAfter
+//    seconds (60): no "buy Speed on a Lab" twice running.
+//  - It never reverses a goal card. "Remove this wire" is only ever said when the active card says so too,
+//    and a Router that a card had turned toward a Lab is never turned away from it.
+//  - Every tip carries `saves` (a number of seconds, or Infinity when the wait would not end without it), and
+//    every sentence fits RULES.tips.maxLength characters (90), for mouse and for touch.
+//
+// How it judges, each point learnt from a newcomer's run (`npm run pacing -- --policy=newcomer --trials`):
+//  - A goal that asks for a research and then a machine is one wait, for credits and Data both: candidates
+//    for either are tried, and the wait is over when the last of them is in hand.
 //  - A Flow tip is about one producer, and is true when that producer flows with the fix and would not have
 //    without it. It need not finish the goal: a board with three things wrong takes a tip for each.
-//  - The look-ahead uses a coarse step, so a small saving is checked again at a fine one before it is given.
-//  - A tip that has been given stays while it still helps at all: it must not blink on and off.
+//  - The look-ahead uses a coarse step, so a saving that is not large is checked again at a fine one.
+//  - A tip does not come back: once it has left the card it is not offered again until the board changes.
 //
 // In the copies nobody plays: nothing is bought or researched, the order the game has is claimed the moment
-// it fills, and no new order is rolled (what the next one asks for is luck).
+// it fills, and no new order is rolled (what the next one asks for is luck). The orders to come are not left
+// out, though: the copy is paid what they are worth per second on its own board, on average (ordersWorth in
+// src/orders.ts). A wire that takes goods from the Markets makes every later order smaller, and a copy
+// with no orders after the first could not see that cost.
 import {
-  act, connect, cutWire, favour, favouredWire, freeDeposits, materialsAt, pickRecipe, placeNode, upgrade, upgradeAll,
+  act, buildNote, connect, cutNote, cutWire, favour, favourNote, favouredWire, freeDeposits, materialsAt, pickRecipe, placeNode, upgrade,
+  upgradeAll, upgradeAllNote, upgradeNote, wireNote,
 } from './actions';
 import { DATA_NAMES, DATA_WORTH, DATA_YIELD, DataTier, MATERIALS, MAT_IDS, MatId, NODE_DEFS, NodeType, RULES, TECHS, Track } from './content';
 import {
@@ -32,11 +48,11 @@ import {
 } from './economy';
 import { countsForFlow, isFlowing } from './flow';
 import { Forecast, forecast, lookahead } from './forecast';
-import { activeGoal } from './goals';
+import { activeGoal, goalAge, meanwhileOf } from './goals';
 import { graph, isMachine, isPass } from './graph';
-import { claimOrder, orderReachesMarket } from './orders';
+import { claimOrder, orderReachesMarket, ordersWorth } from './orders';
 import { tick } from './sim';
-import { Game, GNode, Wire } from './state';
+import { Bag, Game, GNode, Wire, nodeNoun } from './state';
 
 export interface Advice {
   /** What is short: credits, Data, or Flow. (A tip about the order counts as credits: orders are filled by selling.) */
@@ -50,11 +66,10 @@ export interface Advice {
   /** Seconds the current wait would take if nothing changed (Infinity when it would never end). */
   eta: number;
   /**
-   * Seconds the tip saves on the current wait, as measured (Infinity when the wait would not end without it).
-   * Absent for a tip that is one step of several: a Flow tip that gets its producer flowing without finishing
-   * the goal on its own (a board with two or three things wrong takes a tip for each), and a tip that gets one
-   * kind of Data coming in while another the same research needs still has nothing coming in (`eta` is
-   * Infinity then, with the tip and without).
+   * Seconds the tip saves on the current wait, as measured. Every tip advice() gives carries it: a number, or
+   * Infinity when the wait would not end without the tip. That includes a tip that is one step of several
+   * (a Flow tip that gets its producer flowing on a board with two more things wrong; a tip that gets one kind
+   * of Data coming in while another the same research needs still has none): the wait cannot end without it.
    */
   saves?: number;
   /** Credits the action costs (0 for a wire or a Router setting; a tech's price is in its text). */
@@ -93,6 +108,12 @@ export interface WaitInfo {
   need: number;
   /** Seconds until `have` reaches `need` at the current income from sales and Labs. Infinity at zero income. */
   eta: number;
+  /**
+   * What is being saved for, as the card would name it: the tech ("Assembly") while its Data is what takes
+   * longest, the thing bought with the credits otherwise ("the Fabricator"). So that a card can say
+   * "Assembly about 1 min 20 s sooner". Absent where the goal counts Data in hand and buys nothing.
+   */
+  name?: string;
 }
 
 /** Tunables of the adviser. Times are game seconds. */
@@ -122,32 +143,45 @@ export const ADVICE = {
   /** No tip for a wait that ends within this time anyway. */
   minWait: 12,
   /**
-   * A tip must save at least this many seconds, and this share of the wait. That low a bar is for a wait
-   * whose end was reached in the look-ahead, with the tip and without: then the saving is measured, not
-   * estimated, and a newcomer with credits to spare is better off told about a small true gain than left
-   * with nothing to do.
+   * A tip must save at least this many seconds (and this share of a very long wait). Smaller savings are real
+   * too, but a tip takes a player ten seconds to read and do: in a run of 19 followed tips, eight saved under
+   * five seconds each and seven carried 313 of the 356 seconds promised. Two cases need no saving at all: a
+   * wait that would never end without the tip, and a Flow tip that gets its producer flowing.
    */
-  minSaves: 2,
+  minSaves: 15,
   minShare: 0.01,
   /**
    * When the wait outlasts the look-ahead its end is worked out from the income at the horizon, which is good
-   * to a few per cent: a tip then has to save this much, or the estimate could be promising what is not there.
+   * to a few per cent: a tip then has to save this share of the wait as well.
    */
-  estSaves: 5,
+  estSaves: 15,
   estShare: 0.04,
   /**
-   * A tip that has been given stays on offer, while the board does not change, for as long as it still saves
-   * at least this many seconds: a tip worth a few seconds must not blink on and off as its saving drifts
-   * across `minSaves`.
+   * The bar a tip on offer has to stay above. It used to be lower than `minSaves` so that a small tip would
+   * not blink; now it is the same bar, and a tip that falls below it is gone until the board changes.
    */
-  keepSaves: 1,
+  keepSaves: 15,
+  /**
+   * The tip on offer stays ahead of another unless that one ends the wait this many seconds sooner, and this
+   * share of the wait sooner: two tips about equally good must not take turns on the card.
+   */
+  keepWithin: 3,
+  keepShare: 0.05,
   /**
    * A verdict (a tip, or none) is kept this long while the board does not change, and never for more than
    * `refreshShare` of the wait it was worked out for: near the end of a wait a tip goes stale in seconds.
    */
   refresh: 15,
   refreshShare: 0.15,
-  /** At most this many candidates are tried. */
+  /**
+   * In a look-ahead copy no new order is rolled, but the orders to come are not left out: from this long after
+   * the order the game has is filled, the copy is paid what orders are worth per second on its board
+   * (ordersWorth in src/orders.ts, worked out again every `ordersEvery` seconds). Without that, a change that
+   * takes goods away from the Markets looked better than it is: the orders that follow are smaller for it.
+   */
+  claimAfter: 10,
+  ordersEvery: 5,
+  /** At most this many candidates are tried (of each kind, when a wait is for credits and Data both). */
   candidates: 14,
   /** A Lab or machine at this utilisation or more is "full": faster would help. */
   full: 0.85,
@@ -284,7 +318,11 @@ export function waitInfo(g: Game): WaitInfo | null {
   const need = needOf(g);
   if (!need) return null;
   const { key, eta } = longest(g, need, income(g));
-  return { unit: UNIT[key], have: Math.min(have(g, key), need[key]), need: need[key], eta };
+  const info: WaitInfo = { unit: UNIT[key], have: Math.min(have(g, key), need[key]), need: need[key], eta };
+  const step = activeGoal(g)?.step?.(g) ?? null;
+  const name = !step ? undefined : 'tech' in step ? (key === 'credits' ? step.thenWhat : TECHS[step.tech]?.name) : step.what;
+  if (name) info.name = name;
+  return info;
 }
 
 // =====================================================================================
@@ -323,30 +361,22 @@ function spare(g: Game, p: Port): number {
   return s + Math.max(0, full * (1 - p.n.util));
 }
 
-function nounOf(n: GNode): string {
-  if (n.type === 'well') return `${n.material ? MATERIALS[n.material].name + ' ' : ''}Well`;
-  const r = recipeOf(n);
-  return `${r ? r.name + ' ' : ''}${NODE_DEFS[n.type].name}`;
-}
+const cap = (s: string) => s.charAt(0).toUpperCase() + s.slice(1);
+const an = (noun: string) => `${/^[AEIOU]/.test(noun) ? 'an' : 'a'} ${noun}`;
 
 /** "the Ink Refiner", or "a Glint Well" when the board has several of that name. */
 function the(g: Game, n: GNode): string {
-  const noun = nounOf(n);
+  const noun = nodeNoun(n);
   let same = 0;
-  for (const x of g.nodes) if (nounOf(x) === noun) same++;
+  for (const x of g.nodes) if (nodeNoun(x) === noun) same++;
   return same > 1 ? an(noun) : `the ${noun}`;
 }
 
-/** "the Ink Refiner's port", or "...'s Silt port" on a machine with two outputs. */
-function portName(g: Game, p: Port): string {
+/** "the Ink Refiner's port", or "...'s Silt port" on a machine with two outputs. With `its`: "its port", "its Silt port". */
+function portName(g: Game, p: Port, its = false): string {
   const many = (recipeOf(p.n)?.outputs.length ?? 1) > 1;
-  return `${the(g, p.n)}'s ${many ? MATERIALS[p.mat].name + ' ' : ''}port`;
+  return `${its ? 'its' : `${the(g, p.n)}'s`} ${many ? MATERIALS[p.mat].name + ' ' : ''}port`;
 }
-
-const cap = (s: string) => s.charAt(0).toUpperCase() + s.slice(1);
-const low = (s: string) => s.charAt(0).toLowerCase() + s.slice(1);
-const an = (noun: string) => `${/^[AEIOU]/.test(noun) ? 'an' : 'a'} ${noun}`;
-const price = (c: number) => `${Math.round(c)}¢`;
 
 /** Does a wire from this port to this node exist already? Does the port feed any node of this type? */
 const wired = (g: Game, p: Port, to: GNode) => outs(g, p.n, p.port).some((w) => w.to === to.id);
@@ -384,6 +414,68 @@ function overDemand(g: Game): MatId | null {
 }
 
 // =====================================================================================
+// The words. Every sentence the adviser can say is built here and nowhere else, from names and numbers, so
+// that the whole repertoire can be measured: none is longer than RULES.tips.maxLength characters with the
+// longest names and prices the game has (tests/advice.test.ts goes through all of them). The wording names
+// no click, drag, tap or key, so one sentence serves mouse and touch: by the time a tip appears the player
+// has wired, built and upgraded by hand several times, and "Show me" acts the tip out.
+//
+// Arguments: `port` is "the Ink Refiner's Ink port", `node`/`lab`/`market` a node with its article ("the
+// Lab", "a Lab"), `Who` the same with a capital, `mat` a material's name, `cost` credits, `unit` α, β or γ.
+// =====================================================================================
+
+const cents = (c: number) => `${Math.round(c)}¢`;
+
+export const SAY = {
+  // --- into a Lab ---
+  study: (port: string, lab: string, mat: string, y: number, unit: string) => `Wire ${port} to ${lab}: ${mat} is ${y} ${unit} each in a Lab.`,
+  studyWaste: (port: string, lab: string, y: number, unit: string) => `Wire ${port} to ${lab}: you are throwing away ${y} ${unit} each.`,
+  studyBetter: (port: string, lab: string, worse: string) => `Wire ${port} to ${lab}: it gives more Data than ${worse}.`,
+  // --- to a Market ---
+  sellUnsold: (port: string, market: string, mat: string, value: number) => `Wire ${port} to ${market}: its ${mat} is not sold (${value}¢ each).`,
+  sell: (port: string, market: string, mat: string, value: number) => `Wire ${port} to ${market}: ${mat} sells for ${value}¢ each.`,
+  sellBacking: (port: string, market: string, mat: string, value: number) => `Wire ${port} to ${market}: ${mat} backs up there, at ${value}¢ each.`,
+  /** Something else is selling over demand: this material is not. */
+  sellNotGlut: (port: string, market: string, mat: string, glut: string) => `Wire ${port} to ${market}: ${glut} is over demand, ${mat} is not.`,
+  sellGlut: (port: string, market: string, mat: string) => `Wire ${port} to ${market}: ${mat} is over demand, but still sells.`,
+  order: (port: string, market: string, mat: string) => `Wire ${port} to ${market}: the order counts ${mat} sold.`,
+  orderStuck: (port: string, market: string) => `Wire ${port} to ${market}: the order wants it sold, and none is.`,
+  // --- Speed ---
+  speed: (Who: string, cost: number, what: string) => `${Who} runs flat out: buy Speed (${cents(cost)}) for more ${what}.`,
+  speedLab: (Who: string, cost: number, unit: string) => `${Who} is full: buy Speed (${cents(cost)}) for more ${unit}.`,
+  speedOrder: (node: string, cost: number, mat: string) => `The order needs more ${mat} sold: buy Speed on ${node} (${cents(cost)}).`,
+  bulk: (kind: string, cost: number, what: string) => `Your ${kind}s run flat out: use Upgrade all on Speed (${cents(cost)}) for more ${what}.`,
+  bulkLabs: (cost: number, unit: string) => `Your Labs are full: use Upgrade all on Speed (${cents(cost)}) for more ${unit}.`,
+  // --- a Router ---
+  favourStudy: (to: string, unit: string) => `Favour the ${to}'s wire on the Router: more of what passes is studied for ${unit}.`,
+  favourSell: (to: string) => `Favour the ${to}'s wire on the Router: more of what passes is sold.`,
+  favourOrder: (to: string, mat: string) => `Favour the ${to}'s wire on the Router: the order counts ${mat} sold.`,
+  // --- research ---
+  labSpeed: (name: string, cost: string) => `Research ${name} (${cost}): your Lab is full, and Labs then study twice as fast.`,
+  deepAnalysis: (name: string, cost: string) => `Research ${name} (${cost}): every item studied then gives half as much Data again.`,
+  widerDemand: (name: string, cost: string, glut: string) => `Research ${name} (${cost}): ${glut} is over demand, and Markets then buy 50% more.`,
+  // --- remove a wire: only ever what a goal card asks for as well ---
+  cut: (from: string, to: string, mat: string, value: number) => `Remove the wire from ${from} to ${to}: sold, each ${mat} is ${value}¢.`,
+  // --- build ---
+  labFull: (port: string, cost: number) => `Build a Lab from ${port} (${cents(cost)}): the Lab you have is full.`,
+  labNone: (port: string, cost: number, mat: string, unit: string) => `Build a Lab from ${port} (${cents(cost)}): a Lab turns ${mat} into ${unit}.`,
+  market: (port: string, cost: number) => `Build a Market from ${port}${cost > 0 ? ` (${cents(cost)})` : ''}: nothing sells without one.`,
+  refiner: (port: string, cost: number, out: string, value: number) => `Build a Refiner from ${port} (${cents(cost)}) and sell its ${out}: ${value}¢ each.`,
+  wellStudy: (mat: string, cost: number, lab: string) => `Place a Well on the free ${mat} deposit (${cents(cost)}), wired to ${lab}: 1 α each.`,
+  wellSell: (mat: string, cost: number, market: string, value: number) => `Place a Well on the free ${mat} deposit (${cents(cost)}), wired to ${market}: ${value}¢ each.`,
+  wellFeed: (Who: string, mat: string, cost: number) => `${Who} is short: wire in a Well on the free ${mat} deposit (${cents(cost)}).`,
+  // --- Flow: the producer that holds Flow back comes first, then its fix ---
+  flowSell: (Who: string, mat: string, port: string, market: string) => `${Who} makes more ${mat} than is taken: wire ${port} to ${market}.`,
+  flowNowhere: (Who: string, mat: string, port: string, market: string) => `${Who} has nowhere to send its ${mat}: wire ${port} to ${market}.`,
+  flowSpeed: (Who: string, mat: string, node: string, cost: number) => `${Who} needs more ${mat}: buy Speed on ${node} (${cents(cost)}).`,
+  flowWire: (Who: string, mat: string, port: string) => `${Who} needs more ${mat}: wire ${port} to it.`,
+  flowNone: (Who: string, mat: string, port: string) => `${Who} gets no ${mat}: wire ${port} to it.`,
+  flowFavour: (Who: string, mat: string) => `${Who} needs more ${mat}: favour its wire on the Router.`,
+  flowBlank: (Who: string, port: string) => `${Who} has nothing to work on: wire ${port} to it.`,
+  flowTaker: (Who: string, node: string, cost: number) => `${Who} is backed up: buy Speed on ${node} (${cents(cost)}).`,
+};
+
+// =====================================================================================
 // Candidates: everything that might help, each with the words for it
 // =====================================================================================
 
@@ -401,15 +493,14 @@ interface Cand {
   cost: number;
   /** A rough guess at how much it helps. Only decides which candidates get tried when there are too many. */
   hope: number;
-  /** The words: `mouse` and `touch` say how, `why` what for. A Flow tip names the culprit first (`lead`), and `why` is what is wrong with it. */
-  mouse: string;
-  touch: string;
-  why: string;
-  lead?: string;
+  /** The sentence, from SAY. */
+  text: string;
   /** The node the tip points at. */
   show?: number;
   /** A Flow tip: the producer it is meant to get flowing. */
   culprit?: number;
+  /** In a wait for credits and Data both: which of the two this candidate is meant to bring in. */
+  brings?: 'credits' | 'data';
 }
 
 /** Do what a candidate says. A build with its wires is one undo step and is rolled back if any part fails. */
@@ -442,28 +533,53 @@ function perform(g: Game, a: Act): boolean {
   }
 }
 
-/** A wire from a port to an existing node. */
-function wireCand(g: Game, p: Port, to: GNode, hope: number, why: string): Cand {
-  return {
-    act: { t: 'wire', from: p.n.id, port: p.port, to: to.id }, cost: 0, hope, show: p.n.id, why,
-    mouse: `Drag from ${portName(g, p)} to ${the(g, to)}`,
-    touch: `Tap ${portName(g, p)}, then tap ${the(g, to)}`,
-  };
+/**
+ * What doing this would be noted as in g.edits (the same words src/actions.ts uses), or null if it cannot be
+ * done on this board. A candidate the player has just done to the same kind of node is not said again.
+ */
+function noteOf(g: Game, a: Act): string | null {
+  switch (a.t) {
+    case 'upgrade': {
+      const n = node(g, a.node);
+      return !n ? null : a.all ? upgradeAllNote(n.type, a.track) : upgradeNote(n, a.track);
+    }
+    case 'wire': {
+      const from = node(g, a.from);
+      const to = node(g, a.to);
+      return from && to ? wireNote(from, to) : null;
+    }
+    case 'favour': {
+      const to = node(g, g.wires.find((w) => w.id === a.wire)?.to ?? -1);
+      return to ? favourNote(to) : null;
+    }
+    case 'research':
+      return `research:${a.tech}`;
+    case 'cut': {
+      const w = g.wires.find((x) => x.id === a.wire);
+      const from = w && node(g, w.from);
+      const to = w && node(g, w.to);
+      return from && to ? cutNote(from, to) : null;
+    }
+    case 'build':
+      return buildNote(a.type, a.deposit != null ? g.deposits.find((d) => d.id === a.deposit)?.mat ?? null : null);
+  }
 }
 
-function speedCand(g: Game, n: GNode, hope: number, why: string): Cand | null {
+/** A wire from a port to an existing node. */
+function wireCand(p: Port, to: GNode, hope: number, text: string): Cand {
+  return { act: { t: 'wire', from: p.n.id, port: p.port, to: to.id }, cost: 0, hope, show: p.n.id, text };
+}
+
+/** One more level of Speed on a node, if it can be bought. `say` gets the price. */
+function speedCand(g: Game, n: GNode, hope: number, say: (cost: number) => string): Cand | null {
   if (!trackAvailable(g, n, 'speed') || n.lv.speed >= maxLevel(g, 'speed')) return null;
   const cost = upgradeCost(n, 'speed');
   if (cost > g.credits + 1e-6) return null;
-  return {
-    act: { t: 'upgrade', node: n.id, track: 'speed', all: false }, cost, hope, show: n.id, why,
-    mouse: `Click ${the(g, n)} and buy Speed (${price(cost)})`,
-    touch: `Tap ${the(g, n)} and buy Speed (${price(cost)})`,
-  };
+  return { act: { t: 'upgrade', node: n.id, track: 'speed', all: false }, cost, hope, show: n.id, text: say(cost) };
 }
 
 /** "Upgrade all" on Speed for one kind of node (needs Bulk Upgrade): one level each, cheapest first, while credits last. */
-function bulkCand(g: Game, type: NodeType, hope: number, why: string): Cand | null {
+function bulkCand(g: Game, type: NodeType, hope: number, say: (cost: number) => string): Cand | null {
   if (!has(g, 'S1')) return null;
   const nodes = g.nodes.filter((n) => n.type === type && n.lv.speed < maxLevel(g, 'speed')).sort((a, b) => a.lv.speed - b.lv.speed);
   let cost = 0;
@@ -475,91 +591,45 @@ function bulkCand(g: Game, type: NodeType, hope: number, why: string): Cand | nu
     count++;
   }
   if (count < 2) return null;
-  const name = NODE_DEFS[type].name;
-  return {
-    act: { t: 'upgrade', node: nodes[0].id, track: 'speed', all: true }, cost, hope, show: nodes[0].id, why,
-    mouse: `Click ${an(name)} and press Upgrade all on Speed (${price(cost)})`,
-    touch: `Tap ${an(name)} and tap Upgrade all on Speed (${price(cost)})`,
-  };
-}
-
-function favourCand(g: Game, router: GNode, w: Wire, hope: number, why: string): Cand {
-  const to = nounOf(node(g, w.to)!);
-  return {
-    act: { t: 'favour', router: router.id, wire: w.id }, cost: 0, hope, show: router.id, why,
-    mouse: `Select the Router and press Favour on the ${to}'s wire`,
-    touch: `Tap the Router, then tap Favour on the ${to}'s wire`,
-  };
-}
-
-function researchCand(g: Game, id: string, hope: number, why: string): Cand | null {
-  const t = TECHS[id];
-  if (!t || !techAvailable(g, t) || !techAffordable(g, t)) return null;
-  return {
-    act: { t: 'research', tech: id }, cost: 0, hope, why,
-    mouse: `Open the Tech tree and research ${t.name} (${costText(t)})`,
-    touch: `Tap Tech and research ${t.name} (${costText(t)})`,
-  };
-}
-
-/** Take a wire away: what went down it goes to the port's other wires instead. */
-function cutCand(g: Game, w: Wire, hope: number, why: string): Cand {
-  const from = node(g, w.from)!;
-  const to = node(g, w.to)!;
-  return {
-    act: { t: 'cut', wire: w.id }, cost: 0, hope, show: from.id, why,
-    mouse: `Select the wire from ${the(g, from)} to ${the(g, to)} and remove it`,
-    touch: `Tap the wire from ${the(g, from)} to ${the(g, to)} and remove it`,
-  };
+  return { act: { t: 'upgrade', node: nodes[0].id, track: 'speed', all: true }, cost, hope, show: nodes[0].id, text: say(cost) };
 }
 
 /**
- * Is there still something to research with this kind of Data that the player cannot pay for yet? Only techs
- * that could be researched now count, and only if the player has met every kind of Data they cost (nothing
- * priced in γ can be bought before the first Lens, however much α is studied).
+ * Press Favour on a Router's wire. Never away from a Lab: "Route more to a Lab than to the Market" had the
+ * player favour the Lab's wire, and a tip does not take back what a goal card asked for.
  */
-function dataWanted(g: Game, tier: DataTier): boolean {
-  const known = (k: DataTier) => k === 'a' || MAT_IDS.some((m) => g.made[m] && DATA_YIELD[MATERIALS[m].tier].tier === k);
-  for (const t of Object.values(TECHS)) {
-    if (!techAvailable(g, t) || (t.cost[tier] ?? 0) <= g.data[tier]) continue;
-    if (TIERS.every((k) => !t.cost[k] || known(k))) return true;
-  }
-  return false;
+function favourCand(g: Game, router: GNode, w: Wire, hope: number, text: string): Cand | null {
+  const now = favouredWire(g, router.id);
+  if (now === w.id) return null;
+  if (now != null && node(g, g.wires.find((x) => x.id === now)?.to ?? -1)?.type === 'lab') return null;
+  return { act: { t: 'favour', router: router.id, wire: w.id }, cost: 0, hope, show: router.id, text };
+}
+
+function researchCand(g: Game, id: string, hope: number, say: (name: string, cost: string) => string): Cand | null {
+  const t = TECHS[id];
+  if (!t || !techAvailable(g, t) || !techAffordable(g, t)) return null;
+  return { act: { t: 'research', tech: id }, cost: 0, hope, text: say(t.name, costText(t)) };
 }
 
 /** A Lab built from a port: one gesture. */
-function labCand(g: Game, p: Port, hope: number, why: string): Cand | null {
+function labCand(g: Game, p: Port, hope: number, say: (port: string, cost: number) => string): Cand | null {
   const cost = nodeCost(g, 'lab');
   if (!has(g, NODE_DEFS.lab.tech) || cost > g.credits + 1e-6) return null;
-  return {
-    act: { t: 'build', type: 'lab', from: p.n.id, port: p.port }, cost, hope, show: p.n.id, why,
-    mouse: `Drag from ${portName(g, p)} into empty space and pick Lab (${price(cost)})`,
-    touch: `Tap ${portName(g, p)}, tap an empty spot and pick Lab (${price(cost)})`,
-  };
+  return { act: { t: 'build', type: 'lab', from: p.n.id, port: p.port }, cost, hope, show: p.n.id, text: say(portName(g, p), cost) };
 }
 
 /** A Market built from a port, on a board that has none (the first one is free): one gesture. */
-function marketCand(g: Game, p: Port, hope: number, why: string): Cand | null {
+function marketCand(g: Game, p: Port, hope: number): Cand | null {
   const cost = nodeCost(g, 'market');
   if (cost > g.credits + 1e-6) return null;
-  const tag = cost > 0 ? ` (${price(cost)})` : '';
-  return {
-    act: { t: 'build', type: 'market', from: p.n.id, port: p.port }, cost, hope, show: p.n.id, why,
-    mouse: `Drag from ${portName(g, p)} into empty space and pick Market${tag}`,
-    touch: `Tap ${portName(g, p)}, tap an empty spot and pick Market${tag}`,
-  };
+  return { act: { t: 'build', type: 'market', from: p.n.id, port: p.port }, cost, hope, show: p.n.id, text: SAY.market(portName(g, p), cost) };
 }
 
 /** A Well on a free deposit, wired to something that wants what it gives: two gestures. */
-function wellCand(g: Game, deposit: { id: number; mat: MatId }, to: GNode, hope: number, why: string): Cand | null {
+function wellCand(g: Game, deposit: { id: number; mat: MatId }, to: GNode, hope: number, say: (mat: string, cost: number) => string): Cand | null {
   const cost = nodeCost(g, 'well');
   if (cost > g.credits + 1e-6) return null;
-  const mat = MATERIALS[deposit.mat].name;
-  return {
-    act: { t: 'build', type: 'well', deposit: deposit.id, to: to.id }, cost, hope, why,
-    mouse: `Place a Well on the free ${mat} deposit (${price(cost)}) and drag from its port to ${the(g, to)}`,
-    touch: `Place a Well on the free ${mat} deposit (${price(cost)}), then tap its port and tap ${the(g, to)}`,
-  };
+  return { act: { t: 'build', type: 'well', deposit: deposit.id, to: to.id }, cost, hope, text: say(MATERIALS[deposit.mat].name, cost) };
 }
 
 /** A Refiner built from a Well that sells its raw material, wired on to the Market: two gestures. */
@@ -567,11 +637,10 @@ function refinerCand(g: Game, p: Port, to: GNode, hope: number): Cand | null {
   const r = pickRecipe(g, 'refiner', [p.mat]);
   const cost = nodeCost(g, 'refiner');
   if (!r || r.inputs.length !== 1 || !has(g, NODE_DEFS.refiner.tech) || cost > g.credits + 1e-6) return null;
+  const out = MATERIALS[r.outputs[0][0]];
   return {
     act: { t: 'build', type: 'refiner', from: p.n.id, port: p.port, recipe: r.id, to: to.id }, cost, hope, show: p.n.id,
-    why: `${MATERIALS[r.outputs[0][0]].name} sells for more than the ${MATERIALS[p.mat].name} it is made of`,
-    mouse: `Drag from ${portName(g, p)} into empty space, pick Refiner (${price(cost)}) and wire it to ${the(g, to)}`,
-    touch: `Tap ${portName(g, p)}, tap an empty spot and pick Refiner (${price(cost)}), then wire it to ${the(g, to)}`,
+    text: SAY.refiner(portName(g, p), cost, out.name, out.value),
   };
 }
 
@@ -591,23 +660,23 @@ function fasterProducers(g: Game, toward: NodeType, what: string): Cand[] {
     // What it makes is worth more the further down the line it sits: a Glyph Assembler before a Glint Well.
     const made = n.type === 'well' ? n.material : recipeOf(n)?.outputs[0][0];
     const each = !made ? 1 : toward === 'market' ? MATERIALS[made].value : dataYield(g, made).amount;
-    push(list, speedCand(g, n, (direct ? 2 : 1) * each * Math.max(0.1, n.rate), `it is running flat out, and more of what it makes means more ${what}`));
+    push(list, speedCand(g, n, (direct ? 2 : 1) * each * Math.max(0.1, n.rate), (cost) => SAY.speed(cap(the(g, n)), cost, what)));
     flatOut.set(n.type, (flatOut.get(n.type) ?? 0) + 1);
   }
   const out = top(list, 4);
   for (const [type, count] of flatOut) {
-    if (count >= 2) push(out, bulkCand(g, type, 1.5, `they are running flat out, and more of what they make means more ${what}`));
+    if (count >= 2) push(out, bulkCand(g, type, 1.5, (cost) => SAY.bulk(NODE_DEFS[type].name, cost, what)));
   }
   return out;
 }
 
 /** A Well on a free deposit feeding a machine that is short of that material. */
-function wellsForHungryMachines(g: Game, what: string): Cand[] {
+function wellsForHungryMachines(g: Game): Cand[] {
   const list: Cand[] = [];
   for (const d of freeDeposits(g)) {
     const hungry = g.nodes.find((n) => isMachine(n) && n.util < ADVICE.full && n.status !== 'blocked' && !!recipeOf(n)?.inputs.some((i) => i[0] === d.mat)
       && ins(g, n).some((w) => materialsAt(g, w.from, w.port).includes(d.mat)));
-    if (hungry) push(list, wellCand(g, d, hungry, 2, `it is short of ${MATERIALS[d.mat].name}, and what it makes means more ${what}`));
+    if (hungry) push(list, wellCand(g, d, hungry, 2, (mat, cost) => SAY.wellFeed(cap(the(g, hungry)), mat, cost)));
   }
   return top(list, 1);
 }
@@ -620,20 +689,16 @@ function orderCands(g: Game): Cand[] {
   const list: Cand[] = [];
   const name = MATERIALS[o.mat].name;
   const stuck = !orderReachesMarket(g);
-  const why = stuck ? `the order counts what is sold, and no ${name} reaches a Market` : `the order counts ${name} sold at a Market`;
   for (const p of ports(g)) {
     if (p.mat !== o.mat) continue;
-    if (!feeds(g, p, 'market')) push(list, wireCand(g, p, market, 5, why));
-    else if (p.n.util >= 0.9) {
-      // It is sold already: only making more of it fills the order sooner.
-      const shared = outs(g, p.n, p.port).some((x) => machineAt(g, x.to));
-      push(list, speedCand(g, p.n, 1, shared ? `the order wants ${name} sold, and your machines use most of what it makes` : `the order wants ${name}, and it is running flat out`));
-    }
+    if (!feeds(g, p, 'market')) push(list, wireCand(p, market, 5, stuck ? SAY.orderStuck(portName(g, p), the(g, market)) : SAY.order(portName(g, p), the(g, market), name)));
+    // It is sold already: only making more of it fills the order sooner.
+    else if (p.n.util >= 0.9) push(list, speedCand(g, p.n, 1, (cost) => SAY.speedOrder(the(g, p.n), cost, name)));
   }
   for (const r of g.nodes) {
     if (r.type !== 'router' || !materialsAt(g, r.id).includes(o.mat)) continue;
     const toMarket = outs(g, r).find((w) => node(g, w.to)?.type === 'market');
-    if (toMarket && outs(g, r).length > 1 && favouredWire(g, r.id) !== toMarket.id) push(list, favourCand(g, r, toMarket, 4, `the order counts ${name} sold at a Market`));
+    if (toMarket && outs(g, r).length > 1) push(list, favourCand(g, r, toMarket, 4, SAY.favourOrder(nodeNoun(market), name)));
   }
   return top(list, 3);
 }
@@ -658,45 +723,44 @@ function dataCands(g: Game, w: Wait): Cand[] {
         const y = dataYield(g, p.mat).amount;
         const worse = studied(roomy).find((m) => dataYield(g, m).amount < y);
         const sinks = outs(g, p.n, p.port).filter((x) => !machineAt(g, x.to)).length;
-        const name = MATERIALS[p.mat].name;
-        const why = feeds(g, p, 'void') ? `${name} is worth ${y} ${unit} each in a Lab, and you are throwing it away`
-          : worse ? `${name} is worth more Data than ${MATERIALS[worse].name}`
-            : `${name} is worth ${y} ${unit} each in a Lab`;
-        wires.push(wireCand(g, p, roomy, y * Math.min(spare(g, p) / (sinks + 1), Math.max(0.1, room(roomy))), why));
+        const text = feeds(g, p, 'void') ? SAY.studyWaste(portName(g, p), the(g, roomy), y, unit)
+          : worse ? SAY.studyBetter(portName(g, p), the(g, roomy), MATERIALS[worse].name)
+            : SAY.study(portName(g, p), the(g, roomy), MATERIALS[p.mat].name, y, unit);
+        wires.push(wireCand(p, roomy, y * Math.min(spare(g, p) / (sinks + 1), Math.max(0.1, room(roomy))), text));
       }
     }
     list.push(...top(wires, 4));
     if (!labs.length) {
       // No Lab on the board at all: nothing can become Data until there is one. From the port with the most to give.
       const best = [...mine].sort((a, b) => dataYield(g, b.mat).amount * spare(g, b) - dataYield(g, a.mat).amount * spare(g, a))[0];
-      if (best) push(list, labCand(g, best, 5, `you have no Lab, and a Lab turns ${MATERIALS[best.mat].name} into ${unit}`));
+      if (best) push(list, labCand(g, best, 5, (port, cost) => SAY.labNone(port, cost, MATERIALS[best.mat].name, unit)));
     }
     const fed = labs.filter((lab) => studied(lab).length > 0);
     for (const lab of fed) {
-      if (lab.util >= ADVICE.full) push(list, speedCand(g, lab, lab.rate, `it is full, and studying faster brings the ${unit} sooner`));
+      if (lab.util >= ADVICE.full) push(list, speedCand(g, lab, lab.rate, (cost) => SAY.speedLab(cap(the(g, lab)), cost, unit)));
     }
-    // Several full Labs: with Bulk Upgrade, one press speeds them all up (each alone may be too little to be worth saying).
-    if (fed.filter((lab) => lab.util >= ADVICE.full).length >= 2) push(list, bulkCand(g, 'lab', 1.5, `they are full, and studying faster brings the ${unit} sooner`));
+    // Several full Labs: with Bulk Upgrade, one press speeds them all up.
+    if (fed.filter((lab) => lab.util >= ADVICE.full).length >= 2) push(list, bulkCand(g, 'lab', 1.5, (cost) => SAY.bulkLabs(cost, unit)));
     // Every Lab that gets this Data is full: a second Lab from the port with the most to give, or Labs twice as fast.
     if (fed.length && fed.every((lab) => lab.util >= ADVICE.full)) {
       const best = [...mine].sort((a, b) => dataYield(g, b.mat).amount * spare(g, b) - dataYield(g, a.mat).amount * spare(g, a))[0];
-      if (best) push(list, labCand(g, best, dataYield(g, best.mat).amount * spare(g, best) * 0.5, `your Lab is full, and a second one studies the ${MATERIALS[best.mat].name} it cannot take`));
-      push(list, researchCand(g, 'R2', 3, 'your Lab is full, and this doubles how fast Labs study'));
+      if (best) push(list, labCand(g, best, dataYield(g, best.mat).amount * spare(g, best) * 0.5, SAY.labFull));
+      push(list, researchCand(g, 'R2', 3, SAY.labSpeed));
     }
-    if (fed.length) push(list, researchCand(g, 'R3', 2, 'every item studied gives half as much Data again'));
+    if (fed.length) push(list, researchCand(g, 'R3', 2, SAY.deepAnalysis));
     // A Router that leads to a Lab: send it the bigger share.
     for (const r of g.nodes) {
       if (r.type !== 'router' || !materialsAt(g, r.id).some((m) => dataYield(g, m).tier === tier)) continue;
       const toLab = outs(g, r).find((x) => node(g, x.to)?.type === 'lab');
-      if (toLab && outs(g, r).length > 1 && favouredWire(g, r.id) !== toLab.id) push(list, favourCand(g, r, toLab, 2, `more of what passes is studied for ${unit}`));
+      if (toLab && outs(g, r).length > 1) push(list, favourCand(g, r, toLab, 2, SAY.favourStudy('Lab', unit)));
     }
     // Raw material is worth 1 α in a Lab: a Well on a free deposit, straight into a Lab with room.
     if (tier === 'a' && roomy && room(roomy) >= 0.3) {
       const d = freeDeposits(g)[0];
-      if (d) push(list, wellCand(g, d, roomy, Math.min(1, room(roomy)), `raw ${MATERIALS[d.mat].name} is worth 1 α each in a Lab, and yours has room`));
+      if (d) push(list, wellCand(g, d, roomy, Math.min(1, room(roomy)), (mat, cost) => SAY.wellStudy(mat, cost, the(g, roomy))));
     }
     list.push(...fasterProducers(g, 'lab', unit));
-    list.push(...wellsForHungryMachines(g, unit));
+    list.push(...wellsForHungryMachines(g));
     if (g.order && !g.order.ready && g.order.reward[tier] > 0) list.push(...orderCands(g));
   }
   return list;
@@ -708,10 +772,8 @@ function creditCands(g: Game): Cand[] {
   const market = g.nodes.find((n) => n.type === 'market');
   const all = ports(g);
   const glutted = overDemand(g);
-  // When something sells over demand, say so: it is why selling more of it would not help.
-  const glut = glutted ? `${MATERIALS[glutted].name} is over demand, so the extra sells at a quarter; ` : '';
-  const too = (mat: MatId) => (glutted && glutted !== mat ? ' too,' : '');
   if (market) {
+    const shop = the(g, market);
     // Something made and not sold: no wire at all, backing up, or only studied or thrown away.
     const sells: Cand[] = [];
     for (const p of all) {
@@ -721,16 +783,20 @@ function creditCands(g: Game): Cand[] {
       const onlySinks = ws.length > 0 && ws.every((x) => !machineAt(g, x.to));
       if (ws.length && !backing && !onlySinks) continue;
       const name = MATERIALS[p.mat].name;
-      const each = `${MATERIALS[p.mat].value}¢ each`;
-      const why = !ws.length ? `${glut}nothing is done with its ${name}, which sells${too(p.mat)} for ${each}`
-        : onlySinks ? `${glut}${name} sells${too(p.mat)} for ${each}`
-          : `${glut}it is backing up, and the ${name} its machines cannot take sells${too(p.mat)} for ${each}`;
-      sells.push(wireCand(g, p, market, MATERIALS[p.mat].value * Math.max(0.05, spare(g, p)), why));
+      const value = MATERIALS[p.mat].value;
+      const port = portName(g, p);
+      // When something sells over demand, say so: it is why selling more of that would not help, and this would.
+      const text = glutted === p.mat ? SAY.sellGlut(port, shop, name)
+        : glutted ? SAY.sellNotGlut(port, shop, name, MATERIALS[glutted].name)
+          : !ws.length ? SAY.sellUnsold(port, shop, name, value)
+            : onlySinks ? SAY.sell(port, shop, name, value)
+              : SAY.sellBacking(port, shop, name, value);
+      sells.push(wireCand(p, market, value * Math.max(0.05, spare(g, p)), text));
     }
     list.push(...top(sells, 4));
     // A Well on a free deposit, selling raw.
     const d = [...freeDeposits(g)].filter((x) => x.mat !== glutted).sort((a, b) => MATERIALS[b.mat].value - MATERIALS[a.mat].value)[0];
-    if (d) push(list, wellCand(g, d, market, MATERIALS[d.mat].value, `${glut}raw ${MATERIALS[d.mat].name} sells${too(d.mat)} for ${MATERIALS[d.mat].value}¢ each`));
+    if (d) push(list, wellCand(g, d, market, MATERIALS[d.mat].value, (mat, cost) => SAY.wellSell(mat, cost, shop, MATERIALS[d.mat].value)));
     // A Refiner on a Well that sells everything raw.
     const raw = all.filter((p) => p.n.type === 'well' && feeds(g, p, 'market') && !outs(g, p.n).some((x) => machineAt(g, x.to)))
       .sort((a, b) => spare(g, b) - spare(g, a))[0];
@@ -740,29 +806,32 @@ function creditCands(g: Game): Cand[] {
     // No Market on the board at all: nothing can be sold until there is one. From the port with the most to sell.
     const best = [...all].filter((p) => MATERIALS[p.mat].value > 0)
       .sort((a, b) => MATERIALS[b.mat].value * Math.max(0.05, spare(g, b)) - MATERIALS[a.mat].value * Math.max(0.05, spare(g, a)))[0];
-    if (best) push(list, marketCand(g, best, 5, `you have no Market, and ${MATERIALS[best.mat].name} sells for ${MATERIALS[best.mat].value}¢ each`));
+    if (best) push(list, marketCand(g, best, 5));
   }
   for (const r of g.nodes) {
     if (r.type !== 'router') continue;
     const toMarket = outs(g, r).find((x) => node(g, x.to)?.type === 'market');
-    if (toMarket && outs(g, r).length > 1 && favouredWire(g, r.id) !== toMarket.id) push(list, favourCand(g, r, toMarket, 2, 'more of what passes is sold'));
+    if (toMarket && outs(g, r).length > 1) push(list, favourCand(g, r, toMarket, 2, SAY.favourSell('Market')));
   }
-  // Studying something the Market would buy, for Data there is nothing left to spend on right now: sell it instead.
-  const cuts: Cand[] = [];
-  for (const p of all) {
-    if (!feeds(g, p, 'market') || MATERIALS[p.mat].value <= 0) continue;
-    const tier = dataYield(g, p.mat).tier;
-    if (dataWanted(g, tier)) continue;
-    for (const x of outs(g, p.n, p.port)) {
-      if (node(g, x.to)?.type !== 'lab') continue;
-      cuts.push(cutCand(g, x, MATERIALS[p.mat].value * Math.max(0.02, x.rate),
-        `${glut}${MATERIALS[p.mat].name} sells${too(p.mat)} for ${MATERIALS[p.mat].value}¢ each, and you have the ${DATA_NAMES[tier]} you need for now`));
+  // Remove a wire: only where the goal card asks for it (its "while you wait" line), so that a tip never
+  // reverses a card. The card says it; the tip, if it comes, says the same and how many seconds it is worth.
+  const line = meanwhileOf(g);
+  if (line?.cuts && !line.done(g)) {
+    for (const id of line.cuts(g).slice(0, 3)) {
+      const x = g.wires.find((w) => w.id === id);
+      const from = x && node(g, x.from);
+      const to = x && node(g, x.to);
+      const mat = x && materialsAt(g, x.from, x.port)[0];
+      if (!x || !from || !to || !mat) continue;
+      list.push({
+        act: { t: 'cut', wire: x.id }, cost: 0, hope: MATERIALS[mat].value * Math.max(0.02, x.rate), show: from.id,
+        text: SAY.cut(the(g, from), the(g, to), MATERIALS[mat].name, MATERIALS[mat].value),
+      });
     }
   }
-  list.push(...top(cuts, 3));
-  if (glutted) push(list, researchCand(g, 'C2', 3, `${MATERIALS[glutted].name} is over demand, and with this Markets buy half as much again at full price`));
+  if (glutted) push(list, researchCand(g, 'C2', 3, (name, cost) => SAY.widerDemand(name, cost, MATERIALS[glutted].name)));
   list.push(...fasterProducers(g, 'market', 'credits'));
-  list.push(...wellsForHungryMachines(g, 'credits'));
+  list.push(...wellsForHungryMachines(g));
   list.push(...orderCands(g));
   return list;
 }
@@ -792,13 +861,13 @@ function flowCands(g: Game): Cand[] {
   const slow = g.nodes.filter((n) => countsForFlow(g, n) && low(n) < RULES.flow.flowing).sort((a, b) => low(a) - low(b)).slice(0, 4);
   slow.forEach((n, i) => {
     const hope = 10 - i;
-    const lead = `${cap(the(g, n))} is holding Flow back`;
-    const add = (c: Cand | null) => push(list, c && { ...c, lead, culprit: n.id });
+    const Who = cap(the(g, n));
+    const add = (c: Cand | null) => push(list, c && { ...c, culprit: n.id });
     if (isMachine(n) && !recipeOf(n)) {
       // Placed without a recipe, and counted because its port is wired on: it takes its recipe from the first
       // thing wired into it that it can work on.
       const usable = all.filter((p) => p.n !== n && !wired(g, p, n) && !!pickRecipe(g, n.type, [p.mat])).sort((a, b) => spare(g, b) - spare(g, a));
-      for (const p of usable.slice(0, 2)) add(wireCand(g, p, n, hope, 'nothing it can work on is wired into it'));
+      for (const p of usable.slice(0, 2)) add(wireCand(p, n, hope, SAY.flowBlank(Who, portName(g, p))));
       return;
     }
     // Short of an input: flagged as starved, or (hovering near the mark, which is not flagged) seen to stop
@@ -813,31 +882,32 @@ function flowCands(g: Game): Cand[] {
       const m = n.missing ?? ahead?.missing ?? least?.[0] ?? null;
       if (!m) return;
       const name = MATERIALS[m].name;
-      const feeds = ins(g, n).filter((w) => materialsAt(g, w.from, w.port).includes(m));
-      if (!feeds.length) {
+      const fed = ins(g, n).filter((w) => materialsAt(g, w.from, w.port).includes(m));
+      if (!fed.length) {
         const from = all.find((p) => p.mat === m && p.n !== n);
-        if (from) add(wireCand(g, from, n, hope, `it gets no ${name}`));
+        if (from) add(wireCand(from, n, hope, SAY.flowNone(Who, name, portName(g, from))));
       }
       let junction = false;
-      for (const w of feeds) {
+      for (const w of fed) {
         const s = node(g, w.from)!;
         if (!isPass(s)) {
-          if (s.util >= 0.9) add(speedCand(g, s, hope, `it is short of ${name}`));
+          if (s.util >= 0.9) add(speedCand(g, s, hope, (cost) => SAY.flowSpeed(Who, name, the(g, s), cost)));
           continue;
         }
-        // It is fed through a Router, Merger or Silo. A Router that sends most of what passes elsewhere: Favour.
+        // It is fed through a Router, Merger or Silo. A Router that sends most of what passes elsewhere: Favour
+        // (unless a card turned that Router toward a Lab: then its input straight from the source is the fix).
         junction = true;
-        if (s.type === 'router' && outs(g, s).length > 1 && favouredWire(g, s.id) !== w.id) add(favourCand(g, s, w, hope, `it is short of ${name}`));
+        if (s.type === 'router' && outs(g, s).length > 1) add(favourCand(g, s, w, hope, SAY.flowFavour(Who, name)));
       }
       if (junction) {
         // ...or its input straight from what makes it, and more of that if the maker is flat out.
         for (const p of all.filter((x) => x.mat === m && x.n !== n)) {
-          if (!wired(g, p, n)) add(wireCand(g, p, n, hope - 0.5, `it is short of ${name}`));
-          if (p.n.util >= 0.9) add(speedCand(g, p.n, hope - 1, `it is short of ${name}`));
+          if (!wired(g, p, n)) add(wireCand(p, n, hope - 0.5, SAY.flowWire(Who, name, portName(g, p))));
+          if (p.n.util >= 0.9) add(speedCand(g, p.n, hope - 1, (cost) => SAY.flowSpeed(Who, name, the(g, p.n), cost)));
         }
       }
       const d = freeDeposits(g).find((x) => x.mat === m);
-      if (d) add(wellCand(g, d, n, hope - 0.5, `it is short of ${name}`));
+      if (d) add(wellCand(g, d, n, hope - 0.5, (mat, cost) => SAY.wellFeed(Who, mat, cost)));
       return;
     }
     // Its output has nowhere to go, or not all of it does.
@@ -847,17 +917,51 @@ function flowCands(g: Game): Cand[] {
       const ws = outs(g, n, p.port);
       const name = MATERIALS[p.mat].name;
       if (market && !feeds(g, p, 'market')) {
-        add(wireCand(g, p, market, hope, ws.some((x) => machineAt(g, x.to))
-          ? `it makes more ${name} than its machines take`
-          : `its ${name} has nowhere to go`));
+        const say = ws.some((x) => machineAt(g, x.to)) ? SAY.flowSell : SAY.flowNowhere;
+        add(wireCand(p, market, hope, say(Who, name, portName(g, p, true), the(g, market))));
       }
       for (const x of ws) {
         const c = node(g, x.to)!;
-        if (isMachine(c) && c.util >= 0.9) add(speedCand(g, c, hope - 1, `it makes more ${name} than ${the(g, c)} can take`));
+        if (isMachine(c) && c.util >= 0.9) add(speedCand(g, c, hope - 1, (cost) => SAY.flowTaker(Who, the(g, c), cost)));
       }
     }
   });
   return list;
+}
+
+/**
+ * Everything worth trying for this wait: the most hoped-for first, each action once, no more than the limit.
+ * A goal that still needs credits and Data both (a research, then the machine it unlocks) gets the candidates
+ * for each. The wait ends when the last of them is in hand, so a tip for either can shorten it, and which of
+ * the two is further off changes from one second to the next near the end: going by that alone, a tip
+ * blinked on and off as the two swapped places.
+ *
+ * Left out: what the player has just done to the same kind of node (g.edits), and `skip`, the tips (as they
+ * read) that have already come and gone on this board.
+ */
+function candidates(g: Game, w: Wait, skip: ReadonlySet<string> = new Set()): Cand[] {
+  const recent = new Set((g.edits ?? []).filter((e) => g.time - e.at < RULES.tips.repeatAfter).map((e) => e.what));
+  const best = (list: Cand[]): Cand[] => {
+    const seen = new Set<string>();
+    return top(list, list.length).filter((c) => {
+      const key = JSON.stringify(c.act);
+      if (seen.has(key) || seen.size >= ADVICE.candidates || skip.has(reads(c.text))) return false;
+      const note = noteOf(g, c.act);
+      if (!note || recent.has(note)) return false;
+      seen.add(key);
+      return true;
+    });
+  };
+  if (w.kind === 'flow') return best(flowCands(g)).sort((a, b) => b.hope - a.hope);
+  if (w.kind === 'order') return best(orderCands(g));
+  const data = TIERS.some((k) => w.need[k] > g.data[k] + 1e-9);
+  const credits = w.need.credits > g.credits + 1e-6;
+  if (data && credits) {
+    const forData = best(dataCands(g, w)).map((c): Cand => ({ ...c, brings: 'data' }));
+    const had = new Set(forData.map((c) => JSON.stringify(c.act)));
+    return [...forData, ...best(creditCands(g)).filter((c) => !had.has(JSON.stringify(c.act))).map((c): Cand => ({ ...c, brings: 'credits' }))];
+  }
+  return best(data ? dataCands(g, w) : creditCands(g));
 }
 
 // =====================================================================================
@@ -888,6 +992,52 @@ function sooner(a: { o: Outcome; rest: number }, b: { o: Outcome; rest: number }
   return a.o.score - b.o.score;
 }
 
+/**
+ * Where a look-ahead copy stands with the orders to come: since when it has had none of its own, what they
+ * pay per second, and the copy's sales when it was first run (what it sells is averaged from there: a
+ * machine hands over whole items, and the smoothed rate of a moment swings across the line that decides
+ * whether a material counts as selling at all).
+ */
+interface OrdersAhead { since: number | null; rate: Purse; next: number; from: number; sold: Bag }
+const aheads = new WeakMap<Game, OrdersAhead>();
+
+/** The copy's record of the orders to come, kept across the runs of one copy. null for the waits orders are not paid in (an order goal, the Flow goal). */
+function ordersAhead(copy: Game, w: Wait): OrdersAhead | null {
+  if (!copy.ordersOn || w.kind === 'order' || w.kind === 'flow') return null;
+  let s = aheads.get(copy);
+  if (!s) aheads.set(copy, (s = { since: null, rate: { credits: 0, a: 0, b: 0, g: 0 }, next: 0, from: copy.time, sold: { ...copy.sold } }));
+  return s;
+}
+
+/** Items per second the copy has sold of each material since it was first run; the smoothed rate at first, the average once that means something. */
+function soldSince(copy: Game, s: OrdersAhead): Bag {
+  const seconds = copy.time - s.from;
+  const weight = Math.min(1, seconds / 20);
+  const out: Bag = {};
+  for (const m of MAT_IDS) {
+    const average = seconds > 1e-9 ? ((copy.sold[m] ?? 0) - (s.sold[m] ?? 0)) / seconds : 0;
+    const rate = weight * average + (1 - weight) * (copy.soldRate[m] ?? 0);
+    if (rate > 0) out[m] = rate;
+  }
+  return out;
+}
+
+/** One step of the orders to come: pays the copy what they are worth on its board for that long. */
+function ordersPay(copy: Game, s: OrdersAhead, step: number) {
+  if (copy.order) {
+    s.since = null;
+    return;
+  }
+  if (s.since == null) s.since = copy.time;
+  if (copy.time - s.since < ADVICE.claimAfter) return;
+  if (copy.time >= s.next) {
+    s.rate = ordersWorth(copy, soldSince(copy, s), ADVICE.claimAfter);
+    s.next = copy.time + ADVICE.ordersEvery;
+  }
+  copy.credits += s.rate.credits * step;
+  for (const k of TIERS) copy.data[k] += s.rate[k] * step;
+}
+
 /** Run a copy until the wait ends or `seconds` pass, claiming its order when it fills, and say how it went. */
 function tryOut(copy: Game, w: Wait, seconds: number, step = ADVICE.step): Outcome {
   const half = seconds / 2;
@@ -898,9 +1048,12 @@ function tryOut(copy: Game, w: Wait, seconds: number, step = ADVICE.step): Outco
   let sampled = 0;
   let orderAtHalf = copy.order;
   let gotAtHalf = orderAtHalf?.got ?? 0;
+  // The orders to come: paid by the second, from a moment after the copy's own order is out of the way.
+  const ahead = ordersAhead(copy, w);
   for (let t = step; t <= seconds + 1e-9; t += step) {
     tick(copy, step);
     if (copy.order?.ready) claimOrder(copy);
+    if (ahead) ordersPay(copy, ahead, step);
     if (over(copy, w, need)) return { t, score: t };
     if (t > half) {
       earned.credits += copy.tickAcc.credits;
@@ -927,12 +1080,17 @@ function tryOut(copy: Game, w: Wait, seconds: number, step = ADVICE.step): Outco
   const orderIn = o && orderRate > 1e-9 ? (o.need - o.got) / orderRate : Infinity;
   if (w.kind === 'order') return { t: Infinity, score: seconds + orderIn };
   // Credits or Data: when will everything be in hand at this income, counting the order's pay when it lands?
+  // The income is what the board earned over the second half of the run, plus what the orders to come are
+  // worth on it per second (whether or not the copy had got as far as being paid for them: one whose own
+  // order was still filling at the end must not look poorer for that).
+  const orders = ahead ? ordersWorth(copy, soldSince(copy, ahead), ADVICE.claimAfter) : null;
+  const rateOf = (k: keyof Purse) => (sampled > 0 ? earned[k] / sampled : 0) + (orders ? orders[k] : 0);
   const until = (bonus: Purse | null) => {
     let worst = 0;
     for (const k of KEYS) {
       const missing = need[k] - have(copy, k) - (bonus ? bonus[k] : 0);
       if (missing <= 1e-9) continue;
-      const rate = sampled > 0 ? earned[k] / sampled : 0;
+      const rate = rateOf(k);
       worst = Math.max(worst, rate > 1e-9 ? missing / rate : Infinity);
     }
     return worst;
@@ -940,7 +1098,7 @@ function tryOut(copy: Game, w: Wait, seconds: number, step = ADVICE.step): Outco
   const plain = until(null);
   const withOrder = o && orderIn < plain ? Math.max(orderIn, until(o.reward)) : plain;
   let stalled = 0;
-  for (const k of KEYS) if (need[k] - have(copy, k) > 1e-9 && !(sampled > 0 && earned[k] / sampled > 1e-9)) stalled++;
+  for (const k of KEYS) if (need[k] - have(copy, k) > 1e-9 && !(rateOf(k) > 1e-9)) stalled++;
   return { t: Infinity, score: seconds + Math.min(plain, withOrder), stalled };
 }
 
@@ -956,57 +1114,75 @@ function worth(base: number, tip: number, measured = true): boolean {
 
 interface Verdict { cand: Cand; base: number; tip: number; cut?: { wire: number; from: number; to: number } }
 
+/** How far the Flow goal is looked ahead: long enough to see its valve open, if that is still to come (doing nothing may end the wait too). */
+function flowHorizon(g: Game): number {
+  const valve = RULES.flow.valveAfter - goalAge(g);
+  return Math.max(ADVICE.flowScreen, valve > 0 ? valve + RULES.flow.holdSeconds + 5 : 0);
+}
+
 /** Is this producer counted and flowing in `g`? */
 const flows = (g: Game, id: number) => {
   const n = node(g, id);
   return !!n && countsForFlow(g, n) && isFlowing(n);
 };
-/** The share of the last few seconds this producer spent working. */
-const busy = (g: Game, id: number) => node(g, id)?.util ?? 0;
 
 /**
- * The Flow goal. A tip is about one producer, and it is true when that producer flows with the fix and would
- * not have without it. Finishing the goal is better still, but is not asked of every tip: on a board with
+ * Does this producer go on flowing? The copy is run for ADVICE.flowWatch seconds more, and the producer must
+ * stay at the mark throughout: one that dips under it for a moment every few seconds still holds the goal's
+ * ten seconds back, and is what made it a tip's subject in the first place (flowCands). Changes the copy.
+ */
+function flowsSteadily(copy: Game, id: number): boolean {
+  if (!flows(copy, id)) return false;
+  for (let t = 0; t < ADVICE.flowWatch; t += ADVICE.step) {
+    tick(copy, ADVICE.step);
+    if (!flows(copy, id)) return false;
+  }
+  return true;
+}
+
+/**
+ * The Flow goal. A tip is about one producer, and it is true when that producer flows with the fix, and goes
+ * on flowing, and would not have without it. Finishing the goal is better still, but is not asked of every tip: on a board with
  * two or three things wrong the first fix cannot finish it, and a fix can even push another producer under
  * (a faster Spark Refiner fills the Lab that a Well was feeding), which the next tip then deals with.
+ * A fix that leaves its producer short of flowing is not a tip, however much closer it brings it: the goal's
+ * valve (RULES.flow.valveAfter) is there for the board nobody can fix.
  * Best first: the fix that completes the goal soonest, then the one that leaves the fewest producers short,
  * then the one for the producer furthest from flowing.
  */
 function judgeFlow(g: Game, w: Wait, cands: Cand[]): Verdict | null {
   const idle = lookahead(g);
   if (!idle || !cands.length) return null;
-  const base = tryOut(idle, w, ADVICE.flowScreen);
+  const horizon = flowHorizon(g);
+  const base = tryOut(idle, w, horizon);
   if (base.t <= ADVICE.minWait) return null;
   const tried: { c: Cand; o: Outcome; rank: number }[] = [];
-  const seen = new Set<string>();
   cands.forEach((c, rank) => {
-    const key = JSON.stringify(c.act);
-    if (seen.has(key) || seen.size >= ADVICE.candidates) return;
-    seen.add(key);
     const copy = lookahead(g);
     if (!copy || !perform(copy, c.act)) return;
-    const o = tryOut(copy, w, isFinite(base.t) ? base.t : ADVICE.flowScreen);
-    const finishes = isFinite(o.t) && (!isFinite(base.t) || base.t - o.t >= ADVICE.minSaves);
-    const fixed = c.culprit != null && flows(copy, c.culprit) && !flows(idle, c.culprit);
-    // Not flowing yet, but working much more of the time than it would have: one step of two. (A machine fed
-    // through a Router that favours a Lab needs the Router turned and, often, a wire of its own as well.)
-    const closer = c.culprit != null && !flows(idle, c.culprit) && busy(copy, c.culprit) - busy(idle, c.culprit) >= ADVICE.flowStep;
-    if (finishes || ((fixed || closer) && !isFinite(base.t))) tried.push({ c, o, rank: fixed || finishes ? rank : rank + 1000 });
+    const o = tryOut(copy, w, isFinite(base.t) ? base.t : horizon);
+    // With the fix the goal must not end later than without it.
+    if (isFinite(base.t) && !isFinite(o.t)) return;
+    const saves = isFinite(o.t) && (!isFinite(base.t) || base.t - o.t >= ADVICE.minSaves);
+    const fixed = !saves && c.culprit != null && !flows(idle, c.culprit) && flowsSteadily(copy, c.culprit);
+    if (saves || fixed) tried.push({ c, o, rank });
   });
   if (!tried.length) return null;
   tried.sort((a, b) => (a.o.score === b.o.score ? a.rank - b.rank : a.o.score - b.o.score));
   return { cand: tried[0].c, base: base.t, tip: tried[0].o.t };
 }
 
-/** Try the candidates against doing nothing and return the one that ends the wait soonest, if any is worth saying. */
+/**
+ * Try the candidates against doing nothing and return the one that ends the wait soonest, if any is worth
+ * saying. `keep` is the tip already on offer (its action as JSON): it stays ahead of one that is only a
+ * little better.
+ */
 function judge(g: Game, w: Wait, cands: Cand[], keep: string | null = null): Verdict | null {
   if (w.kind === 'flow') return judgeFlow(g, w, cands);
-  /** The tip already on offer only has to go on saving a little (ADVICE.keepSaves) to stay, if that much is measured. */
-  const good = (c: Cand, base: number, tip: number, measured = true) =>
-    worth(base, tip, measured) || (measured && keep != null && JSON.stringify(c.act) === keep && isFinite(tip) && (!isFinite(base) || base - tip >= ADVICE.keepSaves));
   /**
-   * The last word on a small saving: the tip against doing nothing once more, at a fine step, until both waits
-   * end. A bigger saving, or one that is only an estimate (and so had to be large to count), is taken as it is.
+   * The last word on a saving that is not large: the tip against doing nothing once more, at a fine step,
+   * until both waits end. A bigger saving, or one that is only an estimate (and so had to be a good share of
+   * the wait to count), is taken as it is.
    */
   const checked = (c: Cand, v: Verdict, measured: boolean): Verdict | null => {
     if (!measured || !isFinite(v.base) || v.base - v.tip >= Math.max(ADVICE.checkBelow, ADVICE.checkShare * v.base)) return v;
@@ -1016,8 +1192,15 @@ function judge(g: Game, w: Wait, cands: Cand[], keep: string | null = null): Ver
     const limit = v.base * 1.2 + 5;
     const base = tryOut(idle, w, limit, ADVICE.fine);
     const tip = tryOut(copy, w, isFinite(base.t) ? base.t : limit, ADVICE.fine);
-    if (!isFinite(base.t) || !isFinite(tip.t) || !good(c, base.t, tip.t)) return null;
+    if (!isFinite(base.t) || !isFinite(tip.t) || !worth(base.t, tip.t)) return null;
     return { cand: c, base: base.t, tip: tip.t };
+  };
+  /** The tip on offer goes first again if it is about as good as the best: two tips a second apart must not take turns. */
+  const kept = <T extends { c: Cand; o: Outcome }>(list: T[]): T[] => {
+    const i = list.findIndex((x) => keep != null && JSON.stringify(x.c.act) === keep);
+    if (i <= 0 || !isFinite(list[i].o.score)) return list;
+    if (list[i].o.score - list[0].o.score > Math.max(ADVICE.keepWithin, ADVICE.keepShare * list[0].o.score)) return list;
+    return [list[i], ...list.slice(0, i), ...list.slice(i + 1)];
   };
   const idle = lookahead(g);
   if (!idle || !cands.length) return null;
@@ -1027,16 +1210,11 @@ function judge(g: Game, w: Wait, cands: Cand[], keep: string | null = null): Ver
   const tried: { c: Cand; o: Outcome; copy: Game; rest: number }[] = [];
   /** Tips that do not end a wait which would never end, but leave fewer things with nothing coming in. */
   const unstuck: { c: Cand; o: Outcome }[] = [];
-  // The same action can be proposed twice (a wire to the Market for the credits and for the order).
-  const seen = new Set<string>();
-  for (const c of top(cands, cands.length)) {
-    const key = JSON.stringify(c.act);
-    if (seen.has(key) || seen.size >= ADVICE.candidates) continue;
-    seen.add(key);
+  for (const c of cands) {
     const copy = lookahead(g);
     if (!copy || !perform(copy, c.act)) continue;
     const o = tryOut(copy, w, isFinite(base.t) ? base.t : screen);
-    if (good(c, base.score, o.score)) tried.push({ c, o, copy, rest: purse(copy, w) });
+    if (worth(base.score, o.score)) tried.push({ c, o, copy, rest: purse(copy, w) });
     else if (!isFinite(base.score) && !isFinite(o.score) && (o.stalled ?? 0) < (base.stalled ?? 0)) unstuck.push({ c, o });
   }
   if (!tried.length) {
@@ -1050,7 +1228,7 @@ function judge(g: Game, w: Wait, cands: Cand[], keep: string | null = null): Ver
   tried.sort(sooner);
   if (isFinite(base.t)) {
     // Everything that matters happened inside the first run: nothing was estimated.
-    for (const x of tried.slice(0, 3)) {
+    for (const x of kept(tried).slice(0, 3)) {
       const v = checked(x.c, { cand: x.c, base: base.t, tip: x.o.t }, true);
       if (v) return v;
     }
@@ -1061,15 +1239,15 @@ function judge(g: Game, w: Wait, cands: Cand[], keep: string | null = null): Ver
   const baseOn = tryOut(idle, w, rest);
   const baseTime = screen + baseOn.score;
   const finals: { c: Cand; o: Outcome; rest: number; measured: boolean }[] = [];
-  for (const x of tried.slice(0, 2)) {
+  for (const x of kept(tried).slice(0, 2)) {
     const on = isFinite(x.o.t) ? null : tryOut(x.copy, w, isFinite(baseOn.t) ? baseOn.t : rest);
     const time = on ? screen + on.score : x.o.t;
     // Measured when the tip's copy reached the end of the wait, and the untouched one did too (or never would have).
     const measured = (!on || isFinite(on.t)) && (isFinite(baseOn.t) || !isFinite(baseTime));
-    if (good(x.c, baseTime, time, measured)) finals.push({ c: x.c, o: { t: time, score: time }, rest: purse(x.copy, w), measured });
+    if (worth(baseTime, time, measured)) finals.push({ c: x.c, o: { t: time, score: time }, rest: purse(x.copy, w), measured });
   }
   finals.sort(sooner);
-  for (const x of finals) {
+  for (const x of kept(finals)) {
     const v = checked(x.c, { cand: x.c, base: baseTime, tip: x.o.score }, x.measured);
     if (v) return v;
   }
@@ -1080,21 +1258,30 @@ function judge(g: Game, w: Wait, cands: Cand[], keep: string | null = null): Ver
 // The public face
 // =====================================================================================
 
-const verdicts = new WeakMap<Game, { key: string; time: number; until: number; advice: Advice | null; act: string | null }>();
+/**
+ * What the adviser remembers about a game between calls. `key` is what the verdict was worked out for (the
+ * board, the wait, the order); `board` is the board and the wait alone, and `gone` are the tips (their
+ * actions, as JSON) that have been on offer for that board and left again: they do not come back until the
+ * board changes, whatever the orders do in between.
+ */
+interface Memory { key: string; board: string; time: number; until: number; advice: Advice | null; act: string | null; said: string | null; gone: Set<string> }
+
+/** A tip as the player reads it, prices aside: "Wire a Glint Well's port to the Lab" is one tip, whichever of the two Glint Wells it is about. */
+const reads = (text: string) => text.replace(/\d+¢/g, '¢');
+const verdicts = new WeakMap<Game, Memory>();
 
 function toAdvice(w: Wait, v: Verdict): Advice {
   const c = v.cand;
   const a: Advice = {
-    kind: w.kind === 'data' ? 'data' : w.kind === 'flow' ? 'flow' : 'credits',
-    // A Flow tip names the culprit first: "The Murk Well is holding Flow back because it makes more Murk than its machines take: drag from...".
-    text: c.lead
-      ? { mouse: `${c.lead} because ${c.why}: ${low(c.mouse)}.`, touch: `${c.lead} because ${c.why}: ${low(c.touch)}.` }
-      : { mouse: `${c.mouse}: ${c.why}.`, touch: `${c.touch}: ${c.why}.` },
+    kind: w.kind === 'flow' ? 'flow' : c.brings ?? (w.kind === 'data' ? 'data' : 'credits'),
+    text: { mouse: c.text, touch: c.text },
     eta: v.base,
+    // Every tip says what it saves. Infinity: the wait would not end without it (which is also true of a tip
+    // that is one step of several and does not end it alone).
+    saves: isFinite(v.tip) && isFinite(v.base) ? Math.max(0, v.base - v.tip) : Infinity,
     cost: c.cost,
     steps: 1,
   };
-  if (isFinite(v.tip)) a.saves = isFinite(v.base) ? Math.max(0, v.base - v.tip) : Infinity;
   if (c.show != null) a.node = c.show;
   if (c.culprit != null) a.culprit = c.culprit;
   const x = c.act;
@@ -1124,9 +1311,17 @@ function toAdvice(w: Wait, v: Verdict): Advice {
   return a;
 }
 
+/** Seconds of quiet still owed after the player's last change to the board (0 when the adviser may speak). */
+export function adviceQuiet(g: Game): number {
+  const last = g.edits?.[g.edits.length - 1];
+  if (!last || last.at > g.time) return 0;
+  return Math.max(0, RULES.tips.quiet - (g.time - last.at));
+}
+
 /**
  * The best next step while waiting, or null when there is nothing worth saying: no wait, a wait that is
- * nearly over, or nothing affordable that would really shorten it.
+ * nearly over, the player has only just changed the board, or nothing affordable would shorten the wait by
+ * enough (ADVICE.minSaves).
  *
  * Only actions the player can afford and do right now; ranked by the seconds they save on the current wait;
  * and true: the tip was tried on a copy of the game and the wait ended sooner than on an untouched copy.
@@ -1134,26 +1329,36 @@ function toAdvice(w: Wait, v: Verdict): Advice {
 export function advice(g: Game): Advice | null {
   const w = currentWait(g);
   if (!w) return null;
-  const key = `${g.rev}|${g.goal.i}|${w.kind}|${g.order?.created ?? -1}|${g.order?.ready ?? ''}`;
+  // The player has just done something: tips are for free hands, and never follow one another in a chain.
+  if (adviceQuiet(g) > 0) return null;
+  // Saving is one wait whether credits or Data is further off at this moment: the verdict does not turn on it.
+  const what = w.kind === 'flow' || w.kind === 'order' ? w.kind : 'save';
+  const board = `${g.rev}|${g.goal.i}|${what}`;
+  const key = `${board}|${g.order?.created ?? -1}|${g.order?.ready ?? ''}`;
   const hit = verdicts.get(g);
   if (hit && hit.key === key && g.time >= hit.time && g.time < hit.until) return hit.advice;
-  const cands = w.kind === 'data' ? dataCands(g, w) : w.kind === 'credits' ? creditCands(g) : w.kind === 'flow' ? flowCands(g) : orderCands(g);
-  // The tip given last time, if the board and the wait are still the same: it stays while it still helps.
-  const v = judge(g, w, cands, hit && hit.key === key ? hit.act : null);
+  const same = !!hit && hit.board === board && g.time >= hit.time;
+  const gone = same ? hit!.gone : new Set<string>();
+  // The tip given last time, if the board and the wait are still the same: it stays while it is still worth saying.
+  const v = judge(g, w, candidates(g, w, gone), same ? hit!.act : null);
   if (v && v.cand.act.t === 'cut') {
     const id = v.cand.act.wire;
     const wire = g.wires.find((x) => x.id === id);
     if (wire) v.cut = { wire: id, from: wire.from, to: wire.to };
   }
   const a = v ? toAdvice(w, v) : null;
+  const act = v ? JSON.stringify(v.cand.act) : null;
+  const said = v ? reads(v.cand.text) : null;
+  // A tip that has left the card (for nothing, or for another tip) does not come back while the board is as it is.
+  if (same && hit!.said && hit!.said !== said) gone.add(hit!.said);
   // A tip for a wait of a minute is looked at again within ten seconds; no verdict is kept for less than two.
   const life = v && isFinite(v.base) ? Math.min(ADVICE.refresh, Math.max(2, ADVICE.refreshShare * v.base)) : ADVICE.refresh;
-  verdicts.set(g, { key, time: g.time, until: g.time + life, advice: a, act: v ? JSON.stringify(v.cand.act) : null });
+  verdicts.set(g, { key, board, time: g.time, until: g.time + life, advice: a, act, said, gone });
   return a;
 }
 
 export interface AdviceTrial {
-  /** The tip as it would read (mouse wording), its price, and whether trying it on a copy worked at all. */
+  /** The tip as it would read, its price, and whether trying it on a copy worked at all. */
   text: string;
   cost: number;
   doable: boolean;
@@ -1167,26 +1372,23 @@ export interface AdviceTrial {
 /**
  * For tuning and debugging, not for the interface: every candidate the adviser would consider right now and
  * how each one did in the first look (ADVICE.screen seconds), next to doing nothing. Works the trials out
- * afresh on every call. null when the active goal is not a wait.
+ * afresh on every call, and ignores the quiet after a change. null when the active goal is not a wait.
  */
 export function adviceTrials(g: Game): { kind: string; idle: { ends: number; score: number }; trials: AdviceTrial[] } | null {
   const w = currentWait(g);
   const idle = w && lookahead(g);
   if (!w || !idle) return null;
-  const screen = w.kind === 'flow' ? ADVICE.flowScreen : ADVICE.screen;
+  const screen = w.kind === 'flow' ? flowHorizon(g) : ADVICE.screen;
   const base = tryOut(idle, w, screen);
-  const cands = w.kind === 'data' ? dataCands(g, w) : w.kind === 'credits' ? creditCands(g) : w.kind === 'flow' ? flowCands(g) : orderCands(g);
-  const trials = top(cands, cands.length).map((c): AdviceTrial => {
+  const trials = candidates(g, w).map((c): AdviceTrial => {
     const copy = lookahead(g);
-    const text = c.lead ? `${c.lead} because ${c.why}: ${low(c.mouse)}.` : `${c.mouse}: ${c.why}.`;
-    if (!copy || !perform(copy, c.act)) return { text, cost: c.cost, doable: false, ends: Infinity, score: Infinity, worth: false };
+    if (!copy || !perform(copy, c.act)) return { text: c.text, cost: c.cost, doable: false, ends: Infinity, score: Infinity, worth: false };
     const o = tryOut(copy, w, isFinite(base.t) ? base.t : screen);
     // A Flow tip is worth saying when it ends the goal, or gets its producer flowing (judgeFlow).
     const good = w.kind !== 'flow' ? worth(base.score, o.score)
-      : isFinite(o.t) ? !isFinite(base.t) || base.t - o.t >= ADVICE.minSaves
-        : !isFinite(base.t) && c.culprit != null && !flows(idle, c.culprit)
-          && (flows(copy, c.culprit) || busy(copy, c.culprit) - busy(idle, c.culprit) >= ADVICE.flowStep);
-    return { text, cost: c.cost, doable: true, ends: o.t, score: o.score, worth: good };
+      : isFinite(o.t) && (!isFinite(base.t) || base.t - o.t >= ADVICE.minSaves) ? true
+        : !(isFinite(base.t) && !isFinite(o.t)) && c.culprit != null && !flows(idle, c.culprit) && flowsSteadily(copy, c.culprit);
+    return { text: c.text, cost: c.cost, doable: true, ends: o.t, score: o.score, worth: good };
   });
   return { kind: w.kind, idle: { ends: base.t, score: base.score }, trials };
 }

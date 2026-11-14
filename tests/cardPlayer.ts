@@ -1,5 +1,6 @@
 // A scripted newcomer: a player who does ONLY what each goal card says, in the card's own words, one action
-// every few seconds. No upgrade the card did not ask for, no second Lab, no extra machines, no side techs.
+// every few seconds: the hint, and during a wait the card's "while you wait" line (Goal.meanwhile). No
+// upgrade the card did not ask for, no extra machines, no side techs.
 // This is the floor for a first-time player, and it is not one of the pacing bot's fast policies: those
 // wire, upgrade and build Routers on their own.
 //
@@ -15,15 +16,17 @@
 // Used by tests/playthrough.test.ts (every goal can be done; how long each takes) and tests/advice.test.ts
 // (real game states to check tips against).
 import { expect } from 'vitest';
-import { claimGoal, claimOrder, connect, expandBoard, favour, placeNode, upgrade } from '../src/actions';
+import { claimGoal, claimOrder, connect, cutWire, expandBoard, favour, freeDeposits, placeNode, upgrade } from '../src/actions';
 import { Advice, advice, applyAdvice } from '../src/advice';
 import { NodeType, RECIPES, TECHS } from '../src/content';
 import { expansionCost, nodeCost, research, techAffordable, upgradeCost } from '../src/economy';
-import { activeGoal, goalById } from '../src/goals';
+import { activeGoal, goalById, meanwhileOf } from '../src/goals';
 import { Game, GNode } from '../src/state';
 import { fresh, market, run, well } from './helpers';
 
 export interface CardOptions {
+  /** Does what the card's "while you wait" lines say (the default). false: the hints alone, as before the lines existed. */
+  meanwhile?: boolean;
   /** Also wires every new Refiner to the Lab, as goal 7 taught for Shard. */
   studyAll?: boolean;
   /** Follows the adviser's tips. */
@@ -39,7 +42,7 @@ export interface CardOptions {
    * to). 'asked': only while one of those two goals is on the card; at other times that is left to the tips.
    */
   tendOrders?: 'always' | 'asked';
-  /** Called once a second while the player has nothing to do but wait. */
+  /** Called once a second while the player has nothing to do but wait, before a "while you wait" line or a tip is acted on. */
   onIdle?: (g: Game) => void;
   /** Seconds one wait may take before the run fails: longer than this is a wall. */
   wall?: number;
@@ -58,6 +61,44 @@ export interface GoalTime {
 }
 
 export interface TipTaken { at: number; goal: string; text: string; kind: Advice['kind']; eta: number; saves: number | undefined; cost: number }
+
+/**
+ * The next gesture of the active goal's "while you wait" line, read the way the hints are read. Returns false
+ * when there is nothing (more) to do for it right now: no line, not applicable, done, or not affordable yet.
+ */
+export function followMeanwhile(g: Game): boolean {
+  const line = meanwhileOf(g);
+  if (!line || line.done(g)) return false;
+  const lab = g.nodes.find((n) => n.type === 'lab');
+  switch (activeGoal(g)!.id) {
+    case 'make-spark': {
+      // "Drag from the Ink Refiner's Ink port to the Lab too."
+      const ink = g.nodes.find((n) => n.recipe === 'ink');
+      return !!ink && !!lab && !!connect(g, ink.id, 0, lab.id);
+    }
+    case 'make-glyph': case 'make-mist': {
+      // "Give each new deposit a Well and a Lab built from its port": one deposit after the other, a Well and
+      // then its Lab (two gestures each). On "Make your first Mist" the board has to grow first: "Expand the
+      // board again, then give a new deposit a Well and a Lab of its own."
+      const bare = g.nodes.find((n) => n.type === 'well' && !g.wires.some((w) => w.from === n.id));
+      if (bare) {
+        if (g.credits < nodeCost(g, 'lab')) return false;
+        const built = placeNode(g, 'lab', bare.x + 240, bare.y);
+        return !!built && !!connect(g, bare.id, 0, built.id);
+      }
+      const d = freeDeposits(g)[0];
+      if (!d && activeGoal(g)!.id === 'make-mist') return expandBoard(g);
+      return !!d && g.credits >= nodeCost(g, 'well') && !!placeNode(g, 'well', d.x, d.y, { depositId: d.id });
+    }
+    case 'build-fabricator': {
+      // "Remove the wire from the Glyph Assembler to the Lab."
+      const id = line.cuts?.(g)[0];
+      return id != null && cutWire(g, id);
+    }
+    default:
+      return false;
+  }
+}
 
 export interface CardRun {
   g: Game;
@@ -121,6 +162,17 @@ export function playByTheCard(opts: CardOptions = {}): CardRun {
     tickSurplus();
     tendOrder();
     opts.onIdle?.(g);
+    // The card's "while you wait" line comes before any tip: it is on the card.
+    const line = opts.meanwhile === false ? null : meanwhileOf(g);
+    if (line && !line.done(g) && !g.goal.ready) {
+      const before = g.rev;
+      if (followMeanwhile(g)) {
+        act();
+        offered = 0;
+        return;
+      }
+      expect(g.rev, 'a "while you wait" line that could not be followed left the board alone').toBe(before);
+    }
     const tip = opts.tips || activeGoal(g)?.id === 'hold-flow' ? advice(g) : null;
     if (!tip) {
       offered = 0;
@@ -222,7 +274,7 @@ export function playByTheCard(opts: CardOptions = {}): CardRun {
   if (opts.studyAll) wire(spark, lab);
   // 12–14: orders, the Router, the board.
   claim('first-order');
-  const router = from(ink, 'router'); // "Build a Router from a machine's port..."
+  const router = from(spark, 'router'); // "Build a Router from the Spark Refiner's port..."
   wire(router, lab); // "...and wire it to a Lab and to a Market..."
   wire(router, m);
   act();

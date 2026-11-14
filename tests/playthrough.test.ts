@@ -152,63 +152,85 @@ describe('scripted playthrough', () => {
 // The whole demo, by the card.
 //
 // A player who does ONLY what each goal card says, in the card's own words, one action every six seconds
-// (tests/cardPlayer.ts): no upgrade the card did not ask for, no second Lab, no extra machines, no side
-// techs. With the adviser (src/advice.ts) on top, following a tip once it has been on offer for 15 seconds of
-// a wait, that is the newcomer the build is tuned for: `npm run pacing` judges that player (who also claims
-// 8–16 s late) against the targets, and tests/pacing.test.ts pins seed 0 of it. Here the same script proves
-// that every goal can be done from the state the one before leaves behind, with the tips and without, and
-// pins what the tips are worth.
+// (tests/cardPlayer.ts): the hint, and during a wait the card's "while you wait" line. No upgrade the card did
+// not ask for, no extra machines, no side techs. With the adviser (src/advice.ts) on top, following a tip
+// once it has been on offer for 15 seconds of a wait, that is the newcomer the build is tuned for: `npm run
+// pacing` judges that player (who also claims 8–16 s late) against the targets, with tips and without, and
+// tests/pacing.test.ts pins seeds 0–3 of it. Here the same script proves that every goal can be done from the
+// state the one before leaves behind, and pins what the cards' lines and the tips are each worth.
 // ---------------------------------------------------------------------------------------------------
 
 const on = (run: CardRun, id: string) => run.spent.find((x) => x.id === id)!;
 const lens = (r: CardRun) => r.g.stats.firstLensAt!;
 const SPINE = ['L1', 'P1', 'P2', 'P3', 'P4', 'P5', 'P7', 'R1', 'S1']; // what the goal chain grants or asks for
+const LONG = ['make-spark', 'make-glyph', 'make-mist', 'build-fabricator'];
 
-// Without tips a wait can last twenty minutes: the prices are set for a player who follows them. (One run,
-// shared by both groups of tests: it is an hour of game time.)
-const plain = playByTheCard({ tendOrders: 'asked', wall: 30 * 60 });
+// The hints alone, without the "while you wait" lines: a wait can last a quarter of an hour. (One run, shared:
+// it is most of an hour of game time.)
+const bare = playByTheCard({ meanwhile: false, tendOrders: 'asked', wall: 30 * 60 });
+// The cards as they are: hints and lines, and never a tip (but for the Flow goal, whose card sends the player to the ring).
+const plain = playByTheCard({ tendOrders: 'asked' });
 
 describe('the whole demo, by the card alone', () => {
-
   it('every goal can be done, in order, by doing only what its card says', () => {
-    const { g, spent } = plain;
-    expect(spent.map((x) => x.id)).toEqual(GOALS.slice(0, MAIN_GOALS).map((x) => x.id));
-    expect(g.ended).toBe(true);
-    expect(g.stats.firstLensAt).not.toBeNull();
-    expect(g.credits).toBeGreaterThanOrEqual(0);
-    // Nothing the card did not ask for: one Lab and no side techs. The only upgrades are the Well's of goal 6
-    // and what the Flow ring led to on goal 16.
-    expect(g.nodes.filter((n) => n.type === 'lab').length).toBe(1);
-    expect([...g.techs].sort()).toEqual(SPINE);
-    expect(plain.tips.every((t) => t.kind === 'flow')).toBe(true);
-    expect(g.nodes.reduce((s, n) => s + n.lv.speed + n.lv.eff + n.lv.buffer, 0)).toBe(1 + plain.tips.length);
+    for (const run of [bare, plain]) {
+      const { g, spent } = run;
+      expect(spent.map((x) => x.id)).toEqual(GOALS.slice(0, MAIN_GOALS).map((x) => x.id));
+      expect(g.ended).toBe(true);
+      expect(g.stats.firstLensAt).not.toBeNull();
+      expect(g.credits).toBeGreaterThanOrEqual(0);
+      // No side techs, and no tip but the Flow ring's. The only upgrades are the Well's of goal 6 and what the ring led to.
+      expect([...g.techs].sort()).toEqual(SPINE);
+      expect(run.tips.every((t) => t.kind === 'flow')).toBe(true);
+      expect(g.nodes.reduce((s, n) => s + n.lv.speed + n.lv.eff + n.lv.buffer, 0)).toBe(1 + run.tips.length);
+    }
+    // The hints ask for one Lab. The lines add three more, each with a Well of its own, on a board expanded twice.
+    expect(bare.g.nodes.filter((n) => n.type === 'lab').length).toBe(1);
+    expect(bare.g.board.expansions).toBe(1);
+    expect(plain.g.nodes.filter((n) => n.type === 'lab').length).toBe(4);
+    expect(plain.g.nodes.filter((n) => n.type === 'well').length).toBe(bare.g.nodes.filter((n) => n.type === 'well').length + 3);
+    expect(plain.g.board.expansions).toBe(2);
+    // ...Ink is studied, and Glyph no longer is by the time the Fabricator is saved for.
+    const wired = (g: typeof plain.g, recipe: string, type: string) =>
+      g.wires.some((w) => g.nodes.find((n) => n.id === w.from)?.recipe === recipe && g.nodes.find((n) => n.id === w.to)?.type === type);
+    expect(wired(plain.g, 'ink', 'lab')).toBe(true);
+    expect(wired(bare.g, 'ink', 'lab')).toBe(false);
+    expect(wired(plain.g, 'glyph', 'lab')).toBe(false);
+    expect(wired(bare.g, 'glyph', 'lab')).toBe(true);
   });
 
   it('"Hold 95% Flow" is earned: it does not complete until the one machine short of its input is fixed', () => {
     // The card sends the player to the Flow ring; what holds Flow back is the Spark Refiner, short of Ember.
-    const fixes = plain.tips.filter((t) => t.goal === 'hold-flow');
-    expect(fixes.length).toBeGreaterThanOrEqual(1);
-    expect(fixes.length).toBeLessThanOrEqual(2);
-    expect(fixes[0].text).toBe('The Spark Refiner is holding Flow back because it is short of Ember: click the Ember Well and buy Speed (50¢).');
-    expect(on(plain, 'hold-flow').seconds).toBeGreaterThan(30);
-    expect(on(plain, 'hold-flow').seconds).toBeLessThan(120);
+    for (const run of [bare, plain]) {
+      const fixes = run.tips.filter((t) => t.goal === 'hold-flow');
+      expect(fixes.length).toBeGreaterThanOrEqual(1);
+      expect(fixes.length).toBeLessThanOrEqual(2);
+      expect(fixes[0].text).toBe('The Spark Refiner needs more Ember: buy Speed on the Ember Well (50¢).');
+      expect(on(run, 'hold-flow').seconds).toBeGreaterThan(30);
+      expect(on(run, 'hold-flow').seconds).toBeLessThan(120);
+    }
   });
 
-  it('but it is a slow game: every long wait is for α, with credits piling up, which is what the adviser is for', () => {
-    const { g, spent } = plain;
-    const long = spent.filter((x) => x.seconds > 180);
+  it('the lines are what makes it a twenty-minute game: with the hints alone every long wait is for α, and long', () => {
+    const long = bare.spent.filter((x) => x.seconds > 180);
     expect(long.map((x) => `${x.title}: ${x.waitedFor}`)).toEqual([
       'Make your first Spark: α for Ember Deposits',
       'Assemble your first Glyph: α for Assembly',
       'Make your first Mist: α for Breeze Deposits',
       'Build a Fabricator: α and β for Fabrication',
     ]);
-    // Close to an hour to the Lens, against about twenty minutes with the tips.
-    expect(lens(plain)).toBeGreaterThan(40 * 60);
-    expect(lens(plain)).toBeLessThan(65 * 60);
-    expect(g.stats.fromSales + g.stats.fromGoals + g.stats.fromOrders).toBeGreaterThan(15000);
-    // The two-price rule never shows itself to this player.
-    expect(g.seenSurplus).toBe(false);
+    // Most of an hour to the Lens with the hints alone, about twenty minutes with the lines: no tip involved.
+    expect(lens(bare)).toBeGreaterThan(40 * 60);
+    expect(lens(bare)).toBeLessThan(60 * 60);
+    expect(lens(plain)).toBeGreaterThan(17 * 60);
+    expect(lens(plain)).toBeLessThan(22 * 60);
+    for (const id of LONG) expect(on(plain, id).seconds, id).toBeLessThan(0.75 * on(bare, id).seconds);
+    // No goal takes four and a half minutes (the pacing tool's card-only player, who claims late, has six).
+    expect(Math.max(...plain.spent.map((x) => x.seconds))).toBeLessThan(270);
+    expect(plain.g.stats.fromSales + plain.g.stats.fromGoals + plain.g.stats.fromOrders).toBeGreaterThan(9000);
+    // The two-price rule never shows itself to this player, and Market Lens with it.
+    expect(plain.g.seenSurplus).toBe(false);
+    expect(plain.g.techs).not.toContain('C1');
   });
 });
 
@@ -223,7 +245,6 @@ describe('the whole demo, by the card and the tips', () => {
       expect(spent.map((x) => x.id), name).toEqual(GOALS.slice(0, MAIN_GOALS).map((x) => x.id));
       expect(g.ended, name).toBe(true);
       expect(g.credits, name).toBeGreaterThanOrEqual(0);
-      expect(tips.length, name).toBeGreaterThan(8);
       expect(spent.reduce((s, x) => s + x.tips, 0), name).toBe(tips.length);
       // Every upgrade on the board beyond the one goal 6 asks for was a tip.
       const levels = g.nodes.reduce((s, n) => s + n.lv.speed + n.lv.eff + n.lv.buffer, 0);
@@ -231,34 +252,46 @@ describe('the whole demo, by the card and the tips', () => {
       if (levels > 1) expect(tips.some((t) => /buy Speed|Upgrade all/.test(t.text)), name).toBe(true);
       // No tech was researched that the card did not ask for, unless a tip said so.
       const side = g.techs.filter((id) => !SPINE.includes(id));
-      expect(side.length, name).toBe(tips.filter((t) => /research/.test(t.text)).length);
+      expect(side.length, name).toBe(tips.filter((t) => /^Research /.test(t.text)).length);
     }
   });
 
-  it('the tips are worth following: half an hour off the Lens, and no goal takes four minutes', () => {
+  it('tips are few and large: a handful a run, none under 15 s, and the game does not depend on them', () => {
+    for (const { name, run } of runs) {
+      const { tips } = run;
+      // The Flow goal takes a fix or two, each named by the adviser; beyond that, a handful.
+      const fixes = tips.filter((t) => t.goal === 'hold-flow');
+      expect(fixes.length, name).toBeGreaterThanOrEqual(1);
+      expect(fixes.length, name).toBeLessThanOrEqual(3);
+      expect(fixes.every((t) => t.kind === 'flow' && / (needs more|gets no|makes more|has nowhere|has nothing|is backed up|is short)/.test(t.text)), name).toBe(true);
+      expect(tips.length, name).toBeGreaterThanOrEqual(1);
+      expect(tips.length, name).toBeLessThanOrEqual(8);
+      for (const t of tips) {
+        expect(t.saves, `${name}: ${t.text}`).toBeDefined();
+        if (t.kind !== 'flow') expect(t.saves!, `${name}: ${t.text}`).toBeGreaterThanOrEqual(15);
+        expect([...t.text].length, t.text).toBeLessThanOrEqual(90);
+      }
+      // After a tip is followed the next one is at least 20 s (and the 15 s it is on offer) away.
+      for (let i = 1; i < tips.length; i++) expect(tips[i].at - tips[i - 1].at, `${name}: ${tips[i].text}`).toBeGreaterThanOrEqual(35);
+    }
     for (const { name, run } of runs.slice(0, 4)) {
-      expect(lens(run), name).toBeLessThan(lens(plain) - 20 * 60);
-      // The Data waits are where the card-only player sat idle longest.
-      for (const id of ['make-spark', 'make-glyph', 'make-mist', 'build-fabricator']) expect(on(run, id).seconds, `${name} ${id}`).toBeLessThan(on(plain, id).seconds);
-      expect(run.longestTipless, name).toBeLessThan(plain.longestTipless);
+      // With the tips the Lens comes a little sooner than by the cards alone, not half an hour sooner as it once did.
+      expect(lens(run), name).toBeLessThan(lens(plain) + 30);
+      expect(lens(run), name).toBeGreaterThan(lens(plain) - 4 * 60);
     }
     for (const { name, run } of runs) {
       // Four minutes at six seconds an action, five for the slower hands.
       expect(Math.max(...run.spent.map((x) => x.seconds)), name).toBeLessThanOrEqual(name === '10 s hands' ? 300 : 240);
       // The first order starts counting at once and is done in about half a minute, for everyone.
       expect(on(run, 'first-order').tipless, name).toBeLessThanOrEqual(45);
-      // The Flow goal takes a fix or two, each named by the adviser.
-      const fixes = run.tips.filter((t) => t.goal === 'hold-flow');
-      expect(fixes.length, name).toBeGreaterThanOrEqual(1);
-      expect(fixes.length, name).toBeLessThanOrEqual(3);
-      expect(fixes.every((t) => t.kind === 'flow' && /is holding Flow back because/.test(t.text)), name).toBe(true);
       // The two-price rule never bites before the Lens.
       expect(run.surplusAt, name).toBeNull();
+      expect(run.g.techs, name).not.toContain('C1');
     }
   });
 
-  it('BASELINE (printed, not asserted): each goal\'s time, and the longest wait with no tip, per run', () => {
-    const all = [{ name: 'no tips', run: plain }, ...runs];
+  it('BASELINE (printed, not asserted): each goal\'s time, and the tips, per run', () => {
+    const all = [{ name: 'hints only', run: bare }, { name: 'cards', run: plain }, ...runs];
     const pad = (v: string | number, n: number) => String(v).padStart(n);
     const lines: string[] = [];
     lines.push(`${'seconds on each goal (tips followed)'.padEnd(42)}${all.map((x) => pad(x.name, 12)).join('')}`);
@@ -277,7 +310,7 @@ describe('the whole demo, by the card and the tips', () => {
     row('tips followed', (r) => r.tips.length);
     row('first sale over demand', (r) => (r.surplusAt == null ? 'never' : clock(r.surplusAt)));
     row('credits from sales and orders', (r) => `${Math.round((100 * (r.g.stats.fromSales + r.g.stats.fromOrders)) / (r.g.stats.fromSales + r.g.stats.fromOrders + r.g.stats.fromGoals))}%`);
-    console.info(`\nCARD-PLUS-TIPS BASELINE (the tests' own newcomer; the targets are judged on the pacing tool's)\n${lines.join('\n')}\n\nTips followed, seed 0:\n${runs[0].run.tips.map((t) =>
+    console.info(`\nCARD BASELINE (the tests' own newcomer; the targets are judged on the pacing tool's)\n${lines.join('\n')}\n\nTips followed, seed 0:\n${runs[0].run.tips.map((t) =>
       `  ${clock(t.at)} ${t.goal.padEnd(16)} saves ${t.saves == null ? '?' : isFinite(t.saves) ? Math.round(t.saves) + ' s' : 'the wait'}${t.cost ? `, ${t.cost}¢` : ''}: ${t.text}`).join('\n')}\n`);
     expect(lines.length).toBe(MAIN_GOALS + 9);
   });

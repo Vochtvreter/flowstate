@@ -16,7 +16,9 @@
  *                                      (0 = bank everything, 1 = no limit); --patience=<seconds> likewise
  *                --noBulk              what-if: the fast players never press "Upgrade all"
  *                --noTips              what-if: the newcomer never follows a tip (except on the Flow goal, whose card
- *                                      sends them to the Flow ring: the fix it leads to is the adviser's)
+ *                                      sends them to the Flow ring: the fix it leads to is the adviser's). The
+ *                                      policy `cardonly` is that player, with targets of its own
+ *                --noMeanwhile         what-if: the card players ignore the cards' "while you wait" lines
  *                --trials              with --policy=newcomer: for every wait that begins with no tip on offer,
  *                                      list what the adviser weighed and how each candidate did
  *
@@ -43,11 +45,18 @@
  *    (which upgrades every node of that kind) instead of a press each, when they are at least half of the kind.
  *
  * The newcomer is the player the build is tuned for. They do ONLY what the goal card says (cardStep below
- * reads each card the way tests/cardPlayer.ts does), one action every 6 s, and claim 8–16 s late. When they
- * are waiting and the adviser (src/advice.ts) has had a tip on offer for 15 s, they follow it: one action.
- * They never build a Router, upgrade or wire anything unprompted.
+ * reads each card the way tests/cardPlayer.ts does), one action every 6 s, and claim 8–16 s late. That is the
+ * hint and, while a goal makes them wait, the card's "while you wait" line (Goal.meanwhile in src/goals.ts,
+ * meanwhileStep below): the line is on the card, so it is followed like a hint, before any tip. When they
+ * are waiting, the line is done and the adviser (src/advice.ts) has had a tip on offer for 15 s, they follow
+ * it: one action. They never build a Router, upgrade or wire anything unprompted.
  *   newcomer    6 s per action
  *   newcomer10  the same person at 10 s per action
+ *   cardonly    the newcomer who never follows a tip: the cards and their lines alone. The cards have to
+ *               carry the game by themselves, so this player has targets too (on the Flow goal, whose card
+ *               sends them to the Flow ring, they still take the fix the ring leads to)
+ * For these players the report also counts the tips: how many came on offer, how many were followed, and the
+ * smallest and the median saving the followed ones promised.
  *
  *   slow        the old floor (one action per 8–10 s, wires and builds Routers unprompted, ignores amber,
  *               never upgrades a Lab). Not in the default table any more; --policy=slow still runs it.
@@ -68,7 +77,7 @@ import {
   saturation, techAffordable, techAvailable, techEta, trackAvailable, upgradeCost, upgradeCostAt, valueOf, wellRate,
 } from '../src/economy';
 import { countsForFlow, isFlowing } from '../src/flow';
-import { GOALS, MAIN_GOALS, activeGoal, rewardText, routerFavoursLab } from '../src/goals';
+import { GOALS, MAIN_GOALS, activeGoal, meanwhileOf, rewardText, routerFavoursLab } from '../src/goals';
 import { graph, isMachine, tick } from '../src/sim';
 import { Game, GNode, Reward, Stats, Status, Wire, newGame } from '../src/state';
 import { PROFILES, Profile, applyOverrides } from './pacing-profiles';
@@ -83,7 +92,7 @@ export interface Policy {
   name: string;
   describe: string;
   /** Which targets the run is judged against. */
-  judge: 'fast' | 'newcomer' | 'newcomer10' | 'slow';
+  judge: 'fast' | 'newcomer' | 'newcomer10' | 'cardonly' | 'slow';
   /** Judged against the fast targets. */
   fast: boolean;
   /**
@@ -91,6 +100,8 @@ export interface Policy {
    * `tipDelay` seconds of a wait. Nothing else in this policy's habits below is used then.
    */
   card: boolean;
+  /** A card player who also follows the adviser's tips. */
+  tips: boolean;
   tipDelay: number;
   /** Seconds spent looking at the screen before the first drag. */
   firstActionDelay: number;
@@ -132,14 +143,14 @@ const FAST_HANDS = hands([3, 4], [5, 7], [1.5, 2.5]);
 const SLOW_HANDS = hands([8, 10]);
 
 const FAST: Omit<Policy, 'name' | 'describe' | 'techPolicy' | 'impulseShare'> = {
-  judge: 'fast', fast: true, card: false, tipDelay: 15,
+  judge: 'fast', fast: true, card: false, tips: false, tipDelay: 15,
   firstActionDelay: 6, actionSeconds: FAST_HANDS, claimDelay: [1, 3], noticeDelay: 4, settleTime: 10,
   fixesAmber: true, upgradesLabs: true, expandsUnasked: true,
   patience: 150, pettyShare: 0.03, spendShare: 0.5, growShareOfTarget: 0.25,
 };
 /** The newcomer's hands. The habits after `tipDelay` belong to the fast players and are never read for a card player. */
 const CARD: Omit<Policy, 'name' | 'describe' | 'judge' | 'actionSeconds' | 'firstActionDelay'> = {
-  fast: false, card: true, tipDelay: 15, claimDelay: [8, 16], noticeDelay: 8, settleTime: 20,
+  fast: false, card: true, tips: true, tipDelay: 15, claimDelay: [8, 16], noticeDelay: 8, settleTime: 20,
   techPolicy: 'mainline', impulseShare: 0,
   fixesAmber: false, upgradesLabs: false, expandsUnasked: false,
   patience: 150, pettyShare: 0, spendShare: 1, growShareOfTarget: 0,
@@ -166,8 +177,13 @@ export const POLICIES: Record<string, Policy> = {
     describe: 'the newcomer at 10 s per action: a slower person',
     firstActionDelay: 16, actionSeconds: hands([10, 10]),
   },
+  cardonly: {
+    ...CARD, name: 'cardonly', judge: 'cardonly', tips: false,
+    describe: 'the newcomer who never follows a tip: only the goal card and its "while you wait" lines, one action per 6 s, claims 8–16 s late',
+    firstActionDelay: 12, actionSeconds: hands([6, 6]),
+  },
   slow: {
-    name: 'slow', judge: 'slow', fast: false, card: false, tipDelay: 15,
+    name: 'slow', judge: 'slow', fast: false, card: false, tips: false, tipDelay: 15,
     describe: 'the old floor: one action per 8–10 s, claims late, ignores amber rings, never upgrades a Lab, expands only when asked',
     firstActionDelay: 12, actionSeconds: SLOW_HANDS, claimDelay: [8, 16], noticeDelay: 8, settleTime: 20,
     techPolicy: 'mainline', impulseShare: 0.35,
@@ -177,7 +193,7 @@ export const POLICIES: Record<string, Policy> = {
 };
 
 /** The policies of the default table. */
-const DEFAULT_POLICIES = ['mainline', 'greedy', 'newcomer', 'newcomer10'];
+const DEFAULT_POLICIES = ['mainline', 'greedy', 'newcomer', 'newcomer10', 'cardonly'];
 
 /** Things that do not depend on who is playing. */
 export const CFG = {
@@ -196,6 +212,8 @@ export const CFG = {
   bulkShare: 0.5,
   /** The newcomer follows tips. */
   tips: true,
+  /** Card players do what the card's "while you wait" line says. */
+  meanwhile: true,
   /** --trials: record what the adviser weighed whenever a wait begins with no tip on offer. */
   trials: false,
   deadStretch: 45, // seconds with free hands and nothing useful to do, listed in the report
@@ -227,18 +245,22 @@ export const TARGETS = {
     contentUntil: 1440,
   },
   newcomer: {
-    lens: [1200, 1500] as [number, number],
+    /** 18:30–23:00. */
+    lens: [1110, 1380] as [number, number],
     /** Never more than this long on one goal of the demo... */
     goalMax: 240,
     /** ...and "Build a Fabricator" has the same limit by name. */
     fabricatorMax: 240,
-    /** Longest stretch in a wait with no tip on offer and nothing the card asks. */
-    tiplessMax: 60,
   },
   /** The newcomer at 10 s per action. */
   newcomer10: {
-    lensBy: 1920,
+    lensBy: 1800,
     goalMax: 300,
+  },
+  /** The newcomer who never follows a tip: the cards and their "while you wait" lines alone. */
+  cardonly: {
+    lensBy: 1920,
+    goalMax: 360,
   },
   /** The old floor, for --policy=slow. */
   slow: {
@@ -381,6 +403,10 @@ class Bot {
   tipSince: number | null = null;
   tipOn = false;
   tipsTaken: { t: number; goal: number; text: string; kind: Advice['kind']; eta: number; saves: number | undefined; cost: number }[] = [];
+  /** Every tip that came on offer: when, on which goal, what it said and what it promised then. */
+  tipsOffered: { t: number; goal: number; text: string; saves: number | undefined }[] = [];
+  /** The sentence on offer at the last look, '' when there was none. */
+  tipShown = '';
   /** Stretches of waiting with nothing the card asks and no tip on offer. */
   tiplessSince: number | null = null;
   tipless: { from: number; to: number; goal: number; why: string; trials: string[] }[] = [];
@@ -1051,8 +1077,8 @@ class Bot {
       case 'first-order': case 'three-orders': return tendOrder();
       case 'route-lab': {
         const router = g.nodes.find((n) => n.type === 'router') ?? null;
-        const ink = this.maker('ink');
-        if (!router) return ink && from(ink, 0, 'router');
+        const spark = this.maker('spark');
+        if (!router) return spark && from(spark, 0, 'router'); // "Build a Router from the Spark Refiner's port...
         const step = wireIf(router, 0, lab) ?? wireIf(router, 0, market);
         if (step || routerFavoursLab(g) || !lab) return step;
         const toLab = this.outs(router).find((w) => w.to === lab.id)!;
@@ -1085,6 +1111,65 @@ class Bot {
     }
   }
 
+  /** The Well placed for a "while you wait" line that has not been given its Lab yet. */
+  lineWell: number | null = null;
+
+  /**
+   * The card's "while you wait" line, read the way cardStep reads a hint: the next gesture it asks for. null
+   * when the goal has no line, the line does not apply to this board, or it has been done.
+   */
+  meanwhileStep(): Want | null {
+    const g = this.g;
+    const line = CFG.meanwhile ? meanwhileOf(g) : null;
+    const goal = activeGoal(g);
+    if (!line || !goal || line.done(g)) return null;
+    const lab = g.nodes.find((n) => n.type === 'lab') ?? null;
+    switch (goal.id) {
+      case 'make-spark': {
+        // "Drag from the Ink Refiner's Ink port to the Lab too."
+        const ink = this.maker('ink');
+        if (!ink || !lab || this.wired(ink, 0, lab)) return null;
+        return { cls: 'fix', kind: 'wire', cost: 0, label: `card, meanwhile: wire ${this.name(ink)} → Lab`, run: () => !!connect(g, ink.id, 0, lab.id) };
+      }
+      case 'make-glyph': case 'make-mist': {
+        // "Give each new deposit a Well and a Lab built from its port": one deposit after the other, a Well and
+        // then its Lab. On "Make your first Mist" the board has to grow first: "Expand the board again, then
+        // give a new deposit a Well and a Lab of its own."
+        const placed = this.lineWell != null ? g.nodes.find((n) => n.id === this.lineWell && !this.outs(n).length) ?? null : null;
+        if (placed) {
+          return {
+            cls: 'new', kind: 'build', cost: nodeCost(g, 'lab'), label: `card, meanwhile: build Lab from ${this.name(placed)}`,
+            run: () => {
+              const n = this.buildFrom({ n: placed, port: 0 }, 'lab');
+              if (n) this.lineWell = null;
+              return !!n;
+            },
+          };
+        }
+        const d = freeDeposits(g)[0];
+        if (!d && goal.id === 'make-mist') return { cls: 'new', kind: 'expand', cost: expansionCost(g), label: 'card, meanwhile: expand the board again', run: () => expandBoard(g) };
+        return !d ? null : {
+          cls: 'new', kind: 'build', cost: nodeCost(g, 'well'), label: `card, meanwhile: place ${MATERIALS[d.mat].name} Well on a free deposit`,
+          run: () => {
+            const n = placeNode(g, 'well', d.x, d.y, { depositId: d.id });
+            if (n) {
+              this.noteNode('well');
+              this.lineWell = n.id;
+            }
+            return !!n;
+          },
+        };
+      }
+      case 'build-fabricator': {
+        // "Remove the wire from the Glyph Assembler to the Lab."
+        const id = line.cuts?.(g)[0];
+        const w = id == null ? null : g.wires.find((x) => x.id === id) ?? null;
+        return !w ? null : { cls: 'fix', kind: 'cut', cost: 0, label: `card, meanwhile: remove wire ${this.name(this.node(w.from))} → ${this.name(this.node(w.to))}`, run: () => cutWire(g, w.id) };
+      }
+      default: return null;
+    }
+  }
+
   /** One decision of the newcomer: claim, then the card, then (in a wait) a tip that has been on offer long enough. */
   decideCard(): Want | null {
     const g = this.g;
@@ -1108,15 +1193,23 @@ class Bot {
       this.dawdling = true;
       return null;
     }
+    // Nothing the hint asks for can be done right now: the card's "while you wait" line, if it has one.
+    const also = this.meanwhileStep();
+    if (also && also.cost <= g.credits + 1e-6) return also;
     const goal = activeGoal(g);
     const kind = waitKind(g);
     this.idleWhy = `${step ? `saving for "${step.label}" ${fmt(step.cost)}¢ (have ${fmt(g.credits)}¢, +${f1(g.creditRate)}¢/s)` : kind ? `waiting (${kind})` : 'waiting for the game'}; goal ${g.goal.i + 1} "${goal?.title ?? '—'}"`;
-    // --noTips: the Flow goal's card sends the player to the Flow ring, so what the adviser names there is still followed.
-    const tip = (CFG.tips || kind === 'flow') && goal && !goal.free ? advice(g) : null;
+    // A player who takes no tips: the Flow goal's card sends them to the Flow ring, so what the adviser names there is still followed.
+    const tip = ((CFG.tips && this.P.tips) || kind === 'flow') && goal && !goal.free ? advice(g) : null;
     if (!tip) {
       this.tipSince = null;
+      this.tipShown = '';
       if (g.order?.ready) this.dawdling = true; // only a Claim button left
       return null;
+    }
+    if (tip.text.mouse !== this.tipShown) {
+      this.tipShown = tip.text.mouse;
+      this.tipsOffered.push({ t: g.time, goal: g.goal.i, text: tip.text.mouse, saves: tip.saves });
     }
     this.tipOn = true;
     if (this.tipSince == null) this.tipSince = g.time;
@@ -1344,6 +1437,7 @@ class Bot {
     }
     this.endTipless();
     this.endIdle(want.label);
+    this.tipShown = ''; // the board has changed: whatever is on offer next is a new offer
     if (want.kind === 'upgrade') this.presses[want.bulk ? 'bulk' : want.label.startsWith('upgrade wire') ? 'wire' : 'single']++;
     const spent = before - g.credits;
     this.mSpent += Math.max(0, spent);
@@ -1552,6 +1646,12 @@ interface Result {
   /** The newcomer: longest stretch in a wait with no tip on offer and nothing the card asks, and the goal it fell in. */
   tipless: { seconds: number; goal: string };
   tips: number;
+  /**
+   * The newcomer's tips up to the first Lens: how many came on offer and how many were followed; among the
+   * followed, how many were steps without which the wait would not have ended, and the smallest and the
+   * median of the savings the others promised at the moment they were followed.
+   */
+  tipStats: { offered: number; followed: number; rescues: number; smallest: number | null; median: number | null };
   flowAtUnlock: Bot['flowAtUnlock'];
   /** Seconds on "Hold Flow", and the actions taken while it was the goal. */
   flowGoal: { seconds: number; actions: string[] } | null;
@@ -1590,6 +1690,13 @@ function measure(bot: Bot): Result {
     presses: { ...p, total: p.single + p.bulk + p.wire },
     tipless: { seconds: longestTipless.to - longestTipless.from, goal: GOALS[longestTipless.goal]?.title ?? '—' },
     tips: bot.tipsTaken.length,
+    tipStats: (() => {
+      const finite = bot.tipsTaken.map((t) => t.saves).filter((x): x is number => x != null && isFinite(x)).sort((a, b) => a - b);
+      return {
+        offered: bot.tipsOffered.length, followed: bot.tipsTaken.length, rescues: bot.tipsTaken.length - finite.length,
+        smallest: finite.length ? finite[0] : null, median: finite.length ? finite[Math.floor(finite.length / 2)] : null,
+      };
+    })(),
     flowAtUnlock: bot.flowAtUnlock,
     flowGoal: hold && hold.claimedAt != null
       ? { seconds: hold.spent, actions: bot.timeline.filter((e) => e.t >= hold.activeAt && e.t < (hold.readyAt ?? hold.claimedAt!) && !/^[·★!]/.test(e.text)).map((e) => e.text) }
@@ -1643,9 +1750,8 @@ function checks(r: Result): Check[] {
     within('first Lens', r.lens, T.lens);
     goalMax(T.goalMax);
     fabricator(T.fabricatorMax);
-    add('longest wait with no tip and nothing the card asks', `${Math.round(r.tipless.seconds)}s (${r.tipless.goal})`, `≤ ${T.tiplessMax}s`, r.tipless.seconds <= T.tiplessMax);
-  } else if (judge === 'newcomer10') {
-    const T = TARGETS.newcomer10;
+  } else if (judge === 'newcomer10' || judge === 'cardonly') {
+    const T = TARGETS[judge];
     by('first Lens', r.lens, T.lensBy);
     goalMax(T.goalMax);
   } else {
@@ -1876,32 +1982,42 @@ function summary(results: Result[]): string {
   if (card.length) {
     const N = TARGETS.newcomer;
     const N10 = TARGETS.newcomer10;
+    const C = TARGETS.cardonly;
     const S = TARGETS.slow;
-    P('== THE NEWCOMER (the card and the tips): every run against the targets ("!" marks a miss) ==');
-    P('policy      seed    Lens   longest goal                        Fabricator   no tip, nothing to do              nothing to do  tips  upgrade presses  sales+orders  Flow at unlock  first surplus');
-    P(`newcomer         ${mmss(N.lens[0])}–${mmss(N.lens[1]).slice(0, 2)}  ≤${N.goalMax}s                               ≤${N.fabricatorMax}s        ≤${N.tiplessMax}s                                                                        ≥${Math.round(TARGETS.earnedShare * 100)}%`);
-    P(`newcomer10       ≤${mmss(N10.lensBy)}   ≤${N10.goalMax}s                               (≤${N10.goalMax}s)`);
-    for (const r of card) {
+    const limits = (r: Result): { lensOk: boolean; goal: number; fab: number } => {
       const j = r.policy.judge;
-      const lensOk = j === 'newcomer' ? inW(r.lens, N.lens) : r.lens != null && r.lens <= (j === 'newcomer10' ? N10.lensBy : S.lensBy);
-      const goalLimit = j === 'newcomer' ? N.goalMax : j === 'newcomer10' ? N10.goalMax : S.goalMax;
-      const fabLimit = j === 'newcomer' ? N.fabricatorMax : goalLimit;
+      if (j === 'newcomer') return { lensOk: inW(r.lens, N.lens), goal: N.goalMax, fab: N.fabricatorMax };
+      const T = j === 'newcomer10' ? N10 : j === 'cardonly' ? C : S;
+      return { lensOk: r.lens != null && r.lens <= T.lensBy, goal: T.goalMax, fab: T.goalMax };
+    };
+    P('== THE NEWCOMER (the card, its "while you wait" lines, and the tips): every run against the targets ("!" marks a miss) ==');
+    P('policy      seed    Lens   longest goal                        Fabricator  free hands   tips: offered  followed  smallest  median  upgrade presses  sales+orders  Flow at unlock  first surplus');
+    P(`newcomer         ${mmss(N.lens[0])}–${mmss(N.lens[1]).slice(0, 2)}  ≤${N.goalMax}s                               ≤${N.fabricatorMax}s                                                                                    ≥${Math.round(TARGETS.earnedShare * 100)}%`);
+    P(`newcomer10       ≤${mmss(N10.lensBy)}   ≤${N10.goalMax}s                               (≤${N10.goalMax}s)`);
+    P(`cardonly         ≤${mmss(C.lensBy)}   ≤${C.goalMax}s                               (≤${C.goalMax}s)`);
+    for (const r of card) {
+      const L = limits(r);
       const flow = r.flowAtUnlock;
+      const sec = (x: number | null) => (x == null ? '—' : `${Math.round(x)}s`);
       P([
         padR(r.policy.name, 11), pad(r.seed, 4), ' ',
-        pad(mmss(r.lens), 6) + mark(lensOk), ' ',
-        padR(`${Math.round(r.goalMax.seconds)}s ${r.goalMax.title}`.slice(0, 34), 34) + mark(r.lens != null && r.goalMax.seconds <= goalLimit),
-        pad(r.fabricator == null ? '—' : Math.round(r.fabricator) + 's', 9) + mark(r.fabricator != null && r.fabricator <= fabLimit), '  ',
-        padR(`${Math.round(r.tipless.seconds)}s ${r.tipless.goal}`.slice(0, 32), 32) + mark(j !== 'newcomer' || r.tipless.seconds <= N.tiplessMax),
-        pad(Math.round(r.deadBeforeLens) + 's', 13),
-        pad(r.tips, 6),
-        pad(pressText(r), 15), ' ',
+        pad(mmss(r.lens), 6) + mark(L.lensOk), ' ',
+        padR(`${Math.round(r.goalMax.seconds)}s ${r.goalMax.title}`.slice(0, 34), 34) + mark(r.lens != null && r.goalMax.seconds <= L.goal),
+        pad(r.fabricator == null ? '—' : Math.round(r.fabricator) + 's', 9) + mark(r.fabricator != null && r.fabricator <= L.fab),
+        pad(Math.round(r.deadBeforeLens) + 's', 11),
+        pad(r.tipStats.offered, 16),
+        pad(`${r.tipStats.followed}${r.tipStats.rescues ? ` (${r.tipStats.rescues} ∞)` : ''}`, 9),
+        pad(sec(r.tipStats.smallest), 9),
+        pad(sec(r.tipStats.median), 7),
+        pad(pressText(r), 16), ' ',
         pad(r.earnedShare == null ? '—' : Math.round(r.earnedShare * 100) + '%', 12) + mark(r.earnedShare != null && r.earnedShare >= TARGETS.earnedShare),
         pad(flow ? `${Math.round(flow.flow * 100)}% (${flow.flowing}/${flow.producers})` : '—', 14), ' ',
         pad(r.surplusAt ? `${mmss(r.surplusAt.t)} ${MATERIALS[r.surplusAt.mat].name}` : 'never', 13),
       ].join(' '));
     }
-    P('  "nothing to do" is the longest stretch with free hands and nothing the card asks, tips on offer or not (a tip is followed 15 s after it appears).');
+    P('  "free hands" is the longest stretch with nothing the card asks, a tip on offer or not (a tip is followed 15 s after it appears).');
+    P('  Tips: "offered" counts each tip that came on offer during a wait; "smallest" and "median" are the seconds the followed tips said they would save');
+    P('  when they were followed; "(n ∞)" of them were steps without which the wait would not have ended (they have no number).');
     P();
   }
   const misses = results.reduce((n, r) => n + checks(r).filter((c) => !c.ok).length, 0);
@@ -1957,6 +2073,7 @@ function main() {
     else if (k === 'set' && v) overrides.push(v);
     else if (k === 'noBulk') CFG.bulk = false;
     else if (k === 'noTips') CFG.tips = false;
+    else if (k === 'noMeanwhile') CFG.meanwhile = false;
     else if (k === 'trials') CFG.trials = true;
     else if ((k === 'spendShare' || k === 'pettyBudget') && v) {
       for (const pol of Object.values(POLICIES)) if (!pol.card) pol.spendShare = Number(v);
@@ -1977,7 +2094,7 @@ function main() {
   for (const o of overrides) applyOverrides(o);
   const what = [
     profileName !== 'current' ? `profile "${profileName}": ${profile.describe}` : '', ...overrides.map((o) => `--set=${o}`),
-    CFG.bulk ? '' : '--noBulk', CFG.tips ? '' : '--noTips',
+    CFG.bulk ? '' : '--noBulk', CFG.tips ? '' : '--noTips', CFG.meanwhile ? '' : '--noMeanwhile',
   ].filter(Boolean).join('  ');
   const play = (p: Policy, s: number) => {
     const bot = new Bot(p, s, minutes ?? (p.card ? CFG.minutesCard : p.fast ? CFG.minutesFast : CFG.minutesSlow));

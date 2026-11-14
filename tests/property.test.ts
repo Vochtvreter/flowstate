@@ -172,6 +172,7 @@ function play(seed: number, steps: number, credits: number) {
     // in its save or in its undo and redo history.
     advise: () => {
       g.goal = { i: pick(WAITING_GOALS)!, ready: false };
+      g.edits = []; // as if the player's hands had been free for a while: the adviser is quiet for 20 s after any change
       tick(g, 0.05); // the unlocks of the goals before it
       const before = serialize(g).replace(/"savedAt":\d+/, '');
       const history = [canUndo(), canRedo()];
@@ -186,9 +187,12 @@ function play(seed: number, steps: number, credits: number) {
     // Following a tip is a normal action: paid for, and one undo step.
     followTip: () => {
       g.goal = { i: pick(WAITING_GOALS)!, ready: false };
+      g.edits = [];
       tick(g, 0.05);
       const tip = advice(g);
       if (!tip) return false;
+      must(tip.saves != null && (tip.kind === 'flow' || tip.saves >= 15), () => `seed ${seed}: "${tip.text.mouse}" says it saves ${tip.saves} s`);
+      must([...tip.text.mouse].length <= 90 && [...tip.text.touch].length <= 90, () => `seed ${seed}: "${tip.text.mouse}" is longer than 90 characters`);
       const credits = g.credits;
       const ok = applyAdvice(g, tip);
       must(ok, () => `seed ${seed}: a tip could not be followed: ${tip.text.mouse}`);

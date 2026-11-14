@@ -1,5 +1,6 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { claimGoal, claimOrder, connect, deleteNode, placeNode, upgrade } from '../src/actions';
+import { advice, applyAdvice } from '../src/advice';
 import { RULES, TECHS } from '../src/content';
 import { endDemo, endStats, offlineCap, research, techAvailable, techHidden } from '../src/economy';
 import { GOALS, activeGoal, goalById, goalView } from '../src/goals';
@@ -512,6 +513,82 @@ describe('damaged and old saves cannot poison the game', () => {
     run(loaded, 1);
     expect(take(loaded, 'unlock')).toEqual([]);
     expect(take(loaded, 'tech')).toEqual([]);
+  });
+
+  it('saves from the build before the cards had lines: a tip pending, the Flow goal half done, Market Lens owned', () => {
+    // What that build wrote: no `edits`, no `goalAt`, no `flowNear`, and Market Lens from "Fill your first order".
+    const older = (g: Game) => {
+      const raw = JSON.parse(serialize(g));
+      delete raw.edits;
+      delete raw.goalAt;
+      delete raw.flowNear;
+      return deserialize(JSON.stringify(raw))!;
+    };
+    // 1. Saved in the wait for Ember Deposits with a tip on the card ("study the Ink").
+    const g = rich();
+    g.techs = ['P1', 'R1', 'P2'];
+    g.credits = 300;
+    const m = market(g);
+    connect(g, well(g).id, 0, m.id);
+    const shard = placeNode(g, 'refiner', 400, 100)!;
+    connect(g, well(g).id, 0, shard.id);
+    connect(g, shard.id, 0, m.id);
+    connect(g, shard.id, 0, placeNode(g, 'lab', 900, 100)!.id);
+    const ink = placeNode(g, 'refiner', 400, 400)!;
+    connect(g, placeNode(g, 'well', 0, 0, { depositId: 3 })!.id, 0, ink.id);
+    connect(g, ink.id, 0, m.id);
+    connect(g, ink.id, 1, placeNode(g, 'void', 700, 600)!.id);
+    g.goal = { i: GOALS.findIndex((x) => x.id === 'make-spark'), ready: false };
+    run(g, 40);
+    const pending = advice(g)!;
+    expect(pending.text.mouse).toBe('Wire the Ink Refiner\'s Ink port to the Lab: Ink is 3 α each in a Lab.');
+    const loaded = older(g);
+    expect(loaded.edits).toEqual([]);
+    run(loaded, 1);
+    // The tip is there again at once (nothing says the player has just touched the board), and can be followed.
+    const again = advice(loaded)!;
+    expect(again.text).toEqual(pending.text);
+    expect(again.saves!).toBeGreaterThanOrEqual(15);
+    // The card's own line for this goal says the same, in the card's words.
+    expect(goalView(loaded)!.meanwhile).toEqual({ text: 'Drag from the Ink Refiner\'s Ink port to the Lab too: studied Ink is 3 α each.', done: false });
+    expect(applyAdvice(loaded, again)).toBe(true);
+    expect(goalView(loaded)!.meanwhile!.done).toBe(true);
+    expect(advice(loaded)).toBeNull(); // and now it keeps quiet for a while, like any game
+    run(loaded, 300);
+    expect(loaded.data.a).toBeGreaterThan(TECHS.P3.cost.a!);
+    finiteTotals(loaded);
+
+    // 2. Saved in the middle of "Hold 95% Flow" on a board with one producer short: it has 90 s from the load, then the valve.
+    const flow = midGame();
+    flow.flowHold = 0;
+    flow.goal = { i: GOALS.findIndex((x) => x.id === 'hold-flow'), ready: false };
+    const ember = flow.nodes.find((n) => n.material === 'ember')!;
+    const second = placeNode(flow, 'refiner', 400, 700, { recipe: 'spark' })!; // a second Spark Refiner on the one Ember Well: both go short
+    connect(flow, ember.id, 0, second.id);
+    connect(flow, second.id, 0, market(flow).id);
+    run(flow, 60);
+    expect(flow.goal.ready).toBe(false);
+    const flowLoaded = older(flow);
+    expect(flowLoaded.flowNear).toBe(0);
+    run(flowLoaded, 1);
+    const view = goalView(flowLoaded)!;
+    expect(view.flow!.of - view.flow!.running).toBeGreaterThanOrEqual(1);
+    expect(view.flow!.need).toBe(RULES.flow.holdShare);
+    run(flowLoaded, 60);
+    expect(flowLoaded.goal.ready).toBe(false); // 61 s after the load: the bar still stands
+    finiteTotals(flowLoaded);
+
+    // 3. A save that owns Market Lens (and one that went on to Wider Demand) keeps them, and still sees the branch.
+    const lens = midGame();
+    lens.techs.push('L1', 'C1', 'C2');
+    const lensLoaded = older(lens);
+    expect(lensLoaded.techs).toEqual(expect.arrayContaining(['C1', 'C2']));
+    expect(lensLoaded.seenSurplus).toBe(lens.seenSurplus);
+    for (const id of ['C1', 'C2', 'C4', 'C5']) expect(techHidden(lensLoaded, TECHS[id]), id).toBe(false);
+    run(lensLoaded, 5);
+    expect(lensLoaded.techs.filter((id) => id === 'C1')).toEqual(['C1']);
+    // A fresh game, by contrast, sees none of it.
+    for (const id of ['C1', 'C2', 'C4', 'C5']) expect(techHidden(fresh(), TECHS[id]), id).toBe(true);
   });
 
   it('a goal index beyond the list means "everything claimed", not a crash', () => {
