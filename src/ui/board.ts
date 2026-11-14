@@ -1,5 +1,13 @@
 // The board: world rendering (DOM nodes + SVG wires, patched by id) and every pointer gesture.
 // Anything that moves every frame (wire dots, floating gains) is drawn by fx.ts on one canvas.
+//
+// Gestures, for mouse and finger alike:
+//   - drag from a port to wire; drop on empty board for the build menu (a fan, or a sheet on a phone);
+//   - or tap a port to arm it, then tap what its wire should go to (see `tapWire`);
+//   - drag a card to move it, drag empty board to pan, wheel or two fingers to zoom;
+//   - a dragged wire or card scrolls the board when it nears the edge.
+// A finger is matched to ports and wires by distance on screen (see `touchHit`), not by what the
+// browser says is under it. What the phone layout changes here is read from phone-env.ts.
 import { MATERIALS, MatId, NODE_DEFS, NodeType, PIPES, RECIPES, Recipe, TECHS } from '../content';
 import {
   act, canConnect, connect, cutWires, expandBoard, freeDeposits, materialsAt, nodeById, placeNode, splice,
@@ -13,8 +21,9 @@ import { anchorPt, cachedRect, el, invalidateLayout, pulseAnchor, setClass, setH
 import {
   Beacon, Flow, floater, flowPoint, fly, frameFx, invalidateFx, makeFlow, setBeacons, setFlowPath, setFlows,
 } from './fx';
-import { Port, Pt, bezierAt, inPorts, matColor, nodeSize, outPorts, pathD, segmentsCross, wireEnds } from './geom';
+import { NODE_W, Port, Pt, bezierAt, inPorts, matColor, nodeSize, outPorts, pathD, pinchView, segmentsCross, wireEnds } from './geom';
 import { esc, icon, matGlyph, matShape, nodeIcon } from './icons';
+import { env } from './phone-env';
 import { diagnose } from './status';
 import { delegate, onPress, select, signal, toast, touch, ui } from './ui';
 
@@ -29,6 +38,9 @@ let chipsEl: HTMLElement;
 let ghostEl: HTMLElement;
 let expandEl: HTMLButtonElement;
 let radialEl: HTMLElement;
+/** The build menu as a bottom sheet (phone layout). It lives beside the board, not in it, so its list can scroll. */
+let buildEl: HTMLElement;
+let appEl: HTMLElement | null = null;
 let tempPath: SVGPathElement;
 let tempEnd: SVGCircleElement;
 let knifeLine: SVGLineElement;
@@ -48,6 +60,8 @@ interface WireRefs {
   g: SVGGElement; hit: SVGPathElement; glow: SVGPathElement; base: SVGPathElement; chip: HTMLElement; chipText: HTMLElement;
   a: Pt; b: Pt; flow: Flow;
   chipX: number; chipY: number; chipHw: number; chipOff: boolean;
+  /** This wire is selected, or runs to or from the selected node (on a phone only those chips show). */
+  on: boolean;
   cColor: string; cWidth: number; cFlowing: boolean | null; cSat: boolean | null; cChip: string;
   sRate: number; vRate: number;
 }
@@ -64,23 +78,79 @@ let targetId: number | null = null;
 let far = false;
 /** Zoomed out so far that the small print on cards cannot be read; it is then not kept up to date. */
 let tiny = false;
+/** Phone only: the second line of each card is too small to read at this zoom, so it is hidden. */
+let lean = false;
 let mouse: Pt = { x: 0, y: 0 };
 /** Nodes whose border should flash once the next structure sync has run. */
 const flashQueue: number[] = [];
 
 /** How close (screen px) a dragged wire has to come to a node before it snaps on. */
 const SNAP_PX = 40;
+/** The same for a tap while a port is armed: nearer than this to a valid node counts as tapping it. */
+const TAP_SNAP_PX = 20;
 
+// Touch. All distances are screen pixels, whatever the zoom.
+/** A finger this close to a port's centre means the port, even when it is on the card (a 44 px target). */
+const PORT_NEAR = 22;
+/** Input ports get a little less, so that the left edge of a card still selects and drags it. */
+const PORT_IN_NEAR = 18;
+/** Off the cards, the nearest output port within this distance is taken. */
+const PORT_REACH = 44;
+/** Half the width of the band along a wire that selects it (28 px in all). */
+const WIRE_REACH = 14;
+/** How far a finger may wander and still be a tap, and how far it must go before a node or a wire follows it. */
+const TOUCH_SLOP = 10;
+/** A finger pans the board after this much movement (and the board then starts from where the finger is, without a jump). */
+const PAN_SLOP = 8;
+/** The mouse is steadier: a node follows after this much. */
+const MOUSE_SLOP = 4;
+
+/** While something is dragged within this distance of the edge of the visible board, the board scrolls. */
+const EDGE_PX = 52;
+/** Fastest edge scroll, in screen px per second. */
+const EDGE_SPEED = 640;
+
+/**
+ * Zoom limits. On a phone the floor is set by type size: cards there use 15 px type (see phone.css),
+ * which is 11 px on screen at 0.74. Below that the text could not be read, so the board stops there.
+ */
+const zoomMin = () => (env.phone ? 0.74 : 0.3);
+const zoomMax = () => (env.phone ? 1.5 : 2);
+/** Phone: the 12 px second line of a card is shown from this zoom up (11 px on screen). */
+const LEAN_BELOW = 0.92;
+
+type WireDrag = { kind: 'wire'; from: number; port: number; mats: MatId[]; a: Pt; p: Pt; target: number | null; tp: Pt; blend: number; armed: boolean; sx: number; sy: number; slop: number; touch: boolean };
 type Drag =
-  | { kind: 'pan'; sx: number; sy: number; vx: number; vy: number; moved: boolean }
-  | { kind: 'node'; id: number; ox: number; oy: number; x0: number; y0: number; moved: boolean; sx: number; sy: number }
-  | { kind: 'wire'; from: number; port: number; mats: MatId[]; a: Pt; p: Pt; target: number | null; tp: Pt; blend: number; armed: boolean; sx: number; sy: number }
-  | { kind: 'wireIn'; to: number; mat: MatId | null; b: Pt; p: Pt; target: number | null; tp: Pt; blend: number; armed: boolean; sx: number; sy: number }
-  | { kind: 'wirePress'; wireId: number; sx: number; sy: number }
-  | { kind: 'knife'; a: Pt; b: Pt };
+  | { kind: 'pan'; sx: number; sy: number; vx: number; vy: number; moved: boolean; slop: number; place: boolean;
+      /** A finger came down near (not on) this output port: if it turns out to be a tap, the port is armed. */
+      near?: { id: number; port: number } }
+  | { kind: 'node'; id: number; ox: number; oy: number; x0: number; y0: number; moved: boolean; sx: number; sy: number; slop: number }
+  | WireDrag
+  | { kind: 'wireIn'; to: number; mat: MatId | null; b: Pt; p: Pt; target: number | null; tp: Pt; blend: number; armed: boolean; sx: number; sy: number; slop: number }
+  | { kind: 'wirePress'; wireId: number; sx: number; sy: number; slop: number; touch: boolean }
+  | { kind: 'knife'; a: Pt; b: Pt }
+  /** Two fingers: `a` and `b` are their pointer ids; the rest is how things stood when the pair formed. */
+  | { kind: 'pinch'; a: number; b: number; mx: number; my: number; dist: number; vx: number; vy: number; vk: number };
 let drag: Drag | null = null;
 /** The pointer that owns `drag`. Other pointers (a second finger) cannot steer it. */
 let dragPointer = -1;
+/** Where that pointer was last seen, in client pixels (edge scrolling steers the drag from here). */
+const lastClient: Pt = { x: 0, y: 0 };
+/** Every finger currently on the board, by pointer id, in client pixels. */
+const fingers = new Map<number, Pt>();
+
+/**
+ * Wiring by tap: an output port that was tapped and is waiting for the player to tap where its
+ * wire should go. It has the shape of a wire being dragged, so the same code can draw it (for a
+ * mouse, which can hover) and connect it.
+ */
+let tapWire: (WireDrag & { hover: boolean }) | null = null;
+/** Nodes currently marked as possible or impossible ends for the wire being made. */
+const marked = new Set<number>();
+let markedFor: { from: number; port: number } | null = null;
+
+/** A camera move in progress: the view eases to this. */
+let glide: { x: number; y: number; k: number } | null = null;
 
 interface RadialOpt { type: NodeType; recipe?: string; label: string; sub: string; cost: number; locked?: string; glyph: string }
 interface RadialState { at: Pt; opts: RadialOpt[]; dir: 'consume' | 'produce'; from: number; port: number; to: number; mat: MatId | null; a: Pt }
@@ -108,15 +178,33 @@ export function toClient(p: Pt): Pt {
   return { x: p.x * ui.view.k + ui.view.x + r.left, y: p.y * ui.view.k + ui.view.y + r.top };
 }
 
+/**
+ * Keep some of the board on screen, so a long pan or an edge scroll can never lose it: at least
+ * `keep` pixels of the plot stay inside the stage on each axis (which leaves room for the Expand
+ * button under it).
+ */
+function clampView() {
+  const g = ui.g;
+  const r = rectOf();
+  if (!g || r.width < 2 || r.height < 2) return;
+  const v = ui.view;
+  const keepX = Math.min(140, r.width * 0.4), keepY = Math.min(140, r.height * 0.4);
+  v.x = Math.max(keepX - g.board.w * v.k, Math.min(r.width - keepX, v.x));
+  v.y = Math.max(keepY - g.board.h * v.k, Math.min(r.height - keepY, v.y));
+}
+
 function applyView() {
+  clampView();
   const { x, y, k } = ui.view;
   worldEl.style.transform = `translate(${x}px, ${y}px) scale(${k})`;
   boardEl.style.backgroundSize = `${24 * k}px ${24 * k}px`;
   boardEl.style.backgroundPosition = `${x}px ${y}px`;
-  const wasFar = far, wasTiny = tiny;
+  const wasFar = far, wasTiny = tiny, wasLean = lean;
   far = k < 0.6;
   tiny = k < 0.5;
+  lean = env.phone && k < LEAN_BELOW;
   if (far !== wasFar) boardEl.classList.toggle('far', far);
+  if (lean !== wasLean) boardEl.classList.toggle('lean', lean);
   if (!renderedGame) return;
   // Text that was left alone while too small to read (or hidden) is brought up to date on the way back in.
   if ((wasFar && !far) || (wasTiny && !tiny)) updateSlow();
@@ -124,54 +212,171 @@ function applyView() {
   if (far !== wasFar) layoutWires();
 }
 
-export function fitView() {
+const clampK = (k: number) => Math.max(zoomMin(), Math.min(zoomMax(), k));
+
+/** Move the camera. On a phone it glides there (unless the player asked for less motion); elsewhere it jumps. */
+function moveView(x: number, y: number, k: number, smooth: boolean) {
+  if (smooth && env.phone && !env.calm && renderedGame) {
+    glide = { x, y, k };
+    return;
+  }
+  glide = null;
+  ui.view.x = x;
+  ui.view.y = y;
+  ui.view.k = k;
+  applyView();
+}
+
+function stepGlide(dt: number) {
+  const gl = glide;
+  if (!gl) return;
+  const v = ui.view;
+  const f = 1 - Math.exp(-Math.min(dt, 0.1) / 0.07);
+  v.x += (gl.x - v.x) * f;
+  v.y += (gl.y - v.y) * f;
+  v.k += (gl.k - v.k) * f;
+  if (Math.abs(gl.x - v.x) < 0.5 && Math.abs(gl.y - v.y) < 0.5 && Math.abs(gl.k - v.k) < 0.002) {
+    v.x = gl.x;
+    v.y = gl.y;
+    v.k = gl.k;
+    glide = null;
+  }
+  const before = v.x + v.y;
+  applyView();
+  // Stopped by the edge of the board: there is nowhere further to go.
+  if (glide && Math.abs(v.x + v.y - before) > 0.01) glide = null;
+}
+
+/**
+ * The part of the board the player can actually see: the stage minus whatever covers its edges.
+ * Board-local pixels. With `row`, the floating controls at the bottom count as covered too.
+ */
+function freeArea(row = false): { x0: number; y0: number; x1: number; y1: number } {
+  const r = rectOf();
+  const c = env.cover();
+  const x0 = Math.min(c.left, r.width * 0.5), y0 = Math.min(c.top, r.height * 0.5);
+  return { x0, y0, x1: Math.max(x0 + 40, r.width - c.right), y1: Math.max(y0 + 40, r.height - c.bottom - (row ? c.row : 0)) };
+}
+
+/** Every node as one box (with room for the ports that stick out), or null on an empty board. */
+function nodesBox(): { x0: number; y0: number; x1: number; y1: number } | null {
+  let box: { x0: number; y0: number; x1: number; y1: number } | null = null;
+  for (const n of ui.g.nodes) {
+    const { w, h } = nodeSize(n);
+    if (!box) box = { x0: n.x, y0: n.y, x1: n.x + w, y1: n.y + h };
+    else {
+      box.x0 = Math.min(box.x0, n.x);
+      box.y0 = Math.min(box.y0, n.y);
+      box.x1 = Math.max(box.x1, n.x + w);
+      box.y1 = Math.max(box.y1, n.y + h);
+    }
+  }
+  if (box) {
+    box.x0 -= 10;
+    box.x1 += 10;
+    box.y0 -= 12;
+    box.y1 += 4;
+  }
+  return box;
+}
+
+/**
+ * Show the board. On a desktop that is the whole plot. A phone cannot show the whole plot at a
+ * size anyone can read, so there it frames what has been built: a new game opens on the Well and
+ * the Market. A factory too big for the screen is centred at the smallest readable zoom.
+ */
+export function fitView(smooth = false) {
   const r = rectOf();
   const g = ui.g;
+  if (env.phone) {
+    const box = nodesBox() ?? { x0: 0, y0: 0, x1: g.board.w, y1: g.board.h };
+    const bw = box.x1 - box.x0, bh = box.y1 - box.y0;
+    // Clear of the floating controls when that leaves room at a readable zoom; otherwise behind them
+    // (they sit in the corners), with thinner margins.
+    let f = freeArea(true);
+    let pad = 14;
+    if ((f.y1 - f.y0 - pad * 2) / bh < zoomMin()) {
+      f = freeArea();
+      pad = 6;
+    }
+    const aw = Math.max(60, f.x1 - f.x0 - pad * 2), ah = Math.max(60, f.y1 - f.y0 - pad * 2);
+    const k = Math.max(zoomMin(), Math.min(1, aw / bw, ah / bh));
+    moveView((f.x0 + f.x1) / 2 - ((box.x0 + box.x1) / 2) * k, (f.y0 + f.y1) / 2 - ((box.y0 + box.y1) / 2) * k, k, smooth);
+    return;
+  }
   const pad = 60;
   const k = Math.max(0.3, Math.min(1.2, Math.min((r.width - pad * 2) / g.board.w, (r.height - pad * 2 - 40) / g.board.h)));
-  ui.view.k = k;
-  ui.view.x = (r.width - g.board.w * k) / 2;
-  ui.view.y = (r.height - g.board.h * k) / 2 + 10;
-  applyView();
+  moveView((r.width - g.board.w * k) / 2, (r.height - g.board.h * k) / 2 + 10, k, false);
 }
 
 export function jumpTo(id: number) {
   const n = nodeById(ui.g, id);
   if (!n) return;
-  const r = rectOf();
+  const f = freeArea();
   const { w, h } = nodeSize(n);
-  ui.view.x = r.width / 2 - (n.x + w / 2) * ui.view.k;
-  ui.view.y = r.height / 2 - (n.y + h / 2) * ui.view.k;
-  applyView();
+  const k = glide?.k ?? ui.view.k;
+  moveView((f.x0 + f.x1) / 2 - (n.x + w / 2) * k, (f.y0 + f.y1) / 2 - (n.y + h / 2) * k, k, true);
   select({ kind: 'node', id });
+}
+
+/** Pan just enough that a world box is inside the visible part of the board. */
+function reveal(bx: number, by: number, bw: number, bh: number) {
+  const k = glide?.k ?? ui.view.k;
+  const pad = env.phone ? 14 : 40;
+  // Kept out from under the floating controls too, unless the space left would be too small for it.
+  let f = freeArea(true);
+  if (f.y1 - f.y0 - pad * 2 < bh * k) f = freeArea();
+  // Desktop keeps 50 px clear at the top for the goal line; on a phone the strip is measured instead.
+  const x0 = f.x0 + pad, x1 = f.x1 - pad, y0 = f.y0 + pad + (env.phone ? 0 : 50), y1 = f.y1 - pad;
+  let x = glide?.x ?? ui.view.x, y = glide?.y ?? ui.view.y;
+  const left = bx * k + x, top = by * k + y;
+  if (left + bw * k > x1) x -= left + bw * k - x1;
+  else if (left < x0) x += x0 - left;
+  if (top + bh * k > y1) y -= top + bh * k - y1;
+  else if (top < y0) y += y0 - top;
+  // A box bigger than the space shows its top left corner.
+  if (env.phone) {
+    if (bx * k + x < x0) x = x0 - bx * k;
+    if (by * k + y < y0) y = y0 - by * k;
+  }
+  if (x === (glide?.x ?? ui.view.x) && y === (glide?.y ?? ui.view.y)) return;
+  moveView(x, y, k, true);
 }
 
 /** Pan just enough that a node is fully on screen (e.g. after the inspector opens over it). */
 export function ensureVisible(id: number) {
   const n = nodeById(ui.g, id);
   if (!n) return;
-  const r = rectOf();
   const { w, h } = nodeSize(n);
-  const k = ui.view.k;
-  const left = n.x * k + ui.view.x, top = n.y * k + ui.view.y;
-  const pad = 40;
-  if (left + w * k > r.width - pad) ui.view.x -= left + w * k - (r.width - pad);
-  else if (left < pad) ui.view.x += pad - left;
-  if (top + h * k > r.height - pad) ui.view.y -= top + h * k - (r.height - pad);
-  else if (top < pad + 50) ui.view.y += pad + 50 - top;
-  applyView();
+  // On a phone the ports and the status pill count as part of the card.
+  if (env.phone) reveal(n.x - 10, n.y - 14, w + 20, h + 18);
+  else reveal(n.x, n.y, w, h);
 }
 
 export function zoomBy(factor: number, cx?: number, cy?: number) {
+  glide = null;
   const r = rectOf();
   const px = (cx ?? r.left + r.width / 2) - r.left;
   const py = (cy ?? r.top + r.height / 2) - r.top;
-  const k = Math.max(0.3, Math.min(2, ui.view.k * factor));
+  const k = clampK(ui.view.k * factor);
   const f = k / ui.view.k;
   ui.view.x = px - (px - ui.view.x) * f;
   ui.view.y = py - (py - ui.view.y) * f;
   ui.view.k = k;
   applyView();
+}
+
+/**
+ * The layout changed under the board (phone layout on or off, a different input device): redo
+ * whatever depends on it at the next frame, and put the zoom back inside its limits.
+ */
+export function refreshBoard() {
+  renderedRev = -1;
+  depositsHtml = '';
+  if (radial) closeRadial();
+  if (tapWire) disarm();
+  if (ui.view.k !== clampK(ui.view.k)) zoomBy(1);
+  else applyView();
 }
 
 // ---------- init ----------
@@ -203,13 +408,16 @@ export function initBoard(root: HTMLElement) {
   tempPath = boardEl.querySelector('#temp-wire')!;
   tempEnd = boardEl.querySelector('#temp-end')!;
   knifeLine = boardEl.querySelector('#knife')!;
+  appEl = boardEl.closest<HTMLElement>('#app');
+  buildEl = el(`<div id="build-sheet" role="dialog" aria-label="Build menu"></div>`);
+  (boardEl.parentElement ?? boardEl).appendChild(buildEl);
 
   boardEl.addEventListener('pointerdown', onDown);
   boardEl.addEventListener('pointermove', onMove);
   boardEl.addEventListener('pointerup', onUp);
-  boardEl.addEventListener('pointercancel', (e) => {
-    if (e.pointerId === dragPointer) abortDrag();
-  });
+  boardEl.addEventListener('pointercancel', onCancel);
+  // A finger that the browser stops reporting without an up or a cancel must not count as resting on the board.
+  window.addEventListener('blur', () => fingers.clear());
   // The board never scrolls natively (touch-action: none), but unless the touch moves are also
   // claimed here Chromium still counts a quick drag as the start of a fling, and then swallows the
   // click of any tap in the next half second, wherever on the page it lands. Controls act on click
@@ -230,6 +438,10 @@ export function initBoard(root: HTMLElement) {
   });
   delegate(radialEl, (a, args) => {
     if (a === 'pick') pickRadial(Number(args[0]));
+  });
+  delegate(buildEl, (a, args) => {
+    if (a === 'pick') pickRadial(Number(args[0]));
+    else if (a === 'close') closeRadial();
   });
   // The cached board rect (and the minimap's viewport box) follow the stage's size.
   if (typeof ResizeObserver !== 'undefined') {
@@ -261,8 +473,10 @@ function nodeSub(n: GNode): string {
     case 'well': return `Lv ${n.lv.speed} · deposit`;
     case 'refiner': case 'assembler': case 'fabricator': {
       const r = recipeOf(n);
-      const text = r ? recipeText(r) : 'no recipe';
-      return text.length > SUB_CHARS ? text.slice(0, SUB_CHARS - 1).trimEnd() + '…' : text;
+      // A phone sets this line in bigger type, so there it only says what comes out.
+      const max = env.phone ? SUB_CHARS - 2 : SUB_CHARS;
+      const text = !r ? 'no recipe' : env.phone ? `makes ${r.outputs.map(([m]) => MATERIALS[m].name).join(' + ')}` : recipeText(r);
+      return text.length > max ? text.slice(0, max - 1).trimEnd() + '…' : text;
     }
     case 'router': return `${n.mode} split`;
     case 'merger': return 'junction';
@@ -349,7 +563,7 @@ function syncNodes(g: Game, fresh: boolean) {
     } else if (refs.sig !== sig) {
       // Same node, different shape (recipe or ports changed): swap the element where it stands.
       const next = buildNode(n, w, h, ins, outs, sig);
-      for (const cls of ['sel', 'target', 'dragging']) if (refs.el.classList.contains(cls)) next.el.classList.add(cls);
+      for (const cls of ['sel', 'target', 'dragging', 'can', 'cant']) if (refs.el.classList.contains(cls)) next.el.classList.add(cls);
       refs.el.replaceWith(next.el);
       nodeEls.set(n.id, (refs = next));
     } else if (refs.x !== n.x || refs.y !== n.y) {
@@ -402,7 +616,7 @@ function buildWire(w: Wire, a: Pt, b: Pt, fresh: boolean): WireRefs {
     g: grp, hit, glow, base, chip, chipText: chip.firstElementChild as HTMLElement, a, b,
     // A wire that is there when the board loads starts full of dots; one the player just made starts empty.
     flow: makeFlow(fresh),
-    chipX: NaN, chipY: NaN, chipHw: 24, chipOff: false,
+    chipX: NaN, chipY: NaN, chipHw: 24, chipOff: false, on: false,
     cColor: '', cWidth: -9, cFlowing: false, cSat: false, cChip: '',
     sRate: -1, vRate: -1,
   };
@@ -470,6 +684,10 @@ function depositBoxes(): Box[] {
 }
 
 const CHIP_SPOTS = [0.5, 0.4, 0.6, 0.3, 0.7, 0.22, 0.78];
+/** Rate chips are set in bigger type on a phone (15 px against 10.5), so they take more room. */
+const chipScale = () => (env.phone ? 1.42 : 1);
+/** A phone shows a rate chip only for the selection and for wires at capacity; other screens show them all. */
+const chipShown = (refs: WireRefs) => !refs.chipOff && (!env.phone || refs.on || refs.cSat === true);
 
 /**
  * Put each rate chip on its wire where it does not cover a node card (trying the middle first),
@@ -479,9 +697,10 @@ function layoutWires() {
   const boxes = nodeBoxes();
   // Chips also keep off empty deposits, whose labels they would otherwise cover.
   const avoid = boxes.concat(depositBoxes());
+  const cs = chipScale();
   for (const refs of wireEls.values()) {
     const f = refs.flow;
-    const hw = Math.max(24, refs.cChip.length * 3.3 + 9), hh = 11;
+    const hw = Math.max(24, refs.cChip.length * 3.3 + 9) * cs, hh = 11 * cs;
     let spot: Pt | null = null;
     for (const t of CHIP_SPOTS) {
       const p = flowPoint(f, f.len * t);
@@ -530,10 +749,10 @@ function layoutWires() {
     }
     if (far) continue;
     for (const c of wireEls.values()) {
-      if (c.chipOff) continue;
-      const hw = c.chipHw + 3;
-      if (c.chipX + hw < f.x0 || c.chipX - hw > f.x1 || c.chipY + 12 < f.y0 || c.chipY - 12 > f.y1) continue;
-      occ.push(c.chipX - hw, c.chipY - 12, c.chipX + hw, c.chipY + 12);
+      if (!chipShown(c)) continue;
+      const hw = c.chipHw + 3, hh = 12 * cs;
+      if (c.chipX + hw < f.x0 || c.chipX - hw > f.x1 || c.chipY + hh < f.y0 || c.chipY - hh > f.y1) continue;
+      occ.push(c.chipX - hw, c.chipY - hh, c.chipX + hw, c.chipY + hh);
     }
   }
   // Output ports with nothing attached pulse; the pulse is drawn on the effects canvas.
@@ -572,7 +791,7 @@ function syncDeposits(g: Game) {
       const ok = matUnlocked(g, d.mat);
       return `<div class="deposit${ok ? '' : ' locked'}" data-dep="${d.id}" style="left:${d.x}px;top:${d.y}px;${ok ? `--c:${MATERIALS[d.mat].color}` : ''}">
         ${ok ? matGlyph(d.mat, 18) : icon('lock', 16)}
-        <div><div class="dn">${ok ? MATERIALS[d.mat].name + ' deposit' : 'Unknown deposit'}</div><div class="ds">${ok ? 'empty · place a Well' : 'needs research'}</div></div>
+        <div><div class="dn">${ok ? MATERIALS[d.mat].name + ' deposit' : 'Unknown deposit'}</div><div class="ds">${ok ? (env.phone ? 'place a Well here' : 'empty · place a Well') : 'needs research'}</div></div>
       </div>`;
     })
     .join('');
@@ -602,10 +821,18 @@ function syncStructure() {
   setText(plotLabel, `Board · ${g.board.expansions + 1} plot${g.board.expansions ? 's' : ''}`);
   setStyle(expandEl, 'left', g.board.w / 2 - 130 + 'px');
   setStyle(expandEl, 'top', g.board.h + 18 + 'px');
+  if (fresh) {
+    tapWire = null;
+    marked.clear();
+    markedFor = null;
+    boardEl.classList.remove('arming');
+  }
   syncDeposits(g);
   syncNodes(g, fresh);
   syncWires(g, fresh);
+  syncChipsOn();
   layoutWires();
+  refreshMarks();
   for (const id of flashQueue.splice(0)) {
     const refs = nodeEls.get(id);
     if (refs) oneShot(refs.el, 'flash', 260);
@@ -629,8 +856,25 @@ function syncUi() {
     if (wire != null) wireEls.get(wire)?.g.classList.add('sel');
     selWireId = wire;
   }
+  if (syncChipsOn() && env.phone) layoutWires();
   setClass(boardEl, 'placing', !!ui.placing);
   updateGhost();
+}
+
+/** Mark the rate chips that belong to the selection. Returns true when any changed. */
+function syncChipsOn(): boolean {
+  const sel = ui.sel;
+  let changed = false;
+  for (const w of ui.g.wires) {
+    const refs = wireEls.get(w.id);
+    if (!refs) continue;
+    const on = !!sel && (sel.kind === 'wire' ? sel.id === w.id : sel.id === w.from || sel.id === w.to);
+    if (on === refs.on) continue;
+    refs.on = on;
+    refs.chip.classList.toggle('on', on);
+    changed = true;
+  }
+  return changed;
 }
 
 // ---------- per-frame + slow updates ----------
@@ -732,6 +976,7 @@ function updateNodes(g: Game) {
 
 function updateWires(g: Game) {
   let recolored = false;
+  let reshown = false;
   for (const w of g.wires) {
     const refs = wireEls.get(w.id);
     if (!refs) continue;
@@ -765,6 +1010,7 @@ function updateWires(g: Game) {
       refs.cSat = sat;
       refs.g.classList.toggle('sat', sat);
       refs.chip.classList.toggle('sat', sat);
+      if (env.phone) reshown = true;
     }
     // Chips are hidden when zoomed far out, so their text can wait.
     if (!far && !refs.chipOff) {
@@ -779,6 +1025,7 @@ function updateWires(g: Game) {
     }
   }
   if (recolored) pushFlows();
+  if (reshown) layoutWires();
 }
 
 /**
@@ -799,6 +1046,7 @@ export function updateSlow(part?: 'nodes' | 'wires') {
   }
   setClass(expandEl, 'ok', g.credits >= cost);
   if (ui.placing) updateGhost();
+  if (radial) refreshBuildSheet();
 }
 
 let gainTimer = 0;
@@ -862,7 +1110,10 @@ export function updateBoard(dt: number) {
     const refs = wireEls.get(w.id);
     if (refs) refs.flow.rate = w.rate;
   }
+  if (glide) stepGlide(dt);
+  if (drag) edgeScroll(dt);
   if (drag && (drag.kind === 'wire' || drag.kind === 'wireIn')) drawTemp(drag, dt);
+  else if (tapWire?.hover && !radial) drawTemp(tapWire, dt);
   if (!g.paused) {
     gainTimer += dt;
     if (gainTimer >= 1) {
@@ -987,10 +1238,13 @@ function updateGhost() {
   setClass(ghostEl, 'bad', !ok);
   // On a deposit the ghost is only an outline with its caption underneath, so the deposit's own label stays readable.
   setClass(ghostEl, 'outline', onDeposit);
-  const hint = ok ? `${fmt(cost)}¢ · click to place` : why;
+  const hint = ok ? `${fmt(cost)}¢ · ${env.touch ? 'tap' : 'click'} to place` : why;
+  // In the phone layout a line above the hotbar already says "tap the board to place": the card
+  // itself has room for the price only at that type size.
+  const brief = ok && env.phone ? `${fmt(cost)}¢` : hint;
   setHTML(ghostEl, onDeposit
     ? `<span class="cap">${nodeIcon(p.type, 15)}${label} · <span class="mono">${hint}</span></span>`
-    : `${nodeIcon(p.type, 20)}<span>${label}<small class="mono">${hint}</small></span>`);
+    : `${nodeIcon(p.type, 20)}<span>${label}<small class="mono">${brief}</small></span>`);
 }
 
 export function startPlacing(type: NodeType, recipe?: string | null) {
@@ -1010,8 +1264,26 @@ export function startPlacing(type: NodeType, recipe?: string | null) {
     return;
   }
   closeRadial();
+  if (tapWire) disarm();
   ui.placing = { type, recipe };
+  if (env.touch) {
+    // A finger does not hover: the ghost starts in the middle of what the player can see.
+    const f = freeArea(true);
+    mouse = { x: ((f.x0 + f.x1) / 2 - ui.view.x) / ui.view.k, y: ((f.y0 + f.y1) / 2 - ui.view.y) / ui.view.k };
+  }
   touch();
+}
+
+/**
+ * A node has just been built. On a desktop it is selected, which opens the inspector beside the
+ * board. On a phone the inspector would cover half the board just as the player wants to wire the
+ * new node up, so there the camera only makes sure the node can be seen.
+ */
+function built(id: number) {
+  if (env.phone) {
+    if (ui.sel) select(null);
+    ensureVisible(id);
+  } else select({ kind: 'node', id });
 }
 
 /** Distance from a point to a wire's path. */
@@ -1066,7 +1338,8 @@ function placeAt(p: Pt, keep: boolean) {
   }
   if (!node) return toast(`Not enough credits for a ${NODE_DEFS[pl.type].name}`, 'bad');
   if (!keep || nodeCost(g, pl.type) > g.credits) ui.placing = null;
-  select({ kind: 'node', id: (node as GNode).id });
+  touch();
+  built((node as GNode).id);
   signal('place', { id: (node as GNode).id, type: pl.type });
 }
 
@@ -1085,12 +1358,12 @@ function nodeAt(p: Pt): GNode | null {
 
 /**
  * Where a dragged wire should attach: the node under the pointer if it is a valid end,
- * otherwise the nearest valid node within SNAP_PX on screen.
+ * otherwise the nearest valid node within `reach` px on screen.
  */
-function snapTarget(p: Pt, ok: (n: GNode) => boolean): GNode | null {
+function snapTarget(p: Pt, ok: (n: GNode) => boolean, reach = SNAP_PX): GNode | null {
   const nodes = ui.g.nodes;
   let best: GNode | null = null;
-  let bestD = SNAP_PX / ui.view.k;
+  let bestD = reach / ui.view.k;
   for (let i = nodes.length - 1; i >= 0; i--) {
     const n = nodes[i];
     const { w, h } = nodeSize(n);
@@ -1144,34 +1417,322 @@ function highlightTarget(id: number | null) {
   targetId = id;
 }
 
-function startWire(from: number, port: number, e: PointerEvent, p: Pt): boolean {
+// ----- which nodes a wire may go to: shown while a port is armed, and while a finger drags a wire -----
+
+/** Glow every node the wire from this port could connect to and dim the rest. */
+function markTargets(from: number, port: number) {
+  const g = ui.g;
+  markedFor = { from, port };
+  boardEl.classList.add('arming');
+  for (const n of g.nodes) {
+    const refs = nodeEls.get(n.id);
+    if (!refs) continue;
+    const can = n.id !== from && canConnect(g, from, port, n.id);
+    refs.el.classList.toggle('can', can);
+    refs.el.classList.toggle('cant', !can && n.id !== from);
+    marked.add(n.id);
+  }
+}
+
+function clearMarks() {
+  if (!markedFor) return;
+  markedFor = null;
+  boardEl.classList.remove('arming');
+  for (const id of marked) nodeEls.get(id)?.el.classList.remove('can', 'cant');
+  marked.clear();
+}
+
+/** After the board changed: drop an armed port that no longer exists, and re-mark targets (new nodes, new wires). */
+function refreshMarks() {
+  if (tapWire) {
+    const n = nodeById(ui.g, tapWire.from);
+    const a = n && outPorts(ui.g, n)[tapWire.port];
+    if (!a) disarm();
+    else {
+      tapWire.a = a;
+      tapWire.mats = materialsAt(ui.g, tapWire.from, tapWire.port);
+      if (!tapWire.hover) tapWire.p = tapWire.tp = a;
+      nodeEls.get(tapWire.from)?.outs[tapWire.port]?.classList.add('armed');
+    }
+  }
+  if (markedFor) markTargets(markedFor.from, markedFor.port);
+}
+
+/** Arm an output port: it waits for a tap on whatever its wire should go to. */
+function arm(d: WireDrag) {
+  if (tapWire) disarm();
+  tapWire = { ...d, p: d.a, tp: d.a, target: null, blend: 0, armed: false, hover: false };
+  nodeEls.get(d.from)?.outs[d.port]?.classList.add('armed');
+  markTargets(d.from, d.port);
+  // The inspector would sit over half the board on a phone; the player is choosing a target now.
+  if (env.phone && ui.sel) select(null);
+  else touch();
+}
+
+/** Arm a port that was tapped near rather than on. */
+function armPort(from: number, port: number) {
+  const g = ui.g;
+  const n = nodeById(g, from);
+  const a = n && outPorts(g, n)[port];
+  if (!a) return;
+  arm({ kind: 'wire', from, port, mats: materialsAt(g, from, port), a, p: a, target: null, tp: a, blend: 0, armed: false, sx: 0, sy: 0, slop: TOUCH_SLOP, touch: true });
+}
+
+function disarm() {
+  if (!tapWire) return;
+  nodeEls.get(tapWire.from)?.outs[tapWire.port]?.classList.remove('armed');
+  tapWire = null;
+  clearMarks();
+  highlightTarget(null);
+  if (!drag) hideTemp();
+  touch();
+}
+
+/** The port that is armed for wiring by tap, if any (the phone shell shows a hint and a Cancel for it). */
+export const armedPort = (): { from: number; port: number; mat: MatId | null } | null =>
+  tapWire ? { from: tapWire.from, port: tapWire.port, mat: tapWire.mats[0] ?? null } : null;
+
+/** Stop wiring by tap. Returns false when no port was armed. */
+export function cancelArmed(): boolean {
+  if (!tapWire) return false;
+  disarm();
+  return true;
+}
+
+/** Where a wire from these materials attaches on a node: the matching input, or the first. */
+function inPortFor(tn: GNode, mats: MatId[], fallback: Pt): Pt {
+  const ins = inPorts(tn);
+  return ins.find((ip) => ip.mat && mats.includes(ip.mat)) ?? ins[0] ?? fallback;
+}
+
+/** Connect a port to a node, with everything the player should see and hear. Used by drag and by tap. */
+function makeWire(from: number, port: number, mats: MatId[], target: number, tp: Pt) {
+  const g = ui.g;
+  const tn = nodeById(g, target);
+  if (!tn) return;
+  const w = connect(g, from, port, target);
+  if (w) {
+    flashQueue.push(target);
+    signal('connect', { from, to: target, at: toClient(tp) });
+  }
+  const r = recipeOf(tn);
+  if (w && isMachine(tn) && r && mats.length && !r.inputs.some((i) => mats.includes(i[0]))) {
+    toast(`This ${NODE_DEFS[tn.type].name} makes ${r.name} and does not use ${MATERIALS[mats[0]].name}`, 'bad');
+  }
+}
+
+/** A port is armed and the player tapped a node. */
+function tapNode(id: number) {
+  const t = tapWire;
+  if (!t) return;
+  const g = ui.g;
+  if (id !== t.from && canConnect(g, t.from, t.port, id)) {
+    const tn = nodeById(g, id)!;
+    disarm();
+    makeWire(t.from, t.port, t.mats, id, inPortFor(tn, t.mats, t.a));
+    return;
+  }
+  // Anything else cancels. A node that cannot take the wire is simply selected, as a tap would do.
+  disarm();
+  if (id !== t.from) select({ kind: 'node', id });
+}
+
+/** A port is armed and the player tapped the board where there is no node. */
+function tapEmpty(p: Pt) {
+  const t = tapWire;
+  if (!t) return;
+  const g = ui.g;
+  // A mouse has been shown where the wire would snap: a click takes exactly that. A finger gets a
+  // smaller margin, since nothing showed it which node a near miss would count for.
+  const near = snapTarget(p, (n) => canConnect(g, t.from, t.port, n.id), t.hover ? SNAP_PX : TAP_SNAP_PX);
+  if (near) return tapNode(near.id);
+  disarm();
+  // Right beside the port there is no room to build: that tap only cancels.
+  if (Math.hypot(p.x - t.a.x, p.y - t.a.y) > 36 && !nodeAt(p)) {
+    openRadial({ at: p, dir: 'consume', from: t.from, port: t.port, to: 0, mat: t.mats[0] ?? null, a: t.a, opts: consumeOptions(g, t.mats) });
+  }
+}
+
+// ----- what is under the pointer -----
+
+type Hit =
+  | { kind: 'out'; id: number; port: number }
+  /** Not on the port, but within reach of it: a tap there arms it, a drag there pans. */
+  | { kind: 'reach'; id: number; port: number }
+  | { kind: 'in'; id: number; port: number; mat: MatId | null }
+  | { kind: 'node'; id: number }
+  | { kind: 'wire'; id: number }
+  | null;
+
+/** A mouse points exactly, so what it pressed is what the browser says it pressed. */
+function mouseHit(t: HTMLElement): Hit {
+  const nodeEl = t.closest<HTMLElement>('.node');
+  if (nodeEl) {
+    const id = Number(nodeEl.dataset.id);
+    const portOut = t.closest<HTMLElement>('.port.out');
+    if (portOut) return { kind: 'out', id, port: Number(portOut.dataset.out) };
+    const portIn = t.closest<HTMLElement>('.port.in');
+    if (portIn) return { kind: 'in', id, port: Number(portIn.dataset.in), mat: (portIn.dataset.mat as MatId) ?? null };
+    return { kind: 'node', id };
+  }
+  const wireEl = (t as Element).closest?.('g.wire') as SVGGElement | null;
+  if (wireEl) return { kind: 'wire', id: Number(wireEl.dataset.id) };
+  return null;
+}
+
+/**
+ * A finger does not: ports are 14 px dots and wires a few pixels wide. So a touch is matched by
+ * distance on screen, whatever the zoom. In order: a port right under the finger, the card under
+ * the finger, a wire within reach, the nearest output port within reach.
+ *
+ * Only the first of those starts a wire when the finger drags. The gaps between cards are where
+ * a thumb goes to pan, and they are full of wires and within reach of ports: a drag that starts
+ * there pans, and only a tap there selects the wire or arms the port.
+ */
+function touchHit(t: HTMLElement, p: Pt): Hit {
+  const g = ui.g;
+  const k = ui.view.k;
+  const reach = PORT_REACH / k;
+  let out: { id: number; port: number } | null = null, dOut = Infinity;
+  let inn: { id: number; port: number; mat: MatId | null } | null = null, dIn = Infinity;
+  for (const n of g.nodes) {
+    const { w, h } = nodeSize(n);
+    if (p.x < n.x - reach || p.x > n.x + w + reach || p.y < n.y - reach || p.y > n.y + h + reach) continue;
+    for (const o of outPorts(g, n)) {
+      const d = Math.hypot(o.x - p.x, o.y - p.y) * k;
+      if (d < dOut) {
+        dOut = d;
+        out = { id: n.id, port: o.index };
+      }
+    }
+    for (const i of inPorts(n)) {
+      const d = Math.hypot(i.x - p.x, i.y - p.y) * k;
+      if (d < dIn) {
+        dIn = d;
+        inn = { id: n.id, port: i.index, mat: i.mat };
+      }
+    }
+  }
+  if (out && dOut <= PORT_NEAR && dOut <= dIn) return { kind: 'out', ...out };
+  if (inn && dIn <= PORT_IN_NEAR) return { kind: 'in', ...inn };
+  const nodeEl = t.closest<HTMLElement>('.node');
+  if (nodeEl) return { kind: 'node', id: Number(nodeEl.dataset.id) };
+  // A wire comes before the wider reach of a port: every wire starts at one, and a short wire
+  // would otherwise have nowhere left to be tapped (and so could never be cut).
+  const w = wireNear(p, WIRE_REACH / k);
+  if (w) return { kind: 'wire', id: w.id };
+  if (out && dOut <= PORT_REACH) return { kind: 'reach', ...out };
+  return null;
+}
+
+function startWire(from: number, port: number, cx: number, cy: number, p: Pt, touchy: boolean): boolean {
   const g = ui.g;
   const n = nodeById(g, from);
   const a = n && outPorts(g, n)[port];
   if (!a) return false;
-  drag = { kind: 'wire', from, port, mats: materialsAt(g, from, port), a, p, target: null, tp: p, blend: 0, armed: false, sx: e.clientX, sy: e.clientY };
+  drag = {
+    kind: 'wire', from, port, mats: materialsAt(g, from, port), a, p, target: null, tp: p, blend: 0, armed: false,
+    sx: cx, sy: cy, slop: touchy ? TOUCH_SLOP : 6, touch: touchy,
+  };
   boardEl.classList.add('wiring');
   return true;
 }
 
+/** The wire has left its port and is being dragged for real. */
+function wireUnderWay(d: WireDrag) {
+  d.armed = true;
+  if (tapWire) disarm();
+  if (!d.touch) return;
+  // A finger hides what is under it, so the possible ends are lit up as they are for wiring by tap.
+  markTargets(d.from, d.port);
+  if (env.phone && ui.sel) select(null);
+}
+
+// ----- two fingers -----
+
+/** Start (or restart) a pinch from the first two fingers on the board, measured from how things stand now. */
+function startPinch() {
+  const ids = [...fingers.keys()];
+  if (ids.length < 2) return;
+  const a = fingers.get(ids[0])!, b = fingers.get(ids[1])!;
+  const r = rectOf();
+  drag = {
+    kind: 'pinch', a: ids[0], b: ids[1],
+    mx: (a.x + b.x) / 2 - r.left, my: (a.y + b.y) / 2 - r.top,
+    // Fingers that start almost touching would turn a twitch into a big zoom, so the spread never counts as less than this.
+    dist: Math.max(30, Math.hypot(a.x - b.x, a.y - b.y)),
+    vx: ui.view.x, vy: ui.view.y, vk: ui.view.k,
+  };
+  dragPointer = -1;
+}
+
+function movePinch(d: Extract<Drag, { kind: 'pinch' }>) {
+  const a = fingers.get(d.a), b = fingers.get(d.b);
+  if (!a || !b) return;
+  const r = rectOf();
+  const now = { x: (a.x + b.x) / 2 - r.left, y: (a.y + b.y) / 2 - r.top };
+  const v = pinchView({ x: d.vx, y: d.vy, k: d.vk }, { x: d.mx, y: d.my }, d.dist, now, Math.max(30, Math.hypot(a.x - b.x, a.y - b.y)), clampK);
+  ui.view.x = v.x;
+  ui.view.y = v.y;
+  ui.view.k = v.k;
+  applyView();
+}
+
+/** A finger left the board (lifted or cancelled). Returns true when that was handled as part of a pinch. */
+function fingerGone(id: number): boolean {
+  fingers.delete(id);
+  const d = drag;
+  if (d?.kind !== 'pinch') return false;
+  if (id !== d.a && id !== d.b) return true;
+  if (fingers.size >= 2) startPinch();
+  else if (fingers.size === 1) {
+    // One finger left: it carries on as a pan, from where the board is now.
+    const [rest] = fingers.keys();
+    const f = fingers.get(rest)!;
+    drag = { kind: 'pan', sx: f.x, sy: f.y, vx: ui.view.x, vy: ui.view.y, moved: true, slop: 0, place: false };
+    dragPointer = rest;
+    lastClient.x = f.x;
+    lastClient.y = f.y;
+  } else drag = null;
+  return true;
+}
+
 function onDown(e: PointerEvent) {
-  // A press while a gesture is still going (a second finger, or a release that never reached us)
-  // finishes that gesture first, so a node in mid-move is dropped properly rather than left behind.
+  glide = null;
+  const t = e.target as HTMLElement;
+  const onControl = !!(t.closest('#radial') || t.closest('#expand'));
+  if (e.pointerType === 'touch' && !onControl) {
+    fingers.set(e.pointerId, { x: e.clientX, y: e.clientY });
+    if (fingers.size >= 2) {
+      // A second finger: whatever the first was doing ends (a node in mid-move is dropped where it
+      // is, a half-drawn wire is let go), and the two of them move the camera.
+      boardEl.setPointerCapture(e.pointerId);
+      if (radial) closeRadial();
+      // (A node that was only pressed, not moved, is let go without being selected.)
+      if (drag?.kind === 'node' && !drag.moved) endDrag();
+      else finishDrag();
+      startPinch();
+      return;
+    }
+  }
+  // A press while a gesture is still going (a release that never reached us) finishes that gesture
+  // first, so a node in mid-move is dropped properly rather than left behind.
   finishDrag();
   dragPointer = e.pointerId;
+  lastClient.x = e.clientX;
+  lastClient.y = e.clientY;
   if (e.button === 1 || e.button === 2) {
     if (ui.placing) {
       ui.placing = null;
       touch();
     }
     if (radial) closeRadial();
-    drag = { kind: 'pan', sx: e.clientX, sy: e.clientY, vx: ui.view.x, vy: ui.view.y, moved: true };
+    drag = { kind: 'pan', sx: e.clientX, sy: e.clientY, vx: ui.view.x, vy: ui.view.y, moved: true, slop: 0, place: false };
     boardEl.setPointerCapture(e.pointerId);
     return;
   }
   if (e.button !== 0) return;
-  const t = e.target as HTMLElement;
-  if (t.closest('#radial') || t.closest('#expand')) return;
+  if (onControl) return;
   if (radial) {
     closeRadial();
     return;
@@ -1179,69 +1740,121 @@ function onDown(e: PointerEvent) {
   const p = toWorld(e.clientX, e.clientY);
   mouse = p;
   const g = ui.g;
+  const touchy = e.pointerType !== 'mouse';
   boardEl.setPointerCapture(e.pointerId);
 
   if (ui.placing) {
-    placeAt(p, e.shiftKey);
+    // A finger may be about to pan, so it places on release, and only if it was a tap.
+    if (touchy) drag = { kind: 'pan', sx: e.clientX, sy: e.clientY, vx: ui.view.x, vy: ui.view.y, moved: false, slop: PAN_SLOP, place: true };
+    else placeAt(p, e.shiftKey);
     return;
   }
   if (e.shiftKey) {
     drag = { kind: 'knife', a: p, b: p };
     return;
   }
-  const portOut = t.closest<HTMLElement>('.port.out');
-  const portIn = t.closest<HTMLElement>('.port.in');
-  const nodeEl = t.closest<HTMLElement>('.node');
-  if (portOut && nodeEl) {
-    startWire(Number(nodeEl.dataset.id), Number(portOut.dataset.out), e, p);
+  const hit = touchy ? touchHit(t, p) : mouseHit(t);
+  if (hit?.kind === 'out') {
+    startWire(hit.id, hit.port, e.clientX, e.clientY, p, touchy);
     return;
   }
-  if (portIn && nodeEl) {
-    const id = Number(nodeEl.dataset.id);
-    const n = nodeById(g, id);
-    const b = n && inPorts(n)[Number(portIn.dataset.in)];
+  if (hit?.kind === 'in') {
+    const n = nodeById(g, hit.id);
+    const b = n && inPorts(n)[hit.port];
     if (!b) return;
-    drag = { kind: 'wireIn', to: id, mat: (portIn.dataset.mat as MatId) ?? null, b, p, target: null, tp: p, blend: 0, armed: false, sx: e.clientX, sy: e.clientY };
+    drag = {
+      kind: 'wireIn', to: hit.id, mat: hit.mat, b, p, target: null, tp: p, blend: 0, armed: false,
+      sx: e.clientX, sy: e.clientY, slop: touchy ? TOUCH_SLOP : 6,
+    };
     boardEl.classList.add('wiring');
     return;
   }
-  if (nodeEl) {
-    const id = Number(nodeEl.dataset.id);
-    const n = nodeById(g, id);
+  if (hit?.kind === 'node') {
+    const n = nodeById(g, hit.id);
     if (!n) return;
     // Only the old position is remembered here; the undo step is built when the node is dropped.
-    drag = { kind: 'node', id, ox: p.x - n.x, oy: p.y - n.y, x0: n.x, y0: n.y, moved: false, sx: e.clientX, sy: e.clientY };
+    drag = {
+      kind: 'node', id: hit.id, ox: p.x - n.x, oy: p.y - n.y, x0: n.x, y0: n.y, moved: false,
+      sx: e.clientX, sy: e.clientY, slop: touchy ? TOUCH_SLOP : MOUSE_SLOP,
+    };
     return;
   }
-  const wireEl = (t as Element).closest?.('g.wire') as SVGGElement | null;
-  if (wireEl) {
-    drag = { kind: 'wirePress', wireId: Number(wireEl.dataset.id), sx: e.clientX, sy: e.clientY };
+  if (hit?.kind === 'wire') {
+    drag = { kind: 'wirePress', wireId: hit.id, sx: e.clientX, sy: e.clientY, slop: touchy ? TOUCH_SLOP + 2 : 6, touch: touchy };
     return;
   }
-  drag = { kind: 'pan', sx: e.clientX, sy: e.clientY, vx: ui.view.x, vy: ui.view.y, moved: false };
+  drag = { kind: 'pan', sx: e.clientX, sy: e.clientY, vx: ui.view.x, vy: ui.view.y, moved: false, slop: touchy ? PAN_SLOP : 0, place: false };
+  if (hit?.kind === 'reach') drag.near = { id: hit.id, port: hit.port };
 }
 
 function onMove(e: PointerEvent) {
+  const f = fingers.get(e.pointerId);
+  if (f) {
+    f.x = e.clientX;
+    f.y = e.clientY;
+  }
+  if (drag?.kind === 'pinch') {
+    if (e.pointerId === drag.a || e.pointerId === drag.b) movePinch(drag);
+    return;
+  }
   if (drag && e.pointerId !== dragPointer) return;
-  const p = toWorld(e.clientX, e.clientY);
+  lastClient.x = e.clientX;
+  lastClient.y = e.clientY;
+  steer(e.clientX, e.clientY, e.pointerType === 'mouse');
+}
+
+/** Move whatever is being dragged to a client position. Also called by edge scrolling, when the board moved under a still pointer. */
+function steer(cx: number, cy: number, hovering = false) {
+  const p = toWorld(cx, cy);
   mouse = p;
   const g = ui.g;
   if (ui.placing) updateGhost();
-  if (!drag) return;
+  if (!drag) {
+    // A mouse shows where the armed wire would go; a finger cannot hover.
+    const t = tapWire;
+    if (t && hovering && !radial) {
+      t.hover = true;
+      t.p = p;
+      const tn = snapTarget(p, (n) => canConnect(g, t.from, t.port, n.id));
+      t.target = tn?.id ?? null;
+      if (tn) t.tp = inPortFor(tn, t.mats, p);
+      highlightTarget(t.target);
+    }
+    return;
+  }
   switch (drag.kind) {
     case 'pan': {
-      const dx = e.clientX - drag.sx, dy = e.clientY - drag.sy;
-      if (Math.abs(dx) + Math.abs(dy) > 3) drag.moved = true;
+      let dx = cx - drag.sx, dy = cy - drag.sy;
+      if (drag.slop) {
+        // A finger: nothing moves until it has clearly left the spot, and then the board starts from there.
+        if (!drag.moved) {
+          if (Math.hypot(dx, dy) < drag.slop) break;
+          drag.moved = true;
+          drag.sx = cx;
+          drag.sy = cy;
+          dx = dy = 0;
+        }
+      } else if (Math.abs(dx) + Math.abs(dy) > 3) drag.moved = true;
       ui.view.x = drag.vx + dx;
       ui.view.y = drag.vy + dy;
       applyView();
       break;
     }
     case 'node': {
-      if (!drag.moved && Math.hypot(e.clientX - drag.sx, e.clientY - drag.sy) < 4) break;
+      if (!drag.moved && Math.hypot(cx - drag.sx, cy - drag.sy) < drag.slop) break;
       const n = nodeById(g, drag.id);
-      if (!n || n.type === 'well') break;
-      drag.moved = true;
+      if (!n) break;
+      if (n.type === 'well') {
+        // A Well stays on its deposit. Under a finger the drag pans the board instead, so that a
+        // swipe that happens to start on a Well still goes somewhere.
+        if (drag.slop >= TOUCH_SLOP) drag = { kind: 'pan', sx: cx, sy: cy, vx: ui.view.x, vy: ui.view.y, moved: true, slop: 0, place: false };
+        break;
+      }
+      if (!drag.moved) {
+        drag.moved = true;
+        // On a phone the inspector sheet gets out of the way while its node is carried about.
+        appEl?.classList.add('carrying');
+      }
       const { w, h } = nodeSize(n);
       const pos = clampToBoard(p.x - drag.ox, p.y - drag.oy, w, h);
       if (pos.x !== n.x || pos.y !== n.y) {
@@ -1260,29 +1873,36 @@ function onMove(e: PointerEvent) {
       break;
     }
     case 'wirePress': {
-      if (Math.hypot(e.clientX - drag.sx, e.clientY - drag.sy) < 6) break;
-      const w = g.wires.find((x) => x.id === (drag as { wireId: number }).wireId);
-      // Dragging off the middle of a wire branches a new one from the same port.
-      if (!w || !startWire(w.from, w.port, e, p)) drag = null;
+      if (Math.hypot(cx - drag.sx, cy - drag.sy) < drag.slop) break;
+      const press = drag;
+      if (press.touch) {
+        // Under a finger a drag that starts on a wire pans (see touchHit); the board starts from here.
+        drag = { kind: 'pan', sx: cx, sy: cy, vx: ui.view.x, vy: ui.view.y, moved: true, slop: 0, place: false };
+        break;
+      }
+      const w = g.wires.find((x) => x.id === press.wireId);
+      // With a mouse, dragging off the middle of a wire branches a new one from the same port.
+      if (!w || !startWire(w.from, w.port, cx, cy, p, false)) drag = null;
       break;
     }
     case 'wire': {
       const d = drag;
       d.p = p;
-      if (!d.armed && Math.hypot(e.clientX - d.sx, e.clientY - d.sy) > 6) d.armed = true;
+      if (!d.armed && Math.hypot(cx - d.sx, cy - d.sy) > d.slop) wireUnderWay(d);
       const tn = d.armed ? snapTarget(p, (n) => canConnect(g, d.from, d.port, n.id)) : null;
       d.target = tn?.id ?? null;
-      if (tn) {
-        const ins = inPorts(tn);
-        d.tp = ins.find((ip) => ip.mat && d.mats.includes(ip.mat)) ?? ins[0] ?? p;
-      }
+      if (tn) d.tp = inPortFor(tn, d.mats, p);
       highlightTarget(d.target);
       break;
     }
     case 'wireIn': {
       const d = drag;
       d.p = p;
-      if (!d.armed && Math.hypot(e.clientX - d.sx, e.clientY - d.sy) > 6) d.armed = true;
+      if (!d.armed && Math.hypot(cx - d.sx, cy - d.sy) > d.slop) {
+        d.armed = true;
+        if (tapWire) disarm();
+        if (env.phone && ui.sel) select(null);
+      }
       const sn = d.armed ? snapTarget(p, (n) => !isSink(n) && n.id !== d.to) : null;
       d.target = sn?.id ?? null;
       if (sn) d.tp = outPorts(g, sn)[0] ?? p;
@@ -1301,13 +1921,44 @@ function onMove(e: PointerEvent) {
   }
 }
 
+/**
+ * While a wire or a node is dragged near the edge of the visible board, the board scrolls under it,
+ * faster the nearer the edge. On a phone the visible board ends where a sheet or the strip begins.
+ */
+function edgeScroll(dt: number) {
+  const d = drag;
+  if (!d || dt <= 0) return;
+  // A wire that has found something to snap to stays put: the player is where they wanted to be.
+  const live = ((d.kind === 'wire' || d.kind === 'wireIn') && d.armed && d.target == null) || (d.kind === 'node' && d.moved);
+  if (!live) return;
+  const r = rectOf();
+  const f = freeArea();
+  const x = lastClient.x - r.left, y = lastClient.y - r.top;
+  // The band is narrower on a small screen, so there is always a calm middle.
+  const ex = Math.min(EDGE_PX, (f.x1 - f.x0) * 0.2), ey = Math.min(EDGE_PX, (f.y1 - f.y0) * 0.2);
+  const push = (into: number, band: number) => Math.max(0, Math.min(1, into / band));
+  const vx = push(f.x0 + ex - x, ex) - push(x - (f.x1 - ex), ex);
+  const vy = push(f.y0 + ey - y, ey) - push(y - (f.y1 - ey), ey);
+  if (!vx && !vy) return;
+  const step = EDGE_SPEED * Math.min(dt, 0.05);
+  const bx = ui.view.x, by = ui.view.y;
+  ui.view.x += vx * step;
+  ui.view.y += vy * step;
+  applyView();
+  // The pointer has not moved but the board under it has.
+  if (ui.view.x !== bx || ui.view.y !== by) steer(lastClient.x, lastClient.y);
+}
+
 function endDrag() {
   if (drag?.kind === 'node') nodeEls.get(drag.id)?.el.classList.remove('dragging');
   drag = null;
   boardEl.classList.remove('wiring');
+  appEl?.classList.remove('carrying');
   highlightTarget(null);
   hideTemp();
   knifeLine.classList.remove('on');
+  // Marks put up for a dragged wire come down; those of an armed port stay.
+  if (markedFor && !tapWire) clearMarks();
 }
 
 /** Give up on the gesture in progress. A node that was being moved goes back to where it started. */
@@ -1331,6 +1982,7 @@ function dropNode(d: Extract<Drag, { kind: 'node' }>) {
   const g = ui.g;
   const n = nodeById(g, d.id);
   nodeEls.get(d.id)?.el.classList.remove('dragging');
+  appEl?.classList.remove('carrying');
   if (!n) return; // deleted while it was being dragged: nothing to record
   if (d.moved) {
     const { w, h } = nodeSize(n);
@@ -1352,7 +2004,11 @@ function dropNode(d: Extract<Drag, { kind: 'node' }>) {
       });
     } else g.rev++;
   }
+  const again = ui.sel?.kind === 'node' && ui.sel.id === d.id;
   select({ kind: 'node', id: d.id });
+  // The frame loop pans to a node when it becomes the selection. This one already was, and on a
+  // phone it may have been dropped where the returning sheet will cover it.
+  if (env.phone && d.moved && again) ensureVisible(d.id);
 }
 
 /** End whatever gesture is in progress: a node being moved is dropped where it is, anything else is abandoned. */
@@ -1362,43 +2018,64 @@ function finishDrag() {
   endDrag();
 }
 
+function onCancel(e: PointerEvent) {
+  if (fingerGone(e.pointerId)) return;
+  if (e.pointerId === dragPointer) abortDrag();
+}
+
 function onUp(e: PointerEvent) {
   const g = ui.g;
+  if (fingerGone(e.pointerId)) return;
   const d = drag;
   if (!d || e.pointerId !== dragPointer) return;
   const p = toWorld(e.clientX, e.clientY);
   switch (d.kind) {
     case 'pan':
-      if (!d.moved && ui.sel) select(null);
+      if (d.moved) break;
+      if (d.place) {
+        if (ui.placing) placeAt(p, false);
+      } else if (tapWire) {
+        // (The gesture is wound up first: the build menu this may open draws with the wire preview.)
+        endDrag();
+        tapEmpty(p);
+        return;
+      } else if (d.near) {
+        endDrag();
+        armPort(d.near.id, d.near.port);
+        return;
+      } else if (ui.sel) select(null);
       break;
     case 'node':
-      dropNode(d);
+      if (!d.moved && tapWire) tapNode(d.id);
+      else dropNode(d);
       break;
     case 'wirePress':
+      if (tapWire) disarm();
       select({ kind: 'wire', id: d.wireId });
       break;
     case 'wire': {
-      if (d.target != null) {
-        const tn = nodeById(g, d.target)!;
-        const w = connect(g, d.from, d.port, d.target);
-        if (w) {
-          flashQueue.push(d.target);
-          signal('connect', { from: d.from, to: d.target, at: toClient(d.tp) });
+      if (!d.armed) {
+        // A tap on a port arms it; a tap on the armed port lets it go again.
+        if (tapWire && tapWire.from === d.from && tapWire.port === d.port) disarm();
+        else {
+          endDrag();
+          arm(d);
+          return;
         }
-        const r = recipeOf(tn);
-        if (w && isMachine(tn) && r && d.mats.length && !r.inputs.some((i) => d.mats.includes(i[0]))) {
-          toast(`This ${NODE_DEFS[tn.type].name} makes ${r.name} and does not use ${MATERIALS[d.mats[0]].name}`, 'bad');
-        }
-      } else if (Math.hypot(p.x - d.a.x, p.y - d.a.y) > 36 && !nodeAt(p)) {
-        drag = null;
-        boardEl.classList.remove('wiring');
+      } else if (d.target != null) makeWire(d.from, d.port, d.mats, d.target, d.tp);
+      else if (Math.hypot(p.x - d.a.x, p.y - d.a.y) > 36 && !nodeAt(p)) {
+        endDrag();
         openRadial({ at: p, dir: 'consume', from: d.from, port: d.port, to: 0, mat: d.mats[0] ?? null, a: d.a, opts: consumeOptions(g, d.mats) });
         return;
       }
       break;
     }
     case 'wireIn': {
-      if (d.target != null) {
+      if (!d.armed) {
+        // A tap on an input port is a tap on its node.
+        if (tapWire) tapNode(d.to);
+        else if (d.slop >= TOUCH_SLOP) select({ kind: 'node', id: d.to });
+      } else if (d.target != null) {
         const src = nodeById(g, d.target)!;
         let port = 0;
         const r = recipeOf(src);
@@ -1409,10 +2086,9 @@ function onUp(e: PointerEvent) {
         }
       } else if (Math.hypot(p.x - d.b.x, p.y - d.b.y) > 36 && !nodeAt(p)) {
         const opts = d.mat ? produceOptions(g, d.mat) : [];
-        if (!opts.length) toast(d.mat ? `Nothing you have unlocked makes ${MATERIALS[d.mat].name}. Wire a Well to it.` : 'Drag from an output port instead', 'bad');
+        if (!opts.length) toast(d.mat ? `Nothing you have unlocked makes ${MATERIALS[d.mat].name}. Wire a Well to it.` : `${env.touch ? 'Start' : 'Drag'} from an output port instead`, 'bad');
         else {
-          drag = null;
-          boardEl.classList.remove('wiring');
+          endDrag();
           openRadial({ at: p, dir: 'produce', from: 0, port: 0, to: d.to, mat: d.mat, a: d.b, opts });
           return;
         }
@@ -1438,6 +2114,8 @@ function onUp(e: PointerEvent) {
       }
       break;
     }
+    case 'pinch':
+      break;
   }
   endDrag();
 }
@@ -1493,8 +2171,79 @@ export function radialOffset(i: number, n: number): number {
 /** Angle between neighbouring slots. The whole fan never spans more than 300°, which keeps 60° clear around the wire. */
 export const radialStep = (n: number) => (n <= 1 ? 0 : Math.min(Math.PI / 3, (Math.PI * 5) / 3 / (n - 1)));
 
+/** What an option costs, as shown on its button. */
+const optPrice = (o: RadialOpt) =>
+  o.locked ? `needs ${esc(TECHS[o.locked]?.name ?? o.locked)}` : o.cost === 0 ? 'free' : `${fmt(o.cost)}¢`;
+
+/**
+ * The build menu on a phone: a bottom sheet of large labelled buttons instead of the fan, which
+ * is wider than the screen there. The half-drawn wire stays on the board and the board slides so
+ * that the spot where the node will be built shows above the sheet.
+ */
+function openBuildSheet(state: RadialState) {
+  const g = ui.g;
+  const what = state.mat ? MATERIALS[state.mat].name : '';
+  const title = state.dir === 'consume'
+    ? (what ? `Send <b>${what}</b> to a new…` : 'Build here')
+    : `Make <b>${what}</b> with a new…`;
+  const opts = state.opts
+    .map((o, i) => {
+      const afford = !o.locked && o.cost <= g.credits + 1e-6;
+      const cls = o.locked ? 'locked' : afford ? '' : 'poor';
+      const does = o.recipe ? `makes ${esc(RECIPES[o.recipe]?.name ?? '')}` : o.sub;
+      return `<button class="bopt ${cls}${i === 0 && afford ? ' best' : ''}" data-act="pick:${i}" data-testid="radial-${o.type}${o.recipe ? '-' + o.recipe : ''}" ${o.locked ? 'disabled' : ''}>
+        <span class="bg">${o.glyph}</span><span class="bn">${o.locked ? icon('lock', 13) : ''}${esc(NODE_DEFS[o.type].name)}</span>
+        <span class="bs">${o.locked ? '' : does ? does + ' · ' : ''}<span class="mono">${optPrice(o)}</span></span>
+      </button>`;
+    })
+    .join('');
+  buildEl.innerHTML = `<div class="sheet-grab" aria-hidden="true"></div>
+    <div class="bhead"><span class="bt">${state.mat ? matGlyph(state.mat, 18) : ''}<span>${title}</span></span>
+      <button class="ibtn bare" data-act="close" aria-label="Close">${icon('close', 18)}</button></div>
+    <div class="bopts">${opts}</div>`;
+  buildEl.classList.add('open');
+  touch();
+  // The wire that was being drawn stays, ending where the new node will go.
+  const from = state.dir === 'consume' ? state.a : state.at;
+  const to = state.dir === 'consume' ? state.at : state.a;
+  const color = matColor(state.mat);
+  tempPath.setAttribute('d', pathD(from, to));
+  tempPath.style.stroke = color;
+  tempPath.classList.remove('snap');
+  tempPath.classList.add('on');
+  tempEnd.setAttribute('cx', String(state.at.x));
+  tempEnd.setAttribute('cy', String(state.at.y));
+  tempEnd.style.fill = color;
+  tempEnd.classList.add('on');
+  tempD = '';
+  // Room for the card that will appear there (a consumer grows to the right of the spot, a producer to the left).
+  reveal(state.dir === 'consume' ? state.at.x - 16 : state.at.x - NODE_W, state.at.y - 46, NODE_W + 16, 92);
+}
+
+/**
+ * While the sheet is open the player may be waiting to afford something on it: keep the buttons'
+ * "out of reach" look up to date. Only classes change, so nothing moves under a finger.
+ */
+function refreshBuildSheet() {
+  const r = radial;
+  if (!r || !buildEl.classList.contains('open')) return;
+  const credits = ui.g.credits;
+  const btns = buildEl.querySelectorAll<HTMLElement>('.bopt');
+  r.opts.forEach((o, i) => {
+    const b = btns[i];
+    if (!b || o.locked) return;
+    const afford = o.cost <= credits + 1e-6;
+    setClass(b, 'poor', !afford);
+    if (i === 0) setClass(b, 'best', afford);
+  });
+}
+
 function openRadial(state: RadialState) {
   radial = state;
+  if (env.phone) {
+    openBuildSheet(state);
+    return;
+  }
   const g = ui.g;
   const n = state.opts.length;
   // Wide enough that neighbouring slots never overlap, however the fan is turned.
@@ -1519,7 +2268,7 @@ function openRadial(state: RadialState) {
       const x = Math.cos(ang) * R, y = Math.sin(ang) * R;
       const afford = !o.locked && o.cost <= g.credits + 1e-6;
       const cls = o.locked ? 'locked' : afford ? '' : 'poor';
-      const price = o.locked ? `needs ${esc(TECHS[o.locked]?.name ?? o.locked)}` : o.cost === 0 ? 'free' : `${fmt(o.cost)}¢`;
+      const price = optPrice(o);
       return `<button class="slot ${cls}${i === 0 && afford ? ' best' : ''}" data-act="pick:${i}" data-i="${i}" data-testid="radial-${o.type}${o.recipe ? '-' + o.recipe : ''}" style="left:${x.toFixed(1)}px;top:${y.toFixed(1)}px" ${o.locked ? 'disabled' : ''}>
         <span class="key mono">${i + 1}</span>${o.locked ? icon('lock', 14) : ''}${o.glyph}
         <span class="sn">${esc(o.label)}</span><span class="ss">${o.sub ? o.sub + ' · ' : ''}<span class="mono">${price}</span></span>
@@ -1541,6 +2290,10 @@ export function closeRadial() {
   if (!radial) return;
   radial = null;
   radialEl.style.display = 'none';
+  if (buildEl.classList.contains('open')) {
+    buildEl.classList.remove('open');
+    touch();
+  }
   hideTemp();
 }
 
@@ -1575,7 +2328,7 @@ export function pickRadial(i: number) {
   });
   closeRadial();
   if (made) {
-    select({ kind: 'node', id: (made as GNode).id });
+    built((made as GNode).id);
     signal('place', { id: (made as GNode).id, type: o.type });
   }
 }
@@ -1587,9 +2340,10 @@ export function pickRadial(i: number) {
 export function cancelGesture(): boolean {
   const d = drag;
   const busy = !!d && (d.kind === 'wire' || d.kind === 'wireIn' || d.kind === 'knife' || (d.kind === 'node' && d.moved));
-  if (!radial && !busy) return false;
+  if (!radial && !busy && !tapWire) return false;
   if (radial) closeRadial();
   if (busy) abortDrag();
+  if (tapWire) disarm();
   return true;
 }
 
