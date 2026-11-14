@@ -1152,6 +1152,16 @@ export function advice(g: Game): Advice | null {
   return a;
 }
 
+/**
+ * How much longer, in game seconds, the verdict advice(g) last gave for this game stands while the board does
+ * not change (see ADVICE.refresh); 0 when it gave none. For a caller that runs the adviser somewhere else and
+ * has to know when to ask again (src/advice.worker.ts): asking sooner only gets the same answer back.
+ */
+export function adviceLife(g: Game): number {
+  const hit = verdicts.get(g);
+  return hit ? Math.max(0, hit.until - g.time) : 0;
+}
+
 export interface AdviceTrial {
   /** The tip as it would read (mouse wording), its price, and whether trying it on a copy worked at all. */
   text: string;
