@@ -3,31 +3,40 @@
  *
  *   npm run pacing                          play 30 minutes of the current build and print the report
  *   npm run pacing -- --policy=mainline     a focused player who saves Data for the Processing branch
- *   npm run pacing -- --profile=proposed    what-if numbers and rewards from tools/pacing-profiles.ts
+ *   npm run pacing -- --profile=<name>      what-if numbers from tools/pacing-profiles.ts
  *   npm run pacing -- --seed=3 --minutes=45 --quiet
  *   other flags: --patience=<s>  --sharedLab  --noExpand
  *
  * The bot imports the game's own modules, so it always plays the real rules. It models a human,
  * not an optimiser: one action every few seconds, no look-ahead, and a greedy policy
- *   research what is affordable -> fix what is red -> build the new toy -> grow the bottleneck.
- * Everything worth tweaking is in CFG below. Rewards (goal chain, orders) plug in through
- * `hooks` on a profile (tools/pacing-profiles.ts); each hook is called once per tick and may grant
- * credits or Data. Profiles can also change content numbers in memory, so a tuning idea can be
- * measured before anyone edits src/.
+ *   claim what is ready -> research what is affordable -> fix what is red -> build the new toy -> grow the bottleneck.
+ * It plays the game's real goal chain (src/goals.ts) and real orders (src/orders.ts): it claims both as
+ * they become ready, and does the few goals its own policy would never stumble into (upgrade a Well,
+ * expand, set a Router toward a Lab). Everything worth tweaking is in CFG below. Profiles
+ * (tools/pacing-profiles.ts) can change content numbers in memory and add per-tick `hooks`, so a tuning
+ * idea can be measured before anyone edits src/.
  *
- * The report has five parts: (a) event timeline, (b) per-minute table, (c) when each tech was
- * researched and each material first made, (d) dead stretches, (e) where the content runs out.
+ * The report: (a) event timeline, (b) per-minute table, (c) when each tech was researched and each
+ * material first made, (d) dead stretches, (e) where the content runs out, then the goal chain,
+ * where the credits came from, and key times.
+ *
+ * NOTE (stage 1 of the pitch build): this file was only adapted enough to run against the new rules.
+ * The slow policy and the section 1 targets of docs/PITCH_PLAN.md are still to be wired in.
  */
 declare const process: { argv: string[]; stdout: { write(s: string): void } };
 
 import { DATA_YIELD, DataTier, MATERIALS, MatId, NODE_DEFS, NodeType, PIPES, RECIPES, TECHS, Tech, Track } from '../src/content';
-import { clearHistory, connect, cutWire, expandBoard, freeDeposits, materialsAt, placeNode, upgrade, upgradeWire } from '../src/actions';
+import {
+  claimGoal, claimOrder, clearHistory, connect, cutWire, expandBoard, freeDeposits, materialsAt, placeNode, setMode, setWeight, upgrade,
+  upgradeWire,
+} from '../src/actions';
 import {
   expansionCost, fmt, has, maxLevel, maxPipeTier, nodeCost, pipeCap, readyTechs, recipeOf, recipeUnlocked, research, saturation,
   techAvailable, techEta, trackAvailable, upgradeCost, wellRate,
 } from '../src/economy';
+import { GOALS, MAIN_GOALS, activeGoal, rewardText } from '../src/goals';
 import { graph, isMachine, tick } from '../src/sim';
-import { Game, GNode, Status, Wire, newGame } from '../src/state';
+import { Game, GNode, Stats, Status, Wire, newGame } from '../src/state';
 import { HookCtx, PROFILES, Profile, Reward } from './pacing-profiles';
 
 // =====================================================================================
@@ -44,7 +53,7 @@ export const CFG = {
   firstActionDelay: 6, // seconds spent looking at the screen before the first drag
   /** [min, max] game seconds each kind of action keeps the player busy. */
   actionSeconds: {
-    wire: [3, 4], build: [3, 4], upgrade: [3, 4], cut: [3, 4], expand: [3, 4], research: [5, 7],
+    wire: [3, 4], build: [3, 4], upgrade: [3, 4], cut: [3, 4], expand: [3, 4], research: [5, 7], claim: [1.5, 2.5],
   } as Record<string, [number, number]>,
   noticeDelay: 4, // a red or yellow ring must last this long before the player reacts to it
   settleTime: 10, // after touching a problem, wait this long before judging that node again
@@ -60,7 +69,7 @@ export const CFG = {
   patience: 150, // if the next new toy is this many seconds of income away (or less), save for it
   pettyShare: 0.03, // ...while saving, only buy things under this share of the toy's price
   growShareOfTarget: 0.25, // while the toy is further away than that, upgrades may cost up to this share of its price
-  saturationFloor: 0.45, // do not push a line whose product already sells below this share of its base price
+  saturationFloor: 0.9, // do not push a line whose product already averages below this share of its full price (i.e. sells a real surplus)
   expand: true, // expand the board whenever no unlocked deposit is free
   labPerTier: true, // one Lab per Data tier (false: everything goes into the first Lab)
   efficiency: true, // buy Efficiency upgrades once Efficiency Tuning is researched
@@ -145,6 +154,13 @@ class Bot {
   rewardTotal: Required<Reward> = { credits: 0, a: 0, b: 0, g: 0 };
   lastNewAt = 0;
   lastNewWhat = '';
+  /** Per goal id: when it became ready and when it was claimed. */
+  goalReadyAt: Record<string, number> = {};
+  goalClaimedAt: Record<string, number> = {};
+  orderLog: { t: number; text: string }[] = [];
+  flowStates: number[] = [];
+  /** Credit sources at the moment of the first Lens. */
+  statsAtEnd: Stats | null = null;
 
   constructor(profile: Profile) {
     this.profile = profile;
@@ -152,6 +168,7 @@ class Bot {
     clearHistory();
     this.g = newGame();
     this.g.credits += profile.startCredits ?? 0;
+    this.g.orderSeed = (this.g.orderSeed + CFG.seed * 7919) >>> 0;
     this.rnd = rng(CFG.seed);
   }
 
@@ -519,7 +536,8 @@ class Bot {
             });
             return true;
           };
-          if (cutSink('market') || cutSink('void') || cutSink('lab')) continue;
+          // A plain port feeds machines first, so cutting a sink only helps when a Router does the splitting.
+          if (s.type === 'router' && (cutSink('market') || cutSink('void') || cutSink('lab'))) continue;
           if (s.grace > 0 || s.status === 'starved' || s.status === 'blocked') continue; // the cause is further up or elsewhere
           if (s.type === 'well') speedWant(s, `${this.name(n)} is starved`, [n.id]);
           else if (isMachine(s) && s.util >= 0.9) speedWant(s, `${this.name(n)} is starved of ${MATERIALS[m].name}`, [n.id]);
@@ -573,13 +591,59 @@ class Bot {
         });
       }
     }
+    this.goalWants(W);
     return W;
+  }
+
+  /** The goals this policy would never do by itself: the goal card asks, so the player does them. */
+  goalWants(W: Want[]) {
+    const g = this.g;
+    const goal = activeGoal(g);
+    if (!goal || g.goal.ready) return;
+    if (goal.id === 'upgrade-well') {
+      const n = g.nodes.find((x) => x.type === 'well');
+      if (n) W.push({ cls: 'new', kind: 'upgrade', cost: upgradeCost(n, 'speed'), novel: true, settle: [n.id], label: `upgrade ${this.name(n)} speed (goal)`, run: () => upgrade(g, n.id, 'speed') });
+    } else if (goal.id === 'expand') {
+      const cost = this.expandPrice();
+      W.push({ cls: 'new', kind: 'expand', cost, novel: true, label: 'expand the board (goal)', run: () => this.payAs(expansionCost(g), cost, () => expandBoard(g)) });
+    } else if (goal.id === 'route-lab') {
+      const market = g.nodes.find((n) => n.type === 'market');
+      const lab = g.nodes.find((n) => n.type === 'lab');
+      if (!market || !lab) return;
+      const router = g.nodes.find((n) => n.type === 'router');
+      if (!router) {
+        // from a machine port that already feeds that Lab
+        const w = this.ins(lab).find((x) => isMachine(this.node(x.from)));
+        if (!w) return;
+        const from: Port = { n: this.node(w.from), port: w.port };
+        W.push({ cls: 'new', kind: 'build', cost: nodeCost(g, 'router'), novel: true, label: `build Router from ${this.name(from.n)} (goal)`, run: () => !!this.buildFrom(from, 'router') });
+        return;
+      }
+      const toLab = this.outs(router).find((w) => this.node(w.to).type === 'lab');
+      const toMarket = this.outs(router).find((w) => this.node(w.to).type === 'market');
+      if (!toLab) W.push({ cls: 'fix', kind: 'wire', cost: 0, label: 'wire Router → Lab (goal)', run: () => !!connect(g, router.id, 0, lab.id) });
+      else if (!toMarket) W.push({ cls: 'fix', kind: 'wire', cost: 0, label: 'wire Router → Market (goal)', run: () => !!connect(g, router.id, 0, market.id) });
+      else if (router.mode !== 'ratio' || toLab.weight <= toMarket.weight) {
+        W.push({
+          cls: 'fix', kind: 'upgrade', cost: 0, label: 'set Router to Ratio, Lab 3 : Market 1 (goal)',
+          run: () => { setMode(g, router.id, 'ratio'); return setWeight(g, toLab.id, 3); },
+        });
+      }
+    }
   }
 
   // ---------- one decision ----------
 
   decide(): Want | null {
     const g = this.g;
+    if (g.goal.ready) {
+      const goal = activeGoal(g)!;
+      return { cls: 'new', kind: 'claim', cost: 0, label: `claim goal ${g.goal.i + 1} "${goal.title}"`, run: () => claimGoal(g) };
+    }
+    if (g.order?.ready) {
+      const o = g.order;
+      return { cls: 'new', kind: 'claim', cost: 0, label: `claim order: ${o.need} ${MATERIALS[o.mat].name}`, run: () => claimOrder(g) };
+    }
     const tech = this.pickTech();
     if (tech) {
       return {
@@ -682,17 +746,45 @@ class Bot {
 
   drainEvents() {
     const g = this.g;
+    const pay = (r: Reward) => {
+      this.rewardTotal.credits += r.credits ?? 0;
+      for (const k of TIERS) this.rewardTotal[k] += r[k] ?? 0;
+    };
+    const payText = (r: Reward) =>
+      [r.credits ? `+${fmt(r.credits)}¢` : '', ...TIERS.map((k) => (r[k] ? `+${r[k]}${GREEK[k]}` : ''))].filter(Boolean).join(' ');
     for (const ev of g.events.splice(0)) {
       if (ev.kind === 'milestone') {
-        const extra = Math.round((this.profile.milestone ? this.profile.milestone(ev.mat, ev.reward) : ev.reward) - ev.reward);
-        g.credits += extra;
-        g.lifetime += extra;
-        this.log(`· first ${MATERIALS[ev.mat].name}: milestone +${fmt(ev.reward + extra)}¢`);
+        this.log(`· first ${MATERIALS[ev.mat].name}`);
         this.markNew(`first ${MATERIALS[ev.mat].name}`);
       } else if (ev.kind === 'tech') {
         this.techAt[ev.id] = g.time;
         this.markNew(`tech ${ev.id} ${TECHS[ev.id].name}`);
         if (TECHS[ev.id].auto) this.log(`· ${ev.id} ${TECHS[ev.id].name} unlocked (${TECHS[ev.id].auto})`);
+      } else if (ev.kind === 'goal-ready') {
+        this.goalReadyAt[ev.goal] = g.time;
+        this.log(`· goal ${ev.index + 1} ready: ${GOALS[ev.index].title}`);
+      } else if (ev.kind === 'goal-claimed') {
+        this.goalClaimedAt[ev.goal] = g.time;
+        pay(ev.reward);
+        this.log(`★ goal ${ev.index + 1} claimed${ev.big ? ' (BIG)' : ''}: ${rewardText(ev.reward)}`);
+      } else if (ev.kind === 'order-new') {
+        this.orderLog.push({ t: g.time, text: `${ev.quiet ? 'swapped in' : 'new'}: ${ev.order.need} ${MATERIALS[ev.order.mat].name} for ${payText(ev.order.reward)}` });
+        this.log(`· order${ev.quiet ? ' (swapped, no deliveries)' : ''}: deliver ${ev.order.need} ${MATERIALS[ev.order.mat].name} for ${payText(ev.order.reward)}`);
+      } else if (ev.kind === 'order-ready') {
+        this.log(`· order filled: ${ev.order.need} ${MATERIALS[ev.order.mat].name} after ${Math.round(g.time - ev.order.created)}s`);
+      } else if (ev.kind === 'order-claimed') {
+        pay(ev.reward);
+        this.orderLog.push({ t: g.time, text: `claimed: ${ev.order.need} ${MATERIALS[ev.order.mat].name} ${payText(ev.reward)} (${Math.round(g.time - ev.order.created)}s after it appeared)` });
+        this.log(`★ order claimed: ${payText(ev.reward)}`);
+      } else if (ev.kind === 'flow-state') {
+        this.flowStates.push(g.time);
+        this.log(`★ FLOW STATE${ev.first ? ' (first)' : ''}`);
+      } else if (ev.kind === 'unlock') {
+        this.log(`· unlocked: ${ev.what}`);
+        this.markNew(`${ev.what} unlocked`);
+      } else if (ev.kind === 'demo-end') {
+        this.statsAtEnd = { ...g.stats };
+        this.log('★ DEMO COMPLETE: first Lens');
       }
     }
     for (const k in g.made) if (this.madeAt[k as MatId] == null) this.madeAt[k as MatId] = g.time;
@@ -815,9 +907,36 @@ function report(bot: Bot) {
   P('  credit purchases the player still wants:');
   for (const w of wants) P(`    ${padR(fmt(w.cost) + '¢', 9)} ${w.label}  (${w.cost <= g.credits ? 'affordable' : `${Math.ceil((w.cost - g.credits) / Math.max(g.creditRate, 1e-6) / 60)} min away`})`);
   if (!wants.length) P('    none');
-  if (bot.rewardTotal.credits || bot.rewardTotal.a || bot.rewardTotal.b || bot.rewardTotal.g) {
-    P(`  rewards injected by hooks: ${fmt(bot.rewardTotal.credits)}¢, ${bot.rewardTotal.a}α, ${bot.rewardTotal.b}β, ${bot.rewardTotal.g}γ`);
-  }
+  P();
+  P('== GOAL CHAIN (ready → claimed; "stuck" is the time since the previous claim) ==');
+  let prevClaim = 0;
+  let worstStuck = 0;
+  let worstGoal = '';
+  GOALS.forEach((goal, i) => {
+    const ready = bot.goalReadyAt[goal.id];
+    const claimed = bot.goalClaimedAt[goal.id];
+    const stuck = (ready ?? CFG.minutes * 60) - prevClaim;
+    if (ready != null || i === g.goal.i) {
+      if (stuck > worstStuck) { worstStuck = stuck; worstGoal = goal.title; }
+      P(`  ${pad(i + 1, 2)}${goal.free ? '*' : ' '} ${padR(goal.title, 40)} ${ready == null ? 'not done ' : mmss(ready) + ' → ' + (claimed == null ? 'unclaimed' : mmss(claimed))}  stuck ${pad(Math.round(stuck), 4)}s  ${rewardText(goal.reward)}`);
+    }
+    if (claimed != null) prevClaim = claimed;
+  });
+  P(`  goals claimed: ${Math.min(g.goal.i, MAIN_GOALS)}/${MAIN_GOALS} (+${Math.max(0, g.goal.i - MAIN_GOALS)} free play); longest on one goal: ${Math.round(worstStuck)}s (${worstGoal})`);
+  P(`  orders claimed: ${g.stats.ordersFilled}; Flow States: ${bot.flowStates.length}${bot.flowStates.length ? ` (first at ${mmss(bot.flowStates[0])})` : ''}; best Flow streak ${Math.round(g.flowBest)}s; Flow now ${Math.round(g.flow * 100)}%${g.flowOn ? '' : ' (locked)'}`);
+  if (!CFG.quiet) for (const o of bot.orderLog) P(`    ${mmss(o.t)}  order ${o.text}`);
+
+  P();
+  P('== WHERE CREDITS CAME FROM ==');
+  const sources = (label: string, st: Stats) => {
+    const total = st.fromSales + st.fromOrders + st.fromGoals + st.fromAway || 1;
+    const pct = (n: number) => `${Math.round((100 * n) / total)}%`;
+    P(`  ${padR(label, 22)} sales ${fmt(st.fromSales)}¢ (${pct(st.fromSales)}) · orders ${fmt(st.fromOrders)}¢ (${pct(st.fromOrders)}) · goals ${fmt(st.fromGoals)}¢ (${pct(st.fromGoals)}) → sales + orders ${pct(st.fromSales + st.fromOrders)}`);
+  };
+  if (bot.statsAtEnd) sources('at the first Lens:', bot.statsAtEnd);
+  sources(`after ${CFG.minutes} min:`, g.stats);
+  P(`  Data from goals and orders: ${bot.rewardTotal.a}α, ${bot.rewardTotal.b}β, ${bot.rewardTotal.g}γ`);
+
   P();
   P('== KEY TIMES ==');
   const key = (label: string, t: number | undefined) => P(`  ${padR(label, 34)} ${t == null ? 'not reached' : mmss(t)}`);
@@ -833,6 +952,8 @@ function report(bot: Bot) {
   key('first Tier 3 item (Lens)', bot.madeAt.lens);
   key('first Dynamo', bot.madeAt.dynamo);
   key('first Paradox', bot.madeAt.paradox);
+  key('Orders unlocked', bot.goalClaimedAt['make-spark']);
+  key('Flow meter unlocked', bot.goalClaimedAt['make-glyph']);
   process.stdout.write(out.join('\n') + '\n');
 }
 
