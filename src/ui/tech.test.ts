@@ -55,9 +55,13 @@ describe('tech tree: what is shown', () => {
     for (const id of ['L3', 'L4', 'L2', 'S1', 'C2']) expect(byId(g, id)).toBeUndefined();
     g.techs.push('L1', 'C1');
     for (const id of ['L3', 'L4', 'L2', 'S1', 'C2']) expect(byId(g, id)?.veiled).toBe(false);
-    // Auto-balance needs Bulk Upgrade and Priority Routing, both researchable now: one step ahead.
+    // Bulk Upgrade is itself a goal reward ("Fill three orders"): it says so, and Auto-balance behind it stays out.
+    expect(byId(g, 'S1')?.state).toBe('goal');
+    expect(byId(g, 'S3')).toBeUndefined();
+    // Once that goal has paid it out, Auto-balance is one step ahead: it still needs Priority Routing.
+    g.techs.push('S1');
     expect(byId(g, 'S3')?.veiled).toBe(true);
-    expect(byId(g, 'S3')?.needs.map((t) => t.id).sort()).toEqual(['L4', 'S1']);
+    expect(byId(g, 'S3')?.needs.map((t) => t.id)).toEqual(['L4']);
   });
 
   it('a tech two steps away is not shown, however many paths lead to it', () => {
