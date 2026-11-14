@@ -318,13 +318,15 @@ html[data-input='touch'] #insp .link::after { content: ''; position: absolute; i
 
 /* A phone on its side has 276 px of stage. The card folds to one line (step and reward over the title,
    progress beside it) with its hint behind a tap, as above. The order and the alert are small pills
-   beside it; with a sheet standing at the side they move under the card, next to each other. */
+   beside it. While a sheet stands at the side there is half the width and the player is busy with one
+   node: the order and the alert wait out of sight until the sheet is closed. */
 @media (orientation: landscape) and (max-height: 520px) {
   #app.phone #hud { padding-top: 4px; padding-right: calc(var(--edge-r, 8px) + var(--shift, 0px)); }
   #app.phone #hud-strip, #app.phone #hud-strip.over-tech { display: grid; grid-template-columns: minmax(0, 3fr) minmax(0, 2fr); grid-template-areas: 'goal order' 'goal alert'; grid-template-rows: auto 1fr; gap: 4px 6px; align-items: start; }
   #app.phone #hud-strip:not(:has(#order:not([hidden]), #hud-alert:not([hidden]))) { grid-template-columns: minmax(0, 1fr); grid-template-areas: 'goal'; }
   #app.phone #hud-row { display: contents; }
-  #app.phone:has(#insp.open, #build-sheet.open) #hud-strip { grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); grid-template-areas: 'goal goal' 'order alert'; grid-template-rows: auto auto; }
+  #app.phone:has(#insp.open, #build-sheet.open) #hud-strip { grid-template-columns: minmax(0, 1fr); grid-template-areas: 'goal'; }
+  #app.phone:has(#insp.open, #build-sheet.open) #order, #app.phone:has(#insp.open, #build-sheet.open) #hud-alert { display: none; }
   #app.phone #goal { grid-area: goal; padding: 4px 10px 5px 12px; }
   #app.phone #goal.done { justify-self: center; }
   #app.phone #order { grid-area: order; }

@@ -394,7 +394,11 @@ export function initPhone() {
     const g = ui.g;
     if (ui.uiRev !== seenUi || g.rev !== seenRev || sizeRev !== sizeSeen) sync();
     // (On every layout: the first framing happens before the goal card has any text in it.)
-    if (refit && --refit === 0) fitView();
+    if (refit && --refit === 0) {
+      fitView();
+      // (Framing everything may have put the selected node under a sheet or the strip.)
+      if (ui.sel?.kind === 'node') ensureVisible(ui.sel.id);
+    }
   });
   onNewGame(() => {
     measuredKey = '';
