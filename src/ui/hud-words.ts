@@ -13,13 +13,15 @@ export const PressWord = () => (isTouch() ? 'Tap' : 'Click');
 /** A label with its keyboard shortcut, or without it on touch: "Undo (Ctrl+Z)" / "Undo". */
 export const withKey = (label: string, key: string) => (isTouch() ? label : `${label} (${key})`);
 
-/** A wait in words: "about 40 seconds", "about 2 min". Empty when it would never end. */
-export function waitText(seconds: number): string {
+/**
+ * A length of time in round, human numbers: "a few seconds", "about 40 s", "about 1 min", "about 12 min",
+ * "over an hour". For waits and for what a tip saves. Empty when it would never end.
+ */
+export function aboutTime(seconds: number): string {
   if (!isFinite(seconds) || seconds < 0) return '';
   if (seconds < 8) return 'a few seconds';
-  if (seconds < 50) return `about ${Math.max(10, Math.round(seconds / 10) * 10)} seconds`;
-  if (seconds < 90) return 'about a minute';
-  if (seconds < 3600) return `about ${Math.round(seconds / 60)} min`;
+  if (seconds < 55) return `about ${Math.max(10, Math.round(seconds / 10) * 10)} s`;
+  if (seconds < 3570) return `about ${Math.max(1, Math.round(seconds / 60))} min`;
   return 'over an hour';
 }
 

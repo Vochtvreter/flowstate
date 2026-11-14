@@ -1,6 +1,7 @@
 import './style.css';
 import './styles/tech.css';
 import './styles/hud.css';
+import './styles/advice.css';
 import './styles/feel.css';
 import './styles/phone.css';
 import { clearHistory, cutWire, deleteNode, nodeById, redo, refundOf, undo } from './actions';
@@ -16,6 +17,9 @@ import { fx, initFx } from './ui/fx';
 import { hotbarTypes, initPanels, renderPanels, tickPanels } from './ui/panels';
 import { closeTech, initTech, openTech, renderTech } from './ui/tech';
 import { initFeel } from './ui/feel';
+import { adviserStats } from './ui/advice-client';
+import { TIP, offerTip, tipShown } from './ui/advice-tip';
+import { markedControl } from './ui/advice-show';
 import { hudAnchors, initHud } from './ui/hud';
 import { backToStart, initScreens, isStarted, screenOpen, screensApi, showStart } from './ui/hud-screens';
 import { initPhone } from './ui/phone';
@@ -97,6 +101,8 @@ function boot() {
   // Test hooks. `ui` and `tick` are relied on by scripts; the rest are there for convenience.
   (window as unknown as Record<string, unknown>).flowstate = {
     ui, tick, fx, view: { fit: fitView, zoomBy, jumpTo }, onSignal, hud: { ...screensApi, anchors: hudAnchors },
+    // The adviser: how it is run and what it cost; the tip on the card and its timing; the control "Show me" ringed.
+    adviser: { stats: adviserStats, tip: tipShown, offer: (a: Parameters<typeof offerTip>[1]) => { offerTip(ui.g, a); renderPanels(true); }, marked: markedControl, TIP },
   };
   requestAnimationFrame(frame);
 }
