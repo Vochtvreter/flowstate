@@ -64,7 +64,9 @@ html.phone body { position: fixed; inset: 0; width: 100%; }
   grid-template-rows: var(--top-h) minmax(0, 1fr) var(--hot-h);
   overflow: hidden;
 }
-#app.phone #top { grid-row: 1; grid-column: 1; min-width: 0; padding: env(safe-area-inset-top, 0px) var(--edge-r) 0 var(--edge-l); }
+#app.phone #top { grid-row: 1; grid-column: 1; }
+/* (Weak on purpose, like the other rules here for things another track owns: `#app.phone #top` beats it.) */
+#app.phone :where(#top) { min-width: 0; padding: env(safe-area-inset-top, 0px) var(--edge-r) 0 var(--edge-l); }
 #app.phone #stage { grid-row: 2; grid-column: 1; }
 /* The tech tree and the modal are another track's; these only keep them inside the shell. */
 #app.phone :where(#tech) { top: var(--top-h); }
@@ -165,21 +167,22 @@ html.phone body { position: fixed; inset: 0; width: 100%; }
 #app.phone .grab { display: flex; flex: none; height: 20px; align-items: center; justify-content: center; touch-action: none; cursor: grab; }
 #app.phone .grab::before { content: ''; width: 38px; height: 4px; border-radius: 2px; background: #3a4663; }
 
-/* Inspector contents at finger size. */
-#app.phone #insp .sec { padding: 12px 16px; }
-#app.phone #insp .sec.head { padding: 0 6px 8px 16px; touch-action: none; }
-#app.phone #insp .ibtn.bare { width: 44px; height: 44px; }
-#app.phone #insp .scroll { touch-action: pan-y; overscroll-behavior: contain; -webkit-overflow-scrolling: touch; }
-#app.phone #insp .buy { height: 44px; min-width: 100px; font-size: 13px; }
-#app.phone #insp .fbtn { height: 44px; font-size: 13px; }
-#app.phone #insp .ghostbtn { height: 44px; padding: 0 14px; font-size: 13px; }
-#app.phone #insp .link { min-width: 44px; min-height: 44px; padding: 0 6px; font-size: 13px; }
-#app.phone #insp .step { width: 44px; height: 44px; border-radius: 10px; }
-#app.phone #insp .filt { height: 44px; min-width: 56px; font-size: 12px; }
-#app.phone #insp .seg button { height: 44px; }
-#app.phone #insp .recipelist button { height: 48px; font-size: 13px; }
-#app.phone #insp .rrow .dest { width: 76px; }
-#app.phone #insp .foot { padding: 10px 16px 12px; }
+/* Inspector contents at finger size. The contents belong to the hud track, so these are weak too:
+   a rule written as `#app.phone #insp .buy` beats the one here. */
+#app.phone :where(#insp) .sec { padding: 12px 16px; }
+#app.phone :where(#insp) .sec.head { padding: 0 6px 8px 16px; touch-action: none; }
+#app.phone :where(#insp) .ibtn.bare { width: 44px; height: 44px; }
+#app.phone :where(#insp) .scroll { touch-action: pan-y; overscroll-behavior: contain; -webkit-overflow-scrolling: touch; }
+#app.phone :where(#insp) .buy { height: 44px; min-width: 100px; font-size: 13px; }
+#app.phone :where(#insp) .fbtn { height: 44px; font-size: 13px; }
+#app.phone :where(#insp) .ghostbtn { height: 44px; padding: 0 14px; font-size: 13px; }
+#app.phone :where(#insp) .link { min-width: 44px; min-height: 44px; padding: 0 6px; font-size: 13px; }
+#app.phone :where(#insp) .step { width: 44px; height: 44px; border-radius: 10px; }
+#app.phone :where(#insp) .filt { height: 44px; min-width: 56px; font-size: 12px; }
+#app.phone :where(#insp) .seg button { height: 44px; }
+#app.phone :where(#insp) .recipelist button { height: 48px; font-size: 13px; }
+#app.phone :where(#insp) .rrow .dest { width: 76px; }
+#app.phone :where(#insp) .foot { padding: 10px 16px 12px; }
 
 /* The build menu as a sheet. */
 .bhead { display: flex; align-items: center; gap: 8px; padding: 0 6px 6px 16px; touch-action: none; }

@@ -463,8 +463,10 @@ function nodeSub(n: GNode): string {
     case 'well': return `Lv ${n.lv.speed} · deposit`;
     case 'refiner': case 'assembler': case 'fabricator': {
       const r = recipeOf(n);
-      const text = r ? recipeText(r) : 'no recipe';
-      return text.length > SUB_CHARS ? text.slice(0, SUB_CHARS - 1).trimEnd() + '…' : text;
+      // A phone sets this line in bigger type, so there it only says what comes out.
+      const max = env.phone ? SUB_CHARS - 2 : SUB_CHARS;
+      const text = !r ? 'no recipe' : env.phone ? `makes ${r.outputs.map(([m]) => MATERIALS[m].name).join(' + ')}` : recipeText(r);
+      return text.length > max ? text.slice(0, max - 1).trimEnd() + '…' : text;
     }
     case 'router': return `${n.mode} split`;
     case 'merger': return 'junction';
