@@ -39,13 +39,11 @@ interface Spec {
 }
 
 const BLOCK_MS = 400;
-/** Amounts are written this far above the middle of the glyph, clear of its ring. */
-const PAY_LIFT = 84;
 const OUT_MS = 320;
 
 let app: HTMLElement;
 let record: (kind: 'celebrate', name: string, detail?: string | number) => void = () => {};
-let payout: (from: Pt, r: GoalReward, lift?: number) => void = () => {};
+let payout: (from: Pt, r: GoalReward) => void = () => {};
 const reducedQuery = typeof matchMedia === 'function' ? matchMedia('(prefers-reduced-motion: reduce)') : null;
 const reduced = () => !!reducedQuery?.matches;
 
@@ -120,7 +118,9 @@ function leave() {
   c.leaving = true;
   c.wrap.classList.remove('block');
   c.wrap.classList.add('out');
-  c.wash?.classList.add('out');
+  // The wash fades from wherever its own animation has got to. (Done in script: a class that swapped
+  // the animation for a transition would snap it to nothing instead.)
+  if (c.wash?.animate) c.wash.animate([{ opacity: getComputedStyle(c.wash).opacity }, { opacity: 0 }], { duration: OUT_MS - 20, fill: 'forwards' });
   c.timers.push(window.setTimeout(remove, OUT_MS));
 }
 
@@ -170,7 +170,7 @@ function sparksThenPay(count: number, power: number, shape: 'hexagon' | 'diamond
     burst(at, spec.color, count, { top: true, power, shape });
     burst(at, '#ffffff', Math.round(count / 3), { top: true, power: power * 0.7 });
     ring(at, spec.color, { top: true, size: 90, life: 0.6 });
-    later(Math.min(700, spec.life * 0.4), () => payout(at, r, PAY_LIFT));
+    later(Math.min(700, spec.life * 0.4), () => payout(at, r));
   };
 }
 
@@ -222,7 +222,7 @@ function converge(at: Pt, spec: Spec, reward: GoalReward) {
   const r = app.getBoundingClientRect();
   const reach = Math.min(r.width * 0.46, 520);
   const left = { x: at.x - reach, y: at.y + 30 }, right = { x: at.x + reach, y: at.y - 30 };
-  const opts = { ttl: 0.5, stagger: 0.024, spread: 54, size: 6 };
+  const opts = { ttl: 0.5, stagger: 0.024, spread: 54, size: 6, top: true };
   fly(left, at, MATERIALS.ink.color, 22, () => {
     burst(at, spec.color, 44, { top: true, power: 2.1, shape: 'star' });
     burst(at, '#ffffff', 14, { top: true, power: 1.4 });
@@ -230,7 +230,7 @@ function converge(at: Pt, spec: Spec, reward: GoalReward) {
     ring(at, '#ffffff', { top: true, size: 80, life: 0.5 });
   }, { ...opts, shape: 'square' });
   fly(right, at, MATERIALS.spark.color, 22, undefined, { ...opts, shape: 'star' });
-  later(1300, () => payout(at, reward, PAY_LIFT));
+  later(1300, () => payout(at, reward));
 }
 
 /** The first Flow State: no sparks, only slow rings widening from the middle, like breath on glass. */

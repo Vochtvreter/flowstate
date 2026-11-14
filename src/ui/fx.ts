@@ -1,16 +1,22 @@
-// Everything that moves every frame is drawn here, on two canvases:
+// Everything that moves every frame is drawn here, on three canvases:
 //  - the board layer (`#fx`, over the stage and under the HUD): the dots travelling along flowing
 //    wires, the pulse on open ports, and particles that belong to the board (sale floaters, sparks);
+//  - the bar layer (`#fx-bar`, made here, a strip over the top bar): whatever has to be seen up
+//    there, such as a coin on the last stretch of its way to the credits counter;
 //  - the top layer (`#fx-top`, made here, over the whole app and above every panel): particles that
-//    travel to or start from the HUD, such as coins flying to the credits counter.
+//    must be seen above the HUD in the middle of the screen, such as a celebration's sparks.
 // Nothing here touches the DOM after init, and nothing here knows about the game: the board hands
 // over wire geometry as `Flow` objects, everyone else calls the particle functions or adds an
 // overlay (a function that draws its own thing each frame).
 //
 // Points passed to the particle functions are in client pixels (the same space as pointer events
 // and getBoundingClientRect), so any HUD element or board position can be a source or a target.
-// Why two canvases rather than one big one: wire dots must stay under the goal card, the build menu
-// and the phone's sheets, while coins must fly over the top bar. One canvas cannot be both.
+//
+// Why three canvases rather than one big one. Wire dots must stay under the goal card, the build
+// menu and the phone's sheets, while coins must fly over the top bar: one canvas cannot be both.
+// And a canvas costs by its size every frame it changes, which the board layer does anyway (the
+// dots) and a strip hardly does at all; so the everyday traffic (coins from every sale) is drawn
+// on those two, and the big top layer is only touched for the second or two of a celebration.
 
 export interface Pt { x: number; y: number }
 
@@ -105,13 +111,25 @@ let ctx: CanvasRenderingContext2D | null = null;
 let host: HTMLElement | null = null;
 let W = 0, H = 0, dpr = 1;
 let originX = 0, originY = 0;
-// The top layer: same pixel ratio, sized to the whole app.
-let topCanvas: HTMLCanvasElement | null = null;
-let topCtx: CanvasRenderingContext2D | null = null;
-let topHost: HTMLElement | null = null;
-let TW = 0, TH = 0;
-let topX = 0, topY = 0;
-let topBlank = true;
+
+/** One of the two canvases above the panels. `x`, `y`, `w`, `h` are its place on screen, in client px. */
+interface Surface {
+  canvas: HTMLCanvasElement; ctx: CanvasRenderingContext2D | null;
+  x: number; y: number; w: number; h: number;
+  /** Canvas pixels per CSS pixel. */
+  ratio: number;
+  blank: boolean;
+}
+/** Layer numbers. A particle is on one of them, or on AUTO: wherever it happens to be this frame. */
+const BOARD = 0, TOP = 1, BAR = 2, AUTO = -1;
+/**
+ * The top layer is drawn at one canvas pixel per CSS pixel whatever the screen: it only ever holds
+ * small moving shapes, and at full ratio on a phone it would be the largest canvas on the page.
+ */
+const TOP_RATIO = 1;
+let appEl: HTMLElement | null = null;
+let top: Surface | null = null;
+let bar: Surface | null = null;
 let sizeDirty = true;
 let flows: Flow[] = [];
 let stale = true;
@@ -123,27 +141,49 @@ let dotCount = 0;
 let mood = 0;
 let moodTarget = 0;
 
+function makeSurface(id: string, z: number): Surface {
+  const c = document.createElement('canvas');
+  c.id = id;
+  c.setAttribute('aria-hidden', 'true');
+  // Inline, so the layer can never take input or push the layout about even if a stylesheet is missing.
+  c.style.cssText = `position:absolute;left:0;top:0;pointer-events:none;z-index:${z}`;
+  appEl!.appendChild(c);
+  return { canvas: c, ctx: c.getContext('2d'), x: 0, y: 0, w: 0, h: 0, ratio: 1, blank: true };
+}
+
 export function initFx(c: HTMLCanvasElement) {
   canvas = c;
   host = c.parentElement;
   ctx = c.getContext('2d');
-  // The top layer is made here rather than in index.html, so the page needs no second element
-  // and the two can never get out of step.
-  topHost = (c.closest('#app') as HTMLElement | null) ?? document.body;
-  topCanvas = document.createElement('canvas');
-  topCanvas.id = 'fx-top';
-  topCanvas.setAttribute('aria-hidden', 'true');
-  // Inline, so the layer can never take input or push the layout about even if a stylesheet is missing.
-  topCanvas.style.cssText = 'position:absolute;left:0;top:0;pointer-events:none;z-index:56';
-  topHost.appendChild(topCanvas);
-  topCtx = topCanvas.getContext('2d');
+  // The two upper layers are made here rather than in index.html, so the page needs no extra
+  // elements and the three can never get out of step.
+  appEl = (c.closest('#app') as HTMLElement | null) ?? document.body;
+  top = makeSurface('fx-top', 56);
+  bar = makeSurface('fx-bar', 56);
   const dirty = () => (sizeDirty = true);
   if (typeof ResizeObserver !== 'undefined') {
     const ro = new ResizeObserver(dirty);
     if (host) ro.observe(host);
-    ro.observe(topHost);
+    ro.observe(appEl);
   }
   window.addEventListener('resize', dirty);
+}
+
+function place(s: Surface, x: number, y: number, w: number, h: number, ratio: number) {
+  const moved = x !== s.x || y !== s.y;
+  s.x = x;
+  s.y = y;
+  if (w === s.w && h === s.h && ratio === s.ratio) {
+    if (moved) s.blank = false; // what is on it was drawn for the old position: have it redrawn or wiped
+    return;
+  }
+  s.w = w; s.h = h; s.ratio = ratio;
+  s.canvas.width = Math.max(1, Math.round(w * ratio));
+  s.canvas.height = Math.max(1, Math.round(h * ratio));
+  s.canvas.style.width = w + 'px';
+  s.canvas.style.height = h + 'px';
+  s.canvas.style.display = w && h ? '' : 'none';
+  s.blank = true; // setting the size cleared it
 }
 
 function resize() {
@@ -164,20 +204,17 @@ function resize() {
     canvas.style.height = h + 'px';
     stale = true;
   }
-  if (!topCanvas || !topHost) return;
-  const t = topHost.getBoundingClientRect();
-  topX = t.left;
-  topY = t.top;
-  const tw = Math.max(1, Math.round(t.width)), th = Math.max(1, Math.round(t.height));
-  if (tw !== TW || th !== TH || ratioChanged) {
-    TW = tw; TH = th;
-    topCanvas.width = Math.round(tw * d);
-    topCanvas.height = Math.round(th * d);
-    topCanvas.style.width = tw + 'px';
-    topCanvas.style.height = th + 'px';
-    topBlank = true; // setting the size cleared it
-  }
+  if (!appEl || !top || !bar) return;
+  const a = appEl.getBoundingClientRect();
+  place(top, a.left, a.top, Math.max(1, Math.round(a.width)), Math.max(1, Math.round(a.height)), TOP_RATIO);
+  // The strip between the top of the app and the top of the stage: the top bar, in every layout.
+  place(bar, a.left, a.top, Math.max(1, Math.round(a.width)), Math.max(0, Math.round(r.top - a.top)), d);
 }
+
+const inStage = (x: number, y: number, m = 0) => x >= originX - m && x <= originX + W + m && y >= originY - m && y <= originY + H + m;
+const inBar = (x: number, y: number, m = 0) => !!bar && bar.h > 0 && x >= bar.x - m && x <= bar.x + bar.w + m && y >= bar.y - m && y <= bar.y + bar.h + m;
+/** The layer for something that must be seen above the HUD at this point: the strip if it is over the top bar, else the big one. */
+const above = (x: number, y: number) => (inBar(x, y) ? BAR : TOP);
 
 /**
  * How lively the wires look, 0..1. The feel module raises it in Flow State: dots then run a little
@@ -392,7 +429,7 @@ function drawFlows(c: CanvasRenderingContext2D, view: { x: number; y: number; k:
 
 
 // ---------- particles ----------
-// One pool for both layers. Positions are kept in client pixels and shifted to the layer when drawn.
+// One pool for all three layers. Positions are kept in client pixels and shifted to the layer when drawn.
 
 const SPARK = 1, COIN = 2, TEXT = 3, RING = 4, POP = 5;
 const POOL = 360;
@@ -401,10 +438,15 @@ const TEXT_SCALE = 1.2;
 
 interface Particle {
   kind: number;
-  /** 0 = board layer, 1 = top layer. */
+  /** BOARD, TOP or BAR, or AUTO for a coin that is drawn on whichever layer it is passing over. */
   layer: number;
+  /** The layers it is drawn on this frame, one bit each. */
+  mask: number;
   t: number; ttl: number;
-  x: number; y: number; vx: number; vy: number;
+  /** Where it is (sparks, text, rings) or where it set off from (coins). */
+  x: number; y: number;
+  /** Velocity (sparks), or where a coin is right now. For text, `vy` is how far it rises. */
+  vx: number; vy: number;
   cx: number; cy: number; tx: number; ty: number;
   size: number; color: string; text: string;
   shape: DotShape | '';
@@ -413,10 +455,11 @@ interface Particle {
 
 const pool: Particle[] = [];
 for (let i = 0; i < POOL; i++) {
-  pool.push({ kind: 0, layer: 0, t: 0, ttl: 1, x: 0, y: 0, vx: 0, vy: 0, cx: 0, cy: 0, tx: 0, ty: 0, size: 1, color: '#fff', text: '', shape: '', done: null });
+  pool.push({ kind: 0, layer: 0, mask: 0, t: 0, ttl: 1, x: 0, y: 0, vx: 0, vy: 0, cx: 0, cy: 0, tx: 0, ty: 0, size: 1, color: '#fff', text: '', shape: '', done: null });
 }
 let live = 0;
-const liveBy = [0, 0];
+/** Particles to draw on each layer this frame (counted by stepParticles). */
+const liveBy = [0, 0, 0];
 let cursor = 0;
 
 function spawn(kind: number, layer: number): Particle | null {
@@ -426,11 +469,11 @@ function spawn(kind: number, layer: number): Particle | null {
       cursor = (cursor + i + 1) % POOL;
       p.kind = kind;
       p.layer = layer;
+      p.mask = 0;
       p.t = 0;
       p.shape = '';
       p.done = null;
       live++;
-      liveBy[layer]++;
       return p;
     }
   }
@@ -441,17 +484,19 @@ function kill(p: Particle) {
   p.kind = 0;
   p.done = null;
   live--;
-  liveBy[p.layer]--;
 }
 
-/** `top` draws on the layer above every panel instead of on the board (where the HUD covers it). */
+/**
+ * `top` draws above every panel instead of on the board (where the HUD covers it): on the strip
+ * over the top bar when the point is up there, otherwise on the big top layer.
+ */
 export interface LayerOpt { top?: boolean }
 export interface BurstOpts extends LayerOpt {
   /** 1 = the usual spray; 2 flies about twice as far and lives a little longer. */
   power?: number;
   shape?: DotShape;
 }
-export interface FlyOpts {
+export interface FlyOpts extends LayerOpt {
   /** Draw each one as this outline instead of a coin. */
   shape?: DotShape;
   /** Seconds each one takes; by default it follows the distance (0.4 to 0.9 s). */
@@ -468,8 +513,9 @@ export interface RingOpts extends LayerOpt { size?: number; life?: number }
 /** A spray of sparks. */
 export function burst(at: Pt, color: string, count = 10, o?: BurstOpts) {
   const pw = o?.power ?? 1;
+  const layer = o?.top ? above(at.x, at.y) : BOARD;
   for (let i = 0; i < count; i++) {
-    const p = spawn(SPARK, o?.top ? 1 : 0);
+    const p = spawn(SPARK, layer);
     if (!p) return;
     const a = Math.random() * Math.PI * 2;
     const v = (70 + Math.random() * 150) * pw;
@@ -486,7 +532,9 @@ export function burst(at: Pt, color: string, count = 10, o?: BurstOpts) {
 
 /**
  * Send `count` coin-like particles from one point to another along slightly different arcs.
- * They travel on the top layer, so they can cross from the board to any panel.
+ * Each is drawn on whichever layer it is passing over: on the board while it is over the stage
+ * (where the HUD may hide it for a moment), on the strip once it is over the top bar. With `top`
+ * the whole flight is above every panel.
  * `onArrive` runs once, when the first of them lands (or at once, if the pool is full and nothing
  * could be sent), so it is safe to hang a counter update or a sound on it.
  */
@@ -499,7 +547,7 @@ export function fly(from: Pt, to: Pt, color: string, count = 3, onArrive?: () =>
   const stagger = o?.stagger ?? 0.06;
   let sent = 0;
   for (let i = 0; i < count; i++) {
-    const p = spawn(COIN, 1);
+    const p = spawn(COIN, o?.top ? TOP : AUTO);
     if (!p) break;
     sent++;
     const bend = (Math.random() * 0.5 + 0.15) * dist * (i % 2 ? -0.45 : 0.45);
@@ -509,6 +557,8 @@ export function fly(from: Pt, to: Pt, color: string, count = 3, onArrive?: () =>
     p.ty = to.y;
     p.cx = (p.x + p.tx) / 2 + nx * bend;
     p.cy = (p.y + p.ty) / 2 + ny * bend;
+    p.vx = p.x;
+    p.vy = p.y;
     p.t = -i * stagger; // staggered start
     p.ttl = (o?.ttl ?? Math.min(0.9, 0.38 + dist / 2600)) + Math.random() * 0.08;
     p.size = o?.size ?? 4.2;
@@ -521,7 +571,7 @@ export function fly(from: Pt, to: Pt, color: string, count = 3, onArrive?: () =>
 
 /** Text that pops in, rises and fades. */
 export function floater(at: Pt, text: string, color: string, size = 13, o?: FloaterOpts) {
-  const p = spawn(TEXT, o?.top ? 1 : 0);
+  const p = spawn(TEXT, o?.top ? above(at.x, at.y) : BOARD);
   if (!p) return;
   p.x = at.x;
   p.y = at.y;
@@ -534,7 +584,7 @@ export function floater(at: Pt, text: string, color: string, size = 13, o?: Floa
 
 /** An expanding ring. */
 export function ring(at: Pt, color: string, o?: RingOpts) {
-  const p = spawn(RING, o?.top ? 1 : 0);
+  const p = spawn(RING, o?.top ? above(at.x, at.y) : BOARD);
   if (!p) return;
   p.x = at.x;
   p.y = at.y;
@@ -545,7 +595,7 @@ export function ring(at: Pt, color: string, o?: RingOpts) {
 
 /** A disc of radius `r` that swells and fades: the after-image of something popping (a coin on a sale). */
 export function pop(at: Pt, color: string, r = 13, o?: LayerOpt) {
-  const p = spawn(POP, o?.top ? 1 : 0);
+  const p = spawn(POP, o?.top ? above(at.x, at.y) : BOARD);
   if (!p) return;
   p.x = at.x;
   p.y = at.y;
@@ -554,8 +604,13 @@ export function pop(at: Pt, color: string, r = 13, o?: LayerOpt) {
   p.color = color;
 }
 
-/** Advance every particle once per frame, whichever layer it is drawn on. */
+const easeInOut = (u: number) => (u < 0.5 ? 2 * u * u : 1 - ((2 - 2 * u) * (2 - 2 * u)) / 2);
+/** A coin near the edge of a layer is drawn on both sides of it, so it is never cut in half. */
+const EDGE = 12;
+
+/** Advance every particle once per frame, and work out which layer each is drawn on. */
 function stepParticles(dt: number) {
+  liveBy[0] = liveBy[1] = liveBy[2] = 0;
   for (const p of pool) {
     if (p.kind === 0) continue;
     p.t += dt;
@@ -572,16 +627,32 @@ function stepParticles(dt: number) {
       p.vy = p.vy * (1 - 3.2 * dt) + 320 * dt;
       p.x += p.vx * dt;
       p.y += p.vy * dt;
+    } else if (p.kind === COIN) {
+      const e = easeInOut(p.t / p.ttl), a = 1 - e;
+      p.vx = a * a * p.x + 2 * a * e * p.cx + e * e * p.tx;
+      p.vy = a * a * p.y + 2 * a * e * p.cy + e * e * p.ty;
     }
+    if (p.layer !== AUTO) p.mask = 1 << p.layer;
+    else {
+      const x = p.vx, y = p.vy;
+      let m = 0;
+      if (inStage(x, y, EDGE)) m |= 1 << BOARD;
+      if (inBar(x, y, EDGE)) m |= 1 << BAR;
+      // Over neither (the hotbar, the inspector): only the big layer can show it.
+      if (!inStage(x, y) && !inBar(x, y)) m |= 1 << TOP;
+      p.mask = m;
+    }
+    if (p.mask & 1) liveBy[0]++;
+    if (p.mask & 2) liveBy[1]++;
+    if (p.mask & 4) liveBy[2]++;
   }
 }
 
-const easeInOut = (u: number) => (u < 0.5 ? 2 * u * u : 1 - ((2 - 2 * u) * (2 - 2 * u)) / 2);
-
 function drawParticles(c: CanvasRenderingContext2D, layer: number) {
   let font = '';
+  const bit = 1 << layer;
   for (const p of pool) {
-    if (p.kind === 0 || p.layer !== layer || p.t < 0) continue;
+    if (p.kind === 0 || !(p.mask & bit) || p.t < 0) continue;
     const u = p.t / p.ttl;
     switch (p.kind) {
       case SPARK: {
@@ -595,10 +666,7 @@ function drawParticles(c: CanvasRenderingContext2D, layer: number) {
         break;
       }
       case COIN: {
-        const e = easeInOut(u);
-        const a = 1 - e;
-        const x = a * a * p.x + 2 * a * e * p.cx + e * e * p.tx;
-        const y = a * a * p.y + 2 * a * e * p.cy + e * e * p.ty;
+        const x = p.vx, y = p.vy;
         const r = p.size * (u < 0.15 ? 0.5 + u / 0.3 : u > 0.85 ? 1 - (u - 0.85) * 3 : 1);
         const alpha = u < 0.1 ? u * 10 : 1;
         // Two fading echoes just behind it, so the eye reads direction as well as position.
@@ -691,9 +759,9 @@ export interface Overlay {
 
 const overlays: [Overlay[], Overlay[]] = [[], []];
 
-/** Register an overlay on the board layer (under the HUD), or with `top` on the layer above everything. */
-export function addOverlay(o: Overlay, top = false) {
-  overlays[top ? 1 : 0].push(o);
+/** Register an overlay on the board layer (under the HUD), or with `onTop` on the big layer above everything. */
+export function addOverlay(o: Overlay, onTop = false) {
+  overlays[onTop ? TOP : BOARD].push(o);
 }
 
 const anyActive = (list: Overlay[]) => {
@@ -715,7 +783,7 @@ let boardExtras = false;
  * Advance and draw everything. Call once per animation frame.
  * `covered` means the board cannot be seen (a full-screen overlay is up): wire dots, port pulses and
  * everything else on the board layer are then skipped. Particles still run, so an `onArrive`
- * callback is never left waiting, and the top layer is drawn as usual.
+ * callback is never left waiting, and the layers above the panels are drawn as usual.
  */
 export function frameFx(dt: number, view: { x: number; y: number; k: number }, paused: boolean, covered = false) {
   if (!ctx || !canvas) return;
@@ -727,7 +795,8 @@ export function frameFx(dt: number, view: { x: number; y: number; k: number }, p
   }
   if (live) stepParticles(pdt);
   frameBoard(ctx, canvas, dt, pdt, view, paused, covered);
-  frameTop(pdt);
+  if (top) frameSurface(top, liveBy[TOP], overlays[TOP], TOP, pdt);
+  if (bar && bar.h > 0) frameSurface(bar, liveBy[BAR], null, BAR, pdt);
 }
 
 function frameBoard(c: CanvasRenderingContext2D, cv: HTMLCanvasElement, dt: number, pdt: number, view: { x: number; y: number; k: number }, paused: boolean, covered: boolean) {
@@ -742,8 +811,8 @@ function frameBoard(c: CanvasRenderingContext2D, cv: HTMLCanvasElement, dt: numb
       }
     }
   }
-  const over = !covered && anyActive(overlays[0]);
-  const parts = covered ? 0 : liveBy[0];
+  const over = !covered && anyActive(overlays[BOARD]);
+  const parts = covered ? 0 : liveBy[BOARD];
   // The frame after the last particle or overlay has gone must be drawn once more, or (while paused,
   // when nothing else asks for a redraw) its last image would stay on the canvas.
   const extras = over || parts > 0;
@@ -774,35 +843,37 @@ function frameBoard(c: CanvasRenderingContext2D, cv: HTMLCanvasElement, dt: numb
   if (!over && !parts) return;
   // Overlays and particles work in client pixels: shift so that the canvas corner is where it is on screen.
   c.setTransform(dpr, 0, 0, dpr, -originX * dpr, -originY * dpr);
-  if (over) for (const o of overlays[0]) if (o.active()) o.draw(c, pdt);
-  if (parts) drawParticles(c, 0);
+  if (over) for (const o of overlays[BOARD]) if (o.active()) o.draw(c, pdt);
+  if (parts) drawParticles(c, BOARD);
 }
 
-function frameTop(pdt: number) {
-  const c = topCtx;
-  if (!c || !topCanvas) return;
-  const over = anyActive(overlays[1]);
-  const parts = liveBy[1];
+/** One of the layers above the panels: wiped once when it empties, otherwise cleared and redrawn. */
+function frameSurface(s: Surface, parts: number, list: Overlay[] | null, layer: number, pdt: number) {
+  const c = s.ctx;
+  if (!c) return;
+  const over = !!list && anyActive(list);
   if (!parts && !over) {
-    if (!topBlank) {
+    if (!s.blank) {
       c.setTransform(1, 0, 0, 1, 0, 0);
-      c.clearRect(0, 0, topCanvas.width, topCanvas.height);
-      topBlank = true;
+      c.clearRect(0, 0, s.canvas.width, s.canvas.height);
+      s.blank = true;
     }
     return;
   }
-  topBlank = false;
-  c.setTransform(dpr, 0, 0, dpr, -topX * dpr, -topY * dpr);
-  c.clearRect(topX, topY, TW, TH);
-  if (over) for (const o of overlays[1]) if (o.active()) o.draw(c, pdt);
-  if (parts) drawParticles(c, 1);
+  s.blank = false;
+  c.setTransform(s.ratio, 0, 0, s.ratio, -s.x * s.ratio, -s.y * s.ratio);
+  c.clearRect(s.x, s.y, s.w, s.h);
+  if (over) for (const o of list!) if (o.active()) o.draw(c, pdt);
+  if (parts) drawParticles(c, layer);
 }
 
 /** Numbers for tests and tuning. `width`, `height` and `dpr` describe the board layer. */
 export function fxStats() {
   return {
     dots: dotCount, particles: live, thin: +thin.toFixed(2), width: canvas?.width ?? 0, height: canvas?.height ?? 0, dpr,
-    top: { particles: liveBy[1], width: topCanvas?.width ?? 0, height: topCanvas?.height ?? 0 }, mood: +mood.toFixed(2),
+    top: { particles: liveBy[TOP], width: top?.canvas.width ?? 0, height: top?.canvas.height ?? 0 },
+    bar: { particles: liveBy[BAR], width: bar?.canvas.width ?? 0, height: bar?.canvas.height ?? 0 },
+    mood: +mood.toFixed(2),
   };
 }
 

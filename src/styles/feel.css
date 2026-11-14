@@ -3,10 +3,15 @@
 /* ---------- layers ----------
    54  .cel-wash   the colour wash of a big celebration
    55  .cel        the celebration card
-   56  #fx-top     particles that fly over the panels and the card (made by fx.ts)
+   56  #fx-top     particles that must be seen above the panels and the card (made by fx.ts)
+   56  #fx-bar     the strip of the same over the top bar: coins on their way to the counters
    All of it is under the modal (60), the summary (70) and the start screen (80), and none of it takes
-   input (the card swallows presses for its first 0.4 s only, see celebrate.ts). */
-#fx-top { position: absolute; left: 0; top: 0; pointer-events: none; z-index: 56; }
+   input (the card swallows presses for its first 0.4 s only, see celebrate.ts).
+   A note on cost: every element here that fades or moves is kept small on purpose. The browser
+   blends each such layer over the page on every frame it is visible, and that work grows with the
+   layer's area, so the wash is a patch rather than the whole screen and the Flow State glow is four
+   strips rather than one frame-sized box. */
+#fx-top, #fx-bar { position: absolute; left: 0; top: 0; pointer-events: none; z-index: 56; }
 
 /* ---------- mute button ---------- */
 [data-testid='mute'].off { color: var(--dim); }
@@ -28,28 +33,37 @@ g.wire.sat .base { stroke-opacity: 0.58; }
 /* ---------- Flow State ----------
    While the whole line runs flat out the board's edge glows and breathes, and wires brighten.
    Everything eases in and out: leaving is gentle, not a punishment.
-   The glow is feel.ts's own element (#feel-edge, classes .on and .breathe). The fade is a transition
-   on the element and the breathing an animation on its ::before, kept apart on purpose: taking an
+   The glow is feel.ts's own element: #feel-edge holds four strips (<i>), one along each edge, and
+   gets the classes .on and .breathe. Each strip fades with a transition; the breathing is an
+   animation on the <b> inside it. The two are kept on separate elements on purpose: taking an
    animation off an element snaps its opacity, which would cut the glow dead on the way out.
    The wires follow the class the HUD sets on #app. */
-#feel-edge { position: absolute; inset: 0; z-index: 2; pointer-events: none; opacity: 0; transition: opacity 2.6s ease; }
-#feel-edge.on { opacity: 1; transition-duration: 1.5s; }
-#feel-edge::before { content: ''; position: absolute; inset: 0; box-shadow: inset 0 0 90px 4px rgba(92, 225, 255, 0.22), inset 0 0 16px 1px rgba(92, 225, 255, 0.42); }
-#feel-edge.breathe::before { animation: feel-breathe 4.4s ease-in-out 1.5s infinite; }
-@keyframes feel-breathe { 50% { opacity: 0.66; } }
+#feel-edge { position: absolute; inset: 0; z-index: 2; pointer-events: none; }
+#feel-edge > i { position: absolute; opacity: 0; transition: opacity 2.6s ease; }
+#feel-edge.on > i { opacity: 1; transition-duration: 1.5s; }
+#feel-edge b { position: absolute; inset: 0; --g: rgba(92, 225, 255, 0.26); --m: rgba(92, 225, 255, 0.07); --l: rgba(92, 225, 255, 0.5); }
+#feel-edge > i:nth-child(1) { left: 0; right: 0; top: 0; height: 64px; }
+#feel-edge > i:nth-child(2) { left: 0; right: 0; bottom: 0; height: 64px; }
+#feel-edge > i:nth-child(3) { top: 0; bottom: 0; left: 0; width: 64px; }
+#feel-edge > i:nth-child(4) { top: 0; bottom: 0; right: 0; width: 64px; }
+#feel-edge > i:nth-child(1) b { background: linear-gradient(to bottom, var(--g), var(--m) 50%, transparent); border-top: 1.5px solid var(--l); }
+#feel-edge > i:nth-child(2) b { background: linear-gradient(to top, var(--g), var(--m) 50%, transparent); border-bottom: 1.5px solid var(--l); }
+#feel-edge > i:nth-child(3) b { background: linear-gradient(to right, var(--g), var(--m) 50%, transparent); border-left: 1.5px solid var(--l); }
+#feel-edge > i:nth-child(4) b { background: linear-gradient(to left, var(--g), var(--m) 50%, transparent); border-right: 1.5px solid var(--l); }
+#feel-edge.breathe b { animation: feel-breathe 4.4s ease-in-out 1.5s infinite; }
+@keyframes feel-breathe { 50% { opacity: 0.6; } }
 #app.flow-state g.wire:not(.stalled) .base { stroke-opacity: 0.52; }
 #app.flow-state g.wire:not(.stalled) .glow { stroke-opacity: 0.18; }
 #app.flow-state g.wire.sat .glow { stroke-opacity: 0.3; }
 
 /* ---------- big celebrations ---------- */
-.cel-wash { --peak: 0.36; position: absolute; inset: 0; z-index: 54; pointer-events: none; opacity: 0; background: radial-gradient(ellipse 70% 60% at 50% 48%, color-mix(in srgb, var(--c) 78%, transparent) 0%, color-mix(in srgb, var(--c) 26%, transparent) 45%, transparent 78%); animation: cel-wash var(--life, 1.9s) linear both; will-change: opacity; }
-.cel-wash.k-lab { --peak: 0.4; }
-.cel-wash.k-glyph { --peak: 0.5; animation-name: cel-wash-late; }
-.cel-wash.k-lens { --peak: 0.6; }
+.cel-wash { --peak: 0.46; position: absolute; left: 50%; top: 48%; width: min(1040px, 100%); height: min(700px, 88%); margin: 0; translate: -50% -50%; z-index: 54; pointer-events: none; opacity: 0; background: radial-gradient(closest-side, color-mix(in srgb, var(--c) 72%, transparent) 0%, color-mix(in srgb, var(--c) 50%, transparent) 46%, transparent 100%); animation: cel-wash var(--life, 1.9s) linear both; will-change: opacity; }
+.cel-wash.k-lab { --peak: 0.5; }
+.cel-wash.k-glyph { --peak: 0.6; animation-name: cel-wash-late; }
+.cel-wash.k-lens { --peak: 0.66; width: min(1280px, 100%); height: min(820px, 94%); }
 /* Flow State is cool and slow: the wash swells twice, like breathing, instead of flashing. */
-.cel-wash.k-flow { --peak: 0.3; animation-name: cel-wash-breathe; animation-timing-function: ease-in-out; }
-.cel-wash.out { transition: opacity 0.3s ease; opacity: 0 !important; animation: none; }
-@keyframes cel-wash { 0% { opacity: 0; } 8% { opacity: var(--peak); } 40% { opacity: calc(var(--peak) * 0.55); } 100% { opacity: 0; } }
+.cel-wash.k-flow { --peak: 0.4; animation-name: cel-wash-breathe; animation-timing-function: ease-in-out; }
+@keyframes cel-wash { 0% { opacity: 0; } 8% { opacity: var(--peak); } 40% { opacity: calc(var(--peak) * 0.65); } 100% { opacity: 0; } }
 /* The Glyph's flash waits for the two streams to meet. */
 @keyframes cel-wash-late { 0% { opacity: 0; } 12% { opacity: calc(var(--peak) * 0.3); } 22% { opacity: var(--peak); } 55% { opacity: calc(var(--peak) * 0.5); } 100% { opacity: 0; } }
 @keyframes cel-wash-breathe { 0% { opacity: 0; } 24% { opacity: var(--peak); } 50% { opacity: calc(var(--peak) * 0.45); } 74% { opacity: var(--peak); } 100% { opacity: 0; } }
@@ -107,7 +121,7 @@ g.wire.sat .base { stroke-opacity: 0.58; }
 
 @media (prefers-reduced-motion: reduce) {
   #nodes .node.pop { animation: none; }
-  #feel-edge.breathe::before { animation: none; }
-  #feel-edge, #feel-edge.on { transition-duration: 0.4s; }
+  #feel-edge.breathe b { animation: none; }
+  #feel-edge > i, #feel-edge.on > i { transition-duration: 0.4s; }
   .cel-wash { display: none; }
 }

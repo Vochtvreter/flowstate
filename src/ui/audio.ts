@@ -21,7 +21,6 @@ let noiseBuf: AudioBuffer | null = null;
 let muted = false;
 /** The player has pressed something, so a context may be started. */
 let gesture = false;
-let resuming = false;
 let recorder: (kind: 'cue' | 'haptic', name: string, detail?: string | number) => void = () => {};
 
 // ---------- context ----------
@@ -58,11 +57,14 @@ function ensure(): AudioContext | null {
   return ac;
 }
 
-/** Resume a context the browser has parked (it starts suspended until a gesture; phones suspend it on a call). */
+/**
+ * Resume a context the browser has parked (it starts suspended until a gesture; phones suspend it on a call).
+ * Called on every press and key until it runs: some browsers only honour the call from particular
+ * events (the end of a touch, not its start), so one attempt is not enough.
+ */
 function wake() {
-  if (!ac || ac.state !== 'suspended' || resuming || document.hidden || muted) return;
-  resuming = true;
-  ac.resume().catch(() => {}).then(() => (resuming = false));
+  if (!ac || ac.state !== 'suspended' || document.hidden || muted) return;
+  ac.resume().catch(() => {});
 }
 
 function onGesture() {
@@ -70,10 +72,25 @@ function onGesture() {
   if (!muted) ensure();
 }
 
-/** The context, if a cue started now would be heard. */
+/**
+ * The context, if a cue started now would be heard. Nothing is ever scheduled on a context that is
+ * not running: its clock stands still, and everything queued would sound at once when it restarted.
+ */
 function live(): AudioContext | null {
-  if (muted || !ac || document.hidden) return null;
-  return ac.state === 'running' || (ac.state === 'suspended' && resuming) ? ac : null;
+  return !muted && ac && !document.hidden && ac.state === 'running' ? ac : null;
+}
+
+/** Run `fn` as soon as the context is running (at once if it is), or not at all if that takes more than half a second. */
+function whenRunning(fn: () => void) {
+  const ctx = ac;
+  if (!ctx) return;
+  if (ctx.state === 'running') return fn();
+  const t0 = performance.now();
+  const check = () => {
+    ctx.removeEventListener('statechange', check);
+    if (ctx.state === 'running' && performance.now() - t0 < 500) fn();
+  };
+  ctx.addEventListener('statechange', check);
 }
 
 export function initAudio(record: typeof recorder) {
@@ -120,6 +137,8 @@ export function setMuted(on: boolean) {
     if (ctx && master) {
       master.gain.cancelScheduledValues(ctx.currentTime);
       master.gain.setTargetAtTime(MASTER, ctx.currentTime, 0.015);
+      // Switching sound on answers with a sound, so the player hears that it worked.
+      whenRunning(cueAfford);
     }
   }
 }

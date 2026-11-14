@@ -65,9 +65,10 @@ const coinCount = (amount: number) => Math.max(3, Math.min(9, 2 + Math.round(Mat
 /**
  * Send a reward from where it was earned to where it is counted: coins to the credits counter,
  * Data to its chip, and a spark to each hotbar button a new tech has just added. Each lands with a
- * pulse on the counter and a short rising run of ticks. The amount is written `lift` px above `from`.
+ * pulse on the counter and a short rising run of ticks. With `say`, the amounts are also written
+ * where they came from (a big celebration's card already says them).
  */
-function payout(from: Pt, r: GoalReward, lift = 10) {
+function payout(from: Pt, r: GoalReward, say = false) {
   if (reduced()) return;
   let ticked = false;
   const land = (anchor: string, n: number) => () => {
@@ -77,18 +78,20 @@ function payout(from: Pt, r: GoalReward, lift = 10) {
   };
   const quick = { ttl: 0.3, stagger: 0.035 };
   let line = 0;
-  const say = (text: string, color: string) => floater({ x: from.x, y: from.y - lift - 22 * line++ }, text, color, 15, { top: true, life: 1.2, rise: 30 });
+  const write = (text: string, color: string) => {
+    if (say) floater({ x: from.x, y: from.y - 12 - 22 * line++ }, text, color, 15, { top: true, life: 0.9, rise: 26 });
+  };
   if (r.credits) {
     const n = coinCount(r.credits);
     fly(from, creditsPt(), GOLD, n, land('credits', n), quick);
-    say(`+${fmt(r.credits)}¢`, GOLD);
+    write(`+${fmt(r.credits)}¢`, GOLD);
   }
   for (const k of ['a', 'b', 'g'] as DataTier[]) {
     const amount = r[k];
     if (!amount) continue;
     const n = coinCount(amount);
     fly(from, dataPt(k), DATA_COLORS[k], n, land(`data-${k}`, n), { ...quick, shape: 'diamond', size: 4.6 });
-    say(`+${fmt(amount)}${k === 'a' ? 'α' : k === 'b' ? 'β' : 'γ'}`, DATA_COLORS[k]);
+    write(`+${fmt(amount)}${k === 'a' ? 'α' : k === 'b' ? 'β' : 'γ'}`, DATA_COLORS[k]);
   }
   // A new machine in the hotbar: show the player where it has appeared.
   for (const id of r.techs ?? []) {
@@ -108,7 +111,7 @@ function smallCelebration(name: string, from: Pt, r: GoalReward, color = GOLD) {
   if (reduced()) return;
   burst(from, color, 8, { top: true });
   ring(from, color, { top: true });
-  payout(from, r);
+  payout(from, r, true);
 }
 
 // ---------- simulation events ----------
@@ -333,8 +336,6 @@ function addMuteButton() {
   onPress(btn, () => {
     setMuted(!isMuted());
     paint();
-    // Switching it on answers with a sound, so the player hears that it worked.
-    if (!isMuted()) cueAfford();
   });
   addTopItem('actions', { el: btn, update: paint }, document.querySelector('#top .menuwrap'));
 }
@@ -352,9 +353,10 @@ export function initFeel() {
   addOverlay(racerOverlay);
   addMuteButton();
 
-  // The glow around the board's edge in Flow State. It sits in the stage, above the board and under the HUD.
+  // The glow around the board's edge in Flow State: four strips, one along each edge of the stage,
+  // above the board and under the HUD.
   const stage = document.getElementById('stage');
-  if (stage) stage.appendChild((edge = el(`<div id="feel-edge" aria-hidden="true"></div>`)));
+  if (stage) stage.appendChild((edge = el(`<div id="feel-edge" aria-hidden="true"><i><b></b></i><i><b></b></i><i><b></b></i><i><b></b></i></div>`)));
 
   window.addEventListener('pointerdown', (e) => (lastPress = { x: e.clientX, y: e.clientY }), { capture: true, passive: true });
 
