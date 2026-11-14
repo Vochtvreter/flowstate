@@ -39,6 +39,8 @@ interface Spec {
 }
 
 const BLOCK_MS = 400;
+/** How far the middle of the glyph is above the middle of the card, in px, for each size of card. */
+const GLYPH_RISE: Record<BigKind, number> = { shard: 36, lab: 37, glyph: 41, flow: 36, lens: 47 };
 const OUT_MS = 320;
 
 let app: HTMLElement;
@@ -105,10 +107,9 @@ function start(spec: Spec) {
   timers.push(window.setTimeout(leave, spec.life));
   cueFanfare(spec.kind);
   buzz('big', spec.kind === 'lens' ? [30, 60, 30, 60, 60] : spec.kind === 'glyph' ? [20, 50, 30] : [20, 40, 20]);
-  if (!calm && spec.show) {
-    const r = wrap.querySelector('.cel-glyph')!.getBoundingClientRect();
-    spec.show({ x: r.left + r.width / 2, y: r.top + r.height / 2 }, spec);
-  }
+  // The glyph sits a little above the middle of the card, which is in the middle of the window.
+  // (Worked out rather than measured: measuring here would make the browser lay the page out on the spot.)
+  if (!calm && spec.show) spec.show({ x: window.innerWidth / 2, y: window.innerHeight / 2 - GLYPH_RISE[spec.kind] }, spec);
 }
 
 /** Start the card's exit; it is taken out of the page when the exit has played. */
@@ -158,11 +159,6 @@ export function openedText(r: GoalReward): string {
   if (!techs.length && !r.unlock && !r.credits && (r.a || r.b || r.g)) parts.push('spend it in the Tech tree');
   return parts.join(' · ');
 }
-
-const centre = (): Pt => {
-  const r = app.getBoundingClientRect();
-  return { x: r.left + r.width / 2, y: r.top + r.height / 2 };
-};
 
 /** Sparks around the glyph, then (a beat later) the reward flying off to where it lives. */
 function sparksThenPay(count: number, power: number, shape: 'hexagon' | 'diamond' | 'star', r: GoalReward) {
@@ -219,9 +215,7 @@ export function celebrateGoal(goalId: string, reward: GoalReward) {
 
 /** First Glyph: two streams, Ink from the left and Spark from the right, run into the glyph and set it off. */
 function converge(at: Pt, spec: Spec, reward: GoalReward) {
-  const r = app.getBoundingClientRect();
-  // (Kept inside the top effects layer, which is about 900 px wide and centred on the glyph.)
-  const reach = Math.min(r.width * 0.46, 420);
+  const reach = Math.min(window.innerWidth * 0.46, 520);
   const left = { x: at.x - reach, y: at.y + 30 }, right = { x: at.x + reach, y: at.y - 30 };
   const opts = { ttl: 0.5, stagger: 0.024, spread: 54, size: 6, top: true };
   fly(left, at, MATERIALS.ink.color, 22, () => {
@@ -243,7 +237,7 @@ export function celebrateFlow() {
     color: '#5CE1FF', life: 3000, block: false,
     show: (at, spec) => {
       const from = anchorPt('flow') ?? at;
-      for (let i = 0; i < 3; i++) later(i * 520, () => ring(at, spec.color, { top: true, size: 200 + i * 50, life: 1.5 }));
+      for (let i = 0; i < 3; i++) later(i * 520, () => ring(at, spec.color, { top: true, size: 240 + i * 60, life: 1.5 }));
       ring(from, '#ffffff', { top: true, size: 44, life: 0.7 });
     },
   });
@@ -263,7 +257,7 @@ function lensCard(life: number) {
             const a = (i / RAINBOW.length) * Math.PI * 2 + wave;
             burst({ x: at.x + Math.cos(a) * 60 * wave, y: at.y + Math.sin(a) * 40 * wave }, MATERIALS[m].color, 14, { top: true, power: 2.4 - wave * 0.3, shape: wave === 1 ? 'star' : 'diamond' });
           });
-          ring(at, '#ffffff', { top: true, size: 150 + wave * 70, life: 0.9 });
+          ring(at, '#ffffff', { top: true, size: 170 + wave * 90, life: 0.9 });
         });
       }
       burst(at, '#ffffff', 30, { top: true, power: 2.6 });

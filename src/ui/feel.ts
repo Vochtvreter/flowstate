@@ -41,10 +41,8 @@ const reduced = () => !!reducedQuery?.matches;
 
 let app: HTMLElement;
 
-const centre = (): Pt => {
-  const r = app.getBoundingClientRect();
-  return { x: r.left + r.width / 2, y: r.top + r.height / 2 };
-};
+/** The middle of the screen: where a reward starts from when the HUD has not said where its button is. */
+const centre = (): Pt => ({ x: window.innerWidth / 2, y: window.innerHeight / 2 });
 
 const centreOf = (selector: string): Pt | null => {
   const e = app.querySelector(selector);
