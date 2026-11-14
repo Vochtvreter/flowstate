@@ -99,7 +99,7 @@ function start(spec: Spec) {
   wrap.className = `cel k-${spec.kind}${spec.block ? ' block' : ''}${calm ? ' calm' : ''}`;
   wrap.setAttribute('data-testid', 'celebration');
   wrap.style.setProperty('--c', spec.color);
-  wrap.innerHTML = `<div class="cel-card" role="status"><div class="cel-glyph"><i></i><i></i>${spec.glyph}</div><div class="cel-title">${esc(spec.title)}</div><div class="cel-line">${esc(spec.line)}</div></div>`;
+  wrap.innerHTML = `<div class="cel-card" role="status"><div class="cel-glyph">${spec.glyph}</div><div class="cel-title">${esc(spec.title)}</div><div class="cel-line">${esc(spec.line)}</div></div>`;
   app.appendChild(wrap);
   const timers: number[] = [];
   current = { spec, wash, wrap, timers, leaving: false, shownAt: performance.now() };
@@ -165,7 +165,9 @@ function sparksThenPay(count: number, power: number, shape: 'hexagon' | 'diamond
   return (at: Pt, spec: Spec) => {
     burst(at, spec.color, count, { top: true, power, shape });
     burst(at, '#ffffff', Math.round(count / 3), { top: true, power: power * 0.7 });
-    ring(at, spec.color, { top: true, size: 90, life: 0.6 });
+    // Two rings leave the glyph, one after the other.
+    ring(at, spec.color, { top: true, size: 96, life: 0.7 });
+    later(300, () => ring(at, spec.color, { top: true, size: 120, life: 0.8 }));
     later(Math.min(700, spec.life * 0.4), () => payout(at, r));
   };
 }
