@@ -236,12 +236,15 @@ function stepGlide(dt: number) {
   if (glide && Math.abs(v.x + v.y - before) > 0.01) glide = null;
 }
 
-/** The part of the board the player can actually see: the stage minus whatever covers its edges. Board-local pixels. */
-function freeArea(): { x0: number; y0: number; x1: number; y1: number } {
+/**
+ * The part of the board the player can actually see: the stage minus whatever covers its edges.
+ * Board-local pixels. With `row`, the floating controls at the bottom count as covered too.
+ */
+function freeArea(row = false): { x0: number; y0: number; x1: number; y1: number } {
   const r = rectOf();
   const c = env.cover();
   const x0 = Math.min(c.left, r.width * 0.5), y0 = Math.min(c.top, r.height * 0.5);
-  return { x0, y0, x1: Math.max(x0 + 40, r.width - c.right), y1: Math.max(y0 + 40, r.height - c.bottom) };
+  return { x0, y0, x1: Math.max(x0 + 40, r.width - c.right), y1: Math.max(y0 + 40, r.height - c.bottom - (row ? c.row : 0)) };
 }
 
 /** Every node as one box (with room for the ports that stick out), or null on an empty board. */
@@ -276,10 +279,17 @@ export function fitView(smooth = false) {
   const g = ui.g;
   if (env.phone) {
     const box = nodesBox() ?? { x0: 0, y0: 0, x1: g.board.w, y1: g.board.h };
-    const f = freeArea();
-    const pad = 14;
+    const bw = box.x1 - box.x0, bh = box.y1 - box.y0;
+    // Clear of the floating controls when that leaves room at a readable zoom; otherwise behind them
+    // (they sit in the corners), with thinner margins.
+    let f = freeArea(true);
+    let pad = 14;
+    if ((f.y1 - f.y0 - pad * 2) / bh < zoomMin()) {
+      f = freeArea();
+      pad = 6;
+    }
     const aw = Math.max(60, f.x1 - f.x0 - pad * 2), ah = Math.max(60, f.y1 - f.y0 - pad * 2);
-    const k = Math.max(zoomMin(), Math.min(1, aw / (box.x1 - box.x0), ah / (box.y1 - box.y0)));
+    const k = Math.max(zoomMin(), Math.min(1, aw / bw, ah / bh));
     moveView((f.x0 + f.x1) / 2 - ((box.x0 + box.x1) / 2) * k, (f.y0 + f.y1) / 2 - ((box.y0 + box.y1) / 2) * k, k, smooth);
     return;
   }
@@ -300,9 +310,11 @@ export function jumpTo(id: number) {
 
 /** Pan just enough that a world box is inside the visible part of the board. */
 function reveal(bx: number, by: number, bw: number, bh: number) {
-  const f = freeArea();
   const k = glide?.k ?? ui.view.k;
   const pad = env.phone ? 14 : 40;
+  // Kept out from under the floating controls too, unless the space left would be too small for it.
+  let f = freeArea(true);
+  if (f.y1 - f.y0 - pad * 2 < bh * k) f = freeArea();
   // Desktop keeps 50 px clear at the top for the goal line; on a phone the strip is measured instead.
   const x0 = f.x0 + pad, x1 = f.x1 - pad, y0 = f.y0 + pad + (env.phone ? 0 : 50), y1 = f.y1 - pad;
   let x = glide?.x ?? ui.view.x, y = glide?.y ?? ui.view.y;
@@ -1239,7 +1251,7 @@ export function startPlacing(type: NodeType, recipe?: string | null) {
   ui.placing = { type, recipe };
   if (env.touch) {
     // A finger does not hover: the ghost starts in the middle of what the player can see.
-    const f = freeArea();
+    const f = freeArea(true);
     mouse = { x: ((f.x0 + f.x1) / 2 - ui.view.x) / ui.view.k, y: ((f.y0 + f.y1) / 2 - ui.view.y) / ui.view.k };
   }
   touch();
@@ -1541,7 +1553,7 @@ function mouseHit(t: HTMLElement): Hit {
 /**
  * A finger does not: ports are 14 px dots and wires a few pixels wide. So a touch is matched by
  * distance on screen, whatever the zoom. In order: a port right under the finger, the card under
- * the finger, the nearest output port within reach, a wire within reach.
+ * the finger, a wire within reach, the nearest output port within reach.
  */
 function touchHit(t: HTMLElement, p: Pt): Hit {
   const g = ui.g;
@@ -1571,9 +1583,11 @@ function touchHit(t: HTMLElement, p: Pt): Hit {
   if (inn && dIn <= PORT_IN_NEAR) return { kind: 'in', ...inn };
   const nodeEl = t.closest<HTMLElement>('.node');
   if (nodeEl) return { kind: 'node', id: Number(nodeEl.dataset.id) };
-  if (out && dOut <= PORT_REACH) return { kind: 'out', ...out };
+  // A wire comes before the wider reach of a port: every wire starts at one, and a short wire
+  // would otherwise have nowhere left to be tapped (and so could never be cut).
   const w = wireNear(p, WIRE_REACH / k);
   if (w) return { kind: 'wire', id: w.id };
+  if (out && dOut <= PORT_REACH) return { kind: 'out', ...out };
   return null;
 }
 
@@ -1875,14 +1889,17 @@ function steer(cx: number, cy: number, hovering = false) {
 function edgeScroll(dt: number) {
   const d = drag;
   if (!d || dt <= 0) return;
-  const live = ((d.kind === 'wire' || d.kind === 'wireIn') && d.armed) || (d.kind === 'node' && d.moved);
+  // A wire that has found something to snap to stays put: the player is where they wanted to be.
+  const live = ((d.kind === 'wire' || d.kind === 'wireIn') && d.armed && d.target == null) || (d.kind === 'node' && d.moved);
   if (!live) return;
   const r = rectOf();
   const f = freeArea();
   const x = lastClient.x - r.left, y = lastClient.y - r.top;
-  const push = (into: number) => Math.max(0, Math.min(1, into / EDGE_PX));
-  const vx = push(f.x0 + EDGE_PX - x) - push(x - (f.x1 - EDGE_PX));
-  const vy = push(f.y0 + EDGE_PX - y) - push(y - (f.y1 - EDGE_PX));
+  // The band is narrower on a small screen, so there is always a calm middle.
+  const ex = Math.min(EDGE_PX, (f.x1 - f.x0) * 0.2), ey = Math.min(EDGE_PX, (f.y1 - f.y0) * 0.2);
+  const push = (into: number, band: number) => Math.max(0, Math.min(1, into / band));
+  const vx = push(f.x0 + ex - x, ex) - push(x - (f.x1 - ex), ex);
+  const vy = push(f.y0 + ey - y, ey) - push(y - (f.y1 - ey), ey);
   if (!vx && !vy) return;
   const step = EDGE_SPEED * Math.min(dt, 0.05);
   const bx = ui.view.x, by = ui.view.y;
@@ -1926,6 +1943,7 @@ function dropNode(d: Extract<Drag, { kind: 'node' }>) {
   const g = ui.g;
   const n = nodeById(g, d.id);
   nodeEls.get(d.id)?.el.classList.remove('dragging');
+  appEl?.classList.remove('carrying');
   if (!n) return; // deleted while it was being dragged: nothing to record
   if (d.moved) {
     const { w, h } = nodeSize(n);

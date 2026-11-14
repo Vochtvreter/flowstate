@@ -12,7 +12,7 @@
 import { MATERIALS, NODE_DEFS } from '../content';
 import { canUndo, undo } from '../actions';
 import { armedPort, cancelArmed, cancelGesture, closeRadial, fitView, refreshBoard, settleGesture } from './board';
-import { el, invalidateLayout, setAttr, setHTML, setHidden, setStyle } from './dom';
+import { el, invalidateLayout, setAttr, setClass, setHTML, setHidden, setStyle } from './dom';
 import { icon } from './icons';
 import { Insets, env } from './phone-env';
 import { delegate, onBeat, onFrame, onNewGame, select, touch, ui } from './ui';
@@ -61,7 +61,7 @@ function setInput(touchy: boolean) {
 
 // ---------- what covers the board ----------
 
-const NONE: Insets = { top: 0, right: 0, bottom: 0, left: 0 };
+const NONE: Insets = { top: 0, right: 0, bottom: 0, left: 0, row: 0 };
 /** Height of the floating buttons in the thumb row. */
 const THUMB_ROW = 44;
 let coverKey = '';
@@ -69,6 +69,7 @@ let coverNow: Insets = NONE;
 let beats = 0;
 
 const isOpen = (e: HTMLElement | null): e is HTMLElement => !!e && e.classList.contains('open');
+const carrying = () => app.classList.contains('carrying');
 
 /** The height of an open bottom sheet (0 when none), and the width of one docked at the side. */
 function sheetSize(): { lift: number; shift: number } {
@@ -76,7 +77,8 @@ function sheetSize(): { lift: number; shift: number } {
   if (env.phone) {
     const sw = stage.offsetWidth;
     for (const s of [insp, build]) {
-      if (!isOpen(s)) continue;
+      // (While its node is being carried the inspector waits out of sight: see `carrying` in phone.css.)
+      if (!isOpen(s) || (s === insp && carrying())) continue;
       if (s.offsetWidth >= sw * 0.7) lift = Math.max(lift, s.offsetHeight);
       else shift = Math.max(shift, s.offsetWidth + 8);
     }
@@ -92,7 +94,7 @@ function sheetSize(): { lift: number; shift: number } {
  */
 function cover(): Insets {
   if (!env.phone) return NONE;
-  const key = `${ui.uiRev}|${ui.g?.rev}|${beats}|${isOpen(insp) ? 1 : 0}${isOpen(build) ? 1 : 0}`;
+  const key = `${ui.uiRev}|${ui.g?.rev}|${beats}|${isOpen(insp) ? 1 : 0}${isOpen(build) ? 1 : 0}${carrying() ? 1 : 0}`;
   if (key === coverKey) return coverNow;
   coverKey = key;
   let top = 0;
@@ -103,9 +105,9 @@ function cover(): Insets {
     if (e.offsetHeight) top = Math.max(top, e.offsetTop + e.offsetHeight);
   }
   const { lift, shift } = sheetSize();
-  // The thumb row (Fit, Undo, and whatever is in the slot) always takes the bottom of what is left.
+  // The thumb row (Fit, Undo, and whatever is in the slot) floats on top of whatever is at the bottom.
   const row = Math.max(THUMB_ROW, thumb.offsetHeight) + 16;
-  coverNow = { top, right: shift, bottom: lift + row, left: 0 };
+  coverNow = { top, right: shift, bottom: lift, left: 0, row };
   return coverNow;
 }
 
@@ -219,6 +221,8 @@ function sync() {
   const { lift, shift } = sheetSize();
   setStyle(app, '--lift', lift + 'px');
   setStyle(app, '--shift', shift + 'px');
+  // While the build menu is up the player is choosing from it: the floating controls step aside.
+  setClass(app, 'building', isOpen(build));
 }
 
 // ---------- init ----------
