@@ -286,14 +286,14 @@ export const GOALS: Goal[] = [
     hint: hint('Build another Assembler and feed it two Shard for every Mist.'),
     done: (g) => made(g, 'prism'),
     progress: (g) => techThenNode(g, 'P5', 'assembler', 'prism'),
-    reward: { credits: 400, b: 20 },
+    reward: { credits: 600, b: 40 },
   },
   {
     id: 'three-orders', title: 'Fill three orders',
     hint: hint('Keep an eye on the order card: send what it asks for to a Market, then claim it.'),
     done: (g) => g.stats.ordersFilled >= 3,
     progress: (g) => [Math.min(g.stats.ordersFilled, 3), 3, 'orders'],
-    reward: { credits: 300, b: 30 },
+    reward: { credits: 900, b: 60 },
   },
   {
     id: 'build-fabricator', title: 'Build a Fabricator',

@@ -45,7 +45,9 @@ export function maxLevel(g: Game, track: Track): number {
 /** Price of taking a track from `level` to `level + 1`. */
 export function upgradeCostAt(type: NodeType, track: Track, level: number): number {
   const U = RULES.upgrade;
-  return Math.round(U[track] * Math.max(U.minBase, NODE_DEFS[type].base) * Math.pow(U.growth, level));
+  const share = Math.max(U.minBase, NODE_DEFS[type].base);
+  const first = track === 'speed' ? U.speed[type] ?? 0.5 * share : U[track] * share;
+  return Math.round(first * Math.pow(U.growth, level));
 }
 
 export const upgradeCost = (n: GNode, track: Track): number => upgradeCostAt(n.type, track, n.lv[track]);

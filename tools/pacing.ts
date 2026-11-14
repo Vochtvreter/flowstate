@@ -431,13 +431,18 @@ class Bot {
 
   // ---------- research ----------
 
+  /** The next tech the goal chain will ask for. */
+  nextPathTech(): Tech | null {
+    return TECH_PATH.map((id) => TECHS[id]).find((t) => !this.g.techs.includes(t.id)) ?? null;
+  }
+
   pickTech(): Tech | null {
     const g = this.g;
     const ready = readyTechs(g).filter((t) => !CFG.techSkip.includes(t.id)).sort((a, b) => techWeight(a) - techWeight(b));
     if (!ready.length) return null;
     if (this.P.techPolicy === 'greedy') return ready[0];
     // mainline: the tech the goal card is asking for comes first...
-    const next = TECH_PATH.map((id) => TECHS[id]).find((t) => !g.techs.includes(t.id));
+    const next = this.nextPathTech();
     if (!next) return ready[0];
     if (ready.includes(next)) return next;
     // ...and anything else is an impulse buy: fine if it costs none of the Data the next one is short of,
@@ -473,9 +478,15 @@ class Bot {
       return true;
     };
     const saturated = (w: Wire) => w.rate >= pipeCap(w.tier) * 0.95;
-    // The Data the goal card shows the player saving up ("Research Breeze Deposits: 400 / 900 α"), if any.
+    // The Data the player is saving up: what the goal card shows ("Research Breeze Deposits: 400 / 900 α"),
+    // and for a player who follows the Processing branch, whatever its next tech is still short of.
     const unit = goal?.progress?.(g)?.[2];
-    const savingData: DataTier | null = unit === 'α' ? 'a' : unit === 'β' ? 'b' : unit === 'γ' ? 'g' : null;
+    const savingData = new Set<DataTier>();
+    if (unit === 'α') savingData.add('a');
+    if (unit === 'β') savingData.add('b');
+    if (unit === 'γ') savingData.add('g');
+    const nextTech = P.techPolicy === 'mainline' ? this.nextPathTech() : null;
+    if (nextTech && techAvailable(g, nextTech)) for (const k of TIERS) if ((nextTech.cost[k] ?? 0) > g.data[k]) savingData.add(k);
     // The Silt lesson: once the goal card has explained the Void, a byproduct port gets one straight away.
     const knowsVoid = g.goal.i > goalIndex('silt-exit') || goal?.id === 'silt-exit';
 
@@ -547,10 +558,11 @@ class Bot {
         }
         feeders.sort((a, b) => MATERIALS[this.portMat(b.n, b.port)!].value - MATERIALS[this.portMat(a.n, a.port)!].value);
         if (!needed) {
-          // Nothing left to buy with this Data: stop studying, sell instead. (Routers are turned by routerWants.)
+          // Nothing left to buy with this Data: stop studying, sell instead. Tidying up, so it waits its turn
+          // behind anything red and any new toy. (Routers are turned by routerWants.)
           if (lab && CFG.labPerTier) {
             const w = this.ins(lab).find((x) => this.node(x.from).type !== 'router' && this.outs(this.node(x.from), x.port).length > 1);
-            if (w) W.push({ cls: 'fix', kind: 'cut', cost: 0, label: `cut ${this.name(this.node(w.from))} → Lab (no ${GREEK[tier]} left to spend)`, run: () => { this.noSink.add(`${w.from}:${w.port}:lab`); return cutWire(g, w.id); } });
+            if (w) W.push({ cls: 'grow', kind: 'cut', cost: 0, label: `cut ${this.name(this.node(w.from))} → Lab (no ${GREEK[tier]} left to spend)`, run: () => { this.noSink.add(`${w.from}:${w.port}:lab`); return cutWire(g, w.id); } });
           }
           continue;
         }
@@ -582,7 +594,7 @@ class Bot {
           const cand = feeders.filter((p) => direct(p) && !this.routerOn(p) && !this.feedsMachine(p) && !this.noRouter.has(this.key(p)))
             .sort((a, b) => MATERIALS[this.portMat(a.n, a.port)!].value - MATERIALS[this.portMat(b.n, b.port)!].value || this.spare(b) - this.spare(a))[0];
           // While the goal card is waiting on this Data, feeding the Lab comes before everything else.
-          const urgent = forGoal || savingData === tier;
+          const urgent = forGoal || savingData.has(tier);
           if (cand) {
             W.push({
               cls: urgent ? 'new' : 'grow', kind: 'build', cost: nodeCost(g, 'router'), novel: urgent, settle: [lab.id],
@@ -769,7 +781,7 @@ class Bot {
       else if (ordered) { want = CFG.sellRatio; why = `the order wants ${MATERIALS[m].name}`; }
       if (r.mode === 'ratio' && toLab.weight === want[0] && toMarket.weight === want[1]) continue;
       W.push({
-        cls: 'fix', kind: 'route', cost: 0, settle: [lab.id],
+        cls: want[0] === 0 ? 'grow' : 'fix', kind: 'route', cost: 0, settle: [lab.id],
         label: `set Router (${MATERIALS[m].name}) to Lab ${want[0]} : Market ${want[1]} (${why})`,
         run: () => {
           setMode(g, r.id, 'ratio');
@@ -1321,6 +1333,16 @@ function summary(results: Result[]): string {
   }
   const misses = results.reduce((n, r) => n + checks(r).filter((c) => !c.ok).length, 0);
   P(misses ? `${misses} target(s) missed.` : 'Every target met.');
+  P();
+  P('== GOALS: when each was claimed, and the seconds spent on it, per run ==');
+  P(`${padR('', 44)}${results.map((r) => pad(`${r.policy.name.slice(0, 4)}/${r.seed}`, 12)).join('')}`);
+  GOALS.forEach((goal, i) => {
+    const cells = results.map((r) => {
+      const x = r.goals.find((y) => y.index === i);
+      return pad(x && x.claimedAt != null ? `${mmss(x.claimedAt)} ${pad(Math.round(x.spent), 3)}s` : '—', 12);
+    });
+    P(`${pad(i + 1, 2)}${goal.free ? '*' : ' '} ${padR(goal.title, 40)}${cells.join('')}`);
+  });
   return out.join('\n');
 }
 

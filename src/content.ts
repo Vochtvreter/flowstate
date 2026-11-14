@@ -89,8 +89,8 @@ export interface NodeDef {
 export const NODE_DEFS: Record<NodeType, NodeDef> = {
   well: { type: 'well', name: 'Well', base: 10, growth: 1.15, tracks: ['speed'], verb: 'extract', blurb: 'Extracts a raw material. Must sit on a deposit.' },
   refiner: { type: 'refiner', name: 'Refiner', base: 50, growth: 1.15, tech: 'P1', tracks: ['speed', 'eff', 'buffer'], verb: 'refine', blurb: 'One input in, something better out.' },
-  assembler: { type: 'assembler', name: 'Assembler', base: 400, growth: 1.15, tech: 'P4', tracks: ['speed', 'eff', 'buffer'], verb: 'assemble', blurb: 'Combines two inputs.' },
-  fabricator: { type: 'fabricator', name: 'Fabricator', base: 3000, growth: 1.15, tech: 'P7', tracks: ['speed', 'eff', 'buffer'], verb: 'fabricate', blurb: 'Combines up to three inputs.' },
+  assembler: { type: 'assembler', name: 'Assembler', base: 800, growth: 1.15, tech: 'P4', tracks: ['speed', 'eff', 'buffer'], verb: 'assemble', blurb: 'Combines two inputs.' },
+  fabricator: { type: 'fabricator', name: 'Fabricator', base: 6000, growth: 1.15, tech: 'P7', tracks: ['speed', 'eff', 'buffer'], verb: 'fabricate', blurb: 'Combines up to three inputs.' },
   router: { type: 'router', name: 'Router', base: 25, growth: 1.1, tech: 'L1', tracks: [], verb: 'split', blurb: 'Splits a stream by ratio, priority or filter.' },
   merger: { type: 'merger', name: 'Merger', base: 25, growth: 1.1, tech: 'L2', tracks: [], verb: 'merge', blurb: 'A junction: many wires in, one stream out.' },
   silo: { type: 'silo', name: 'Silo', base: 200, growth: 1.2, tech: 'L5', tracks: ['buffer'], verb: 'store', blurb: 'A big buffer that smooths bursts.' },
@@ -161,37 +161,37 @@ export const TECHS: Record<string, Tech> = Object.fromEntries([
   // Processing
   T('P1', 'Refining', 'processing', 0, 0, {}, [], 'Your first machine. Turn raw Glint into Shard, which sells for more.', ['Refiner', 'Recipe: 2 Glint → Shard'], { auto: 'Reward for the goal “Wire it to the Market too”' }),
   T('P2', 'Murk Deposits', 'processing', 1, 0, { a: 45 }, ['R1'], 'Extract Murk and refine it into Ink. It leaves Silt behind, so you also get the Void to dump it.', ['Murk Wells', 'Recipe: 2 Murk → Ink + Silt', 'Void node']),
-  T('P3', 'Ember Deposits', 'processing', 2, 0, { a: 150 }, ['P2'], 'Extract Ember and refine it into Spark.', ['Ember Wells', 'Recipe: 2 Ember → Spark']),
+  T('P3', 'Ember Deposits', 'processing', 2, 0, { a: 180 }, ['P2'], 'Extract Ember and refine it into Spark.', ['Ember Wells', 'Recipe: 2 Ember → Spark']),
   T('P4', 'Assembly', 'processing', 3, 0, { a: 1000 }, ['P3'], 'Machines with two inputs. Ink and Spark make Glyph, your first Tier 2 item and the source of β Data.', ['Assembler', 'Recipe: Ink + Spark → Glyph']),
-  T('P5', 'Breeze Deposits', 'processing', 4, 0, { a: 1500 }, ['P4'], 'Extract Breeze, refine it into Mist, and combine Mist with Shard into Prism.', ['Breeze Wells', 'Recipe: 2 Breeze → Mist', 'Recipe: 2 Shard + Mist → Prism']),
-  T('P7', 'Fabrication', 'processing', 5, 0, { a: 2000, b: 800 }, ['P5'], 'Three-input machines. Prism and Glyph become Lens, the first Tier 3 item and the source of γ Data.', ['Fabricator', 'Recipe: Prism + 2 Glyph → Lens']),
-  T('P9', 'Paradox', 'processing', 6, 0, { b: 700, g: 400 }, ['P8'], 'The capstone. Lens, Dynamo and raw Breeze fold into a Paradox.', ['Recipe: Lens + Dynamo + 4 Breeze → Paradox']),
-  T('U1', 'Efficiency Tuning', 'processing', 1, 1, { a: 310 }, ['P1'], 'A new upgrade track for machines: some crafts consume no inputs.', ['Efficiency upgrades on machines']),
-  T('U2', 'Overclock', 'processing', 2, 1, { b: 180 }, ['U1'], 'Raises the level cap on Speed upgrades from 10 to 25.', ['Speed level cap 25']),
-  T('P6', 'Reclamation', 'processing', 4, 1, { a: 300, b: 30 }, ['P4'], 'Turn Silt, the byproduct clogging your Ink line, into Clay, then into Coil.', ['Recipe: 3 Silt → Clay', 'Recipe: Spark + 2 Clay → Coil']),
-  T('P8', 'Dynamo', 'processing', 5, 1, { b: 400, g: 80 }, ['P6', 'P7'], 'Coil, Glyph and Prism spin up a Dynamo.', ['Recipe: 2 Coil + Glyph + Prism → Dynamo']),
+  T('P5', 'Breeze Deposits', 'processing', 4, 0, { a: 1000 }, ['P4'], 'Extract Breeze, refine it into Mist, and combine Mist with Shard into Prism.', ['Breeze Wells', 'Recipe: 2 Breeze → Mist', 'Recipe: 2 Shard + Mist → Prism']),
+  T('P7', 'Fabrication', 'processing', 5, 0, { a: 1200, b: 250 }, ['P5'], 'Three-input machines. Prism and Glyph become Lens, the first Tier 3 item and the source of γ Data.', ['Fabricator', 'Recipe: Prism + 2 Glyph → Lens']),
+  T('P9', 'Paradox', 'processing', 6, 0, { b: 500, g: 400 }, ['P8'], 'The capstone. Lens, Dynamo and raw Breeze fold into a Paradox.', ['Recipe: Lens + Dynamo + 4 Breeze → Paradox']),
+  T('U1', 'Efficiency Tuning', 'processing', 1, 1, { b: 40 }, ['P1'], 'A new upgrade track for machines: some crafts consume no inputs.', ['Efficiency upgrades on machines']),
+  T('U2', 'Overclock', 'processing', 2, 1, { g: 60 }, ['U1'], 'Raises the level cap on Speed upgrades from 10 to 25.', ['Speed level cap 25']),
+  T('P6', 'Reclamation', 'processing', 4, 1, { a: 300, g: 25 }, ['P4'], 'Turn Silt, the byproduct clogging your Ink line, into Clay, then into Coil.', ['Recipe: 3 Silt → Clay', 'Recipe: Spark + 2 Clay → Coil']),
+  T('P8', 'Dynamo', 'processing', 5, 1, { b: 300, g: 100 }, ['P6', 'P7'], 'Coil, Glyph and Prism spin up a Dynamo.', ['Recipe: 2 Coil + Glyph + Prism → Dynamo']),
   // Logistics
   T('L1', 'Routing', 'logistics', 1, 0, {}, ['R1'], 'A Router splits one stream across several wires by weight, when an even split is not what you want.', ['Router node', 'Ratio mode'], { auto: 'Reward for the goal “Fill your first order”' }),
-  T('L3', 'Pipes Mk II', 'logistics', 2, 0, { a: 190 }, ['L1'], 'Wires can be upgraded to carry 8 items per second.', ['Mk II wires (8/s)']),
-  T('L7', 'Pipes Mk III', 'logistics', 3, 0, { b: 150 }, ['L3'], 'Wires can be upgraded to carry 16 items per second.', ['Mk III wires (16/s)']),
-  T('L8', 'Pipes Mk IV', 'logistics', 4, 0, { g: 200 }, ['L7'], 'Wires can be upgraded to carry 32 items per second.', ['Mk IV wires (32/s)']),
-  T('L4', 'Priority Routing', 'logistics', 2, 1, { a: 270 }, ['L1'], 'Routers can fill their first wire completely before anything overflows to the next.', ['Router: Priority mode']),
-  T('L6', 'Filter Routing', 'logistics', 3, 1, { a: 400, b: 60 }, ['L4'], 'Routers can send each material down its own wire, which untangles mixed streams.', ['Router: Filter mode']),
-  T('L2', 'Merger', 'logistics', 2, 2, { a: 100 }, ['L1'], 'A junction node that gathers many wires into one tidy stream.', ['Merger node']),
-  T('L5', 'Silo', 'logistics', 3, 2, { a: 170 }, ['L2'], 'A large buffer that keeps machines fed through uneven supply.', ['Silo node']),
+  T('L3', 'Pipes Mk II', 'logistics', 2, 0, { a: 60 }, ['L1'], 'Wires can be upgraded to carry 8 items per second.', ['Mk II wires (8/s)']),
+  T('L7', 'Pipes Mk III', 'logistics', 3, 0, { b: 60 }, ['L3'], 'Wires can be upgraded to carry 16 items per second.', ['Mk III wires (16/s)']),
+  T('L8', 'Pipes Mk IV', 'logistics', 4, 0, { g: 150 }, ['L7'], 'Wires can be upgraded to carry 32 items per second.', ['Mk IV wires (32/s)']),
+  T('L4', 'Priority Routing', 'logistics', 2, 1, { b: 20 }, ['L1'], 'Routers can fill their first wire completely before anything overflows to the next.', ['Router: Priority mode']),
+  T('L6', 'Filter Routing', 'logistics', 3, 1, { b: 30 }, ['L4'], 'Routers can send each material down its own wire, which untangles mixed streams.', ['Router: Filter mode']),
+  T('L2', 'Merger', 'logistics', 2, 2, { a: 40 }, ['L1'], 'A junction node that gathers many wires into one tidy stream.', ['Merger node']),
+  T('L5', 'Silo', 'logistics', 3, 2, { b: 15 }, ['L2'], 'A large buffer that keeps machines fed through uneven supply.', ['Silo node']),
   // Commerce
   T('C1', 'Market Lens', 'commerce', 1, 0, {}, ['R1'], 'See live prices and how much of each material your Markets buy at full price.', ['Price gauges on Markets'], { auto: 'Reward for the goal “Fill your first order”' }),
-  T('C2', 'Wider Demand', 'commerce', 2, 0, { a: 240 }, ['C1'], 'Markets buy 50% more of everything at full price.', ['+50% demand, all materials']),
-  T('C4', 'Luxury Buyers', 'commerce', 3, 0, { b: 200 }, ['C2'], 'Tier 2 and Tier 3 items sell for 25% more.', ['+25% value on T2 and T3']),
-  T('C5', 'Exports', 'commerce', 4, 0, { g: 60 }, ['C4'], 'Markets buy twice as much of everything at full price.', ['+100% demand, all materials']),
+  T('C2', 'Wider Demand', 'commerce', 2, 0, { a: 200 }, ['C1'], 'Markets buy 50% more of everything at full price.', ['+50% demand, all materials']),
+  T('C4', 'Luxury Buyers', 'commerce', 3, 0, { b: 300 }, ['C2'], 'Tier 2 and Tier 3 items sell for 25% more.', ['+25% value on T2 and T3']),
+  T('C5', 'Exports', 'commerce', 4, 0, { g: 80 }, ['C4'], 'Markets buy twice as much of everything at full price.', ['+100% demand, all materials']),
   // Research
   T('R1', 'Lab', 'research', 0, 0, {}, [], 'Send items to a Lab instead of a Market to earn Data, the currency of this tree.', ['Lab node', 'Tech tree'], { auto: 'Reward for the goal “Sell your first Shard”' }),
-  T('R2', 'Lab Speed', 'research', 1, 0, { a: 80 }, ['R1'], 'Labs study items twice as fast.', ['Labs 2× speed']),
-  T('R3', 'Deep Analysis', 'research', 2, 0, { b: 100 }, ['R2'], 'Every item studied yields 50% more Data.', ['+50% Data per item']),
+  T('R2', 'Lab Speed', 'research', 1, 0, { a: 50 }, ['R1'], 'Labs study items twice as fast.', ['Labs 2× speed']),
+  T('R3', 'Deep Analysis', 'research', 2, 0, { b: 80 }, ['R2'], 'Every item studied yields 50% more Data.', ['+50% Data per item']),
   T('R4', 'Long Absence', 'research', 1, 1, { a: 210 }, ['R1'], 'Your supply line keeps earning for up to 8 hours while you are away, instead of 2.', ['Offline cap 2h → 8h'], { needsEnd: true }),
   // Scale tools
-  T('S1', 'Bulk Upgrade', 'scale', 1, 0, { a: 210 }, ['L1'], 'Upgrade every node of the same kind with one click.', ['"Upgrade all" button']),
-  T('S3', 'Auto-balance', 'scale', 2, 0, { b: 250 }, ['S1', 'L4'], 'One click sets a Router\'s weights to match what each destination can actually use.', ['Router: Auto-balance']),
+  T('S1', 'Bulk Upgrade', 'scale', 1, 0, { a: 60 }, ['L1'], 'Upgrade every node of the same kind with one click.', ['"Upgrade all" button']),
+  T('S3', 'Auto-balance', 'scale', 2, 0, { b: 50 }, ['S1', 'L4'], 'One click sets a Router\'s weights to match what each destination can actually use.', ['Router: Auto-balance']),
 ].map((t) => [t.id, t]));
 
 export const TECH_IDS = Object.keys(TECHS);
@@ -290,6 +290,17 @@ export const RULES = {
   /** Board expansion number n (0-based) costs base × growth^n. */
   expansion: { base: 100, growth: 2.2 },
 
-  /** Upgrade level L of a track costs share × max(minBase, node base price) × growth^L. */
-  upgrade: { growth: 1.6, minBase: 10, speed: 0.5, eff: 1.5, buffer: 0.4 },
+  /**
+   * Upgrades. Level L of a track (0-based) costs its first-level price × growth^L.
+   * Speed is priced per node type so that a first or second level pays for itself in one to three minutes
+   * when the extra input exists (`npm run pacing` prints the table). Efficiency and Buffer cost a share of
+   * the node's base price (at least minBase).
+   */
+  upgrade: {
+    growth: 1.6,
+    speed: { well: 40, refiner: 32, assembler: 100, fabricator: 400, lab: 50 } as Partial<Record<NodeType, number>>,
+    eff: 1.5,
+    buffer: 0.4,
+    minBase: 10,
+  },
 };
