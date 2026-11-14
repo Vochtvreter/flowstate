@@ -22,6 +22,14 @@ const SHAPES: Record<MatId, (c: string) => string> = {
   paradox: () => `<path d="M10 10c-2-3-6-3-6 0s4 3 6 0 6-3 6 0-4 3-6 0z" class="ic"/>`,
 };
 
+/** The simple outline used for a material's dots on wires. Anything not listed is a circle. */
+export type MatShape = 'circle' | 'diamond' | 'triangle' | 'hexagon' | 'square' | 'star';
+const DOT_SHAPES: Partial<Record<MatId, MatShape>> = {
+  glint: 'diamond', ember: 'triangle', shard: 'hexagon', ink: 'square', clay: 'square',
+  spark: 'star', glyph: 'star', prism: 'diamond',
+};
+export const matShape = (m: MatId | null): MatShape => (m && DOT_SHAPES[m]) || 'circle';
+
 export function matGlyph(m: MatId, size = 16): string {
   const c = MATERIALS[m].color;
   return svg(size, 20, SHAPES[m](c), c);
