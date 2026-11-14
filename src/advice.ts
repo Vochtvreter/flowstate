@@ -157,13 +157,10 @@ export const ADVICE = {
   estSaves: 15,
   estShare: 0.04,
   /**
-   * The bar a tip on offer has to stay above. It used to be lower than `minSaves` so that a small tip would
-   * not blink; now it is the same bar, and a tip that falls below it is gone until the board changes.
-   */
-  keepSaves: 15,
-  /**
    * The tip on offer stays ahead of another unless that one ends the wait this many seconds sooner, and this
-   * share of the wait sooner: two tips about equally good must not take turns on the card.
+   * share of the wait sooner: two tips about equally good must not take turns on the card. (There is no lower
+   * bar for a tip on offer any more: it has to keep saving `minSaves` like any other, and one that falls
+   * below is gone until the board changes.)
    */
   keepWithin: 3,
   keepShare: 0.05,
