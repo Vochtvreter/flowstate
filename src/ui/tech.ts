@@ -1,10 +1,12 @@
 // Full-screen tech tree overlay.
 import { BRANCHES, DATA_COLORS, DATA_NAMES, DataTier, TECHS, Tech } from '../content';
 import { costText, fmtInt, fmtRate, fmtTime, research, techAffordable, techAvailable, techEta, techProgress } from '../economy';
+import { Panel, makePanel } from './dom';
 import { esc, icon } from './icons';
-import { delegate, toast, touch, ui } from './ui';
+import { delegate, touch, ui } from './ui';
 
 let host: HTMLElement;
+let panel: Panel;
 const COL0 = 150, COLW = 136, TILE_W = 124, TILE_H = 54, ROW_H = 66, LANE_GAP = 26, TOP = 96;
 
 function laneTops(): Record<string, number> {
@@ -22,6 +24,9 @@ const pos = (t: Tech, tops: Record<string, number>) => ({ x: COL0 + t.col * COLW
 
 type TState = 'own' | 'rdy' | 'sav' | 'lck';
 
+/** A percentage for a style attribute, rounded so tiny changes do not count as new HTML. */
+const pct = (frac: number) => Math.round(Math.max(0, Math.min(1, frac)) * 1000) / 10;
+
 function stateOf(t: Tech): TState {
   const g = ui.g;
   if (g.techs.includes(t.id)) return 'own';
@@ -31,6 +36,7 @@ function stateOf(t: Tech): TState {
 
 export function initTech(el: HTMLElement) {
   host = el;
+  panel = makePanel(host);
   delegate(host, (a, args) => {
     const g = ui.g;
     if (a === 'close') closeTech();
@@ -42,7 +48,7 @@ export function initTech(el: HTMLElement) {
       if (g.queue.includes(id)) g.queue = g.queue.filter((q) => q !== id);
       else g.queue.push(id);
     }
-    renderTech();
+    renderTech(true); // answer the press at once, even though the pointer is still down in here
   });
 }
 
@@ -55,7 +61,7 @@ export function openTech(id?: string) {
   if (id && TECHS[id]) ui.techSel = id;
   if (!ui.techSel) ui.techSel = Object.values(TECHS).find((t) => stateOf(t) === 'rdy' || stateOf(t) === 'sav')?.id ?? 'P1';
   host.classList.add('open');
-  renderTech();
+  renderTech(true);
   touch();
 }
 
@@ -80,7 +86,7 @@ function tile(t: Tech, tops: Record<string, number>): string {
   const queued = g.queue.includes(t.id) ? ' queued' : '';
   return `<button class="tt ${st}${ui.techSel === t.id ? ' sel' : ''}${queued}" data-act="sel:${t.id}" data-testid="tech-${t.id}" style="left:${p.x}px;top:${p.y}px">
     <span class="n">${esc(t.name)}${t.auto ? ' ★' : ''}</span><span class="c">${sub}</span>
-    ${st === 'sav' ? `<span class="pb" style="width:${techProgress(g, t) * 100}%"></span>` : ''}</button>`;
+    ${st === 'sav' ? `<span class="pb" style="width:${pct(techProgress(g, t))}%"></span>` : ''}</button>`;
 }
 
 function edges(tops: Record<string, number>): string {
@@ -109,7 +115,7 @@ function detail(t: Tech): string {
     const ok = have >= c;
     const eta = ok ? '✓' : g.dataRate[k] > 1e-6 ? fmtTime((c - have) / g.dataRate[k]) : 'no income';
     return `<div><div class="row sm"><b style="color:${DATA_COLORS[k]}">${c}${DATA_NAMES[k]}</b><span class="mono muted">${fmtInt(Math.min(have, 1e9))} / ${c} · ${eta}</span></div>
-      <div class="bar"><span style="width:${Math.min(100, (have / c) * 100)}%;background:${DATA_COLORS[k]}"></span></div></div>`;
+      <div class="bar"><span style="width:${pct(have / c)}%;background:${DATA_COLORS[k]}"></span></div></div>`;
   }).join('');
   const reqs = t.requires.map((r) => {
     const own = g.techs.includes(r);
@@ -124,7 +130,7 @@ function detail(t: Tech): string {
     const label = st === 'rdy' ? 'Research' : st === 'sav' ? (isFinite(eta) ? `Ready in ${fmtTime(eta)}` : 'Not enough Data') : 'Locked: research the requirements first';
     action = `<label class="qbox" data-act="queue:${t.id}"><span class="cb${queued ? ' on' : ''}">${queued ? icon('check', 12) : ''}</span>Research automatically when affordable</label>
       <button class="rbtn${st === 'rdy' ? ' ok' : ''}" data-act="research:${t.id}" data-testid="research" ${st === 'rdy' ? '' : 'disabled'}>
-        ${st === 'sav' ? `<span class="fill" style="width:${techProgress(g, t) * 100}%"></span>` : ''}<span class="lab">${label}</span></button>`;
+        ${st === 'sav' ? `<span class="fill" style="width:${pct(techProgress(g, t))}%"></span>` : ''}<span class="lab">${label}</span></button>`;
   }
   const branch = BRANCHES.find((b) => b.id === t.branch)!;
   return `<div class="dsec"><span class="tag">${branch.name}</span><h2>${esc(t.name)}</h2><p>${esc(t.desc)}</p></div>
@@ -134,7 +140,11 @@ function detail(t: Tech): string {
     <div class="grow"></div><div class="dsec last">${action}</div>`;
 }
 
-export function renderTech() {
+/**
+ * Draw the overlay. The HTML is patched into the existing elements (so the tree keeps its scroll
+ * position and a finger can keep scrolling it); `force` is for the refresh right after a press.
+ */
+export function renderTech(force = false) {
   if (!ui.techOpen) return;
   const g = ui.g;
   const tops = laneTops();
@@ -146,9 +156,7 @@ export function renderTech() {
       <div class="lsep" style="top:${tops[b.id] - LANE_GAP / 2}px"></div>`;
   }).join('');
   const width = COL0 + 6 * COLW + TILE_W + 20;
-  const scroller = host.querySelector('.tree');
-  const sx = scroller?.scrollLeft ?? 0, sy = scroller?.scrollTop ?? 0;
-  host.innerHTML = `
+  panel.render(`
     <div class="tree"><div class="treein" style="width:${width}px;height:${tops._end + 30}px">
       <div class="thead"><div><h1>Tech Tree</h1><p>Spend Data from your Labs. The board keeps running behind this screen.</p></div>
         <div class="legend"><span><i class="own"></i>Owned</span><span><i class="rdy"></i>Ready</span><span><i class="sav"></i>Saving up</span><span><i class="lck"></i>Locked</span></div></div>
@@ -160,10 +168,5 @@ export function renderTech() {
       <div class="tbar"><div class="tdata">${(['a', 'b', 'g'] as DataTier[]).map((k) => `<span style="color:${DATA_COLORS[k]}"><b class="mono">${fmtInt(g.data[k])}</b>${DATA_NAMES[k]} <i class="mono">+${fmtRate(g.dataRate[k])}/s</i></span>`).join('')}</div>
         <button class="closebtn" data-act="close" data-testid="close-tech">Back to board <span class="kbd">Esc</span></button></div>
       ${detail(sel)}
-    </aside>`;
-  const s2 = host.querySelector('.tree');
-  if (s2) {
-    s2.scrollLeft = sx;
-    s2.scrollTop = sy;
-  }
+    </aside>`, force);
 }

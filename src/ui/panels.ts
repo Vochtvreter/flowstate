@@ -1,16 +1,22 @@
 // Top bar, hotbar, inspector, objective line, bottleneck alert and minimap.
+//
+// How these refresh: the top bar is built once from persistent items that patch their own text
+// and attributes (see addTopItem). The other panels still describe themselves as an HTML string;
+// makePanel() skips the write when the string is unchanged, patches the existing elements in
+// place when it is not, and holds off while the player is pressing or touch-scrolling the panel.
 import { DATA_COLORS, DATA_NAMES, DataTier, HOTBAR, MATERIALS, MatId, NODE_DEFS, PIPES, RECIPES, TECHS, Track } from '../content';
 import {
   autoBalance, canRedo, canUndo, cutWire, deleteNode, materialsAt, nodeById, raisePriority, recipesFor, redo, refundOf,
   setFilter, setMode, setRecipe, setWeight, undo, upgrade, upgradeAll, upgradeSaturatedWires, upgradeWire,
 } from '../actions';
 import {
-  TRACK_INFO, costText, cycleTime, dataYield, fmt, fmtInt, fmtRate, fmtTime, has, labRate, maxLevel, maxPipeTier,
-  nodeCost, nodeUnlocked, price, readyTechs, recipeOf, saturation, trackAvailable, upgradeCost, valueOf, wellRate,
+  TRACK_INFO, costText, cycleTime, dataYield, fmt, fmtInt, fmtRate, has, labRate, maxLevel, maxPipeTier,
+  nodeCost, nodeUnlocked, price, readyTechs, recipeOf, saturation, trackAvailable, upgradeCost, wellRate,
 } from '../economy';
-import { bagTotal, graph, isMachine, passCap } from '../sim';
-import { Game, GNode, RouterMode, Wire, clearSave } from '../state';
-import { jumpTo, startPlacing, fitView, zoomBy } from './board';
+import { graph, isMachine, passCap } from '../sim';
+import { Game, GNode, RouterMode, Wire } from '../state';
+import { boardRect, jumpTo, startPlacing, fitView, zoomBy } from './board';
+import { Panel, el, invalidateLayout, makePanel, setAnchor, setAttr, setClass, setHTML, setHidden, setText } from './dom';
 import { nodeSize } from './geom';
 import { esc, icon, matGlyph, nodeIcon } from './icons';
 import { diagnose, matName } from './status';
@@ -23,6 +29,11 @@ let objEl: HTMLElement;
 let alertEl: HTMLElement;
 let mini: HTMLCanvasElement;
 let zoomEl: HTMLElement;
+let zoomLabel: HTMLElement;
+let hotPanel: Panel;
+let inspPanel: Panel;
+let objPanel: Panel;
+let alertPanel: Panel;
 
 export function initPanels(refs: {
   top: HTMLElement; hot: HTMLElement; insp: HTMLElement; obj: HTMLElement; alert: HTMLElement; mini: HTMLCanvasElement; zoom: HTMLElement;
@@ -34,7 +45,16 @@ export function initPanels(refs: {
   alertEl = refs.alert;
   mini = refs.mini;
   zoomEl = refs.zoom;
+  hotPanel = makePanel(hotEl);
+  inspPanel = makePanel(inspEl);
+  objPanel = makePanel(objEl);
+  alertPanel = makePanel(alertEl);
+  buildTop();
+  zoomEl.innerHTML = `<button class="ibtn" data-act="out" aria-label="Zoom out">${icon('minus', 14)}</button><span class="mono zl"></span><button class="ibtn" data-act="in" aria-label="Zoom in">${icon('plus', 14)}</button><button class="ibtn" data-act="fit" aria-label="Fit board (F)" title="Fit board (F)">${icon('fit', 14)}</button>`;
+  zoomLabel = zoomEl.querySelector('.zl')!;
 
+  // Every handler ends with a forced refresh: the player has just pressed something here, so the
+  // panel must answer at once even though the pointer is still down inside it.
   delegate(topEl, (a) => {
     const g = ui.g;
     if (a === 'undo') undo(g);
@@ -45,16 +65,18 @@ export function initPanels(refs: {
     else if (a === 'reset') {
       if (confirm('Start over? This erases your whole supply line and all research.')) hooks.reset();
     }
-    renderPanels();
+    renderPanels(true);
   });
 
   delegate(hotEl, (a, args) => {
     if (a === 'place') startPlacing(args[0] as never);
     else if (a === 'locked') hooks.openTech(args[0]);
+    renderPanels(true);
   });
 
   delegate(alertEl, (a, args) => {
     if (a === 'jump') jumpTo(Number(args[0]));
+    renderPanels(true);
   });
 
   delegate(zoomEl, (a) => {
@@ -65,97 +87,203 @@ export function initPanels(refs: {
   });
 
   delegate(inspEl, (a, args) => {
-    const g = ui.g;
-    const sel = ui.sel;
-    if (a === 'close') return select(null);
-    if (a === 'tech') return hooks.openTech(args[0]);
-    if (a === 'jump') return jumpTo(Number(args[0]));
-    if (a === 'upgsrc') {
-      if (!upgrade(g, Number(args[0]), 'speed')) toast('Not enough credits', 'bad');
-      return renderPanels();
-    }
-    if (!sel) return;
-    if (sel.kind === 'node') {
-      const n = nodeById(g, sel.id);
-      if (!n) return;
-      if (a === 'upg') {
-        if (!upgrade(g, n.id, args[0] as Track)) toast('Not enough credits', 'bad');
-      } else if (a === 'upgall') {
-        const c = upgradeAll(g, n.type, args[0] as Track);
-        toast(c ? `Upgraded ${c} ${NODE_DEFS[n.type].name}${c > 1 ? 's' : ''}` : 'Not enough credits', c ? 'good' : 'bad');
-      } else if (a === 'del') {
-        const refund = refundOf(g, n);
-        deleteNode(g, n.id);
-        select(null);
-        if (refund > 0) toast(`Refunded <b>${fmt(refund)}¢</b>`, 'good');
-      } else if (a === 'dup') startPlacing(n.type, n.recipe);
-      else if (a === 'recipes') { ui.recipeMenu = !ui.recipeMenu; touch(); }
-      else if (a === 'recipe') { setRecipe(g, n.id, args[0]); ui.recipeMenu = false; touch(); }
-      else if (a === 'mode') setMode(g, n.id, args[0] as RouterMode);
-      else if (a === 'wplus') { const w = g.wires.find((x) => x.id === Number(args[0])); if (w) setWeight(g, w.id, w.weight + 1); }
-      else if (a === 'wminus') { const w = g.wires.find((x) => x.id === Number(args[0])); if (w) setWeight(g, w.id, w.weight - 1); }
-      else if (a === 'prio') raisePriority(g, Number(args[0]));
-      else if (a === 'filter') {
-        const w = g.wires.find((x) => x.id === Number(args[0]));
-        if (w) {
-          const mats: (MatId | null)[] = [null, ...materialsAt(g, n.id)];
-          setFilter(g, w.id, mats[(mats.indexOf(w.filter) + 1) % mats.length]);
-        }
-      } else if (a === 'autobal') autoBalance(g, n.id);
-    } else {
-      const w = g.wires.find((x) => x.id === sel.id);
-      if (!w) return;
-      if (a === 'wireup') { if (!upgradeWire(g, w.id)) toast('Not enough credits', 'bad'); }
-      else if (a === 'wireall') { const c = upgradeSaturatedWires(g); toast(c ? `Upgraded ${c} wire${c > 1 ? 's' : ''}` : 'Nothing to upgrade, or not enough credits', c ? 'good' : 'bad'); }
-      else if (a === 'cut') { cutWire(g, w.id); select(null); }
-    }
-    renderPanels();
+    inspectorAction(a, args, hooks.openTech);
+    renderPanels(true);
   });
 }
 
+function inspectorAction(a: string, args: string[], openTech: (id?: string) => void) {
+  const g = ui.g;
+  const sel = ui.sel;
+  if (a === 'close') return select(null);
+  if (a === 'tech') return openTech(args[0]);
+  if (a === 'jump') return jumpTo(Number(args[0]));
+  if (a === 'upgsrc') {
+    if (!upgrade(g, Number(args[0]), 'speed')) toast('Not enough credits', 'bad');
+    return;
+  }
+  if (!sel) return;
+  if (sel.kind === 'node') {
+    const n = nodeById(g, sel.id);
+    if (!n) return;
+    if (a === 'upg') {
+      if (!upgrade(g, n.id, args[0] as Track)) toast('Not enough credits', 'bad');
+    } else if (a === 'upgall') {
+      const c = upgradeAll(g, n.type, args[0] as Track);
+      toast(c ? `Upgraded ${c} ${NODE_DEFS[n.type].name}${c > 1 ? 's' : ''}` : 'Not enough credits', c ? 'good' : 'bad');
+    } else if (a === 'del') {
+      const refund = refundOf(g, n);
+      deleteNode(g, n.id);
+      select(null);
+      if (refund > 0) toast(`Refunded <b>${fmt(refund)}¢</b>`, 'good');
+    } else if (a === 'dup') startPlacing(n.type, n.recipe);
+    else if (a === 'recipes') { ui.recipeMenu = !ui.recipeMenu; touch(); }
+    else if (a === 'recipe') { setRecipe(g, n.id, args[0]); ui.recipeMenu = false; touch(); }
+    else if (a === 'mode') setMode(g, n.id, args[0] as RouterMode);
+    else if (a === 'wplus') { const w = g.wires.find((x) => x.id === Number(args[0])); if (w) setWeight(g, w.id, w.weight + 1); }
+    else if (a === 'wminus') { const w = g.wires.find((x) => x.id === Number(args[0])); if (w) setWeight(g, w.id, w.weight - 1); }
+    else if (a === 'prio') raisePriority(g, Number(args[0]));
+    else if (a === 'filter') {
+      const w = g.wires.find((x) => x.id === Number(args[0]));
+      if (w) {
+        const mats: (MatId | null)[] = [null, ...materialsAt(g, n.id)];
+        setFilter(g, w.id, mats[(mats.indexOf(w.filter) + 1) % mats.length]);
+      }
+    } else if (a === 'autobal') autoBalance(g, n.id);
+  } else {
+    const w = g.wires.find((x) => x.id === sel.id);
+    if (!w) return;
+    if (a === 'wireup') { if (!upgradeWire(g, w.id)) toast('Not enough credits', 'bad'); }
+    else if (a === 'wireall') { const c = upgradeSaturatedWires(g); toast(c ? `Upgraded ${c} wire${c > 1 ? 's' : ''}` : 'Nothing to upgrade, or not enough credits', c ? 'good' : 'bad'); }
+    else if (a === 'cut') { cutWire(g, w.id); select(null); }
+  }
+}
+
 // ---------- shared bits ----------
+
+/** A percentage for a style attribute, rounded so tiny changes do not count as new HTML. */
+const pct = (frac: number) => Math.round(Math.max(0, Math.min(1, frac)) * 1000) / 10;
 
 const tok = (m: MatId, q?: number) =>
   `<span class="tok">${matGlyph(m, 13)}${q != null ? `<span class="mono">${q}</span> ` : ''}${MATERIALS[m].name}</span>`;
 
 function buyBtn(act: string, cost: number, credits: number, label?: string, testid?: string): string {
   const ok = credits + 1e-6 >= cost;
-  const pct = Math.max(0, Math.min(100, (credits / Math.max(1, cost)) * 100));
-  return `<button class="buy${ok ? ' ok' : ''}" data-act="${act}" ${testid ? `data-testid="${testid}"` : ''}>${ok ? '' : `<span class="fill" style="width:${pct}%"></span>`}<span class="lab">${label ?? ''}${fmt(cost)}¢</span></button>`;
+  return `<button class="buy${ok ? ' ok' : ''}" data-act="${act}" ${testid ? `data-testid="${testid}"` : ''}>${ok ? '' : `<span class="fill" style="width:${pct(credits / Math.max(1, cost))}%"></span>`}<span class="lab">${label ?? ''}${fmt(cost)}¢</span></button>`;
 }
 
 // ---------- top bar ----------
 
-function dataPill(g: Game, k: DataTier): string {
-  const seen = g.data[k] > 0 || g.dataRate[k] > 0 || g.techs.some((t) => (TECHS[t].cost[k] ?? 0) > 0);
+/**
+ * A persistent piece of the top bar. `el` is created once and stays in the page; `update` runs on
+ * every refresh and should write only what changed (the setText/setAttr/setClass helpers in dom.ts
+ * do that for you). To add something to the bar, call addTopItem().
+ */
+export interface TopItem {
+  el: HTMLElement;
+  update(g: Game): void;
+}
+
+const topItems: TopItem[] = [];
+const topSlots: Partial<Record<'res' | 'actions', HTMLElement>> = {};
+
+/** Add an element to the resource row (left) or the action buttons (right), optionally before an existing one. */
+export function addTopItem(slot: 'res' | 'actions', item: TopItem, before?: Element | null) {
+  topItems.push(item);
+  topSlots[slot]!.insertBefore(item.el, before ?? null);
+  if (ui.g) item.update(ui.g);
+}
+
+let creditsNum: HTMLElement;
+let shownCredits = NaN;
+let shownInt = NaN;
+let rolledGame: Game | null = null;
+
+function creditsItem(): TopItem {
+  const e = el(`<div class="res credits" data-testid="credits"><span class="sym coin">¢</span><div class="nums"><b class="mono">0</b><i class="mono"></i></div></div>`);
+  creditsNum = e.querySelector('b')!;
+  const rate = e.querySelector('i')!;
+  setAnchor('credits', e.querySelector('.sym')!);
+  return { el: e, update: (g) => void setText(rate, `+${fmtRate(g.creditRate)}/s`) };
+}
+
+/** The credits number chases its real value, closing most of the gap in about 300 ms. Call every frame. */
+export function tickPanels(dt: number) {
+  const g = ui.g;
+  const target = g.credits;
+  if (g !== rolledGame || !isFinite(shownCredits)) {
+    rolledGame = g;
+    shownCredits = target;
+  } else if (shownCredits !== target) {
+    const gap = target - shownCredits;
+    shownCredits = Math.abs(gap) < 0.5 ? target : shownCredits + gap * (1 - Math.exp(-dt / 0.1));
+  }
+  const whole = Math.floor(shownCredits);
+  if (whole !== shownInt) {
+    shownInt = whole;
+    creditsNum.textContent = fmtInt(whole);
+  }
+}
+
+function dataItem(k: DataTier): TopItem {
   const hint = k === 'a' ? 'Build a Lab' : k === 'b' ? 'Study a T2 item' : 'Study a T3 item';
-  if (!seen) return `<div class="res ghost"><span class="sym">${DATA_NAMES[k]}</span><span class="hint">${hint}</span></div>`;
-  return `<div class="res" style="--c:${DATA_COLORS[k]}" data-testid="data-${k}"><span class="sym">${DATA_NAMES[k]}</span><div class="nums"><b class="mono">${fmtInt(g.data[k])}</b><i class="mono">+${fmtRate(g.dataRate[k])}/s</i></div></div>`;
+  const e = el(`<div class="res" style="--c:${DATA_COLORS[k]}"><span class="sym">${DATA_NAMES[k]}</span><div class="nums"><b class="mono"></b><i class="mono"></i></div><span class="hint">${hint}</span></div>`);
+  const num = e.querySelector('b')!;
+  const rate = e.querySelector('i')!;
+  return {
+    el: e,
+    update(g) {
+      const on = has(g, 'R1');
+      setHidden(e, !on);
+      if (!on) return;
+      const seen = g.data[k] > 0 || g.dataRate[k] > 0 || g.techs.some((t) => (TECHS[t]?.cost[k] ?? 0) > 0);
+      setClass(e, 'ghost', !seen);
+      setAttr(e, 'data-testid', seen ? `data-${k}` : null);
+      if (!seen) return;
+      setText(num, fmtInt(g.data[k]));
+      setText(rate, `+${fmtRate(g.dataRate[k])}/s`);
+    },
+  };
+}
+
+function buildTop() {
+  topEl.innerHTML = `
+    <div class="logo"><svg viewBox="0 0 28 28" width="26" height="26" aria-hidden="true"><circle cx="6" cy="8" r="4" fill="#FFD84D"/><circle cx="22" cy="20" r="4" fill="#5CE1FF"/><path d="M10 8c8 0 4 12 8 12" class="ic" style="color:#9DB8FF"/></svg><span>flowstate</span></div>
+    <div class="resrow"></div>
+    <div class="grow"></div>
+    <div class="acts"></div>`;
+  topSlots.res = topEl.querySelector<HTMLElement>('.resrow')!;
+  topSlots.actions = topEl.querySelector<HTMLElement>('.acts')!;
+
+  addTopItem('res', creditsItem());
+  for (const k of ['a', 'b', 'g'] as DataTier[]) addTopItem('res', dataItem(k));
+
+  const undoBtn = el(`<button class="ibtn" data-act="undo" aria-label="Undo (Ctrl+Z)" title="Undo (Ctrl+Z)">${icon('undo')}</button>`);
+  addTopItem('actions', { el: undoBtn, update: () => void setAttr(undoBtn, 'disabled', canUndo() ? null : '') });
+  const redoBtn = el(`<button class="ibtn" data-act="redo" aria-label="Redo (Ctrl+Shift+Z)" title="Redo (Ctrl+Shift+Z)">${icon('redo')}</button>`);
+  addTopItem('actions', { el: redoBtn, update: () => void setAttr(redoBtn, 'disabled', canRedo() ? null : '') });
+  const pauseBtn = el(`<button class="ibtn" data-act="pause"></button>`);
+  addTopItem('actions', {
+    el: pauseBtn,
+    update(g) {
+      const label = `${g.paused ? 'Resume' : 'Pause'} (P)`;
+      setClass(pauseBtn, 'on', g.paused);
+      setAttr(pauseBtn, 'aria-label', label);
+      setAttr(pauseBtn, 'title', label);
+      setHTML(pauseBtn, icon(g.paused ? 'play' : 'pause'));
+    },
+  });
+  addTopItem('actions', { el: el(`<span class="sep"></span>`), update() {} });
+
+  const techBtn = el(`<button class="techbtn" data-act="tech">${icon('tree')}Tech tree<span class="badge"></span><span class="kbd">R</span></button>`);
+  const badge = techBtn.querySelector('.badge')!;
+  addTopItem('actions', {
+    el: techBtn,
+    update(g) {
+      const on = has(g, 'R1');
+      setHidden(techBtn, !on);
+      setAttr(techBtn, 'data-testid', on ? 'open-tech' : null);
+      if (!on) return;
+      const ready = readyTechs(g).length;
+      setClass(techBtn, 'ready', ready > 0);
+      setHidden(badge, !ready);
+      if (ready) setText(badge, `${ready} ready`);
+    },
+  });
+
+  const menuWrap = el(`<div class="menuwrap"><button class="ibtn" data-act="menu" aria-label="Menu" title="Menu">${icon('gear')}</button><div class="menu" hidden><button data-act="reset">Reset game…</button></div></div>`);
+  const menu = menuWrap.querySelector('.menu')!;
+  addTopItem('actions', { el: menuWrap, update: () => void setHidden(menu, !ui.menuOpen) });
 }
 
 function renderTop() {
   const g = ui.g;
-  const ready = readyTechs(g).length;
-  const techOn = has(g, 'R1');
-  topEl.innerHTML = `
-    <div class="logo"><svg viewBox="0 0 28 28" width="26" height="26" aria-hidden="true"><circle cx="6" cy="8" r="4" fill="#FFD84D"/><circle cx="22" cy="20" r="4" fill="#5CE1FF"/><path d="M10 8c8 0 4 12 8 12" class="ic" style="color:#9DB8FF"/></svg><span>flowstate</span></div>
-    <div class="resrow">
-      <div class="res credits" data-testid="credits"><span class="sym coin">¢</span><div class="nums"><b class="mono">${fmtInt(g.credits)}</b><i class="mono">+${fmtRate(g.creditRate)}/s</i></div></div>
-      ${techOn ? dataPill(g, 'a') + dataPill(g, 'b') + dataPill(g, 'g') : ''}
-    </div>
-    <div class="grow"></div>
-    <button class="ibtn" data-act="undo" aria-label="Undo (Ctrl+Z)" title="Undo (Ctrl+Z)" ${canUndo() ? '' : 'disabled'}>${icon('undo')}</button>
-    <button class="ibtn" data-act="redo" aria-label="Redo (Ctrl+Shift+Z)" title="Redo (Ctrl+Shift+Z)" ${canRedo() ? '' : 'disabled'}>${icon('redo')}</button>
-    <button class="ibtn${g.paused ? ' on' : ''}" data-act="pause" aria-label="${g.paused ? 'Resume' : 'Pause'} (P)" title="${g.paused ? 'Resume' : 'Pause'} (P)">${icon(g.paused ? 'play' : 'pause')}</button>
-    <span class="sep"></span>
-    ${techOn ? `<button class="techbtn${ready ? ' ready' : ''}" data-act="tech" data-testid="open-tech">${icon('tree')}Tech tree${ready ? `<span class="badge">${ready} ready</span>` : ''}<span class="kbd">R</span></button>` : ''}
-    <div class="menuwrap"><button class="ibtn" data-act="menu" aria-label="Menu" title="Menu">${icon('gear')}</button>
-      ${ui.menuOpen ? `<div class="menu"><button data-act="reset">Reset game…</button></div>` : ''}</div>`;
+  for (const item of topItems) item.update(g);
 }
 
 // ---------- hotbar ----------
 
-function renderHot() {
+function renderHot(force: boolean) {
   const g = ui.g;
   let key = 0;
   let shownLocked = 0;
@@ -166,17 +294,17 @@ function renderHot() {
       if (!has(g, 'R1') || shownLocked >= 2) return '';
       shownLocked++;
       const t = TECHS[def.tech!];
+      if (!t) return '';
       return `<button class="hb locked" data-act="locked:${t.id}" title="${def.name}: research ${t.name}" aria-label="${def.name}, locked">${nodeIcon(type)}<span class="p">${costText(t) || 'locked'}</span></button>`;
     }
     key++;
     const cost = nodeCost(g, type);
     const ok = g.credits + 1e-6 >= cost;
-    const pct = Math.max(0, Math.min(100, (g.credits / Math.max(1, cost)) * 100));
     const k = key <= 9 ? key : 0;
     return `<button class="hb${ok ? '' : ' poor'}${ui.placing?.type === type ? ' on' : ''}" data-act="place:${type}" data-testid="hot-${type}" title="${def.name}: ${def.blurb}" aria-label="${def.name}, key ${k}, ${cost} credits">
-      ${ok ? '' : `<span class="fill" style="height:${pct}%"></span>`}<span class="k mono">${k}</span>${nodeIcon(type)}<span class="p mono">${cost === 0 ? 'free' : fmt(cost) + '¢'}</span></button>`;
+      ${ok ? '' : `<span class="fill" style="height:${pct(g.credits / Math.max(1, cost))}%"></span>`}<span class="k mono">${k}</span>${nodeIcon(type)}<span class="p mono">${cost === 0 ? 'free' : fmt(cost) + '¢'}</span></button>`;
   }).join('');
-  hotEl.innerHTML = `${items}<div class="grow"></div><div class="hb tip" title="Select a node and press Delete. Everything is refunded in full.">${icon('trash')}<span class="p">Del = refund</span></div>`;
+  hotPanel.render(`${items}<div class="grow"></div><div class="hb tip" title="Select a node and press Delete. Everything is refunded in full.">${icon('trash')}<span class="p">Del = refund</span></div>`, force);
 }
 
 /** Hotbar node types in key order (unlocked only). */
@@ -249,12 +377,12 @@ function flowSection(g: Game, n: GNode): string {
     for (const w of ins) if (w.mat === m) got += w.rate;
     const lim = n.status === 'starved' && n.missing === m;
     return `<div><div class="row sm"><span class="${lim ? 'bad' : ''}">In · ${MATERIALS[m].name}${lim ? ' · limiting' : ''}</span><span class="mono muted"><b>${fmtRate(got)}</b> / ${fmtRate(need)} /s</span></div>
-      <div class="bar"><span style="width:${Math.min(100, (got / need) * 100)}%;background:${MATERIALS[m].color}"></span></div></div>`;
+      <div class="bar"><span style="width:${pct(got / need)}%;background:${MATERIALS[m].color}"></span></div></div>`;
   }).join('');
   const outs = r.outputs.map(([m, q]) => `<div class="row sm"><span>Out · ${MATERIALS[m].name}</span><span class="mono"><b>${fmtRate((n.util * q) / T)}</b>/s</span></div>`).join('');
   return `<div class="sec flow"><span class="lbl">Flow</span>${rows}${outs}
     <div class="row sm"><span>Utilization</span><span class="mono"><b>${Math.round(n.util * 100)}%</b></span></div>
-    <div class="bar"><span style="width:${n.util * 100}%;background:#7AA2FF"></span></div></div>`;
+    <div class="bar"><span style="width:${pct(n.util)}%;background:#7AA2FF"></span></div></div>`;
 }
 
 function upgradeSection(g: Game, n: GNode): string {
@@ -290,7 +418,7 @@ function routerSection(g: Game, n: GNode): string {
     if (n.mode === 'ratio') ctl = `<button class="step" data-act="wminus:${w.id}" aria-label="Decrease weight">${icon('minus', 12)}</button><span class="mono w">${w.weight}</span><button class="step" data-act="wplus:${w.id}" aria-label="Increase weight" data-testid="wplus">${icon('plus', 12)}</button>`;
     else if (n.mode === 'priority') ctl = `<span class="mono w">#${i + 1}</span>${i > 0 ? `<button class="step" data-act="prio:${w.id}" aria-label="Raise priority">${icon('up', 12)}</button>` : '<span class="step ghost"></span>'}`;
     else if (n.mode === 'filter') ctl = `<button class="filt" data-act="filter:${w.id}">${w.filter ? matGlyph(w.filter, 12) + MATERIALS[w.filter].name : 'any'}</button>`;
-    return `<div class="rrow"><span class="dest">→ ${esc(name)}</span>${ctl}<div class="bar"><span style="width:${(w.rate / total) * 100}%;background:#9DB8FF"></span></div><span class="mono rate">${fmtRate(w.rate)}/s</span></div>`;
+    return `<div class="rrow"><span class="dest">→ ${esc(name)}</span>${ctl}<div class="bar"><span style="width:${pct(w.rate / total)}%;background:#9DB8FF"></span></div><span class="mono rate">${fmtRate(w.rate)}/s</span></div>`;
   }).join('');
   const help: Record<RouterMode, string> = {
     even: 'Splits evenly and skips outputs that are full.',
@@ -308,7 +436,7 @@ function marketSection(g: Game, n: GNode): string {
   const lens = has(g, 'C1');
   const rows = sold.map((m) => {
     const sat = saturation(g, m);
-    return `<div class="mrow">${matGlyph(m, 12)}<span class="mn">${MATERIALS[m].name}</span><div class="bar"><span style="width:${sat * 100}%;background:${MATERIALS[m].color}"></span></div><span class="mono rate">${lens ? fmt(price(g, m)) + '¢' : Math.round(sat * 100) + '%'}</span></div>`;
+    return `<div class="mrow">${matGlyph(m, 12)}<span class="mn">${MATERIALS[m].name}</span><div class="bar"><span style="width:${pct(sat)}%;background:${MATERIALS[m].color}"></span></div><span class="mono rate">${lens ? fmt(price(g, m)) + '¢' : Math.round(sat * 100) + '%'}</span></div>`;
   }).join('');
   return `<div class="sec"><span class="lbl">Selling · all markets</span>${rows || '<div class="note">Nothing arriving yet.</div>'}
     <div class="note">Bars show how much of the full price you still get. Flooding a material lowers its price, so sell a mix.${lens ? '' : ' Market Lens shows exact prices.'}</div></div>`;
@@ -323,7 +451,7 @@ function labSection(g: Game, n: GNode): string {
   }).join('');
   return `<div class="sec flow"><span class="lbl">Studying</span>${rows || '<div class="note">Wire any item into the Lab.</div>'}
     <div class="row sm"><span>Throughput</span><span class="mono"><b>${fmtRate(n.rate)}</b> / ${fmtRate(labRate(g, n))} /s</span></div>
-    <div class="bar"><span style="width:${Math.min(100, (n.rate / labRate(g, n)) * 100)}%;background:#C4A1FF"></span></div>
+    <div class="bar"><span style="width:${pct(n.rate / labRate(g, n))}%;background:#C4A1FF"></span></div>
     <div class="note">Raw and T1 items give α. T2 gives β. T3 gives γ.</div></div>`;
 }
 
@@ -332,13 +460,13 @@ function nodeInspector(g: Game, n: GNode): string {
   const title = n.type === 'well' && n.material ? `${MATERIALS[n.material].name} Well` : def.name;
   let body = statusBlock(g, n);
   if (isMachine(n)) body += recipeSection(g, n) + flowSection(g, n);
-  else if (n.type === 'well') body += `<div class="sec flow"><span class="lbl">Flow</span><div class="row sm"><span>Extracting</span><span class="mono"><b>${fmtRate(n.rate)}</b> / ${fmtRate(wellRate(n))} /s</span></div><div class="bar"><span style="width:${Math.min(100, (n.rate / wellRate(n)) * 100)}%;background:${MATERIALS[n.material!].color}"></span></div></div>`;
+  else if (n.type === 'well') body += `<div class="sec flow"><span class="lbl">Flow</span><div class="row sm"><span>Extracting</span><span class="mono"><b>${fmtRate(n.rate)}</b> / ${fmtRate(wellRate(n))} /s</span></div><div class="bar"><span style="width:${pct(n.rate / wellRate(n))}%;background:${MATERIALS[n.material!].color}"></span></div></div>`;
   else if (n.type === 'router') body += routerSection(g, n);
   else if (n.type === 'market') body += marketSection(g, n);
   else if (n.type === 'lab') body += labSection(g, n);
   else if (n.type === 'silo') {
     const stored = (Object.keys(n.inb) as MatId[]).filter((m) => (n.inb[m] ?? 0) >= 0.5);
-    body += `<div class="sec flow"><span class="lbl">Stored</span>${stored.map((m) => `<div><div class="row sm"><span>${matGlyph(m, 12)} ${MATERIALS[m].name}</span><span class="mono"><b>${Math.round(n.inb[m] ?? 0)}</b> / ${passCap(n)}</span></div><div class="bar"><span style="width:${((n.inb[m] ?? 0) / passCap(n)) * 100}%;background:${MATERIALS[m].color}"></span></div></div>`).join('') || '<div class="note">Empty.</div>'}
+    body += `<div class="sec flow"><span class="lbl">Stored</span>${stored.map((m) => `<div><div class="row sm"><span>${matGlyph(m, 12)} ${MATERIALS[m].name}</span><span class="mono"><b>${Math.round(n.inb[m] ?? 0)}</b> / ${passCap(n)}</span></div><div class="bar"><span style="width:${pct((n.inb[m] ?? 0) / passCap(n))}%;background:${MATERIALS[m].color}"></span></div></div>`).join('') || '<div class="note">Empty.</div>'}
       <div class="note">Holds up to ${passCap(n)} of each material.</div></div>`;
   }
   else body += `<div class="sec"><div class="note">${def.blurb}</div></div>`;
@@ -369,13 +497,13 @@ function wireInspector(g: Game, w: Wire): string {
     <div class="scroll">
       ${sat ? `<div class="sec"><div class="statusbox blocked"><div class="st-title">${icon('warn', 16)}At capacity</div><p>This wire is the bottleneck. Upgrade it or add a second one.</p></div></div>` : ''}
       <div class="sec flow"><span class="lbl">Flow</span><div class="row sm"><span>Carrying</span><span class="mono"><b>${fmtRate(w.rate)}</b> / ${cap} /s</span></div>
-      <div class="bar"><span style="width:${Math.min(100, (w.rate / cap) * 100)}%;background:${mats[0] ? MATERIALS[mats[0]].color : '#9DB8FF'}"></span></div></div>
+      <div class="bar"><span style="width:${pct(w.rate / cap)}%;background:${mats[0] ? MATERIALS[mats[0]].color : '#9DB8FF'}"></span></div></div>
       <div class="sec"><span class="lbl">Pipe</span>${up}</div>
     </div>
     <div class="foot"><button class="fbtn danger" data-act="cut">Cut wire${w.paid > 0 ? ` · <span class="mono">+${fmt(w.paid)}¢</span>` : ''}</button></div>`;
 }
 
-function renderInspector() {
+function renderInspector(force: boolean) {
   const g = ui.g;
   const sel = ui.sel;
   let html = '';
@@ -387,12 +515,9 @@ function renderInspector() {
     if (w) html = wireInspector(g, w);
   }
   if (!html && sel) ui.sel = null;
-  const open = !!html;
-  if (inspEl.classList.contains('open') !== open) inspEl.classList.toggle('open', open);
-  const scroll = inspEl.querySelector('.scroll')?.scrollTop ?? 0;
-  inspEl.innerHTML = html;
-  const s = inspEl.querySelector('.scroll');
-  if (s) s.scrollTop = scroll;
+  // Opening or closing changes the width of the stage, so cached screen positions are thrown away.
+  if (setClass(inspEl, 'open', !!html)) invalidateLayout();
+  inspPanel.render(html, force);
 }
 
 // ---------- objective + alert ----------
@@ -405,17 +530,15 @@ function objective(g: Game): string | null {
   if (!count('refiner')) return 'Drag from a Well\'s port into <b>empty space</b> and pick <b>Refiner</b>.';
   if (!has(g, 'R1')) return 'Wire the Refiner\'s output to the <b>Market</b>. Shard sells for more than Glint.';
   if (!count('lab')) return 'Drag from the Refiner\'s port into empty space and pick <b>Lab</b> to start earning Data.';
-  if (!g.techs.some((t) => !TECHS[t].auto)) return 'Open the <b>Tech tree</b> <span class="kbd">R</span> and research something with your Data.';
+  if (!g.techs.some((t) => TECHS[t] && !TECHS[t].auto)) return 'Open the <b>Tech tree</b> <span class="kbd">R</span> and research something with your Data.';
   return null;
 }
 
-let alertNode: number | null = null;
-
-function renderObjective() {
+function renderObjective(force: boolean) {
   const g = ui.g;
   const o = objective(g);
-  objEl.style.display = o ? '' : 'none';
-  if (o && objEl.innerHTML !== o) objEl.innerHTML = o;
+  setHidden(objEl, !o);
+  if (o) objPanel.render(o, force);
 
   // The single worst root-cause problem on the board.
   let worst: { n: GNode; text: string } | null = null;
@@ -427,18 +550,9 @@ function renderObjective() {
     const name = n.type === 'well' ? `${matName(n.material)} Well` : `${NODE_DEFS[n.type].name}${n.recipe ? ` (${RECIPES[n.recipe].name})` : ''}`;
     worst = { n, text: dx.problem === 'starved' ? `<b>${name}</b> is starved of ${matName(dx.mat)}` : dx.openPort ? `<b>${name}</b>: ${matName(dx.mat)} has nowhere to go` : `<b>${name}</b> is blocked` };
   }
-  if (!worst || o) {
-    alertEl.style.display = 'none';
-    alertNode = null;
-    return;
-  }
-  alertEl.style.display = '';
-  const html = `<span class="dot ${worst.n.status}"></span><span>${worst.text}</span><button data-act="jump:${worst.n.id}">Jump</button>`;
-  if (alertNode !== worst.n.id || alertEl.dataset.h !== worst.text) {
-    alertEl.innerHTML = html;
-    alertEl.dataset.h = worst.text;
-    alertNode = worst.n.id;
-  }
+  const show = !!worst && !o;
+  setHidden(alertEl, !show);
+  if (show && worst) alertPanel.render(`<span class="dot ${worst.n.status}"></span><span>${worst.text}</span><button data-act="jump:${worst.n.id}">Jump</button>`, force);
 }
 
 // ---------- minimap + zoom ----------
@@ -462,21 +576,25 @@ function renderMini() {
     ctx.fillStyle = n.type === 'market' ? '#FFC857' : n.type === 'lab' ? '#C4A1FF' : ST_COLORS[n.status];
     ctx.fillRect(ox + n.x * s, oy + n.y * s, Math.max(3, w * s), Math.max(2, h * s));
   }
-  const r = (document.getElementById('board') as HTMLElement).getBoundingClientRect();
+  const r = boardRect();
   ctx.strokeStyle = '#7AA2FF';
   ctx.lineWidth = 1.5;
   ctx.strokeRect(ox + (-ui.view.x / ui.view.k) * s, oy + (-ui.view.y / ui.view.k) * s, (r.width / ui.view.k) * s, (r.height / ui.view.k) * s);
 }
 
 function renderZoom() {
-  zoomEl.innerHTML = `<button class="ibtn" data-act="out" aria-label="Zoom out">${icon('minus', 14)}</button><span class="mono zl">${Math.round(ui.view.k * 100)}%</span><button class="ibtn" data-act="in" aria-label="Zoom in">${icon('plus', 14)}</button><button class="ibtn" data-act="fit" aria-label="Fit board (F)" title="Fit board (F)">${icon('fit', 14)}</button>`;
+  setText(zoomLabel, `${Math.round(ui.view.k * 100)}%`);
 }
 
-export function renderPanels() {
+/**
+ * Refresh every panel. Cheap to call often: each part writes only what changed.
+ * `force` is for calls made straight from a press inside a panel, which must show at once.
+ */
+export function renderPanels(force = false) {
   renderTop();
-  renderHot();
-  renderInspector();
-  renderObjective();
+  renderHot(force);
+  renderInspector(force);
+  renderObjective(force);
   renderMini();
   renderZoom();
 }
