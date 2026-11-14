@@ -1,11 +1,11 @@
 // Coarse regression for the tuning: a scripted player (no bot, no cleverness) does exactly what the goal
 // card asks. If a price or a reward drifts so far that the opening no longer chains, this fails.
 import { describe, expect, it } from 'vitest';
-import { claimGoal, claimOrder, connect, expandBoard, placeNode, setMode, setWeight, upgrade } from '../src/actions';
-import { NodeType, RECIPES, TECHS } from '../src/content';
-import { expansionCost, has, nodeCost, research, techAffordable, upgradeCost } from '../src/economy';
-import { GOALS, MAIN_GOALS, activeGoal, goalById } from '../src/goals';
+import { claimGoal, connect, placeNode, upgrade } from '../src/actions';
+import { has, nodeCost, research, upgradeCost } from '../src/economy';
+import { GOALS, MAIN_GOALS, activeGoal } from '../src/goals';
 import { Game, GNode } from '../src/state';
+import { CardRun, clock, playByTheCard } from './cardPlayer';
 import { fresh, market, run, well } from './helpers';
 
 /** A player who follows the card: claims in order and keeps a tally of reward money against purchases. */
@@ -151,167 +151,25 @@ describe('scripted playthrough', () => {
 // ---------------------------------------------------------------------------------------------------
 // The whole demo, by the card.
 //
-// A player who does ONLY what each goal card says, in the card's own words, one action every six seconds:
-// no upgrade the card did not ask for, no second Lab, no extra machines, no side techs. This is the floor
-// for a newcomer, and it is not the pacing bot's "slow" policy: that bot wires every Refiner to a Lab,
-// builds Routers for Data and upgrades whatever it can, all unprompted.
+// A player who does ONLY what each goal card says, in the card's own words, one action every six seconds
+// (tests/cardPlayer.ts): no upgrade the card did not ask for, no second Lab, no extra machines, no side
+// techs. This is the floor for a newcomer. The first group of tests proves that every goal can be done from
+// the state the one before leaves behind, and pins how long this player waits when nothing tells them what
+// to do while they wait: minutes at a time on α Data, with credits piling up.
 //
-// The test proves that every goal can be done from the state the one before leaves behind. It also pins
-// how long this player waits. As tuned, they are held up by α Data, not credits: three to six minutes each
-// on Spark, Glyph, Mist and the Fabricator, with thousands of credits in the bank. Three of those are over
-// the plan's four minutes on one goal. A player who studies more (every Refiner wired to the Lab) has the
-// Data sooner and then waits almost nine minutes for the Fabricator's price instead. The pacing bot sees
-// neither: see the bounds at the end, and treat lowering them as the goal.
+// The second group gives the same player the adviser (src/advice.ts): when a tip has been on offer for
+// 15 seconds of a wait, they follow it. That is the newcomer the build is tuned for. Nothing is asserted
+// against the pacing targets here yet; the run prints each goal's time and the longest wait with no tip on
+// offer, per seed, as the baseline for tuning.
 // ---------------------------------------------------------------------------------------------------
 
-/** Plays the demo to the first Lens by the card. `studyAll`: also wires every new Refiner to the Lab, as goal 7 taught for Shard. */
-function byTheCard(studyAll: boolean) {
-  const g = fresh();
-  const HANDS = 6; // seconds per action
-  const spent: { id: string; title: string; seconds: number; waitedFor: string }[] = [];
-  let last = 0;
-  let waitedFor = '';
-  const m = market(g);
-  const act = () => run(g, HANDS);
-
-  /** "Keep an eye on the order card: send what it asks for to a Market, then claim it." */
-  const tendOrder = () => {
-    const o = g.order;
-    if (!o) return;
-    if (o.ready) {
-      act();
-      claimOrder(g);
-      return;
-    }
-    for (const n of g.nodes) {
-      const port = n.recipe ? RECIPES[n.recipe].outputs.findIndex((out) => out[0] === o.mat) : -1;
-      if (port < 0 || g.wires.some((w) => w.from === n.id && w.port === port && w.to === m.id)) continue;
-      act();
-      connect(g, n.id, port, m.id);
-    }
-  };
-  /** Let the game run until `ready()`; orders are tended meanwhile. Fails after 15 minutes: that would be a wall. */
-  const wait = (what: string, ready: () => boolean) => {
-    const from = g.time;
-    while (!ready()) {
-      expect(g.time - from, `still waiting for ${what} after 15 minutes`).toBeLessThan(900);
-      run(g, 1);
-      tendOrder();
-    }
-    if (g.time - from > 30) waitedFor = what;
-  };
-  const claim = (id: string) => {
-    expect(activeGoal(g)!.id).toBe(id);
-    wait(`"${activeGoal(g)!.title}" to complete`, () => g.goal.ready);
-    act();
-    expect(claimGoal(g)).toBe(true);
-    spent.push({ id, title: goalById(id)!.title, seconds: g.time - last, waitedFor });
-    last = g.time;
-    waitedFor = '';
-  };
-  const buy = (type: NodeType, opts: { depositId?: number; recipe?: string } = {}): GNode => {
-    wait(`credits for a ${type}`, () => g.credits >= nodeCost(g, type));
-    act();
-    const n = placeNode(g, type, 300 + 60 * g.nodes.length, 60 + 45 * g.nodes.length, opts);
-    expect(n, type).not.toBeNull();
-    return n!;
-  };
-  const wire = (from: GNode, to: GNode, port = 0) => {
-    act();
-    expect(connect(g, from.id, port, to.id), `${from.type} → ${to.type}`).not.toBeNull();
-  };
-  /** "Build X from a port": place it and wire it in one gesture. */
-  const from = (source: GNode, type: NodeType, port = 0): GNode => {
-    const n = buy(type);
-    expect(connect(g, source.id, port, n.id)).not.toBeNull();
-    return n;
-  };
-  const study = (id: string) => {
-    wait(`${id === 'P7' ? 'α and β' : 'α'} for ${TECHS[id].name}`, () => techAffordable(g, TECHS[id]));
-    act();
-    expect(research(g, id)).toBe(true);
-  };
-
-  // 1–7: the opening.
-  const w1 = well(g);
-  wire(w1, m);
-  claim('wire-market');
-  const w2 = buy('well', { depositId: 2 });
-  claim('second-well');
-  wire(w2, m);
-  claim('wire-all-wells');
-  const shard = from(w1, 'refiner');
-  claim('build-refiner');
-  wire(shard, m);
-  claim('sell-shard');
-  wait('credits for a Well upgrade', () => g.credits >= upgradeCost(w1, 'speed'));
-  act();
-  expect(upgrade(g, w1.id, 'speed')).toBe(true);
-  claim('upgrade-well');
-  const lab = from(shard, 'lab');
-  claim('feed-lab');
-  // 8–11: Murk, Silt, Ember.
-  study('P2');
-  claim('research-murk');
-  const ink = from(buy('well', { depositId: 3 }), 'refiner');
-  expect(ink.recipe).toBe('ink');
-  claim('make-ink');
-  wire(ink, m); // "sell the Ink at the Market..."
-  from(ink, 'void', 1); // "...then pick Void for the Silt"
-  claim('silt-exit');
-  if (studyAll) wire(ink, lab);
-  study('P3');
-  const spark = from(buy('well', { depositId: 4 }), 'refiner');
-  expect(spark.recipe).toBe('spark');
-  claim('make-spark');
-  if (studyAll) wire(spark, lab);
-  // 12–14: orders, the Router, the board.
-  claim('first-order');
-  const router = from(ink, 'router'); // "Build a Router from a machine's port..."
-  const toLab = connect(g, router.id, 0, lab.id)!; // "...wire it to a Lab and to a Market..."
-  act();
-  wire(router, m);
-  act();
-  setMode(g, router.id, 'ratio'); // "...set it to Ratio and give the Lab the bigger share"
-  setWeight(g, toLab.id, 3);
-  claim('route-lab');
-  wait('credits to expand the board', () => g.credits >= expansionCost(g));
-  act();
-  expect(expandBoard(g)).toBe(true);
-  claim('expand');
-  // 15–17: Glyph, Flow, β.
-  study('P4');
-  const glyph = buy('assembler', { recipe: 'glyph' });
-  wire(ink, glyph);
-  wire(spark, glyph);
-  claim('make-glyph');
-  claim('hold-flow');
-  wire(glyph, lab); // "Drag from the Assembler's port to a Lab"
-  claim('study-glyph');
-  // 18–20: Mist, Prism, three orders.
-  study('P5');
-  const mist = from(buy('well', { depositId: 5 }), 'refiner');
-  expect(mist.recipe).toBe('mist');
-  claim('make-mist');
-  if (studyAll) wire(mist, lab);
-  const prism = buy('assembler', { recipe: 'prism' });
-  wire(shard, prism);
-  wire(mist, prism);
-  claim('make-prism');
-  claim('three-orders');
-  // 21–22: the Fabricator and the Lens.
-  study('P7');
-  const fab = buy('fabricator', { recipe: 'lens' });
-  claim('build-fabricator');
-  wire(prism, fab);
-  wire(glyph, fab);
-  claim('make-lens');
-  return { g, spent };
-}
+const on = (run: CardRun, id: string) => run.spent.find((x) => x.id === id)!;
 
 describe('the whole demo, by the card', () => {
+  const plain = playByTheCard();
+
   it('every goal can be done, in order, by doing only what its card says', () => {
-    const { g, spent } = byTheCard(false);
+    const { g, spent } = plain;
     expect(spent.map((x) => x.id)).toEqual(GOALS.slice(0, MAIN_GOALS).map((x) => x.id));
     expect(g.ended).toBe(true);
     expect(g.stats.firstLensAt).not.toBeNull();
@@ -322,16 +180,15 @@ describe('the whole demo, by the card', () => {
     expect(g.nodes.reduce((s, n) => s + n.lv.speed + n.lv.eff + n.lv.buffer, 0)).toBe(1);
   });
 
-  it('gets this player to the Lens in about half an hour', () => {
-    // 29:49 now that a Router to a Lab and a Market waits for the machines on its port (it was 23:32 while
-    // that Router took half of the Assembler's Ink and fed it to the Lab). The adviser exists to win this back.
-    const { g } = byTheCard(false);
-    expect(g.stats.firstLensAt!).toBeLessThan(31 * 60);
-    expect(g.stats.firstLensAt!).toBeGreaterThan(20 * 60); // and the demo is not over in a flash either
+  it('gets this player to the Lens in under half an hour', () => {
+    // 26:45. A Router to a Lab and a Market now waits for the machines on its port, so the half of the Ink it
+    // used to take from the Assembler no longer reaches the Lab: without tips this player is slower than before.
+    expect(plain.g.stats.firstLensAt!).toBeLessThan(30 * 60);
+    expect(plain.g.stats.firstLensAt!).toBeGreaterThan(20 * 60); // and the demo is not over in a flash either
   });
 
-  it('but keeps them waiting on Data: KNOWN GAP, three goals take longer than the plan\'s four minutes', () => {
-    const { g, spent } = byTheCard(false);
+  it('but keeps them waiting on Data with nothing to do: this is what the adviser is for', () => {
+    const { g, spent } = plain;
     const long = spent.filter((x) => x.seconds > 180);
     // What they wait for is always Data, never credits...
     expect(long.map((x) => `${x.title}: ${x.waitedFor}`)).toEqual([
@@ -342,21 +199,84 @@ describe('the whole demo, by the card', () => {
     ]);
     // ...while credits pile up with nothing on the card to spend them on.
     expect(g.stats.fromSales + g.stats.fromGoals + g.stats.fromOrders).toBeGreaterThan(8000);
-    // 185 s, 339 s, 557 s and 363 s. The bounds stop it getting worse; the plan's own limit is 240 s.
-    expect(Math.max(...spent.map((x) => x.seconds))).toBeLessThan(600);
-    expect(spent.filter((x) => x.seconds > 240).length).toBeLessThanOrEqual(3);
+    // 185 s, 297 s, 272 s and 492 s, with stretches of 80 to 160 s in which nothing at all can be done.
+    expect(Math.max(...spent.map((x) => x.seconds))).toBeLessThan(540);
+    expect(plain.longestTipless).toBeGreaterThan(100);
+    // The two-price rule never shows itself to this player.
+    expect(g.seenSurplus).toBe(false);
   });
 
-  it('and a player who studies more waits for credits instead: KNOWN GAP, almost nine minutes on the Fabricator', () => {
+  it('and a player who studies more waits for credits instead', () => {
     // Wiring every new Refiner to the Lab, as goal 7 taught for Shard, brings the Data sooner...
-    const plain = byTheCard(false);
-    const studious = byTheCard(true);
-    const on = (run: typeof plain, id: string) => run.spent.find((x) => x.id === id)!;
+    const studious = playByTheCard({ studyAll: true });
     expect(on(studious, 'make-glyph').seconds).toBeLessThan(on(plain, 'make-glyph').seconds - 60);
-    // ...but what is studied is not sold, and at a few credits a second the Fabricator is a long way off: 398 s.
+    // ...but what is studied is not sold, and at a few credits a second the Fabricator is a long way off.
     const fabricator = on(studious, 'build-fabricator');
     expect(fabricator.waitedFor).toBe('credits for a fabricator');
+    expect(fabricator.seconds).toBeGreaterThan(240);
     expect(fabricator.seconds).toBeLessThan(560);
-    expect(studious.g.stats.firstLensAt!).toBeLessThan(28 * 60); // 22:16
+    expect(studious.g.stats.firstLensAt!).toBeLessThan(28 * 60);
+  });
+});
+
+describe('the whole demo, by the card and the tips', () => {
+  // The newcomer: card and tips, at six seconds an action for four order seeds, and once at ten seconds.
+  const runs = [0, 1, 2, 3].map((seed) => ({ name: `seed ${seed}`, run: playByTheCard({ tips: true, seed }) }));
+  runs.push({ name: '10 s hands', run: playByTheCard({ tips: true, seed: 0, hands: 10 }) });
+  const plain = playByTheCard({ tendOrders: 'asked' }); // the same player without the tips
+
+  it('every goal can still be done in order, and the tips are the only thing this player does unprompted', () => {
+    for (const { name, run } of runs) {
+      const { g, spent, tips } = run;
+      expect(spent.map((x) => x.id), name).toEqual(GOALS.slice(0, MAIN_GOALS).map((x) => x.id));
+      expect(g.ended, name).toBe(true);
+      expect(g.credits, name).toBeGreaterThanOrEqual(0);
+      expect(tips.length, name).toBeGreaterThan(8);
+      expect(spent.reduce((s, x) => s + x.tips, 0), name).toBe(tips.length);
+      // Every upgrade on the board beyond the one goal 6 asks for was a tip.
+      const levels = g.nodes.reduce((s, n) => s + n.lv.speed + n.lv.eff + n.lv.buffer, 0);
+      expect(levels - 1, name).toBeLessThanOrEqual(tips.filter((t) => /buy Speed|Upgrade all/.test(t.text)).length * 8);
+      if (levels > 1) expect(tips.some((t) => /buy Speed|Upgrade all/.test(t.text)), name).toBe(true);
+      // No tech was researched that the card did not ask for, unless a tip said so.
+      const side = g.techs.filter((id) => !['C1', 'L1', 'P1', 'P2', 'P3', 'P4', 'P5', 'P7', 'R1', 'S1'].includes(id));
+      expect(side.length, name).toBe(tips.filter((t) => /research/.test(t.text)).length);
+    }
+  });
+
+  it('the tips are worth following: minutes off the Lens, and far less time with nothing to do', () => {
+    const lens = (r: CardRun) => r.g.stats.firstLensAt!;
+    for (const { name, run } of runs.slice(0, 4)) {
+      expect(lens(run), name).toBeLessThan(lens(plain) - 120);
+      // The Data waits are where the card-only player sat idle longest.
+      for (const id of ['make-spark', 'make-glyph', 'make-mist']) expect(on(run, id).seconds, `${name} ${id}`).toBeLessThan(on(plain, id).seconds);
+      expect(run.longestTipless, name).toBeLessThan(plain.longestTipless);
+    }
+    // The first order starts counting at once and is done in about half a minute, for everyone.
+    for (const { name, run } of runs) expect(on(run, 'first-order').tipless, name).toBeLessThanOrEqual(45);
+  });
+
+  it('BASELINE (nothing asserted against the targets yet): each goal\'s time, and the longest wait with no tip, per run', () => {
+    const all = [{ name: 'no tips', run: plain }, ...runs];
+    const pad = (v: string | number, n: number) => String(v).padStart(n);
+    const lines: string[] = [];
+    lines.push(`${'seconds on each goal (tips followed)'.padEnd(42)}${all.map((x) => pad(x.name, 12)).join('')}`);
+    GOALS.slice(0, MAIN_GOALS).forEach((goal, i) => {
+      lines.push(`${pad(i + 1, 2)} ${goal.title.padEnd(39)}${all.map((x) => {
+        const t = x.run.spent[i];
+        return pad(`${Math.round(t.seconds)}${t.tips ? ` (${t.tips})` : ''}`, 12);
+      }).join('')}`);
+    });
+    const row = (label: string, f: (r: CardRun) => string | number) => lines.push(`${label.padEnd(42)}${all.map((x) => pad(f(x.run), 12)).join('')}`);
+    row('first Lens', (r) => clock(r.g.stats.firstLensAt!));
+    row('longest on one goal (s)', (r) => Math.round(Math.max(...r.spent.map((x) => x.seconds))));
+    row('time on "Build a Fabricator" (s)', (r) => Math.round(on(r, 'build-fabricator').seconds));
+    row('longest wait with no tip on offer (s)', (r) => r.longestTipless);
+    row('...on which goal', (r) => r.spent.reduce((m, x) => (x.tipless > m.tipless ? x : m)).id.slice(0, 11));
+    row('tips followed', (r) => r.tips.length);
+    row('first sale over demand', (r) => (r.surplusAt == null ? 'never' : clock(r.surplusAt)));
+    row('credits from sales and orders', (r) => `${Math.round((100 * (r.g.stats.fromSales + r.g.stats.fromOrders)) / (r.g.stats.fromSales + r.g.stats.fromOrders + r.g.stats.fromGoals))}%`);
+    console.info(`\nCARD-PLUS-TIPS BASELINE\n${lines.join('\n')}\n\nTips followed, seed 0:\n${runs[0].run.tips.map((t) =>
+      `  ${clock(t.at)} ${t.goal.padEnd(16)} saves ${t.saves == null ? '?' : isFinite(t.saves) ? Math.round(t.saves) + ' s' : 'the wait'}${t.cost ? `, ${t.cost}¢` : ''}: ${t.text}`).join('\n')}\n`);
+    expect(lines.length).toBe(MAIN_GOALS + 9);
   });
 });
