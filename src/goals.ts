@@ -16,6 +16,7 @@
 // goods unsold and their machines blocked, and cannot pay for the Fabricator.
 import { MATERIALS, MatId, NodeType, RULES, TECHS } from './content';
 import { endDemo, expansionCost, grantTech, has, nodeCost, nodeCount, upgradeCost } from './economy';
+import { countsForFlow, isFlowing, nearShare } from './flow';
 import { graph } from './graph';
 import { startOrders } from './orders';
 import { Game, GNode, GoalReward } from './state';
@@ -143,6 +144,39 @@ export function routerFavoursLab(g: Game): boolean {
 }
 
 const hint = (mouse: string, touch: string = mouse) => ({ mouse, touch });
+
+/** Seconds the active goal has been the active one (0 until the first tick has seen it). */
+export const goalAge = (g: Game) => (g.goalAt && g.goalAt.i === g.goal.i ? Math.max(0, g.time - g.goalAt.t) : 0);
+
+/**
+ * The Flow goal. Its bar is RULES.flow.holdShare, held for holdSeconds. The valve: once the goal has been on
+ * the card for RULES.flow.valveAfter seconds it also passes with all but one producer flowing, held just as
+ * long. (A board with one producer that nobody can get flowing would otherwise stop the chain for good.)
+ */
+const flowValveOpen = (g: Game) => goalAge(g) >= RULES.flow.valveAfter;
+const flowHeld = (g: Game) => (flowValveOpen(g) ? Math.max(g.flowHold, g.flowNear) : g.flowHold);
+
+/** What the Flow goal's card shows beside its count-down. */
+export interface FlowGoalView {
+  /** Smoothed Flow, 0..1: what the ring shows. */
+  pct: number;
+  /** Producers flowing right now, and producers counted. */
+  running: number;
+  of: number;
+  /** The share needed right now: the goal's bar, or "all but one" once the valve is open. */
+  need: number;
+}
+
+function flowGoalView(g: Game): FlowGoalView {
+  let of = 0;
+  let running = 0;
+  for (const n of g.nodes) {
+    if (!countsForFlow(g, n)) continue;
+    of++;
+    if (isFlowing(n)) running++;
+  }
+  return { pct: g.flow, running, of, need: flowValveOpen(g) ? nearShare(of) : RULES.flow.holdShare };
+}
 
 // ---------- the chain ----------
 
@@ -295,8 +329,8 @@ export const GOALS: Goal[] = [
       'Flow is the share of your Wells and machines running flat out: click the Flow ring to jump to the one holding it back.',
       'Flow is the share of your Wells and machines running flat out: tap the Flow ring to jump to the one holding it back.',
     ),
-    done: (g) => g.flowHold >= RULES.flow.holdSeconds,
-    progress: (g) => [Math.min(g.flowHold, RULES.flow.holdSeconds), RULES.flow.holdSeconds, 's'],
+    done: (g) => flowHeld(g) >= RULES.flow.holdSeconds,
+    progress: (g) => [Math.min(flowHeld(g), RULES.flow.holdSeconds), RULES.flow.holdSeconds, 's'],
     reward: { credits: 150 },
   },
   {
@@ -397,6 +431,11 @@ export interface GoalView {
   progress: GoalProgress | null;
   reward: GoalReward;
   big: boolean;
+  /**
+   * Only on "Hold 95% Flow": the smoothed share the ring shows, producers flowing and counted, and the share
+   * needed right now, so the card can read "Flow 90% · 9 of 10 running" with a mark at the bar.
+   */
+  flow?: FlowGoalView;
 }
 
 /** Everything the goal card shows. null when every goal has been claimed. */
@@ -405,6 +444,7 @@ export function goalView(g: Game, touch = false): GoalView | null {
   if (!goal) return null;
   const free = !!goal.free;
   return {
+    ...(goal.id === 'hold-flow' ? { flow: flowGoalView(g) } : {}),
     goal,
     number: free ? g.goal.i - MAIN_GOALS + 1 : g.goal.i + 1,
     total: free ? GOALS.length - MAIN_GOALS : MAIN_GOALS,
@@ -456,6 +496,8 @@ const unlocksChecked = new WeakMap<Game, number>();
  */
 function repairChain(g: Game) {
   if (g.goal.i > GOALS.length) g.goal = { i: GOALS.length, ready: false };
+  // Since when this goal has been the active one: set here for a save without it, or a goal set by hand.
+  if (!g.goalAt || g.goalAt.i !== g.goal.i) g.goalAt = { i: g.goal.i, t: g.time };
   const from = unlocksChecked.get(g) ?? 0;
   if (from >= g.goal.i) return;
   for (let i = from; i < g.goal.i; i++) applyUnlocks(g, GOALS[i].reward);
@@ -487,6 +529,7 @@ export function claimGoal(g: Game): boolean {
   g.data.b += r.b ?? 0;
   g.data.g += r.g ?? 0;
   g.goal = { i: index + 1, ready: false };
+  g.goalAt = { i: index + 1, t: g.time };
   g.events.push({ kind: 'goal-claimed', goal: goal.id, index, reward: r, big: !!goal.big, text: `${goal.title}: ${rewardText(r)}` });
   applyUnlocks(g, r);
   // A goal the player has already met is ready at once.

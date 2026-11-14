@@ -196,9 +196,19 @@ export interface Game {
   flowBest: number;
   /** Seconds the smoothed Flow has stayed at or above RULES.flow.holdShare (the "hold Flow" goal). */
   flowHold: number;
+  /**
+   * Seconds the smoothed Flow has stayed at or above "all but one producer flowing" (nearShare in src/flow.ts):
+   * the bar the "hold Flow" goal also accepts once it has been on the card for RULES.flow.valveAfter seconds.
+   */
+  flowNear: number;
   // --- goals and orders ---
   /** Active goal: index into GOALS (GOALS.length when all are claimed) and whether it is waiting for claimGoal(). */
   goal: { i: number; ready: boolean };
+  /**
+   * When the active goal became the active one: its index and the game time. Kept by src/goals.ts (goalAge).
+   * A save from before this field starts counting when it is loaded, a goal index set by hand on the next tick.
+   */
+  goalAt?: { i: number; t: number };
   ordersOn: boolean;
   order: Order | null;
   /** Running seed of the order generator. */
@@ -267,8 +277,8 @@ export function newGame(): Game {
     paused: false, time: 0, savedAt: Date.now(),
     creditRate: 0, dataRate: { a: 0, b: 0, g: 0 },
     madeAt: { glint: 0 }, demandLeft: {},
-    flow: 0, flowOn: false, flowStreak: 0, flowBest: 0, flowHold: 0,
-    goal: { i: 0, ready: false },
+    flow: 0, flowOn: false, flowStreak: 0, flowBest: 0, flowHold: 0, flowNear: 0,
+    goal: { i: 0, ready: false }, goalAt: { i: 0, t: 0 },
     ordersOn: false, order: null, orderSeed: RULES.orders.seed >>> 0,
     ended: false, seenSurplus: false,
     stats: newStats(),
@@ -385,6 +395,10 @@ export function deserialize(json: string): Game | null {
     g.stats = stats;
     // The index is checked against the goal list, and the unlocks of claimed goals re-applied, by tickGoal() (src/goals.ts).
     g.goal = { i: Math.max(0, Math.floor(num(raw.goal?.i, 0))), ready: !!raw.goal?.ready };
+    // Since when that goal has been the active one. Without it (an older save) the count starts now.
+    const at = raw.goalAt;
+    const since = at && typeof at === 'object' && at.i === g.goal.i && typeof at.t === 'number' && isFinite(at.t) ? Math.max(0, Math.min(at.t, g.time)) : g.time;
+    g.goalAt = { i: g.goal.i, t: since };
     const made: Game['made'] = {};
     if (raw.made && typeof raw.made === 'object') for (const m in raw.made) if (MATERIALS[m as MatId] && raw.made[m]) made[m as MatId] = true;
     g.made = made;
@@ -397,6 +411,7 @@ export function deserialize(json: string): Game | null {
     g.flowStreak = num(raw.flowStreak, 0);
     g.flowBest = num(raw.flowBest, 0);
     g.flowHold = num(raw.flowHold, 0);
+    g.flowNear = pos(raw.flowNear);
     g.orderSeed = num(raw.orderSeed, base.orderSeed) >>> 0;
     g.order = loadOrder(raw.order);
     // A save from before the `ended` flag that already has a Lens is past the demo.

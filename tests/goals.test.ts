@@ -1,9 +1,9 @@
 import { describe, expect, it } from 'vitest';
 import { claimGoal, connect, cutWire, expandBoard, placeNode, setMode, setWeight, undo, upgrade, upgradeAll } from '../src/actions';
-import { TECHS } from '../src/content';
+import { RULES, TECHS } from '../src/content';
 import { has, nodeCost, research } from '../src/economy';
-import { GOALS, MAIN_GOALS, activeGoal, goalById, goalView, rewardText, routerFavoursLab } from '../src/goals';
-import { Game } from '../src/state';
+import { GOALS, MAIN_GOALS, activeGoal, goalAge, goalById, goalView, rewardText, routerFavoursLab } from '../src/goals';
+import { Game, deserialize, serialize } from '../src/state';
 import { fresh, market, rich, run, take, well } from './helpers';
 
 const indexOf = (id: string) => GOALS.findIndex((x) => x.id === id);
@@ -397,6 +397,146 @@ describe('goal chain: conditions and progress', () => {
     expect(activeGoal(g)!.done(g)).toBe(false);
     expect(expandBoard(g)).toBe(true);
     expect(activeGoal(g)!.done(g)).toBe(true);
+  });
+});
+
+/** Wells that sell and flow, and Spark Refiners that never can: each has one Ember Well (0.8/s) for the 1/s it wants. */
+function flowBoard(wells: number, starved: number): Game {
+  const g = rich();
+  const m = market(g);
+  connect(g, well(g).id, 0, m.id);
+  let id = 900;
+  for (let i = 1; i < wells; i++) {
+    g.deposits.push({ id: ++id, x: 100, y: 800 + 140 * i, mat: 'glint' });
+    connect(g, placeNode(g, 'well', 0, 0, { depositId: id })!.id, 0, m.id);
+  }
+  for (let i = 0; i < starved; i++) {
+    g.deposits.push({ id: ++id, x: 500, y: 800 + 140 * i, mat: 'ember' });
+    const r = placeNode(g, 'refiner', 700, 800 + 140 * i, { recipe: 'spark' })!;
+    connect(g, placeNode(g, 'well', 0, 0, { depositId: id })!.id, 0, r.id);
+    connect(g, r.id, 0, m.id);
+  }
+  run(g, 40);
+  g.flowOn = true; // the meter is unlocked now, as the Glyph goal's reward does it
+  g.events = [];
+  at(g, 'hold-flow');
+  return g;
+}
+
+describe('"Hold 95% Flow": the bar, and the valve for a board nobody can fix', () => {
+  it('the card shows the share, how many producers run, and the share needed', () => {
+    const g = flowBoard(8, 1); // 8 Glint Wells and an Ember Well flow, the Spark Refiner does not: 9 of 10
+    run(g, 10);
+    const v = goalView(g)!;
+    expect(v.flow).toBeDefined();
+    expect(v.flow!.of).toBe(10);
+    expect(v.flow!.running).toBe(9);
+    expect(v.flow!.pct).toBeCloseTo(0.9, 2);
+    expect(v.flow!.pct).toBe(g.flow);
+    expect(v.flow!.need).toBe(RULES.flow.holdShare);
+    expect(v.progress).toEqual([0, 10, 's']);
+    expect(v.ready).toBe(false);
+    // No other goal carries it.
+    at(g, 'study-glyph');
+    expect(goalView(g)!.flow).toBeUndefined();
+  });
+
+  it('keeps the bar for 90 s; after that, all but one producer flowing for 10 s is enough', () => {
+    const g = flowBoard(8, 1);
+    expect(RULES.flow.valveAfter).toBe(90);
+    expect(RULES.flow.holdShare).toBe(0.95);
+    run(g, 0.05);
+    const start = g.time;
+    run(g, 89.5);
+    expect(goalAge(g)).toBeCloseTo(89.5, 6); // counted from the first tick that saw the goal
+    expect(g.goal.ready).toBe(false); // 90% for a minute and a half is not 95%
+    expect(g.flowHold).toBe(0);
+    expect(g.flowNear).toBeGreaterThan(80); // ...but it has been "all but one" all along
+    expect(goalView(g)!.flow!.need).toBe(0.95);
+    run(g, 1);
+    expect(g.goal.ready).toBe(true); // the valve opens at 90 s, and those ten seconds have long been held
+    expect(g.time - start).toBeLessThan(91);
+    expect(take(g, 'goal-ready').map((e) => e.goal)).toEqual(['hold-flow']);
+    expect(claimGoal(g)).toBe(true);
+    expect(claimGoal(g)).toBe(false);
+  });
+
+  it('with the valve open the card shows the lower bar, and the ten seconds still have to be held', () => {
+    const g = flowBoard(8, 2); // 10 of 12 flow: one too few even for the valve
+    run(g, 100);
+    expect(g.goal.ready).toBe(false);
+    const v = goalView(g)!;
+    expect(v.flow).toMatchObject({ of: 12, running: 10 });
+    expect(v.flow!.need).toBeCloseTo(11 / 12, 9);
+    expect(v.progress).toEqual([0, 10, 's']);
+    // Fix one of the two (a faster Ember Well): eleven of twelve, and the count-down starts from there.
+    const ember = g.nodes.find((n) => n.material === 'ember')!;
+    expect(upgrade(g, ember.id, 'speed')).toBe(true);
+    let waited = 0;
+    while (goalView(g)!.progress![0] <= 0 && waited++ < 60) run(g, 1);
+    expect(waited).toBeLessThan(40); // the Refiner fills up and Flow settles at eleven of twelve
+    expect(g.goal.ready).toBe(false);
+    expect(goalView(g)!.flow).toMatchObject({ of: 12, running: 11 });
+    run(g, 8);
+    expect(g.goal.ready).toBe(false);
+    expect(goalView(g)!.progress![0]).toBeGreaterThan(7);
+    run(g, 2);
+    expect(g.goal.ready).toBe(true);
+  });
+
+  it('the valve never passes a board where nothing flows, and never lowers the bar for a board that meets it', () => {
+    // One producer, not flowing: "all but one" of one is none, and that is not enough.
+    const lone = rich();
+    lone.flowOn = true;
+    const r = placeNode(lone, 'refiner', 400, 100, { recipe: 'spark' })!; // nothing feeds it
+    connect(lone, r.id, 0, market(lone).id);
+    run(lone, 30);
+    at(lone, 'hold-flow');
+    run(lone, 200);
+    expect(goalView(lone)!.flow).toMatchObject({ of: 1, running: 0, need: 0.95 });
+    expect(lone.goal.ready).toBe(false);
+    // Two producers, one flowing: after 90 s that is all but one.
+    connect(lone, well(lone).id, 0, market(lone).id);
+    run(lone, 5);
+    expect(lone.goal.ready).toBe(false);
+    run(lone, 40);
+    expect(goalView(lone)!.flow).toMatchObject({ of: 2, running: 1, need: 0.5 });
+    expect(lone.goal.ready).toBe(true);
+    // A board that flows passes in ten seconds, valve or no valve.
+    const fine = flowBoard(6, 0);
+    run(fine, 9);
+    expect(fine.goal.ready).toBe(false);
+    run(fine, 2);
+    expect(fine.goal.ready).toBe(true);
+  });
+
+  it('the time on the goal is counted from its claim, survives a save, and starts afresh in a save from before the valve', () => {
+    const g = flowBoard(8, 1);
+    at(g, 'make-glyph');
+    g.made.glyph = true;
+    run(g, 0.1);
+    expect(claimGoal(g)).toBe(true); // "Hold 95% Flow" becomes the goal now
+    expect(activeGoal(g)!.id).toBe('hold-flow');
+    expect(goalAge(g)).toBe(0);
+    run(g, 60);
+    expect(goalAge(g)).toBeCloseTo(60, 6);
+    const copy = deserialize(serialize(g))!;
+    expect(goalAge(copy)).toBeCloseTo(60, 6);
+    run(copy, 29);
+    expect(copy.goal.ready).toBe(false);
+    run(copy, 2);
+    expect(copy.goal.ready).toBe(true);
+    // A save taken mid-goal by the build before this one has no such count: its 90 s start when it is loaded.
+    const raw = JSON.parse(serialize(g));
+    delete raw.goalAt;
+    delete raw.flowNear;
+    const old = deserialize(JSON.stringify(raw))!;
+    expect(old.flowNear).toBe(0);
+    expect(goalAge(old)).toBe(0);
+    run(old, 89);
+    expect(old.goal.ready).toBe(false);
+    run(old, 2);
+    expect(old.goal.ready).toBe(true);
   });
 });
 

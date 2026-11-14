@@ -343,6 +343,13 @@ export const RULES = {
     holdShare: 0.95,
     /** ...for this many seconds. */
     holdSeconds: 10,
+    /**
+     * The goal's valve. Once the goal has been on the card for this many seconds it also passes with all but
+     * one producer flowing, held for the same `holdSeconds`. The bar stays where it is for everyone who can
+     * reach it; the valve is for a board with one producer nobody can get flowing (a machine starved through
+     * a Router in a way the adviser has no fix for), which would otherwise hold the whole chain up for good.
+     */
+    valveAfter: 90,
   },
 
   /** 2.4 Goal thresholds that are numbers rather than events (the Flow goal's are in `flow` above). */

@@ -37,6 +37,12 @@ export function worstProducer(g: Game): GNode | null {
   return worst;
 }
 
+/**
+ * "All but one producer flowing", as a share: the bar the "hold Flow" goal also accepts once its valve is open
+ * (RULES.flow.valveAfter). At least one producer has to flow, and the bar is never above the goal's own.
+ */
+export const nearShare = (producers: number) => (producers > 0 ? Math.min(F.holdShare, Math.max(1, producers - 1) / producers) : F.holdShare);
+
 /** Flow State is on: the raw share has been 100% for long enough, with enough producers. */
 export const inFlowState = (g: Game) => g.flowOn && g.flowStreak >= F.stateSeconds;
 
@@ -88,10 +94,12 @@ export function updateFlow(g: Game, dt: number) {
   if (!g.flowOn) {
     g.flowStreak = 0;
     g.flowHold = 0;
+    g.flowNear = 0;
     return;
   }
   // The smoothed value creeps up on its target, so allow half a percent.
   g.flowHold = g.flow >= F.holdShare - 0.005 ? g.flowHold + dt : 0;
+  g.flowNear = producers > 0 && g.flow >= nearShare(producers) - 0.005 ? g.flowNear + dt : 0;
   if (producers >= F.stateProducers && flowing === producers) {
     const before = g.flowStreak;
     g.flowStreak += dt;
