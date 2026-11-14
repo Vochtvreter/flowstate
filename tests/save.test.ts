@@ -1,10 +1,11 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import { claimGoal, claimOrder, connect, placeNode, upgrade } from '../src/actions';
+import { claimGoal, claimOrder, connect, deleteNode, placeNode, upgrade } from '../src/actions';
 import { RULES, TECHS } from '../src/content';
 import { endDemo, endStats, offlineCap, research, techAvailable, techHidden } from '../src/economy';
-import { activeGoal } from '../src/goals';
+import { GOALS, activeGoal, goalView } from '../src/goals';
+import { startOrders } from '../src/orders';
 import { offlineGains } from '../src/sim';
-import { Game, deserialize, newGame, serialize } from '../src/state';
+import { Game, cloneGame, deserialize, newGame, serialize } from '../src/state';
 import { fresh, market, rich, run, take, well } from './helpers';
 
 afterEach(() => vi.unstubAllGlobals());
@@ -311,6 +312,205 @@ describe('loading saves', () => {
       expect(copy[key], key).toEqual(g[key]);
     }
     expect(copy.nodes.map((n) => n.born)).toEqual(g.nodes.map((n) => n.born));
+  });
+});
+
+/** A game caught in the middle of things: a part-filled order, a goal waiting to be claimed, Flow running, research queued. */
+function midGame(): Game {
+  const g = rich();
+  g.techs = ['P1', 'R1', 'P2', 'P3'];
+  const m = market(g);
+  const line = (deposit: number, y: number) => {
+    const w = deposit === 1 ? well(g) : placeNode(g, 'well', 0, 0, { depositId: deposit })!;
+    const r = placeNode(g, 'refiner', 400, y)!;
+    connect(g, w.id, 0, r.id);
+    connect(g, r.id, 0, m.id);
+    return r;
+  };
+  line(1, 100);
+  const ink = line(3, 400);
+  connect(g, ink.id, 1, placeNode(g, 'void', 700, 600)!.id);
+  line(4, 540);
+  for (let i = 0; i < 6; i++) upgrade(g, well(g).id, 'speed'); // the surplus Glint is sold over demand
+  connect(g, well(g).id, 0, m.id);
+  g.flowOn = true;
+  run(g, 40);
+  g.ordersOn = true;
+  startOrders(g);
+  g.goal = { i: GOALS.findIndex((x) => x.id === 'hold-flow'), ready: false };
+  g.queue = ['P4'];
+  run(g, 12.5);
+  g.events = [];
+  return g;
+}
+
+/** What a save holds, minus the save time and the two per-node fields that are reset on every load. */
+function comparable(g: Game) {
+  const o = saved(g);
+  for (const n of o.nodes) {
+    delete n.grace;
+    delete n.gain;
+    delete n.gainB;
+  }
+  return o;
+}
+
+describe('save → load → save, mid-goal and mid-order', () => {
+  it('the game it is taken from really is in the middle of things', () => {
+    const g = midGame();
+    expect(g.order!.got).toBeGreaterThan(0);
+    expect(g.order!.ready).toBe(false);
+    expect(g.goal.ready).toBe(true);
+    expect(g.flowHold).toBeGreaterThan(10);
+    expect(Object.keys(g.demandLeft).length).toBeGreaterThan(0); // demand is partly used up
+    expect(g.nodes.some((n) => n.crafting && n.prog > 0)).toBe(true); // a machine is mid-craft
+  });
+
+  it('reloading changes nothing that is saved, and a second round trip changes nothing at all', () => {
+    const g = midGame();
+    const once = deserialize(serialize(g))!;
+    expect(comparable(once)).toEqual(comparable(g));
+    const twice = deserialize(serialize(once))!;
+    expect(saved(twice)).toEqual(saved(once));
+    expect(saved(cloneGame(g)!)).toEqual(saved(once));
+  });
+
+  it('the reloaded game claims the same goal and the same order for the same pay, once each', () => {
+    const g = midGame();
+    const copy = deserialize(serialize(g))!;
+    expect(copy.goal).toEqual(g.goal);
+    expect(goalView(copy)!.ready).toBe(true);
+    const credits = copy.credits;
+    expect(claimGoal(copy)).toBe(true);
+    expect(copy.credits).toBe(credits + 300);
+    expect(claimGoal(g)).toBe(true);
+    expect(copy.goal).toEqual(g.goal);
+    // Saved after the claim, it stays claimed: a reload cannot pay the same goal again.
+    const again = deserialize(serialize(copy))!;
+    expect(again.goal).toEqual({ i: copy.goal.i, ready: false });
+    expect(claimGoal(again)).toBe(false);
+    expect(again.credits).toBe(copy.credits);
+
+    // Both finish the same order at the same moment and are paid the same.
+    let seconds = 0;
+    while (!g.order!.ready && seconds++ < 300) {
+      run(g, 1);
+      run(copy, 1);
+      expect(copy.order!.got).toBeCloseTo(g.order!.got, 0);
+    }
+    expect(g.order!.ready).toBe(true);
+    run(copy, 1.5);
+    expect(copy.order!.ready).toBe(true);
+    expect(copy.order!.reward).toEqual(g.order!.reward);
+    const before = { g: g.credits, copy: copy.credits };
+    expect(claimOrder(g)).toBe(true);
+    expect(claimOrder(copy)).toBe(true);
+    expect(copy.credits - before.copy).toBe(g.credits - before.g);
+    expect(copy.order!.mat).toBe(g.order!.mat); // the next order is the same one too
+    expect(claimOrder(copy)).toBe(false);
+  });
+
+  it('plays on like the original', () => {
+    const g = midGame();
+    const copy = deserialize(serialize(g))!;
+    const start = g.lifetime;
+    run(g, 120);
+    run(copy, 120);
+    expect((copy.lifetime - start) / (g.lifetime - start)).toBeCloseTo(1, 2);
+    expect(copy.flowHold).toBeCloseTo(g.flowHold, 0);
+    expect(copy.techs).toEqual(g.techs);
+    expect(copy.time).toBeCloseTo(g.time, 6);
+  });
+});
+
+describe('damaged and old saves cannot poison the game', () => {
+  const finiteTotals = (g: Game) => {
+    for (const v of [g.credits, g.lifetime, g.time, g.data.a, g.data.b, g.data.g, g.creditRate, g.flow]) expect(Number.isFinite(v)).toBe(true);
+  };
+
+  it('numbers that are not numbers never reach the simulation', () => {
+    const raw = {
+      ...JSON.parse(serialize(midGame())),
+      credits: 'lots', lifetime: null, time: 'late', data: { a: 'x', b: -5 },
+      demandLeft: { glint: 'x', shard: -3, unobtainium: 2, ink: 0.5 },
+      madeAt: { glint: 'early', nope: 4 }, sold: { glint: 'many', bogus: 1, shard: 12 }, soldRate: 7, made: { glint: true, bogus: true, shard: 1 },
+    };
+    const g = deserialize(JSON.stringify(raw))!;
+    expect(g.credits).toBe(0);
+    expect(g.data).toEqual({ a: 0, b: 0, g: 0 });
+    expect(g.demandLeft).toEqual({ ink: 0.5 });
+    expect(g.madeAt).toEqual({ glint: 0, shard: 0 });
+    expect(g.sold).toEqual({ shard: 12 });
+    expect(g.made).toEqual({ glint: true, shard: true });
+    run(g, 30); // used to throw on the unknown material, or turn credits into NaN
+    finiteTotals(g);
+    expect(g.credits).toBeGreaterThan(0);
+  });
+
+  it('an order from a save cannot carry a negative reward or impossible progress', () => {
+    const raw = { ...oldSave(), ordersOn: true, order: { mat: 'glint', need: 5, base: -9, got: 99, ready: true, reward: { credits: -500, a: -50, b: 'x', g: 3 } } };
+    const g = deserialize(JSON.stringify(raw))!;
+    expect(g.order).toMatchObject({ need: 5, base: 0, got: 5, reward: { credits: 0, a: 0, b: 0, g: 3 } });
+    const before = { credits: g.credits, a: g.data.a };
+    expect(claimOrder(g)).toBe(true);
+    expect(g.credits).toBe(before.credits);
+    expect(g.data.a).toBe(before.a);
+    expect(g.data.g).toBe(3);
+  });
+
+  it('Data left far below zero by the old time-away bug is reset, so research is possible again', () => {
+    const raw = { ...oldSave(), data: { a: -10760, b: 0, g: 0 }, queue: [] };
+    const g = deserialize(JSON.stringify(raw))!;
+    expect(g.data.a).toBe(0);
+    run(g, 60);
+    expect(g.data.a).toBeGreaterThan(10);
+  });
+
+  it('a save further down the chain than its unlocks is repaired on the first tick', () => {
+    // "Goal 17" with no Flow meter could never finish "Hold 75% Flow"; with no Router, never "Route more to a Lab".
+    const raw = { ...oldSave(), goal: { i: GOALS.findIndex((x) => x.id === 'hold-flow'), ready: false }, techs: [] };
+    const g = deserialize(JSON.stringify(raw))!;
+    expect(g.flowOn).toBe(false);
+    run(g, 0.05);
+    expect(g.flowOn).toBe(true);
+    expect(g.ordersOn).toBe(true);
+    expect(g.order).not.toBeNull();
+    expect([...g.techs].sort()).toEqual(['C1', 'L1', 'P1', 'R1']);
+    expect(g.ended).toBe(false); // nothing beyond the goals already claimed
+    expect(g.credits).toBeCloseTo(321.5, 0); // and no reward is paid again
+    expect(g.stats.fromGoals).toBe(0);
+    // A consistent save raises no unlock events when it loads.
+    const mid = midGame();
+    mid.techs.push('L1', 'C1');
+    const loaded = deserialize(serialize(mid))!;
+    run(loaded, 1);
+    expect(take(loaded, 'unlock')).toEqual([]);
+    expect(take(loaded, 'tech')).toEqual([]);
+  });
+
+  it('a goal index beyond the list means "everything claimed", not a crash', () => {
+    const g = deserialize(JSON.stringify({ ...oldSave(), goal: { i: 9999, ready: true } }))!;
+    run(g, 1);
+    expect(g.goal).toEqual({ i: GOALS.length, ready: false });
+    expect(goalView(g)).toBeNull();
+    expect(claimGoal(g)).toBe(false);
+    expect(g.ordersOn && g.flowOn && g.ended).toBe(true);
+    finiteTotals(g);
+  });
+
+  it('a board with no Well and no credits (possible in the old build) is given the price of one', () => {
+    const raw = oldSave();
+    raw.nodes = raw.nodes.filter((n) => n.type !== 'well');
+    raw.credits = 0.4;
+    const g = deserialize(JSON.stringify(raw))!;
+    expect(g.credits).toBe(10);
+    const w = placeNode(g, 'well', 0, 0, { depositId: 1 });
+    expect(w).not.toBeNull();
+    expect(g.credits).toBe(0);
+    expect(deleteNode(g, w!.id)).toBe(false); // and from now on the last Well stays
+    // A board that has a Well is left alone, however poor.
+    const poor = deserialize(JSON.stringify({ ...oldSave(), credits: 0.4 }))!;
+    expect(poor.credits).toBe(0.4);
   });
 });
 
