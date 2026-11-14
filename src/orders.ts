@@ -106,11 +106,11 @@ export function orderReward(g: Game, mat: MatId, need: number): Required<Reward>
 /**
  * Materials an order may ask for, in the order the picker prefers them: what the player makes right now,
  * refined before raw, never junk; within that, whatever reaches a Market first, and the newest first.
+ * `sold` is what reaches Markets per second (the forecast, unless the caller has its own measure).
  */
-export function orderCandidates(g: Game): MatId[] {
+export function orderCandidates(g: Game, sold: Bag = marketRates(g)): MatId[] {
   const rates = outputRates(g);
-  const sold = marketRates(g);
-  const selling = (m: MatId) => (sold[m] ?? 0) >= O.minRate;
+  const selling = (m: MatId) => (sold[m] ?? 0) >= O.marketRate;
   const newest = (a: MatId, b: MatId) =>
     Number(selling(b)) - Number(selling(a))
     || (g.madeAt[b] ?? 0) - (g.madeAt[a] ?? 0) || MATERIALS[b].tier - MATERIALS[a].tier || MATERIALS[b].value - MATERIALS[a].value;
@@ -232,6 +232,41 @@ export interface OrderView {
   /** Items per second of it being sold right now (smoothed), and the seconds left at that rate (Infinity at zero). */
   rate: number;
   eta: number;
+}
+
+/**
+ * What the orders still to come are worth per second on this board, on average: for the adviser's look-ahead
+ * copies (src/advice.ts), in which no new order is rolled. An order asks for 45 to 90 s of what is sold of one
+ * of the first three candidates and pays by the item, so a board that sells half as much of a material gets
+ * orders for it half the size: a change that takes goods away from the Markets costs that much.
+ * `sold` is items per second reaching Markets, `lag` the seconds between an order filling and its claim.
+ */
+export function ordersWorth(g: Game, sold: Bag, lag: number): Required<Reward> {
+  const out = { credits: 0, a: 0, b: 0, g: 0 };
+  if (!g.ordersOn) return out;
+  const pool = orderCandidates(g, sold).slice(0, O.pick.length);
+  const weights = O.pick.slice(0, pool.length);
+  const total = weights.reduce((s, w) => s + w, 0);
+  const seconds = g.stats.ordersFilled === 0 ? (O.first.seconds[0] + O.first.seconds[1]) / 2 : (O.minSeconds + O.maxSeconds) / 2;
+  let time = 0;
+  pool.forEach((mat, i) => {
+    const p = weights[i] / total;
+    const rate = sold[mat] ?? 0;
+    const need = Math.max(O.minNeed, rate * seconds);
+    // What is not sold fills no order: it sits for staleSeconds and is swapped for another.
+    if (rate < O.sellingRate) {
+      time += p * O.staleSeconds;
+      return;
+    }
+    const r = orderReward(g, mat, need);
+    time += p * (need / rate + lag);
+    out.credits += p * r.credits;
+    out.a += p * r.a;
+    out.b += p * r.b;
+    out.g += p * r.g;
+  });
+  if (time <= 0) return { credits: 0, a: 0, b: 0, g: 0 };
+  return { credits: out.credits / time, a: out.a / time, b: out.b / time, g: out.g / time };
 }
 
 /** Is the ordered material being sold at all? Goes by recent sales, so it turns true with the first item delivered. */

@@ -3,7 +3,8 @@ import { claimOrder, connect, cutWire, placeNode, upgrade } from '../src/actions
 import { RULES } from '../src/content';
 import { forecast, lookahead, measure } from '../src/forecast';
 import {
-  makeOrder, marketRates, neededTier, orderCandidates, orderReachesMarket, orderReward, orderView, outputRates, startOrders, stopNewOrders,
+  makeOrder, marketRates, neededTier, orderCandidates, orderReachesMarket, orderReward, orderView, ordersWorth, outputRates, startOrders,
+  stopNewOrders,
 } from '../src/orders';
 import { Game, Order, deserialize, serialize } from '../src/state';
 import { market, rich, run, take, well } from './helpers';
@@ -237,6 +238,51 @@ describe('orders (2.5)', () => {
       expect(g.wires.length).toBe(wires);
       expect(o.need).toBeGreaterThanOrEqual(RULES.orders.first.minNeed);
     }
+  });
+
+  it('a trickle into the Market is not "selling": no order asks for what would take minutes to deliver', () => {
+    // The smallest order is 8 items; at the line (0.08/s) that is 100 s. A material that only trickles past a
+    // busy machine used to count as sold at 0.02/s: eight of it took up to seven minutes, or the order went stale.
+    expect(RULES.orders.marketRate).toBe(0.08);
+    expect(RULES.orders.minNeed / RULES.orders.marketRate).toBe(100);
+    const g = factory();
+    g.stats.ordersFilled = 1;
+    // Spark is the newest thing made and comes first while it sells...
+    expect(orderCandidates(g, { shard: 0.5, ink: 0.5, spark: 0.4 })).toEqual(['spark', 'ink', 'shard']);
+    expect(orderCandidates(g, { shard: 0.5, ink: 0.5, spark: 0.08 })).toEqual(['spark', 'ink', 'shard']);
+    // ...and last when only a trickle of it reaches the Market, exactly as if none did.
+    expect(orderCandidates(g, { shard: 0.5, ink: 0.5, spark: 0.07 })).toEqual(['ink', 'shard', 'spark']);
+    expect(orderCandidates(g, { shard: 0.5, ink: 0.5, spark: 0.03 })).toEqual(orderCandidates(g, { shard: 0.5, ink: 0.5 }));
+    // Without a rate of its own the picker measures the board, as before.
+    expect(orderCandidates(g)).toEqual(orderCandidates(g, marketRates(g)));
+  });
+
+  it('ordersWorth: what the orders to come pay per second, which halves when half as much is sold', () => {
+    const g = factory();
+    g.ordersOn = true;
+    g.stats.ordersFilled = 1;
+    expect(neededTier(g)).toBe('a');
+    // Three refined materials on sale at 0.5/s each: an order is 45–90 s of one of them (67.5 s on average),
+    // claimed 10 s after it fills, and pays 3 α an item.
+    const all = ordersWorth(g, { shard: 0.5, ink: 0.5, spark: 0.5 }, 10);
+    const pay = orderReward(g, 'ink', 0.5 * 67.5);
+    expect(all.a).toBeCloseTo(pay.a / (67.5 + 10), 2);
+    expect(all.a).toBeGreaterThan(1.2); // studying all of one of them would bring 1.5 α a second
+    expect(all.credits).toBeGreaterThan(0.5);
+    expect(all.b + all.g).toBe(0);
+    // Half as much sold (the other half wired into Labs, say): orders half the size, in the same time.
+    const half = ordersWorth(g, { shard: 0.25, ink: 0.25, spark: 0.25 }, 10);
+    expect(half.a).toBeGreaterThan(0.45 * all.a);
+    expect(half.a).toBeLessThan(0.55 * all.a);
+    // Taking one material off the Market altogether costs more than its share: an order for it now sits
+    // unfilled for two minutes before it is swapped.
+    const two = ordersWorth(g, { shard: 0.5, ink: 0.5 }, 10);
+    expect(two.a).toBeLessThan(0.8 * all.a);
+    expect(two.a).toBeGreaterThan(0.5 * all.a);
+    // Nothing sold, or no orders yet: nothing.
+    expect(ordersWorth(g, {}, 10)).toEqual({ credits: 0, a: 0, b: 0, g: 0 });
+    g.ordersOn = false;
+    expect(ordersWorth(g, { ink: 0.5 }, 10)).toEqual({ credits: 0, a: 0, b: 0, g: 0 });
   });
 
   it('stays a first order until one has been filled, even if it is swapped', () => {

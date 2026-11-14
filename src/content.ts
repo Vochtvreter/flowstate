@@ -376,8 +376,15 @@ export const RULES = {
      * (so it fills in 30 to 40 s with nothing rerouted), and at least `minNeed` items.
      */
     first: { seconds: [32, 37] as [number, number], minNeed: 3 },
-    /** A material counts as "currently produced", or as reaching a Market, above this rate (items/s). */
+    /** A material counts as "currently produced" above this rate (items/s). */
     minRate: 0.02,
+    /**
+     * ...and as reaching a Market, for the choice of what to ask for, from this rate: the smallest order
+     * (`minNeed`) fills in 100 s at it. This used to be `minRate` too: a trickle of Mist past a busy Assembler
+     * counted as selling, an order for eight of it took four minutes or went stale, and a fast player saving
+     * for the Fabricator sat with free hands for up to 157 s.
+     */
+    marketRate: 0.08,
     /** orderView: the ordered material "reaches a Market" while its smoothed sales stay above this rate (items/s)... */
     sellingRate: 0.005,
     /** ...or for this many seconds after the order's last delivery, so that a slow trickle still counts. */
