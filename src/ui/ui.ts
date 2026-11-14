@@ -49,6 +49,8 @@ export interface Signals {
   place: { id: number; type: NodeType };
   /** Once a second for each Market that earned something. */
   sale: { id: number; amount: number; at: { x: number; y: number } };
+  /** A hotbar item the player could not afford a moment ago can now be bought. `at` is its button. */
+  afford: { type: NodeType; at: { x: number; y: number } };
 }
 
 const listeners: { [K in keyof Signals]?: ((detail: Signals[K]) => void)[] } = {};
