@@ -1,0 +1,414 @@
+// Every change the player can make to the board. All of them are undoable and refund in full.
+import { EXPANSION_DEPOSITS, MATERIALS, MatId, NODE_DEFS, NodeType, PIPES, RECIPES, Recipe, Track } from './content';
+import {
+  cycleTime, expansionCost, has, matUnlocked, maxLevel, maxPipeTier, nodeCost, nodeUnlocked, recipeOf, recipeUnlocked,
+  trackAvailable, upgradeCost,
+} from './economy';
+import { graph, isMachine, isPass, isSink, outPortCount } from './sim';
+import { Game, GNode, RouterMode, Snapshot, Wire, makeNode, makeWire, restore, snap, snapshot } from './state';
+
+// ---------- undo ----------
+
+interface UndoEntry { state: Snapshot; spent: number }
+const undoStack: UndoEntry[] = [];
+const redoStack: UndoEntry[] = [];
+let depth = 0;
+let batchSpent = 0;
+
+/** Run a mutation as one undo step. `fn` returns credits spent (negative = refund) or false to abort. */
+export function act(g: Game, fn: () => number | false): boolean {
+  if (depth > 0) {
+    const r = fn();
+    if (r === false) return false;
+    batchSpent += r;
+    g.rev++;
+    return true;
+  }
+  const before = snapshot(g);
+  depth++;
+  batchSpent = 0;
+  let r: number | false;
+  try {
+    r = fn();
+  } finally {
+    depth--;
+  }
+  if (r === false) {
+    // A nested step may already have changed things: roll back.
+    restore(g, before);
+    g.credits += batchSpent;
+    return false;
+  }
+  undoStack.push({ state: before, spent: r + batchSpent });
+  if (undoStack.length > 200) undoStack.shift();
+  redoStack.length = 0;
+  g.rev++;
+  return true;
+}
+
+export function pushUndo(g: Game, before: Snapshot) {
+  undoStack.push({ state: before, spent: 0 });
+  redoStack.length = 0;
+}
+
+export const canUndo = () => undoStack.length > 0;
+export const canRedo = () => redoStack.length > 0;
+
+export function undo(g: Game): boolean {
+  const e = undoStack.pop();
+  if (!e) return false;
+  redoStack.push({ state: snapshot(g), spent: e.spent });
+  restore(g, e.state);
+  g.credits += e.spent;
+  return true;
+}
+
+export function redo(g: Game): boolean {
+  const e = redoStack[redoStack.length - 1];
+  if (!e) return false;
+  if (e.spent > g.credits + 1e-6) {
+    g.events.push({ kind: 'toast', text: 'Not enough credits to redo that' });
+    return false;
+  }
+  redoStack.pop();
+  undoStack.push({ state: snapshot(g), spent: e.spent });
+  restore(g, e.state);
+  g.credits -= e.spent;
+  return true;
+}
+
+export function clearHistory() {
+  undoStack.length = 0;
+  redoStack.length = 0;
+}
+
+// ---------- queries ----------
+
+export const nodeById = (g: Game, id: number) => graph(g).byId.get(id) ?? null;
+
+/** Materials that can come out of a node's output port, following pass-through nodes upstream. */
+export function materialsAt(g: Game, id: number, port = 0, seen = new Set<number>()): MatId[] {
+  const n = nodeById(g, id);
+  if (!n || seen.has(id)) return [];
+  seen.add(id);
+  if (n.type === 'well') return n.material ? [n.material] : [];
+  if (isMachine(n)) {
+    const m = recipeOf(n)?.outputs[port]?.[0];
+    return m ? [m] : [];
+  }
+  if (isPass(n)) {
+    const out = new Set<MatId>();
+    for (const w of graph(g).ins.get(id) ?? []) for (const m of materialsAt(g, w.from, w.port, seen)) out.add(m);
+    return [...out];
+  }
+  return [];
+}
+
+export function recipesFor(g: Game, type: NodeType): Recipe[] {
+  return Object.values(RECIPES).filter((r) => r.machine === type && recipeUnlocked(g, r));
+}
+
+/** Best unlocked recipe for a machine type that uses any of the given materials. */
+export function pickRecipe(g: Game, type: NodeType, mats: MatId[]): Recipe | null {
+  const fits = recipesFor(g, type).filter((r) => r.inputs.some((i) => mats.includes(i[0])));
+  fits.sort((a, b) => MATERIALS[b.outputs[0][0]].value - MATERIALS[a.outputs[0][0]].value);
+  return fits[0] ?? null;
+}
+
+export function freeDeposits(g: Game) {
+  const used = new Set(g.nodes.map((n) => n.depositId).filter((d) => d != null));
+  return g.deposits.filter((d) => !used.has(d.id) && matUnlocked(g, d.mat));
+}
+
+export function refundOf(g: Game, n: GNode): number {
+  let r = n.paid;
+  for (const w of g.wires) if (w.from === n.id || w.to === n.id) r += w.paid;
+  return r;
+}
+
+// ---------- node actions ----------
+
+export interface PlaceOpts { recipe?: string | null; depositId?: number }
+
+export function placeNode(g: Game, type: NodeType, x: number, y: number, opts: PlaceOpts = {}): GNode | null {
+  if (!nodeUnlocked(g, type)) return null;
+  const cost = nodeCost(g, type);
+  if (cost > g.credits + 1e-6) return null;
+  let node: GNode | null = null;
+  const ok = act(g, () => {
+    const n = makeNode(g, type, snap(x), snap(y));
+    if (type === 'well') {
+      const dep = g.deposits.find((d) => d.id === opts.depositId);
+      if (!dep || g.nodes.some((o) => o.depositId === dep.id) || !matUnlocked(g, dep.mat)) return false;
+      n.depositId = dep.id;
+      n.material = dep.mat;
+      n.x = dep.x;
+      n.y = dep.y;
+    }
+    if (opts.recipe && RECIPES[opts.recipe]?.machine === type) n.recipe = opts.recipe;
+    n.paid = cost;
+    g.credits -= cost;
+    g.nodes.push(n);
+    node = n;
+    return cost;
+  });
+  return ok ? node : null;
+}
+
+export function deleteNode(g: Game, id: number): boolean {
+  const n = nodeById(g, id);
+  if (!n) return false;
+  return act(g, () => {
+    const refund = refundOf(g, n);
+    g.wires = g.wires.filter((w) => w.from !== id && w.to !== id);
+    g.nodes = g.nodes.filter((o) => o.id !== id);
+    g.credits += refund;
+    return -refund;
+  });
+}
+
+export function upgrade(g: Game, id: number, track: Track): boolean {
+  const n = nodeById(g, id);
+  if (!n || !trackAvailable(g, n, track) || n.lv[track] >= maxLevel(g, track)) return false;
+  const cost = upgradeCost(n, track);
+  if (cost > g.credits + 1e-6) return false;
+  return act(g, () => {
+    n.lv[track]++;
+    n.paid += cost;
+    g.credits -= cost;
+    return cost;
+  });
+}
+
+/** Upgrade every node of the same type by one level on a track, cheapest first, while credits last. */
+export function upgradeAll(g: Game, type: NodeType, track: Track): number {
+  let count = 0;
+  act(g, () => {
+    const nodes = g.nodes.filter((n) => n.type === type).sort((a, b) => a.lv[track] - b.lv[track]);
+    for (const n of nodes) if (upgrade(g, n.id, track)) count++;
+    return count ? 0 : false;
+  });
+  return count;
+}
+
+export function setRecipe(g: Game, id: number, recipeId: string): boolean {
+  const n = nodeById(g, id);
+  const r = RECIPES[recipeId];
+  if (!n || !r || r.machine !== n.type || !recipeUnlocked(g, r) || n.recipe === recipeId) return false;
+  return act(g, () => {
+    let refund = 0;
+    g.wires = g.wires.filter((w) => {
+      if (w.from === id && w.port >= r.outputs.length) {
+        refund += w.paid;
+        return false;
+      }
+      return true;
+    });
+    n.recipe = recipeId;
+    n.inb = {};
+    n.outb = {};
+    n.crafting = false;
+    n.prog = 0;
+    n.grace = 6;
+    g.credits += refund;
+    return -refund;
+  });
+}
+
+export function setMode(g: Game, id: number, mode: RouterMode): boolean {
+  const n = nodeById(g, id);
+  if (!n || n.type !== 'router' || n.mode === mode) return false;
+  return act(g, () => {
+    n.mode = mode;
+    return 0;
+  });
+}
+
+export function setWeight(g: Game, wireId: number, weight: number): boolean {
+  const w = g.wires.find((x) => x.id === wireId);
+  if (!w) return false;
+  return act(g, () => {
+    w.weight = Math.max(0, Math.min(99, Math.round(weight)));
+    return 0;
+  });
+}
+
+export function setFilter(g: Game, wireId: number, filter: MatId | null): boolean {
+  const w = g.wires.find((x) => x.id === wireId);
+  if (!w) return false;
+  return act(g, () => {
+    w.filter = filter;
+    return 0;
+  });
+}
+
+/** Move a wire earlier in its router's priority order. */
+export function raisePriority(g: Game, wireId: number): boolean {
+  const i = g.wires.findIndex((x) => x.id === wireId);
+  if (i < 0) return false;
+  const w = g.wires[i];
+  let j = -1;
+  for (let k = i - 1; k >= 0; k--) if (g.wires[k].from === w.from && g.wires[k].port === w.port) { j = k; break; }
+  if (j < 0) return false;
+  return act(g, () => {
+    [g.wires[i], g.wires[j]] = [g.wires[j], g.wires[i]];
+    return 0;
+  });
+}
+
+/** Set a router's weights to what each destination can actually consume. */
+export function autoBalance(g: Game, id: number): boolean {
+  const n = nodeById(g, id);
+  if (!n || n.type !== 'router' || !has(g, 'S3')) return false;
+  const wires = g.wires.filter((w) => w.from === id);
+  if (!wires.length) return false;
+  const mats = materialsAt(g, id);
+  return act(g, () => {
+    const needs = wires.map((w) => {
+      const d = nodeById(g, w.to)!;
+      const r = recipeOf(d);
+      if (!r) return 1;
+      let need = 0;
+      for (const [m, q] of r.inputs) if (mats.includes(m)) need += q / cycleTime(d, r);
+      return need || 1;
+    });
+    const min = Math.min(...needs);
+    wires.forEach((w, i) => (w.weight = Math.max(1, Math.round(needs[i] / min))));
+    n.mode = 'ratio';
+    return 0;
+  });
+}
+
+// ---------- wires ----------
+
+export function canConnect(g: Game, fromId: number, port: number, toId: number): boolean {
+  const a = nodeById(g, fromId);
+  const b = nodeById(g, toId);
+  if (!a || !b || a === b) return false;
+  if (isSink(a) || b.type === 'well') return false;
+  if (port >= outPortCount(a)) return false;
+  if (g.wires.some((w) => w.from === fromId && w.port === port && w.to === toId)) return false;
+  return true;
+}
+
+export function connect(g: Game, fromId: number, port: number, toId: number): Wire | null {
+  if (!canConnect(g, fromId, port, toId)) return null;
+  let wire: Wire | null = null;
+  act(g, () => {
+    const b = nodeById(g, toId)!;
+    if (isMachine(b) && !b.recipe) {
+      const r = pickRecipe(g, b.type, materialsAt(g, fromId, port));
+      if (r) b.recipe = r.id;
+    }
+    wire = makeWire(g, fromId, port, toId);
+    g.wires.push(wire);
+    b.grace = Math.max(b.grace, 5);
+    const a = nodeById(g, fromId)!;
+    a.grace = Math.max(a.grace, 3);
+    a.fBlocked = 0;
+    return 0;
+  });
+  return wire;
+}
+
+export function cutWire(g: Game, id: number): boolean {
+  const w = g.wires.find((x) => x.id === id);
+  if (!w) return false;
+  return act(g, () => {
+    g.wires = g.wires.filter((x) => x.id !== id);
+    g.credits += w.paid;
+    return -w.paid;
+  });
+}
+
+export function cutWires(g: Game, ids: number[]): boolean {
+  if (!ids.length) return false;
+  return act(g, () => {
+    for (const id of ids) cutWire(g, id);
+    return 0;
+  });
+}
+
+export function upgradeWire(g: Game, id: number): boolean {
+  const w = g.wires.find((x) => x.id === id);
+  if (!w || w.tier >= maxPipeTier(g)) return false;
+  const cost = PIPES[w.tier + 1].cost;
+  if (cost > g.credits + 1e-6) return false;
+  return act(g, () => {
+    w.tier++;
+    w.paid += cost;
+    g.credits -= cost;
+    return cost;
+  });
+}
+
+/** Upgrade every wire running at (or near) capacity by one tier. Returns how many were upgraded. */
+export function upgradeSaturatedWires(g: Game): number {
+  let count = 0;
+  act(g, () => {
+    for (const w of g.wires) if (w.rate >= PIPES[w.tier].cap * 0.97 && upgradeWire(g, w.id)) count++;
+    return count ? 0 : false;
+  });
+  return count;
+}
+
+/** Insert an existing, unconnected node into the middle of a wire. */
+export function splice(g: Game, wireId: number, nodeId: number): boolean {
+  const w = g.wires.find((x) => x.id === wireId);
+  const n = nodeById(g, nodeId);
+  if (!w || !n || n.type === 'well') return false;
+  if (g.wires.some((x) => x.from === nodeId || x.to === nodeId)) return false;
+  return act(g, () => {
+    const { from, port, to, tier, paid } = w;
+    g.wires = g.wires.filter((x) => x.id !== wireId);
+    g.rev++;
+    const a = connect(g, from, port, nodeId);
+    if (!a) return false;
+    a.tier = tier;
+    a.paid = paid;
+    g.rev++;
+    if (!isSink(n)) connect(g, nodeId, 0, to);
+    return 0;
+  });
+}
+
+// ---------- board ----------
+
+function rng(seed: number) {
+  let s = seed >>> 0;
+  return () => {
+    s = (s * 1664525 + 1013904223) >>> 0;
+    return s / 4294967296;
+  };
+}
+
+export function expandBoard(g: Game): boolean {
+  const cost = expansionCost(g);
+  if (cost > g.credits + 1e-6) return false;
+  g.credits -= cost;
+  const n = g.board.expansions;
+  const mats = EXPANSION_DEPOSITS[n % EXPANSION_DEPOSITS.length];
+  const rand = rng(n * 7919 + 13);
+  const wide = n % 2 === 0;
+  const strip = wide
+    ? { x: g.board.w, y: 0, w: 400, h: g.board.h }
+    : { x: 0, y: g.board.h, w: g.board.w, h: 320 };
+  mats.forEach((mat, i) => {
+    // One deposit per slice of the new strip, so they never overlap.
+    const fx = wide ? rand() : (i + rand() * 0.6 + 0.2) / mats.length;
+    const fy = wide ? (i + rand() * 0.6 + 0.2) / mats.length : rand();
+    g.deposits.push({
+      id: g.nextId++,
+      x: snap(strip.x + 40 + fx * (strip.w - 240)),
+      y: snap(strip.y + 40 + fy * (strip.h - 160)),
+      mat,
+    });
+  });
+  if (wide) g.board.w += 400;
+  else g.board.h += 320;
+  g.board.expansions++;
+  g.rev++;
+  return true;
+}
+
+export const defOf = (n: GNode) => NODE_DEFS[n.type];

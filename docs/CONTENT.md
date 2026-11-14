@@ -87,18 +87,18 @@ Design notes:
 | Router | 25 | ×1.10 | — | — |
 | Merger | 25 | ×1.10 | — | — |
 | Silo | 200 | ×1.20 | 200 items | Buffer |
-| Market | 1st free, then 1,000 | ×2.0 | sells up to 5/s per Market | Throughput |
+| Market | 1st free, then 150 | ×1.5 | sells anything, no limit | — |
 | Lab | 100 | ×1.30 | 1 item/s | Speed |
 | Void | free | — | unlimited | — |
 
-**Upgrades:** level cost = `0.5 × node base cost × 1.6^level`, max level 10 (raised to 25 by tech).
+**Upgrades:** level cost = `k × node base cost × 1.6^level` (k = 0.5 Speed, 1.5 Efficiency, 0.4 Buffer). Speed caps at level 10 (25 with Overclock), Efficiency at 4, Buffer at 5.
 - Speed: −15% cycle time / +25% Well rate, multiplicative per level.
-- Efficiency: every 6th → 5th → … → 3rd cycle consumes no inputs.
+- Efficiency: every 6th → 5th → 4th → 3rd cycle consumes no inputs.
 - Buffer: +100% internal buffer.
 
-**Pipes:** Mk I 1/s (free) · Mk II 3/s (20¢/wire) · Mk III 8/s (300¢/wire) · Mk IV 20/s (4,000¢/wire).
+**Pipes:** Mk I 2/s (free) · Mk II 5/s (20¢/wire) · Mk III 12/s (300¢/wire) · Mk IV 30/s (4,000¢/wire).
 
-**Plots:** start with 3×3 plots; plot *n* costs `100 × 2.2^n`. ~1 in 3 new plots contains a Deposit, weighted toward materials the player has unlocked but has few of.
+**Board:** starts with five deposits (2 Glint, Murk, Ember, Breeze). Expansion *n* costs `100 × 2.2^n`, alternately widens and deepens the board, and reveals 2–3 deposits from a fixed cycle.
 
 ---
 
@@ -117,88 +117,40 @@ A Lab converts each item into Data of a tier:
 
 ## Tech tree
 
-`★` = auto-granted by a milestone (part of onboarding, never bought).
+`★` = auto-granted by a milestone (part of onboarding, never bought). The source of truth is `src/content.ts`.
 
-```mermaid
-flowchart TB
-  Root[Flowstate ★]
+| ID | Tech | Branch | Cost | Requires | Unlocks |
+|---|---|---|---|---|---|
+| P1 | Refining ★ | Processing | earn 50¢ in total | — | Refiner, Shard |
+| R1 | Lab ★ | Research | sell your first Shard | — | Lab, Data, Tech tree |
+| P2 | Murk Deposits | Processing | 20α | R1 | Murk Wells, Ink + Silt, Void node |
+| P3 | Ember Deposits | Processing | 40α | P2 | Ember Wells, Spark |
+| P4 | Assembly | Processing | 80α | P3 | Assembler, Glyph |
+| P5 | Breeze Deposits | Processing | 150α | P4 | Breeze Wells, Mist, Prism |
+| P6 | Reclamation | Processing | 60α + 20β | P4 | Clay, Coil |
+| P7 | Fabrication | Processing | 300α + 150β | P5 | Fabricator, Lens |
+| P8 | Dynamo | Processing | 200β + 40γ | P6, P7 | Dynamo |
+| P9 | Paradox | Processing | 400β + 150γ | P8 | Paradox (capstone) |
+| U1 | Efficiency Tuning | Processing | 80α | P1 | Efficiency upgrade track |
+| U2 | Overclock | Processing | 100β | U1 | Speed cap 10 → 25 |
+| L1 | Routing | Logistics | 15α | R1 | Router node, Ratio mode |
+| L3 | Pipes Mk II | Logistics | 40α | L1 | 5/s wires |
+| L7 | Pipes Mk III | Logistics | 80β | L3 | 12/s wires |
+| L8 | Pipes Mk IV | Logistics | 100γ | L7 | 30/s wires |
+| L4 | Priority Routing | Logistics | 60α | L1 | Router Priority mode (fill #1, overflow to the rest) |
+| L6 | Filter Routing | Logistics | 100α + 20β | L4 | Router Filter mode |
+| L2 | Merger | Logistics | 25α | L1 | Merger (junction) node |
+| L5 | Silo | Logistics | 30α | L2 | Silo node |
+| C1 | Market Lens | Commerce | 10α | R1 | Exact prices in the Market inspector |
+| C2 | Wider Demand | Commerce | 50α | C1 | +50% demand |
+| C4 | Luxury Buyers | Commerce | 100β | C2 | +25% value on T2 and T3 |
+| C5 | Exports | Commerce | 50γ | C4 | +100% demand |
+| R2 | Lab Speed | Research | 30α | R1 | Labs 2× speed |
+| R3 | Deep Analysis | Research | 60β | R2 | +50% Data per item |
+| R4 | Long Absence | Research | 40α | R1 | Offline cap 2h → 8h |
+| S1 | Bulk Upgrade | Scale tools | 40α | L1 | "all" button on upgrades |
+| S3 | Auto-balance | Scale tools | 150β | S1, L4 | One-click Router weights |
 
-  Root --> P1[Refining ★]
-  P1 --> R1[Lab ★]
-
-  R1 --> P2[Murk Deposits]
-  R1 --> L1[Routing]
-  R1 --> C1[Market Lens]
-  R1 --> R4[Long Absence]
-  P2 --> P3[Ember Deposits]
-  P3 --> P4[Assembly]
-  P4 --> P5[Breeze Deposits]
-  P2 --> P6[Reclamation]
-  P4 --> P6
-  P5 --> P7[Fabrication]
-  P6 --> P8[Dynamo]
-  P7 --> P8
-  P8 --> P9[Paradox]
-
-  L1 --> L2[Merger]
-  L1 --> L3[Pipes Mk II]
-  L2 --> L4[Priority & Overflow]
-  L1 --> L5[Silo]
-  L4 --> L6[Filter Routing]
-  L3 --> L7[Pipes Mk III]
-  L7 --> L8[Pipes Mk IV]
-
-  C1 --> C2[Wider Demand]
-  C2 --> C3[Contracts]
-  C2 --> C4[Luxury Buyers]
-  C4 --> C5[Exports]
-
-  R1 --> R2[Lab Speed]
-  R2 --> R3[Deep Analysis]
-
-  P1 --> U1[Efficiency Tuning]
-  U1 --> U2[Overclock]
-
-  L1 --> S1[Bulk Upgrade]
-  S1 --> S2[Blueprints]
-  S2 --> S4[Ghost Planner]
-  L4 --> S3[Auto-balance]
-```
-
-| ID | Tech | Branch | Cost | Unlocks |
-|---|---|---|---|---|
-| — | Flowstate ★ | — | — | Glint Well, Market, wiring, fan-in/out |
-| P1 | Refining ★ | Processing | 50¢ lifetime earned | Refiner, Shard |
-| R1 | Lab ★ | Research | First Shard sold | Lab, Data, Tech Tree panel |
-| P2 | Murk Deposits | Processing | 20α | Murk, Ink + Silt, Void node |
-| P3 | Ember Deposits | Processing | 40α | Ember, Spark |
-| P4 | Assembly | Processing | 80α | Assembler, Glyph |
-| P5 | Breeze Deposits | Processing | 150α | Breeze, Mist, Prism |
-| P6 | Reclamation | Processing | 60α + 20β | Clay, Coil |
-| P7 | Fabrication | Processing | 300α + 150β | Fabricator, Lens |
-| P8 | Dynamo | Processing | 200β + 40γ | Dynamo |
-| P9 | Paradox | Processing | 400β + 150γ | Paradox (MVP capstone) |
-| L1 | Routing | Logistics | 15α | Router: Even + Ratio |
-| L2 | Merger | Logistics | 25α | Merger node: Fair + Priority |
-| L3 | Pipes Mk II | Logistics | 40α | Mk II wires |
-| L4 | Priority & Overflow | Logistics | 60α | Router modes |
-| L5 | Silo | Logistics | 30α | Silo node |
-| L6 | Filter Routing | Logistics | 100α + 20β | Router Filter mode (mixed streams) |
-| L7 | Pipes Mk III | Logistics | 80β | Mk III wires |
-| L8 | Pipes Mk IV | Logistics | 100γ | Mk IV wires |
-| C1 | Market Lens | Commerce | 10α | Price/saturation gauges on Markets |
-| C2 | Wider Demand | Commerce | 50α | +50% demand, all materials |
-| C3 | Contracts | Commerce | 100α | Contract board |
-| C4 | Luxury Buyers | Commerce | 100β | +25% value on T2+ |
-| C5 | Exports | Commerce | 50γ | +100% demand, all materials |
-| R2 | Lab Speed | Research | 30α | Labs 2× speed |
-| R3 | Deep Analysis | Research | 60β | +50% Data per item |
-| R4 | Long Absence | Research | 40α | Offline cap 2h → 8h |
-| U1 | Efficiency Tuning | Processing | 80α | Efficiency upgrade track |
-| U2 | Overclock | Processing | 100β | Upgrade cap 10 → 25 |
-| S1 | Bulk Upgrade | Scale tools | 40α | Upgrade a whole selection at once |
-| S2 | Blueprints | Scale tools | 120α | Save & stamp named layouts |
-| S3 | Auto-balance | Scale tools | 150β | One-click: Router ratios match downstream demand |
-| S4 | Ghost Planner | Scale tools | 80β | Place unbuilt ghost nodes that auto-buy when affordable |
+**Designed but not built yet:** Contracts (C3), Blueprints (S2), Ghost Planner (S4).
 
 **Tree shape rule:** at any moment the player should see **2–4 affordable-soon techs** across at least two branches, so research always feels like a choice.

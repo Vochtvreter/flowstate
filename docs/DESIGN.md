@@ -102,7 +102,7 @@ Fictional, tiered, each with a **color + shape** pair (shape so it's colorblind-
 - Any **output port can fan out** to several wires: it behaves as an *Even* splitter that skips blocked outputs.
 - Any **input port can fan in** from several wires: it behaves as a *fair* merger.
 - Explicit **Router / Merger** nodes exist for *non-default behavior* (ratios, priority, overflow, filtering). This keeps the simple case zero-effort while leaving depth for optimizers.
-- A wire carries whatever its source emits. Merging different materials onto one wire creates a **mixed stream** — legal, but most machines will only pull what their recipe needs and the rest backs up. Filter Routers (tech) are the cure. This is a deliberate mid-game "aha".
+- A wire carries whatever its source emits. Merging different materials onto one wire creates a **mixed stream** — legal: machines pull only what their recipe needs, and anything nobody takes backs up to its own source without blocking the other materials. Filter Routers (tech) sort a mixed stream back out.
 
 ---
 
