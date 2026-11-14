@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { claimGoal, connect, cutWire, expandBoard, placeNode, setMode, setWeight, upgrade } from '../src/actions';
+import { claimGoal, connect, cutWire, expandBoard, placeNode, setMode, setWeight, undo, upgrade, upgradeAll } from '../src/actions';
 import { TECHS } from '../src/content';
 import { has, nodeCost, research } from '../src/economy';
 import { GOALS, MAIN_GOALS, activeGoal, goalById, goalView, rewardText, routerFavoursLab } from '../src/goals';
@@ -32,7 +32,7 @@ describe('goal chain: the table (2.4)', () => {
       'Route more to a Lab than to the Market',
       'Expand the board',
       'Assemble your first Glyph',
-      'Hold 75% Flow for 10 seconds',
+      'Hold 95% Flow for 10 seconds',
       'Study Glyph for β',
       'Make your first Mist',
       'Assemble your first Prism',
@@ -65,23 +65,24 @@ describe('goal chain: the table (2.4)', () => {
     expect(reward('feed-lab')).toEqual({ a: 15 });
     expect(reward('make-spark')).toEqual({ a: 25, unlock: 'orders' });
     expect(reward('first-order')).toEqual({ techs: ['L1', 'C1'] });
-    expect(reward('make-glyph')).toEqual({ credits: 300, unlock: 'flow' });
-    expect(reward('hold-flow')).toEqual({ credits: 300 });
+    expect(reward('make-glyph')).toEqual({ credits: 150, unlock: 'flow' });
+    expect(reward('hold-flow')).toEqual({ credits: 150 });
     expect(reward('make-prism')).toEqual({ credits: 600, b: 40 });
-    expect(reward('three-orders')).toEqual({ credits: 1200, b: 60 });
+    expect(reward('three-orders')).toEqual({ credits: 1200, b: 60, techs: ['S1'] });
     expect(reward('build-fabricator')).toEqual({ b: 40 });
     expect(reward('make-lens')).toEqual({ unlock: 'end' });
     expect(rewardText(reward('wire-all-wells'))).toBe('Refining + 50¢');
     expect(rewardText(reward('make-spark'))).toBe('Orders + 25α');
+    expect(rewardText(reward('three-orders'))).toBe('Bulk Upgrade + 1200¢ + 60β');
   });
 
   it('flags four goals as big celebrations (the fifth is the first Flow State)', () => {
     expect(GOALS.filter((x) => x.big).map((x) => x.id)).toEqual(['sell-shard', 'feed-lab', 'make-glyph', 'make-lens']);
   });
 
-  it('is the only way to get Refining, Lab, Routing and Market Lens', () => {
+  it('is the only way to get Refining, Lab, Routing, Market Lens and Bulk Upgrade', () => {
     const granted = GOALS.flatMap((x) => x.reward.techs ?? []).sort();
-    expect(granted).toEqual(['C1', 'L1', 'P1', 'R1']);
+    expect(granted).toEqual(['C1', 'L1', 'P1', 'R1', 'S1']);
     const auto = Object.values(TECHS).filter((t) => t.auto).map((t) => t.id).sort();
     expect(auto).toEqual(granted);
     const g = fresh();
@@ -169,6 +170,37 @@ describe('goal chain: ready, claim, skip ahead', () => {
     expect(ev.big).toBe(true);
     expect(ev.reward.techs).toEqual(['R1']);
     expect(has(g, 'R1')).toBe(true);
+  });
+
+  it('hands over Bulk Upgrade with "Fill three orders", before the Fabricator has to be saved for', () => {
+    expect(indexOf('three-orders')).toBe(indexOf('build-fabricator') - 1);
+    const g = rich();
+    g.techs = ['P1', 'R1', 'L1', 'C1'];
+    g.credits = 1000;
+    const second = placeNode(g, 'well', 0, 0, { depositId: 2 })!;
+    expect(has(g, 'S1')).toBe(false);
+    expect(upgradeAll(g, 'well', 'speed')).toBe(2); // the action itself has never needed the tech; the button does
+    at(g, 'three-orders');
+    g.stats.ordersFilled = 3;
+    run(g, 0.1);
+    expect(claimGoal(g)).toBe(true);
+    expect(has(g, 'S1')).toBe(true);
+    expect(take(g, 'tech').map((e) => e.id)).toEqual(['S1']);
+    expect(take(g, 'goal-claimed')[0].reward.techs).toEqual(['S1']);
+    // One press now upgrades every Well by a level, cheapest first, as one undo step.
+    const before = g.credits;
+    expect(upgradeAll(g, 'well', 'speed')).toBe(2);
+    expect([well(g).lv.speed, second.lv.speed]).toEqual([2, 2]);
+    expect(before - g.credits).toBe(80 + 80);
+    expect(undo(g)).toBe(true);
+    expect([well(g).lv.speed, g.nodes.find((n) => n.id === second.id)!.lv.speed]).toEqual([1, 1]);
+    expect(g.credits).toBe(before);
+    // It cannot be bought, by anyone, at any price.
+    const poor = fresh();
+    poor.techs = ['R1', 'L1'];
+    poor.data = { a: 1e6, b: 1e6, g: 1e6 };
+    expect(research(poor, 'S1')).toBe(false);
+    expect(TECHS.S1.cost).toEqual({});
   });
 
   it('unlocks Orders, the Flow meter and the end of the demo', () => {
@@ -307,7 +339,51 @@ describe('goal chain: conditions and progress', () => {
     expect(g.goal.ready).toBe(true);
   });
 
-  it('"Hold 75% Flow" reads the hold timer, and "Expand the board" the expansion count', () => {
+  it('every card that has the player make something new says to sell it', () => {
+    // Without this a newcomer who does only what the card says leaves Spark, Glyph, Mist and Prism unsold:
+    // the machines block, and the Fabricator has to be paid for from Shard and Ink alone.
+    for (const [id, what] of [['make-spark', 'sell the Spark'], ['make-glyph', 'sell its Glyph at the Market'], ['make-mist', 'sell the Mist'], ['make-prism', 'sell its Prism at the Market']]) {
+      const hint = goalById(id)!.hint;
+      expect(hint.mouse, id).toContain(what);
+      expect(hint.touch, id).toContain(what);
+    }
+    expect(goalById('silt-exit')!.hint.mouse).toContain('sell the Ink at the Market');
+  });
+
+  it('a goal that asks for a research and then a machine says so: the step carries the price that follows', () => {
+    const g = fresh();
+    const step = (id: string) => {
+      at(g, id);
+      return activeGoal(g)!.step!(g);
+    };
+    g.techs = ['P1', 'R1', 'P2', 'P3'];
+    // Assembly, then the first Assembler; Breeze Deposits, then a Well and a Refiner; Fabrication, then the Fabricator.
+    expect(step('make-glyph')).toEqual({ tech: 'P4', then: nodeCost(g, 'assembler') });
+    g.techs.push('P4');
+    expect(step('make-glyph')).toEqual({ credits: 600 });
+    expect(step('make-mist')).toEqual({ tech: 'P5', then: nodeCost(g, 'well') + nodeCost(g, 'refiner') });
+    g.techs.push('P5');
+    expect(step('build-fabricator')).toEqual({ tech: 'P7', then: 7100 });
+    // What the card shows is still the Data for the research.
+    expect(activeGoal(g)!.progress!(g)).toEqual([0, 1180, 'α']);
+    g.techs.push('P7');
+    expect(step('build-fabricator')).toEqual({ credits: 7100 });
+    // A research with nothing to buy after it carries no price.
+    g.techs = ['P1', 'R1'];
+    expect(step('research-murk')).toEqual({ tech: 'P2' });
+  });
+
+  it('"Study Glyph for β" asks for 40 β in hand', () => {
+    const g = rich();
+    at(g, 'study-glyph');
+    g.data.b = 39;
+    expect(goalView(g)!.progress).toEqual([39, 40, 'β']);
+    expect(activeGoal(g)!.done(g)).toBe(false);
+    g.data.b = 40;
+    expect(activeGoal(g)!.done(g)).toBe(true);
+  });
+
+  it('"Hold 95% Flow" reads the hold timer, and "Expand the board" the expansion count', () => {
     const g = rich();
     at(g, 'hold-flow');
     g.flowHold = 4;

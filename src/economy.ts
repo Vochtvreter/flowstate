@@ -158,7 +158,7 @@ export function refillDemand(g: Game, dt: number) {
 
 export function dataYield(g: Game, m: MatId): { tier: DataTier; amount: number } {
   const y = DATA_YIELD[MATERIALS[m].tier];
-  return { tier: y.tier, amount: y.amount * (has(g, 'R3') ? 1.5 : 1) };
+  return { tier: y.tier, amount: (MATERIALS[m].study ?? y.amount) * (has(g, 'R3') ? 1.5 : 1) };
 }
 
 // ---------- pipes / board ----------

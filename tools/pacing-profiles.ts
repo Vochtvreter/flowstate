@@ -7,8 +7,8 @@
  * the fields of RULES, and the reward fields of GOALS). Nothing is emulated here any more: if a rule is
  * not in src/, the bot cannot play it.
  *
- *   npm run pacing -- --profile=<name>            every policy, seeds 1–3, with those numbers
- *   npm run pacing -- --profile=<name> --policy=slow --seed=2
+ *   npm run pacing -- --profile=<name>            every default policy, seeds 0–3, with those numbers
+ *   npm run pacing -- --profile=<name> --policy=newcomer --seed=2
  *
  * Mutate fields in place (RULES.orders.minSeconds = 30), never replace a whole object
  * (RULES.orders = {...}): modules in src/ keep references to the originals.
@@ -44,7 +44,7 @@ export function reward(goalId: string, r: Partial<GoalReward>) {
  *
  *   tech.<id>=a<n>[+b<n>][+g<n>]      a tech's whole price (tech.P7=a1000+b250)
  *   node.<type>.base|growth=<n>       a node's price
- *   mat.<id>.value|demand=<n>         a material
+ *   mat.<id>.value|demand|study=<n>   a material (study: the Data a Lab makes from one item, where it is not the tier's)
  *   goal.<id>.credits|a|b|g=<n>       one field of a goal's reward
  *   rules.<path>=<n>                  any number in RULES (rules.orders.maxSeconds=60, rules.upgrade.speed.well=50)
  */

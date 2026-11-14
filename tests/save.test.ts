@@ -2,7 +2,7 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 import { claimGoal, claimOrder, connect, deleteNode, placeNode, upgrade } from '../src/actions';
 import { RULES, TECHS } from '../src/content';
 import { endDemo, endStats, offlineCap, research, techAvailable, techHidden } from '../src/economy';
-import { GOALS, activeGoal, goalView } from '../src/goals';
+import { GOALS, activeGoal, goalById, goalView } from '../src/goals';
 import { startOrders } from '../src/orders';
 import { offlineGains } from '../src/sim';
 import { Game, cloneGame, deserialize, newGame, serialize } from '../src/state';
@@ -295,6 +295,30 @@ describe('loading saves', () => {
     expect(Number.isFinite(half.credits)).toBe(true);
   });
 
+  it('a wire\'s rate bookkeeping from a save is checked too: junk is dropped and measured afresh', () => {
+    const g = rich();
+    upgrade(g, well(g).id, 'speed');
+    const r = placeNode(g, 'refiner', 400, 100)!;
+    const feed = connect(g, well(g).id, 0, r.id)!;
+    connect(g, well(g).id, 0, market(g).id);
+    connect(g, r.id, 0, market(g).id);
+    run(g, 30);
+    const raw = JSON.parse(serialize(g));
+    expect(raw.wires[0].gulp.past.length).toBeGreaterThan(0);
+    raw.wires[0].gulp = { n: 'many', t: null, past: 'gone' };
+    raw.wires[0].rate = 'fast';
+    raw.wires[1].gulp = { n: 1, t: 1, on: 0, idle: 0, armed: true, past: [1, 2, 3], est: 1, max: 2 }; // an odd number of entries
+    raw.wires[2].gulp = 7;
+    const copy = deserialize(JSON.stringify(raw))!;
+    expect(copy.wires.every((w) => w.gulp === undefined)).toBe(true);
+    expect(copy.wires[0].rate).toBe(0);
+    const before = copy.credits;
+    run(copy, 20); // nothing throws, and the readings settle again
+    expect(copy.wires.find((w) => w.id === feed.id)!.rate).toBeCloseTo(1, 1);
+    expect(copy.credits).toBeGreaterThan(before);
+    for (const w of copy.wires) expect(Number.isFinite(w.rate)).toBe(true);
+  });
+
   it('still rejects other save versions', () => {
     expect(deserialize(JSON.stringify({ ...oldSave(), v: 2 }))).toBeNull();
     expect(deserialize('not json')).toBeNull();
@@ -331,6 +355,7 @@ function midGame(): Game {
   const ink = line(3, 400);
   connect(g, ink.id, 1, placeNode(g, 'void', 700, 600)!.id);
   line(4, 540);
+  upgrade(g, g.nodes.find((n) => n.material === 'ember')!.id, 'speed'); // or the Spark Refiner is short of Ember and holds Flow back
   for (let i = 0; i < 6; i++) upgrade(g, well(g).id, 'speed'); // the surplus Glint is sold over demand
   connect(g, well(g).id, 0, m.id);
   g.flowOn = true;
@@ -382,7 +407,7 @@ describe('save → load → save, mid-goal and mid-order', () => {
     expect(goalView(copy)!.ready).toBe(true);
     const credits = copy.credits;
     expect(claimGoal(copy)).toBe(true);
-    expect(copy.credits).toBe(credits + 300);
+    expect(copy.credits).toBe(credits + goalById('hold-flow')!.reward.credits!);
     expect(claimGoal(g)).toBe(true);
     expect(copy.goal).toEqual(g.goal);
     // Saved after the claim, it stays claimed: a reload cannot pay the same goal again.

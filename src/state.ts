@@ -51,11 +51,29 @@ export interface Wire {
   weight: number;
   filter: MatId | null;
   // --- runtime ---
+  /** Items per second, smoothed. Steady and exact when the wire carries its items in regular gulps (measureWire in src/sim.ts). */
   rate: number;
   mat: MatId | null;
   mixed: boolean;
   budget: number;
   flow: number;
+  /**
+   * Bookkeeping for `rate` (absent on a wire from an older save, which simply starts measuring afresh):
+   * the gulp in progress, and the last few whole gulps. A gulp runs from the moment items start moving after a
+   * pause to the next such moment.
+   */
+  gulp?: {
+    /** Items and seconds since the gulp in progress began. */
+    n: number; t: number;
+    /** Seconds it has flowed without a pause, and seconds since anything last moved (0 while flowing). */
+    on: number; idle: number;
+    /** A start has been seen, so the next start completes a whole gulp. */
+    armed: boolean;
+    /** Whole gulps, oldest first: items, seconds, items, seconds... Empty while the flow is steady or unknown. */
+    past: number[];
+    /** Worked out from `past` each time a gulp completes: the rate over the pattern, and the longest gulp in it. */
+    est: number; max: number;
+  };
 }
 
 export interface Deposit {
@@ -135,7 +153,12 @@ export type GameEvent =
   /** Flow State reached (once per streak). `first` = the first time ever: a big celebration. */
   | { kind: 'flow-state'; text: string; first: boolean }
   /** The first Lens was made: the demo is complete. Raised once per save. */
-  | { kind: 'demo-end'; text: string };
+  | { kind: 'demo-end'; text: string }
+  /**
+   * A material has been selling over its demand for a few seconds, for the first time in this save
+   * (g.seenSurplus): the moment to introduce the demand gauge. Raised once per save.
+   */
+  | { kind: 'surplus'; mat: MatId; text: string };
 
 export interface Game {
   v: 1;
@@ -181,6 +204,8 @@ export interface Game {
   orderSeed: number;
   /** The first Lens has been made. Set once. */
   ended: boolean;
+  /** Something has sold over its demand for a few seconds (RULES.demand.notice). Set once, with a 'surplus' event. */
+  seenSurplus: boolean;
   stats: Stats;
   // --- not saved ---
   rev: number;
@@ -244,7 +269,7 @@ export function newGame(): Game {
     flow: 0, flowOn: false, flowStreak: 0, flowBest: 0, flowHold: 0,
     goal: { i: 0, ready: false },
     ordersOn: false, order: null, orderSeed: RULES.orders.seed >>> 0,
-    ended: false,
+    ended: false, seenSurplus: false,
     stats: newStats(),
     rev: 1, events: [],
     tickAcc: { credits: 0, data: { a: 0, b: 0, g: 0 }, sold: {} },
@@ -339,6 +364,14 @@ export function deserialize(json: string): Game | null {
     }
     const ids = new Set(g.nodes.map((n) => n.id));
     g.wires = (Array.isArray(g.wires) ? g.wires : []).filter((w) => ids.has(w.from) && ids.has(w.to));
+    for (const w of g.wires) {
+      // The rate and its bookkeeping are display only: anything odd is dropped and measured afresh.
+      w.rate = pos(w.rate);
+      const u = w.gulp;
+      const sound = !!u && typeof u === 'object' && Array.isArray(u.past) && u.past.length % 2 === 0
+        && [u.n, u.t, u.on, u.idle, u.est, u.max, ...u.past].every((v) => typeof v === 'number' && isFinite(v) && v >= 0);
+      if (!sound) delete w.gulp;
+    }
     const known = (list: unknown) => [...new Set(Array.isArray(list) ? list : [])].filter((id) => typeof id === 'string' && !!TECHS[id]) as string[];
     g.techs = known(g.techs);
     g.queue = known(g.queue).filter((id) => !g.techs.includes(id));
@@ -367,6 +400,7 @@ export function deserialize(json: string): Game | null {
     g.order = loadOrder(raw.order);
     // A save from before the `ended` flag that already has a Lens is past the demo.
     g.ended = typeof raw.ended === 'boolean' ? raw.ended : !!g.made[RULES.capstone];
+    g.seenSurplus = !!raw.seenSurplus;
     // The build before this one let the last Well be deleted. A board with no Well and no money for one is stuck: pay for one.
     if (!g.nodes.some((n) => n.type === 'well')) g.credits = Math.max(g.credits, NODE_DEFS.well.base);
     return g;
@@ -399,6 +433,23 @@ export function clearSave() {
     /* ignore */
   }
 }
+
+// ---------- look-ahead copies ----------
+
+/**
+ * Games made to try something out and be thrown away: the copies a forecast or the adviser runs ahead of the
+ * live game (lookahead() in src/forecast.ts). The undo and redo history belongs to the game the player is
+ * playing (src/actions.ts keeps one history), so nothing done to a look-ahead copy is ever recorded in it:
+ * otherwise every tip the adviser weighed would become an Undo step that hands back credits nobody spent.
+ */
+const lookaheads = new WeakSet<Game>();
+
+/** Mark a game as a look-ahead copy: its edits are not recorded for undo, and it cannot be undone or redone. */
+export function markLookahead(g: Game) {
+  lookaheads.add(g);
+}
+
+export const isLookahead = (g: Game) => lookaheads.has(g);
 
 // ---------- structure snapshots (undo) ----------
 

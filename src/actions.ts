@@ -1,12 +1,12 @@
 // Every change the player can make to the board. Board edits are undoable and refund in full;
 // claiming a goal or an order (re-exported below) is not undoable.
-import { EXPANSION_DEPOSITS, MATERIALS, MatId, NODE_DEFS, NodeType, PIPES, RECIPES, Recipe, Track } from './content';
+import { EXPANSION_DEPOSITS, MATERIALS, MatId, NODE_DEFS, NodeType, PIPES, RECIPES, RULES, Recipe, Track } from './content';
 import {
   buyBackPrice, cycleTime, expansionCost, has, matUnlocked, maxLevel, maxPipeTier, nodeCost, nodeCount, nodeUnlocked, recipeOf,
   recipeUnlocked, trackAvailable, upgradeCost, upgradeValue,
 } from './economy';
 import { graph, isMachine, isPass, isSink, outPortCount } from './sim';
-import { Game, GNode, RouterMode, Snapshot, Wire, makeNode, makeWire, restore, shelve, snap, snapshot } from './state';
+import { Game, GNode, RouterMode, Snapshot, Wire, isLookahead, makeNode, makeWire, restore, shelve, snap, snapshot } from './state';
 
 export { claimGoal } from './goals';
 export { claimOrder } from './orders';
@@ -43,9 +43,12 @@ export function act(g: Game, fn: () => number | false): boolean {
     g.credits += batchSpent;
     return false;
   }
-  undoStack.push({ state: before, spent: r + batchSpent });
-  if (undoStack.length > 200) undoStack.shift();
-  redoStack.length = 0;
+  // The history is the live game's: a look-ahead copy (src/forecast.ts) changes, but leaves no step behind.
+  if (!isLookahead(g)) {
+    undoStack.push({ state: before, spent: r + batchSpent });
+    if (undoStack.length > 200) undoStack.shift();
+    redoStack.length = 0;
+  }
   g.rev++;
   return true;
 }
@@ -72,7 +75,7 @@ function sameStructure(g: Game, before: Snapshot): boolean {
  * restoring that snapshot for free would hand back a node whose refund was already paid.
  */
 export function pushUndo(g: Game, before: Snapshot): boolean {
-  if (!sameStructure(g, before)) return false;
+  if (isLookahead(g) || !sameStructure(g, before)) return false;
   undoStack.push({ state: before, spent: 0 });
   redoStack.length = 0;
   return true;
@@ -83,7 +86,7 @@ export const canRedo = () => redoStack.length > 0;
 
 export function undo(g: Game): boolean {
   const e = undoStack[undoStack.length - 1];
-  if (!e) return false;
+  if (!e || isLookahead(g)) return false;
   // Undoing a delete takes its refund back: refuse if that refund has been spent.
   if (g.credits + e.spent < -1e-6) {
     g.events.push({ kind: 'toast', text: 'Not enough credits to undo that' });
@@ -98,7 +101,7 @@ export function undo(g: Game): boolean {
 
 export function redo(g: Game): boolean {
   const e = redoStack[redoStack.length - 1];
-  if (!e) return false;
+  if (!e || isLookahead(g)) return false;
   if (e.spent > g.credits + 1e-6) {
     g.events.push({ kind: 'toast', text: 'Not enough credits to redo that' });
     return false;
@@ -291,6 +294,54 @@ export function setFilter(g: Game, wireId: number, filter: MatId | null): boolea
   if (!w) return false;
   return act(g, () => {
     w.filter = filter;
+    return 0;
+  });
+}
+
+/** The wires leaving a Router, in priority order. */
+const routerWires = (g: Game, routerId: number): Wire[] => graph(g).outs.get(routerId)?.[0] ?? [];
+
+/**
+ * The wire a Router currently favours, or null when it treats its wires alike:
+ * in Ratio mode the one wire with the biggest weight, in Priority mode the first wire. Even and Filter favour none.
+ */
+export function favouredWire(g: Game, routerId: number): number | null {
+  const n = nodeById(g, routerId);
+  const wires = routerWires(g, routerId);
+  if (!n || n.type !== 'router' || wires.length < 2) return null;
+  if (n.mode === 'priority') return wires[0].id;
+  if (n.mode !== 'ratio') return null;
+  let best: Wire | null = null;
+  let tied = false;
+  for (const w of wires) {
+    if (!best || w.weight > best.weight) {
+      best = w;
+      tied = false;
+    } else if (w.weight === best.weight) tied = true;
+  }
+  return best && !tied && best.weight > 0 ? best.id : null;
+}
+
+/** Would favour() change anything? The wire must leave this Router, which needs a second wire to favour it over. */
+export function canFavour(g: Game, routerId: number, wireId: number): boolean {
+  const n = nodeById(g, routerId);
+  const wires = routerWires(g, routerId);
+  if (!n || n.type !== 'router' || wires.length < 2 || !wires.some((w) => w.id === wireId)) return false;
+  const F = RULES.router;
+  return n.mode !== 'ratio' || wires.some((w) => w.weight !== (w.id === wireId ? F.favour : F.rest));
+}
+
+/**
+ * The one-press Router preset: Ratio mode, weighted 3 : 1 toward this wire (RULES.router; every other wire
+ * of the Router gets the 1). One undo step. Returns false when the Router already stands that way.
+ */
+export function favour(g: Game, routerId: number, wireId: number): boolean {
+  if (!canFavour(g, routerId, wireId)) return false;
+  const n = nodeById(g, routerId)!;
+  const wires = routerWires(g, routerId);
+  return act(g, () => {
+    n.mode = 'ratio';
+    for (const w of wires) w.weight = w.id === wireId ? RULES.router.favour : RULES.router.rest;
     return 0;
   });
 }

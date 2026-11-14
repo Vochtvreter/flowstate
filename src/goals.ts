@@ -5,8 +5,13 @@
 // reward (event 'goal-claimed'), moves on, and checks the next goal at once, so a goal the player has
 // already met is ready the moment it is reached. Rewards are not undoable.
 //
-// Reward sizes are in the GOALS table below, tuned with `npm run pacing`. Through "Build a Lab and feed it"
+// Reward sizes are in the GOALS table below, tuned with `npm run pacing`. Five techs are goal rewards and
+// cannot be bought: Refining, Lab, Routing, Market Lens and Bulk Upgrade. Through "Build a Lab and feed it"
 // the credits paid so far always cover the next purchase the card asks for (tests/playthrough.test.ts).
+//
+// The hints are what a newcomer does, to the letter. So every card that has the player make something new
+// also says to sell it (Ink, Spark, Glyph, Mist, Prism): a player who is never told leaves their dearest
+// goods unsold and their machines blocked, and cannot pay for the Fabricator.
 import { MATERIALS, MatId, NodeType, RULES, TECHS } from './content';
 import { endDemo, expansionCost, grantTech, has, nodeCost, nodeCount, upgradeCost } from './economy';
 import { graph } from './graph';
@@ -16,6 +21,13 @@ import { Game, GNode, GoalReward } from './state';
 /** [current, target, unit]. Unit '¢' means "saving up credits"; 'α' / 'β' / 'γ' mean saving up Data. */
 export type GoalProgress = [current: number, target: number, unit: string];
 
+/**
+ * The next thing a goal needs bought: a tech to research, or something that costs credits. For a tech, `then`
+ * is what the card asks the player to buy with credits straight after the research (the machine it unlocks),
+ * when there is such a thing: the adviser reads it to see the whole of a wait, not only its first half.
+ */
+export type GoalStep = { tech: string; then?: number } | { credits: number };
+
 export interface Goal {
   id: string;
   title: string;
@@ -24,6 +36,11 @@ export interface Goal {
   done(g: Game): boolean;
   /** For numeric goals, and for goals where the next step has to be saved up for. null = nothing to show. */
   progress?(g: Game): GoalProgress | null;
+  /**
+   * The purchase the card is asking for next, when there is one: what `progress` counts toward. null when
+   * nothing has to be bought (any more). The adviser (src/advice.ts) reads it to know what a wait is for.
+   */
+  step?(g: Game): GoalStep | null;
   reward: GoalReward;
   /** One of the big celebrations (the fifth is the first Flow State, see the 'flow-state' event). */
   big?: boolean;
@@ -66,20 +83,29 @@ function savingTech(g: Game, id: string): GoalProgress | null {
   return best;
 }
 
+const tech = (id: string, then = 0): GoalStep => (then > 0 ? { tech: id, then } : { tech: id });
+const price = (credits: number): GoalStep => ({ credits });
+
+/** What the card shows for a step: Data toward the tech, or credits toward the price. */
+const show = (g: Game, s: GoalStep | null): GoalProgress | null => (!s ? null : 'tech' in s ? savingTech(g, s.tech) : saving(g, s.credits));
+
+/** A goal whose next step is a purchase: the step itself, and the progress shown for it. */
+const buying = (step: (g: Game) => GoalStep | null) => ({ step, progress: (g: Game) => show(g, step(g)) });
+
 /** Research first, then save for the machine if none of that kind is free to use yet. */
-function techThenNode(g: Game, tech: string, type: NodeType, recipe: string): GoalProgress | null {
-  const t = savingTech(g, tech);
-  if (t) return t;
-  if (g.nodes.some((n) => n.recipe === recipe)) return null;
-  return saving(g, nodeCost(g, type));
+function techThenNode(g: Game, id: string, type: NodeType, recipe: string): GoalStep | null {
+  const built = g.nodes.some((n) => n.recipe === recipe);
+  if (!has(g, id)) return tech(id, built ? 0 : nodeCost(g, type));
+  return built ? null : price(nodeCost(g, type));
 }
 
 /** A raw material line: research, then a Well on the deposit, then a Refiner. */
-function rawLine(g: Game, tech: string, raw: MatId, recipe: string): GoalProgress | null {
-  const t = savingTech(g, tech);
-  if (t) return t;
-  if (!g.nodes.some((n) => n.type === 'well' && n.material === raw)) return saving(g, nodeCost(g, 'well'));
-  if (!g.nodes.some((n) => n.recipe === recipe)) return saving(g, nodeCost(g, 'refiner'));
+function rawLine(g: Game, id: string, raw: MatId, recipe: string): GoalStep | null {
+  const well = g.nodes.some((n) => n.type === 'well' && n.material === raw);
+  const refiner = g.nodes.some((n) => n.recipe === recipe);
+  if (!has(g, id)) return tech(id, (well ? 0 : nodeCost(g, 'well')) + (refiner ? 0 : nodeCost(g, 'refiner')));
+  if (!well) return price(nodeCost(g, 'well'));
+  if (!refiner) return price(nodeCost(g, 'refiner'));
   return null;
 }
 
@@ -130,7 +156,7 @@ export const GOALS: Goal[] = [
     id: 'second-well', title: 'Place a second Well',
     hint: hint('Pick the Well in the hotbar and click the free Glint deposit.', 'Tap Well in the bottom bar, then tap the free Glint deposit.'),
     done: (g) => count(g, 'well') >= 2,
-    progress: (g) => saving(g, nodeCost(g, 'well')),
+    ...buying((g) => price(nodeCost(g, 'well'))),
     reward: { credits: 10 },
   },
   {
@@ -150,7 +176,7 @@ export const GOALS: Goal[] = [
       'Tap a Well\'s port, tap an empty spot, and pick Refiner.',
     ),
     done: (g) => g.nodes.some((n) => n.type === 'refiner' && inWires(g, n) > 0),
-    progress: (g) => (count(g, 'refiner') ? null : saving(g, nodeCost(g, 'refiner'))),
+    ...buying((g) => (count(g, 'refiner') ? null : price(nodeCost(g, 'refiner')))),
     reward: { credits: 20 },
   },
   {
@@ -170,10 +196,10 @@ export const GOALS: Goal[] = [
       'Tap a Well and buy a Speed upgrade: whatever the Refiner cannot use is sold.',
     ),
     done: (g) => g.nodes.some((n) => n.type === 'well' && n.lv.speed >= 1),
-    progress: (g) => {
+    ...buying((g) => {
       const well = g.nodes.find((n) => n.type === 'well');
-      return well ? saving(g, upgradeCost(well, 'speed')) : null;
-    },
+      return well ? price(upgradeCost(well, 'speed')) : null;
+    }),
     reward: { credits: 50 },
   },
   {
@@ -183,7 +209,7 @@ export const GOALS: Goal[] = [
       'Tap the Refiner\'s port, tap an empty spot and pick Lab: what it studies becomes Data instead of credits.',
     ),
     done: (g) => g.data.a > 0,
-    progress: (g) => (count(g, 'lab') ? null : saving(g, nodeCost(g, 'lab'))),
+    ...buying((g) => (count(g, 'lab') ? null : price(nodeCost(g, 'lab')))),
     reward: { a: 15 },
     big: true,
   },
@@ -191,7 +217,7 @@ export const GOALS: Goal[] = [
     id: 'research-murk', title: 'Research Murk Deposits',
     hint: hint('Open the Tech tree and spend your α Data on Murk Deposits.', 'Tap Tech and spend your α Data on Murk Deposits.'),
     done: (g) => has(g, 'P2'),
-    progress: (g) => savingTech(g, 'P2'),
+    ...buying((g) => (has(g, 'P2') ? null : tech('P2'))),
     reward: { credits: 40 },
   },
   {
@@ -201,7 +227,7 @@ export const GOALS: Goal[] = [
       'Place a Well on the Murk deposit, then tap its port, tap an empty spot and pick Refiner.',
     ),
     done: (g) => made(g, 'ink'),
-    progress: (g) => rawLine(g, 'P2', 'murk', 'ink'),
+    ...buying((g) => rawLine(g, 'P2', 'murk', 'ink')),
     reward: { credits: 40 },
   },
   {
@@ -216,9 +242,9 @@ export const GOALS: Goal[] = [
   },
   {
     id: 'make-spark', title: 'Make your first Spark',
-    hint: hint('Research Ember Deposits, then put a Well on the Ember deposit and build a Refiner from its port.'),
+    hint: hint('Research Ember Deposits, then put a Well on the Ember deposit, build a Refiner from its port and sell the Spark.'),
     done: (g) => made(g, 'spark'),
-    progress: (g) => rawLine(g, 'P3', 'ember', 'spark'),
+    ...buying((g) => rawLine(g, 'P3', 'ember', 'spark')),
     reward: { a: 25, unlock: 'orders' },
   },
   {
@@ -233,9 +259,12 @@ export const GOALS: Goal[] = [
   },
   {
     id: 'route-lab', title: 'Route more to a Lab than to the Market',
-    hint: hint('Build a Router from a machine\'s port, wire it to a Lab and to a Market, set it to Ratio and give the Lab the bigger share.'),
+    hint: hint(
+      'Build a Router from a machine\'s port and wire it to a Lab and to a Market, then select the Router and press Favour on the Lab\'s wire.',
+      'Build a Router from a machine\'s port and wire it to a Lab and to a Market, then tap the Router and tap Favour on the Lab\'s wire.',
+    ),
     done: routerFavoursLab,
-    progress: (g) => (count(g, 'router') ? null : saving(g, nodeCost(g, 'router'))),
+    ...buying((g) => (count(g, 'router') ? null : price(nodeCost(g, 'router')))),
     reward: { a: 30 },
   },
   {
@@ -245,26 +274,26 @@ export const GOALS: Goal[] = [
       'Tap Expand board at the edge of the map to reveal new deposits.',
     ),
     done: (g) => g.board.expansions >= 1,
-    progress: (g) => saving(g, expansionCost(g)),
+    ...buying((g) => price(expansionCost(g))),
     reward: { credits: 60 },
   },
   {
     id: 'make-glyph', title: 'Assemble your first Glyph',
-    hint: hint('Research Assembly, then build an Assembler and wire both Ink and Spark into it.'),
+    hint: hint('Research Assembly, then build an Assembler, wire both Ink and Spark into it and sell its Glyph at the Market.'),
     done: (g) => made(g, 'glyph'),
-    progress: (g) => techThenNode(g, 'P4', 'assembler', 'glyph'),
-    reward: { credits: 300, unlock: 'flow' },
+    ...buying((g) => techThenNode(g, 'P4', 'assembler', 'glyph')),
+    reward: { credits: 150, unlock: 'flow' },
     big: true,
   },
   {
-    id: 'hold-flow', title: 'Hold 75% Flow for 10 seconds',
+    id: 'hold-flow', title: 'Hold 95% Flow for 10 seconds',
     hint: hint(
       'Flow is the share of your Wells and machines running flat out: click the Flow ring to jump to the one holding it back.',
       'Flow is the share of your Wells and machines running flat out: tap the Flow ring to jump to the one holding it back.',
     ),
     done: (g) => g.flowHold >= RULES.flow.holdSeconds,
     progress: (g) => [Math.min(g.flowHold, RULES.flow.holdSeconds), RULES.flow.holdSeconds, 's'],
-    reward: { credits: 300 },
+    reward: { credits: 150 },
   },
   {
     id: 'study-glyph', title: 'Study Glyph for β',
@@ -272,22 +301,22 @@ export const GOALS: Goal[] = [
       'Drag from the Assembler\'s port to a Lab: Tier 2 items become β Data.',
       'Tap the Assembler\'s port, then tap a Lab: Tier 2 items become β Data.',
     ),
-    done: (g) => g.data.b >= 10,
-    progress: (g) => [Math.min(g.data.b, 10), 10, 'β'],
+    done: (g) => g.data.b >= RULES.goals.studyBeta,
+    progress: (g) => [Math.min(g.data.b, RULES.goals.studyBeta), RULES.goals.studyBeta, 'β'],
     reward: { a: 50 },
   },
   {
     id: 'make-mist', title: 'Make your first Mist',
-    hint: hint('Research Breeze Deposits, then put a Well on a Breeze deposit and build a Refiner from its port.'),
+    hint: hint('Research Breeze Deposits, then put a Well on a Breeze deposit, build a Refiner from its port and sell the Mist.'),
     done: (g) => made(g, 'mist'),
-    progress: (g) => rawLine(g, 'P5', 'breeze', 'mist'),
+    ...buying((g) => rawLine(g, 'P5', 'breeze', 'mist')),
     reward: { a: 50 },
   },
   {
     id: 'make-prism', title: 'Assemble your first Prism',
-    hint: hint('Build another Assembler and feed it two Shard for every Mist.'),
+    hint: hint('Build another Assembler, feed it two Shard for every Mist and sell its Prism at the Market.'),
     done: (g) => made(g, 'prism'),
-    progress: (g) => techThenNode(g, 'P5', 'assembler', 'prism'),
+    ...buying((g) => techThenNode(g, 'P5', 'assembler', 'prism')),
     reward: { credits: 600, b: 40 },
   },
   {
@@ -295,13 +324,14 @@ export const GOALS: Goal[] = [
     hint: hint('Keep an eye on the order card: send what it asks for to a Market, then claim it.'),
     done: (g) => g.stats.ordersFilled >= 3,
     progress: (g) => [Math.min(g.stats.ordersFilled, 3), 3, 'orders'],
-    reward: { credits: 1200, b: 60 },
+    // Bulk Upgrade arrives here, just before the long save for the Fabricator.
+    reward: { credits: 1200, b: 60, techs: ['S1'] },
   },
   {
     id: 'build-fabricator', title: 'Build a Fabricator',
     hint: hint('Research Fabrication, then save up for the Fabricator: orders and a high Flow get you there faster.'),
     done: (g) => count(g, 'fabricator') >= 1,
-    progress: (g) => savingTech(g, 'P7') ?? saving(g, nodeCost(g, 'fabricator')),
+    ...buying((g) => (has(g, 'P7') ? price(nodeCost(g, 'fabricator')) : tech('P7', nodeCost(g, 'fabricator')))),
     reward: { b: 40 },
   },
   {
@@ -316,28 +346,28 @@ export const GOALS: Goal[] = [
     id: 'make-clay', title: 'Reclaim Silt into Clay', free: true,
     hint: hint('Research Reclamation, then send Silt to a Refiner instead of the Void.'),
     done: (g) => made(g, 'clay'),
-    progress: (g) => techThenNode(g, 'P6', 'refiner', 'clay'),
+    ...buying((g) => techThenNode(g, 'P6', 'refiner', 'clay')),
     reward: { credits: 200 },
   },
   {
     id: 'make-coil', title: 'Wind your first Coil', free: true,
     hint: hint('Feed an Assembler one Spark and two Clay for every Coil.'),
     done: (g) => made(g, 'coil'),
-    progress: (g) => techThenNode(g, 'P6', 'assembler', 'coil'),
+    ...buying((g) => techThenNode(g, 'P6', 'assembler', 'coil')),
     reward: { credits: 600 },
   },
   {
     id: 'make-dynamo', title: 'Spin up a Dynamo', free: true,
     hint: hint('Research Dynamo, then feed a Fabricator two Coil, a Glyph and a Prism.'),
     done: (g) => made(g, 'dynamo'),
-    progress: (g) => techThenNode(g, 'P8', 'fabricator', 'dynamo'),
+    ...buying((g) => techThenNode(g, 'P8', 'fabricator', 'dynamo')),
     reward: { credits: 1800 },
   },
   {
     id: 'make-paradox', title: 'Fold a Paradox', free: true,
     hint: hint('Research Paradox, then feed a Fabricator a Lens, a Dynamo and four raw Breeze.'),
     done: (g) => made(g, 'paradox'),
-    progress: (g) => techThenNode(g, 'P9', 'fabricator', 'paradox'),
+    ...buying((g) => techThenNode(g, 'P9', 'fabricator', 'paradox')),
     reward: { credits: 7500 },
   },
 ];

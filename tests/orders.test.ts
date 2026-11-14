@@ -1,7 +1,10 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import { claimOrder, connect, cutWire, placeNode } from '../src/actions';
+import { claimOrder, connect, cutWire, placeNode, upgrade } from '../src/actions';
 import { RULES } from '../src/content';
-import { makeOrder, neededTier, orderCandidates, orderReward, orderView, outputRates, startOrders } from '../src/orders';
+import { forecast, lookahead, measure } from '../src/forecast';
+import {
+  makeOrder, marketRates, neededTier, orderCandidates, orderReachesMarket, orderReward, orderView, outputRates, startOrders, stopNewOrders,
+} from '../src/orders';
 import { Game, Order, deserialize, serialize } from '../src/state';
 import { market, rich, run, take, well } from './helpers';
 
@@ -49,10 +52,15 @@ describe('orders (2.5)', () => {
     expect(take(g, 'order-new').length).toBe(0);
   });
 
-  it('asks for something the player makes right now, never junk, sized to 45–90 s of output', () => {
+  it('asks for something the player makes right now, never junk, sized to 45–90 s of what reaches Markets', () => {
     const g = factory();
-    const rates = outputRates(g);
+    g.stats.ordersFilled = 1; // the first order has its own, shorter size (below)
+    expect(outputRates(g).shard).toBeCloseTo(0.5, 1);
+    expect(outputRates(g).spark).toBeCloseTo(0.4, 1);
+    // Everything this factory makes is sold, so what reaches Markets is what is made.
+    const rates = marketRates(g);
     expect(rates.shard).toBeCloseTo(0.5, 1);
+    expect(rates.ink).toBeCloseTo(0.5, 1);
     expect(rates.spark).toBeCloseTo(0.4, 1);
     expect(orderCandidates(g)).toEqual(['spark', 'ink', 'shard']); // newest first; no Silt, no raw materials
     for (let i = 0; i < 200; i++) {
@@ -86,6 +94,7 @@ describe('orders (2.5)', () => {
     run(g, 10);
     // Only raw Glint is produced: that is what gets asked for.
     expect(orderCandidates(g)).toEqual(['glint']);
+    g.stats.ordersFilled = 1;
     const o = makeOrder(g);
     expect(o.mat).toBe('glint');
     expect(o.need).toBeGreaterThanOrEqual(45);
@@ -95,6 +104,204 @@ describe('orders (2.5)', () => {
     const idle = makeOrder(g);
     expect(idle.mat).toBe('glint');
     expect(idle.need).toBe(RULES.orders.minNeed);
+    // The same holds for a player who has not filled one yet: with nothing selling there is no "quick" first order.
+    g.stats.ordersFilled = 0;
+    expect(makeOrder(g).need).toBe(RULES.orders.minNeed);
+  });
+
+  it('sizes an order from what is sold, not from what is made', () => {
+    // Half the Shard is studied: 0.5/s is made, 0.25/s reaches the Market.
+    const g = factory();
+    g.stats.ordersFilled = 1;
+    const shard = g.nodes.find((n) => n.recipe === 'shard')!;
+    connect(g, shard.id, 0, placeNode(g, 'lab', 900, 100)!.id);
+    run(g, 20);
+    expect(outputRates(g).shard).toBeCloseTo(0.5, 1);
+    expect(marketRates(g).shard).toBeCloseTo(0.25, 1);
+    let seen = 0;
+    for (let i = 0; i < 200; i++) {
+      const o = makeOrder(g);
+      if (o.mat !== 'shard') continue;
+      seen++;
+      expect(o.need).toBeGreaterThanOrEqual(Math.floor(0.25 * RULES.orders.minSeconds) - 1);
+      expect(o.need).toBeLessThanOrEqual(Math.ceil(0.25 * RULES.orders.maxSeconds) + 1); // 23 at most, where output would give 45
+    }
+    expect(seen).toBeGreaterThan(5);
+    // So it really does take 45 to 90 s, with nothing rerouted.
+    unlock(g);
+    while (g.order!.mat !== 'shard') g.order = makeOrder(g);
+    const o = g.order!;
+    let seconds = 0;
+    while (!o.ready && seconds < 200) {
+      run(g, 1);
+      seconds++;
+    }
+    expect(seconds).toBeGreaterThanOrEqual(RULES.orders.minSeconds - 6);
+    expect(seconds).toBeLessThanOrEqual(RULES.orders.maxSeconds + 6);
+  });
+
+  it('counts a line built a moment ago for what it will sell, and leaves the live game alone', () => {
+    const g = factory();
+    const mist = placeNode(g, 'refiner', 400, 640)!;
+    g.techs.push('P5');
+    connect(g, placeNode(g, 'well', 0, 0, { depositId: 5 })!.id, 0, mist.id);
+    connect(g, mist.id, 0, market(g).id);
+    run(g, 1); // nothing has come out of it yet
+    expect(g.soldRate.mist ?? 0).toBe(0);
+    const state = () => serialize(g).replace(/"savedAt":\d+/, '');
+    const before = state();
+    const rates = marketRates(g);
+    expect(rates.mist).toBeGreaterThan(0.3); // 0.4/s once it runs
+    expect(rates.mist).toBeLessThanOrEqual(0.41);
+    expect(state()).toBe(before); // measured on a copy
+    expect(forecast(g)).toBe(forecast(g)); // and kept until the board or the clock moves
+    const f = forecast(g);
+    expect(f.seconds).toBe(40);
+    expect(f.credits).toBeCloseTo(0.5 * 3 + 0.5 * 4 + 0.4 * 6 + rates.mist! * 6, 1);
+    run(g, 0.05);
+    expect(forecast(g)).not.toBe(f);
+  });
+
+  it('a look-ahead copy never rolls an order: the one it has can be filled and claimed, then there is none', () => {
+    const g = factory();
+    unlock(g);
+    const seed = g.orderSeed;
+    const copy = lookahead(g)!;
+    expect(copy.order).toEqual(g.order);
+    measure(copy, 200);
+    expect(copy.order!.ready).toBe(true);
+    expect(claimOrder(copy)).toBe(true);
+    expect(copy.stats.ordersFilled).toBe(1);
+    expect(copy.order).toBeNull();
+    measure(copy, 200);
+    expect(copy.order).toBeNull();
+    expect(copy.orderSeed).toBe(seed); // no draw was made
+    expect(claimOrder(copy)).toBe(false);
+    // The live game is where it was.
+    expect(g.orderSeed).toBe(seed);
+    expect(g.order!.got).toBe(0);
+    // An order nobody delivers to simply goes away in a copy.
+    const idle = factory();
+    unlock(idle);
+    stopNewOrders(idle);
+    for (const w of [...idle.wires]) cutWire(idle, w.id);
+    run(idle, RULES.orders.staleSeconds + 5);
+    expect(idle.order).toBeNull();
+  });
+
+  /** The board a player has when Orders unlock by following the goal card: Shard sold and studied, Ink sold, Spark with no wire out. */
+  function byTheCardAtOrders(): Game {
+    const g = rich();
+    g.techs = ['P1', 'R1', 'P2', 'P3'];
+    const m = market(g);
+    upgrade(g, well(g).id, 'speed');
+    connect(g, well(g).id, 0, m.id);
+    connect(g, placeNode(g, 'well', 0, 0, { depositId: 2 })!.id, 0, m.id);
+    const shard = placeNode(g, 'refiner', 400, 100)!;
+    connect(g, well(g).id, 0, shard.id);
+    connect(g, shard.id, 0, m.id);
+    connect(g, shard.id, 0, placeNode(g, 'lab', 900, 100)!.id);
+    const ink = placeNode(g, 'refiner', 400, 400)!;
+    connect(g, placeNode(g, 'well', 0, 0, { depositId: 3 })!.id, 0, ink.id);
+    connect(g, ink.id, 0, m.id);
+    connect(g, ink.id, 1, placeNode(g, 'void', 700, 600)!.id);
+    run(g, 60);
+    const spark = placeNode(g, 'refiner', 400, 540)!;
+    connect(g, placeNode(g, 'well', 0, 0, { depositId: 4 })!.id, 0, spark.id);
+    run(g, 12); // the first Spark is made; the goal is claimed a few seconds later
+    g.events = [];
+    return g;
+  }
+
+  it('the first order asks for something already selling and fills in 30 to 40 s with nothing rerouted', () => {
+    for (let seed = 0; seed < 12; seed++) {
+      const g = byTheCardAtOrders();
+      g.orderSeed = (g.orderSeed + seed * 7919) >>> 0;
+      expect(orderCandidates(g)[0]).toBe('ink'); // Spark is newer, but none of it is sold
+      const wires = g.wires.length;
+      unlock(g);
+      const o = g.order!;
+      expect(['ink', 'shard']).toContain(o.mat);
+      expect(orderView(g)!.reachesMarket).toBe(true);
+      // It counts from the instant it appears...
+      run(g, 4);
+      expect(o.got, `seed ${seed}`).toBeGreaterThan(0);
+      // ...and is filled in 30 to 40 seconds, on the wires that were already there.
+      let seconds = 4;
+      while (!o.ready && seconds < 120) {
+        run(g, 1);
+        seconds++;
+      }
+      expect(seconds, `seed ${seed}: ${o.need} ${o.mat}`).toBeGreaterThanOrEqual(30);
+      expect(seconds, `seed ${seed}: ${o.need} ${o.mat}`).toBeLessThanOrEqual(40);
+      expect(g.wires.length).toBe(wires);
+      expect(o.need).toBeGreaterThanOrEqual(RULES.orders.first.minNeed);
+    }
+  });
+
+  it('stays a first order until one has been filled, even if it is swapped', () => {
+    const g = byTheCardAtOrders();
+    unlock(g);
+    const sized = (o: Order) => o.need / marketRates(g)[o.mat]!;
+    expect(sized(g.order!)).toBeGreaterThan(30);
+    expect(sized(g.order!)).toBeLessThan(40);
+    const again = makeOrder(g, g.order!.mat);
+    expect(sized(again)).toBeLessThan(40);
+    g.stats.ordersFilled = 1;
+    let longer = 0;
+    for (let i = 0; i < 40; i++) if (sized(makeOrder(g)) > 44) longer++;
+    expect(longer).toBeGreaterThan(30); // 45 to 90 s from then on (a few are held up by the minimum of 8)
+  });
+
+  it('prefers what is selling, and says so when the ordered material reaches no Market', () => {
+    const g = byTheCardAtOrders();
+    g.stats.ordersFilled = 1;
+    // Newest first among what is sold, then what is not: Spark has no wire out.
+    expect(orderCandidates(g)).toEqual(['ink', 'shard', 'spark']);
+    const count: Record<string, number> = {};
+    for (let i = 0; i < 400; i++) {
+      const o = makeOrder(g);
+      count[o.mat] = (count[o.mat] ?? 0) + 1;
+      if (o.mat === 'spark') expect(o.need).toBe(RULES.orders.minNeed); // 45–90 s of nothing
+    }
+    expect(count.ink).toBeGreaterThan(count.shard);
+    expect(count.shard).toBeGreaterThan(count.spark);
+    expect(count.spark).toBeGreaterThan(0);
+
+    // An order for Spark: the chip can say it is not reaching a Market, at once.
+    unlock(g);
+    while (g.order!.mat !== 'spark') g.order = makeOrder(g);
+    expect(orderReachesMarket(g)).toBe(false);
+    let view = orderView(g)!;
+    expect(view.reachesMarket).toBe(false);
+    expect(view.rate).toBe(0);
+    expect(view.eta).toBe(Infinity);
+    run(g, 20);
+    expect(orderView(g)!.reachesMarket).toBe(false);
+    expect(g.order!.got).toBe(0);
+    // One wire later it is, as soon as the first Spark is sold.
+    const spark = g.nodes.find((n) => n.recipe === 'spark')!;
+    connect(g, spark.id, 0, market(g).id);
+    run(g, 1);
+    view = orderView(g)!;
+    expect(view.reachesMarket).toBe(true);
+    expect(view.rate).toBeGreaterThan(0);
+    expect(view.eta).toBeLessThan(120);
+    // A slow trickle still counts between deliveries.
+    for (let t = 0; t < 12; t++) {
+      run(g, 1);
+      expect(orderView(g)!.reachesMarket).toBe(true);
+    }
+    run(g, 30);
+    expect(g.order!.ready).toBe(true);
+    expect(orderView(g)!.reachesMarket).toBe(true);
+    expect(orderView(g)!.eta).toBe(0);
+    // And when the player takes the wire away again, the chip says so after a while.
+    expect(claimOrder(g)).toBe(true);
+    g.order = { ...makeOrder(g), mat: 'spark', base: g.sold.spark ?? 0 };
+    cutWire(g, g.wires.find((w) => w.from === spark.id)!.id);
+    run(g, 40);
+    expect(orderView(g)!.reachesMarket).toBe(false);
   });
 
   it('pays mostly Data of the tier the player needs next, plus some credits', () => {
@@ -114,7 +321,19 @@ describe('orders (2.5)', () => {
     expect(neededTier(g)).toBe('b');
     const rb = orderReward(g, 'spark', 30);
     expect(rb.a).toBe(0);
-    expect(rb.b).toBe(23); // 90 α-worth is 22.5 β
+    // 90 α-worth is 22.5 β, and a quarter of it survives the conversion: Spark is α in a Lab, not β.
+    expect(RULES.orders.convertShare).toBe(0.25);
+    expect(rb.b).toBe(6);
+    // The other way round as well: Glyph is 5 β each in a Lab. Paid in β that is the whole 50 β for ten;
+    // paid in α (to a player who is short of α) it is a quarter of the 200 α they would be worth.
+    expect(orderReward(g, 'glyph', 10).b).toBe(50);
+    g.data.a = 0;
+    g.data.b = 1e6;
+    expect(neededTier(g)).toBe('a');
+    expect(orderReward(g, 'glyph', 10)).toMatchObject({ a: 50, b: 0, credits: 100 });
+    expect(orderReward(g, 'spark', 30).a).toBe(90); // its own kind of Data: nothing is lost
+    g.data.a = 1e6;
+    g.data.b = 0;
     // A tier the player has never produced is not paid, even if it is needed.
     g.data.b = 1e6;
     for (const id of ['P5', 'P7']) g.techs.push(id);

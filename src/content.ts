@@ -17,6 +17,8 @@ export interface Material {
   color: string;
   /** Tech needed before a Well can extract it (raw materials only). */
   tech?: string;
+  /** Data a Lab makes from one item, when that is not the usual amount for its tier (DATA_YIELD). */
+  study?: number;
 }
 
 export const MATERIALS: Record<MatId, Material> = {
@@ -26,7 +28,8 @@ export const MATERIALS: Record<MatId, Material> = {
   breeze: { id: 'breeze', name: 'Breeze', tier: 0, value: 2, demand: 1.5, color: '#5CE1FF', tech: 'P5' },
   shard: { id: 'shard', name: 'Shard', tier: 1, value: 3, demand: 1.5, color: '#B8F26B' },
   ink: { id: 'ink', name: 'Ink', tier: 1, value: 4, demand: 1.2, color: '#6F93FF' },
-  silt: { id: 'silt', name: 'Silt', tier: 1, value: 0.5, demand: 0.5, color: '#C2C8D2' },
+  // A by-product is poor study material: 1 α, not the 3 α of a refined item (three Silt make one Clay, which is worth 3 α).
+  silt: { id: 'silt', name: 'Silt', tier: 1, value: 0.5, demand: 0.5, color: '#C2C8D2', study: 1 },
   spark: { id: 'spark', name: 'Spark', tier: 1, value: 6, demand: 1, color: '#FF5A4E' },
   mist: { id: 'mist', name: 'Mist', tier: 1, value: 6, demand: 1, color: '#3FD6B5' },
   clay: { id: 'clay', name: 'Clay', tier: 1, value: 3, demand: 0.8, color: '#C08A5B' },
@@ -89,8 +92,8 @@ export interface NodeDef {
 export const NODE_DEFS: Record<NodeType, NodeDef> = {
   well: { type: 'well', name: 'Well', base: 10, growth: 1.15, tracks: ['speed'], verb: 'extract', blurb: 'Extracts a raw material. Must sit on a deposit.' },
   refiner: { type: 'refiner', name: 'Refiner', base: 50, growth: 1.15, tech: 'P1', tracks: ['speed', 'eff', 'buffer'], verb: 'refine', blurb: 'One input in, something better out.' },
-  assembler: { type: 'assembler', name: 'Assembler', base: 600, growth: 1.15, tech: 'P4', tracks: ['speed', 'eff', 'buffer'], verb: 'assemble', blurb: 'Combines two inputs.' },
-  fabricator: { type: 'fabricator', name: 'Fabricator', base: 7800, growth: 1.15, tech: 'P7', tracks: ['speed', 'eff', 'buffer'], verb: 'fabricate', blurb: 'Combines up to three inputs.' },
+  assembler: { type: 'assembler', name: 'Assembler', base: 600, growth: 2.5, tech: 'P4', tracks: ['speed', 'eff', 'buffer'], verb: 'assemble', blurb: 'Combines two inputs.' },
+  fabricator: { type: 'fabricator', name: 'Fabricator', base: 7100, growth: 1.15, tech: 'P7', tracks: ['speed', 'eff', 'buffer'], verb: 'fabricate', blurb: 'Combines up to three inputs.' },
   router: { type: 'router', name: 'Router', base: 25, growth: 1.1, tech: 'L1', tracks: [], verb: 'split', blurb: 'Splits a stream by ratio, priority or filter.' },
   merger: { type: 'merger', name: 'Merger', base: 25, growth: 1.1, tech: 'L2', tracks: [], verb: 'merge', blurb: 'A junction: many wires in, one stream out.' },
   silo: { type: 'silo', name: 'Silo', base: 200, growth: 1.2, tech: 'L5', tracks: ['buffer'], verb: 'store', blurb: 'A big buffer that smooths bursts.' },
@@ -113,7 +116,7 @@ export type DataTier = 'a' | 'b' | 'g';
 export const DATA_NAMES: Record<DataTier, string> = { a: 'α', b: 'β', g: 'γ' };
 export const DATA_COLORS: Record<DataTier, string> = { a: '#5EEAD4', b: '#C4A1FF', g: '#FF8FB1' };
 
-/** Data produced by a Lab per item, by item tier. */
+/** Data produced by a Lab per item, by item tier. A material's own `study` amount, where it has one, replaces the amount. */
 export const DATA_YIELD: { tier: DataTier; amount: number }[] = [
   { tier: 'a', amount: 1 },
   { tier: 'a', amount: 3 },
@@ -156,26 +159,31 @@ const T = (
 /**
  * Tech prices as tuned with the pacing bot (`npm run pacing`, docs/CONTENT.md). The reasoning, so that the
  * next change keeps it:
- *  - The Processing spine the goal chain asks for (P2 → P3 → P4 → P5 → P7) never costs more than about
- *    three minutes of the Data a slow player's un-upgraded Labs bring in at that point.
+ *  - The Processing spine the goal chain asks for (P2 → P3 → P4 → P5 → P7) is priced for the newcomer who
+ *    does what the goal card says and follows the adviser's tips (src/advice.ts): each of its waits is three
+ *    to three and a half minutes for that player, never four, and together they put the first Lens between
+ *    20 and 25 minutes. The tips about double that player's α, so without them the same prices are a wait of
+ *    seven to twenty minutes each: the spine is not priced for a player who ignores the adviser.
+ *  - Ember Deposits is the cheap one because a fast player has nothing else to do while it is saved for:
+ *    past about 220 α their hands are idle for more than a minute.
  *  - Side techs are impulse buys: cheap next to the spine tech they compete with, so every kind of player
- *    picks them up along the way. α for what is useful before the first Glyph, β after it.
+ *    picks them up along the way. α for what is useful before the first Glyph (Lab Speed, Merger, Pipes
+ *    Mk II: 150 α together), β after it. Wider Demand is β for that reason: nothing sells over demand before
+ *    the first Glyph, and at 200 α it cost a fast player most of a minute there.
  *  - Anything that only matters after the demo costs γ, which does not exist before the first Lens, and the
  *    late Processing techs need all three kinds of Data, so studying Tier 1 items never stops paying.
- * P1, R1, L1 and C1 are goal rewards (src/goals.ts) and cannot be bought.
- *
- * Retuned once after rule 2.1 was fixed for machine-to-machine wires (machines are fed properly now, so
- * everything past the first Assembler earns more): Fabricator 6,600 → 7,800¢, Fabrication 150 → 100β,
- * Paradox 400 → 450γ. Nothing else moved.
+ * P1, R1, L1, C1 and S1 are goal rewards (src/goals.ts) and cannot be bought. S1 (Bulk Upgrade) comes with
+ * "Fill three orders", just before the save for the Fabricator, so nobody has to press Upgrade a hundred
+ * times on a phone; upgrades are not balanced around dozens of tiny purchases.
  */
 export const TECHS: Record<string, Tech> = Object.fromEntries([
   // Processing
   T('P1', 'Refining', 'processing', 0, 0, {}, [], 'Your first machine. Turn raw Glint into Shard, which sells for more.', ['Refiner', 'Recipe: 2 Glint → Shard'], { auto: 'Reward for the goal “Wire it to the Market too”' }),
   T('P2', 'Murk Deposits', 'processing', 1, 0, { a: 45 }, ['R1'], 'Extract Murk and refine it into Ink. It leaves Silt behind, so you also get the Void to dump it.', ['Murk Wells', 'Recipe: 2 Murk → Ink + Silt', 'Void node']),
-  T('P3', 'Ember Deposits', 'processing', 2, 0, { a: 180 }, ['P2'], 'Extract Ember and refine it into Spark.', ['Ember Wells', 'Recipe: 2 Ember → Spark']),
-  T('P4', 'Assembly', 'processing', 3, 0, { a: 800 }, ['P3'], 'Machines with two inputs. Ink and Spark make Glyph, your first Tier 2 item and the source of β Data.', ['Assembler', 'Recipe: Ink + Spark → Glyph']),
-  T('P5', 'Breeze Deposits', 'processing', 4, 0, { a: 850 }, ['P4'], 'Extract Breeze, refine it into Mist, and combine Mist with Shard into Prism.', ['Breeze Wells', 'Recipe: 2 Breeze → Mist', 'Recipe: 2 Shard + Mist → Prism']),
-  T('P7', 'Fabrication', 'processing', 5, 0, { a: 700, b: 100 }, ['P5'], 'Three-input machines. Prism and Glyph become Lens, the first Tier 3 item and the source of γ Data.', ['Fabricator', 'Recipe: Prism + 2 Glyph → Lens']),
+  T('P3', 'Ember Deposits', 'processing', 2, 0, { a: 215 }, ['P2'], 'Extract Ember and refine it into Spark.', ['Ember Wells', 'Recipe: 2 Ember → Spark']),
+  T('P4', 'Assembly', 'processing', 3, 0, { a: 1140 }, ['P3'], 'Machines with two inputs. Ink and Spark make Glyph, your first Tier 2 item and the source of β Data.', ['Assembler', 'Recipe: Ink + Spark → Glyph']),
+  T('P5', 'Breeze Deposits', 'processing', 4, 0, { a: 1420 }, ['P4'], 'Extract Breeze, refine it into Mist, and combine Mist with Shard into Prism.', ['Breeze Wells', 'Recipe: 2 Breeze → Mist', 'Recipe: 2 Shard + Mist → Prism']),
+  T('P7', 'Fabrication', 'processing', 5, 0, { a: 1180, b: 100 }, ['P5'], 'Three-input machines. Prism and Glyph become Lens, the first Tier 3 item and the source of γ Data.', ['Fabricator', 'Recipe: Prism + 2 Glyph → Lens']),
   T('P9', 'Paradox', 'processing', 6, 0, { a: 2500, b: 500, g: 450 }, ['P8'], 'The capstone. Lens, Dynamo and raw Breeze fold into a Paradox.', ['Recipe: Lens + Dynamo + 4 Breeze → Paradox']),
   T('U1', 'Efficiency Tuning', 'processing', 1, 1, { b: 40 }, ['P1'], 'A new upgrade track for machines: some crafts consume no inputs.', ['Efficiency upgrades on machines']),
   T('U2', 'Overclock', 'processing', 2, 1, { g: 60 }, ['U1'], 'Raises the level cap on Speed upgrades from 10 to 25.', ['Speed level cap 25']),
@@ -192,7 +200,7 @@ export const TECHS: Record<string, Tech> = Object.fromEntries([
   T('L5', 'Silo', 'logistics', 3, 2, { b: 15 }, ['L2'], 'A large buffer that keeps machines fed through uneven supply.', ['Silo node']),
   // Commerce
   T('C1', 'Market Lens', 'commerce', 1, 0, {}, ['R1'], 'See live prices and how much of each material your Markets buy at full price.', ['Price gauges on Markets'], { auto: 'Reward for the goal “Fill your first order”' }),
-  T('C2', 'Wider Demand', 'commerce', 2, 0, { a: 200 }, ['C1'], 'Markets buy 50% more of everything at full price.', ['+50% demand, all materials']),
+  T('C2', 'Wider Demand', 'commerce', 2, 0, { b: 40 }, ['C1'], 'Markets buy 50% more of everything at full price.', ['+50% demand, all materials']),
   T('C4', 'Luxury Buyers', 'commerce', 3, 0, { b: 300 }, ['C2'], 'Tier 2 and Tier 3 items sell for 25% more.', ['+25% value on T2 and T3']),
   T('C5', 'Exports', 'commerce', 4, 0, { g: 80 }, ['C4'], 'Markets buy twice as much of everything at full price.', ['+100% demand, all materials']),
   // Research
@@ -201,7 +209,7 @@ export const TECHS: Record<string, Tech> = Object.fromEntries([
   T('R3', 'Deep Analysis', 'research', 2, 0, { b: 80 }, ['R2'], 'Every item studied yields 50% more Data.', ['+50% Data per item']),
   T('R4', 'Long Absence', 'research', 1, 1, { a: 210 }, ['R1'], 'Your supply line keeps earning for up to 8 hours while you are away, instead of 2.', ['Offline cap 2h → 8h'], { needsEnd: true }),
   // Scale tools
-  T('S1', 'Bulk Upgrade', 'scale', 1, 0, { a: 60 }, ['L1'], 'Upgrade every node of the same kind with one click.', ['"Upgrade all" button']),
+  T('S1', 'Bulk Upgrade', 'scale', 1, 0, {}, ['L1'], 'Upgrade every node of the same kind with one click.', ['"Upgrade all" button'], { auto: 'Reward for the goal “Fill three orders”' }),
   T('S3', 'Auto-balance', 'scale', 2, 0, { b: 50 }, ['S1', 'L4'], 'One click sets a Router\'s weights to match what each destination can actually use.', ['Router: Auto-balance']),
 ].map((t) => [t.id, t]));
 
@@ -236,20 +244,53 @@ export const RULES = {
    * the Market on the same port, which left that machine starved although everything it needed was being made
    * (2.1: machines are fed first). The long-run rate through a wire is still its capacity.
    */
-  wires: { burstSeconds: 1 },
+  wires: {
+    burstSeconds: 1,
+    /**
+     * How a wire's displayed rate (wire.rate) is measured. Nothing in the simulation reads it.
+     * A machine takes its inputs in gulps, so a plain moving average of what passes swings by a third around
+     * the true rate. Instead whole gulps are measured, from one start of flow to the next, and the rate shown
+     * is items over seconds across the gulps that make up one round of the pattern: exact for any pattern
+     * that repeats, close for one that does not.
+     */
+    rate: {
+      /** Seconds of smoothing on the displayed number. */
+      smooth: 1.5,
+      /**
+       * How many whole gulps are remembered. A pattern that repeats within half of them is measured exactly:
+       * a machine with Efficiency skips its inputs on every third to sixth craft, which makes a round of up to
+       * a dozen gulps on the wire that feeds it.
+       */
+      gulps: 32,
+      /**
+       * A round must hold over the gulps of the last this many seconds before it is believed. With no repeat
+       * found, the most recent gulps that together last at least this long are averaged.
+       */
+      window: 8,
+      /** Flow that has not paused for this long is steady, not a gulp: it is measured directly. */
+      steadyAfter: 8,
+      /** A gulp longer than this is not a pattern worth waiting for. */
+      longest: 30,
+      /** The next gulp is overdue after this many times the longest remembered one: the pattern is dropped. */
+      overdue: 1.5,
+    },
+  },
 
   /**
-   * 2.1 Fan-out. A plain port feeds machines, Routers, Mergers and Silos first; Markets, Labs and Voids share
-   * what is left. That is the plan's rule and the default.
+   * 2.1 Fan-out: "machines are fed first; what is left goes on to selling and study".
+   * A plain port feeds machines first. A Router, Merger or Silo counts as a machine when any path from it
+   * leads to one; a junction whose every path ends at Markets, Labs, Silos, Voids or nowhere waits with the
+   * Markets, Labs and Voids and shares what the machines leave.
    *
-   * `deadEndJunctionsLast` is a switch for the designer, off by default. On, a Router, Merger or Silo that leads
-   * only to Markets, Labs and Voids (or nowhere) waits with them for what the machines leave. Why it exists: the
-   * goal chain has the player hang a Router to a Lab and a Market on a machine's port; served first, it takes
-   * half of what an Assembler built on that port later needs, and that Assembler shows as starved. Why it is
-   * off: that same half is what keeps a Lab fed once machines want everything, and without it a player who only
-   * follows the goal card waits much longer for Data (tests/playthrough.test.ts measures both).
+   * `deadEndJunctionsLast` is that last clause. It is on: the goal chain has the player hang a Router to a
+   * Lab and a Market on a machine's port, and served first it took half of what the Assembler built on that
+   * port later needed. Off gives the first reading of the plan (every junction is served with the machines);
+   * it is kept as a switch for what-if runs (`npm run pacing -- --set=rules.fanOut.deadEndJunctionsLast=0`).
    */
-  fanOut: { deadEndJunctionsLast: false },
+  fanOut: { deadEndJunctionsLast: true },
+
+  /** The one-press Router preset (favour() in src/actions.ts): Ratio mode, this weight on the chosen wire and `rest` on the others. */
+  router: { favour: 3, rest: 1 },
 
   /** 2.2 Demand: full price up to a material's demand rate, a flat share of it for the surplus. */
   demand: {
@@ -259,6 +300,13 @@ export const RULES = {
     burstSeconds: 8,
     /** ...and never for fewer items than this (one Paradox every 12 s must still sell whole at full price). */
     minBurst: 1,
+    /**
+     * The first time a material keeps selling over its demand for `seconds` (surplus sales no more than `gap`
+     * apart), g.seenSurplus is set and a 'surplus' event raised: the interface introduces the demand gauge then.
+     * The gap is longer than the slowest craft (a Paradox takes 12 s): a machine hands over whole items, so a
+     * line that is over demand makes one surplus sale per craft, seconds apart, for as long as it runs.
+     */
+    notice: { seconds: 3, gap: 13 },
   },
 
   /** 2.3 Flow. */
@@ -275,10 +323,24 @@ export const RULES = {
     stateSeconds: 10,
     /** ...with at least this many counted producers. */
     stateProducers: 6,
-    /** The "hold Flow" goal: smoothed Flow at or above this share... */
-    holdShare: 0.75,
+    /**
+     * The "hold Flow" goal: smoothed Flow at or above this share... On a board of fewer than nineteen
+     * producers that is all of them. A newcomer arrives with seven of nine or nine of ten flowing (the Spark
+     * Refiner is short of Ember, sometimes the Ink Refiner of Murk) and has to find and fix what is not: at
+     * 75% the goal completed by itself, and at 90% it still did for anyone with ten producers.
+     */
+    holdShare: 0.95,
     /** ...for this many seconds. */
     holdSeconds: 10,
+  },
+
+  /** 2.4 Goal thresholds that are numbers rather than events (the Flow goal's are in `flow` above). */
+  goals: {
+    /**
+     * "Study Glyph for β": this much β in hand. About a minute of one Assembler's Glyph in a Lab: a goal with
+     * something to watch, between the first Glyph and the wait for Breeze Deposits.
+     */
+    studyBeta: 40,
   },
 
   /** 2.5 Orders. */
@@ -287,12 +349,21 @@ export const RULES = {
     seed: 0x5eed1e55,
     /** An order asks for between this many... */
     minSeconds: 45,
-    /** ...and this many seconds of the material's current output... */
+    /** ...and this many seconds of what currently reaches Markets of that material... */
     maxSeconds: 90,
     /** ...but never fewer items than this. */
     minNeed: 8,
-    /** A material counts as "currently produced" above this output (items/s). */
+    /**
+     * Until the player has filled an order: something that is already selling, sized to this many seconds of it
+     * (so it fills in 30 to 40 s with nothing rerouted), and at least `minNeed` items.
+     */
+    first: { seconds: [32, 37] as [number, number], minNeed: 3 },
+    /** A material counts as "currently produced", or as reaching a Market, above this rate (items/s). */
     minRate: 0.02,
+    /** orderView: the ordered material "reaches a Market" while its smoothed sales stay above this rate (items/s)... */
+    sellingRate: 0.005,
+    /** ...or for this many seconds after the order's last delivery, so that a slow trickle still counts. */
+    sellingMemory: 30,
     /** Materials worth less than this are never asked for (Silt). */
     junkValue: 1,
     /** Chance of asking for the newest, second-newest and third-newest material the player makes. */
@@ -303,6 +374,13 @@ export const RULES = {
     creditShareNoData: 1,
     /** Data paid, as a share of what studying the delivered items in a Lab would yield (converted with DATA_WORTH). */
     dataShare: 1,
+    /**
+     * The share of that which survives when the pay is in another kind of Data than the items would give in a
+     * Lab (Glyph is β in a Lab; an order that pays α for it converts). At 1 a single Glyph order paid 400 α,
+     * two minutes of a newcomer's Labs in one lump, and which material the next order happened to ask for
+     * decided the pace of a run: the same player reached the Lens up to three minutes apart.
+     */
+    convertShare: 0.25,
     /** An unfilled order with no deliveries for this long is quietly replaced. */
     staleSeconds: 120,
   },

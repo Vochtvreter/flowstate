@@ -1,11 +1,11 @@
 // Deterministic, DOM-free simulation. tick(game, dt) advances everything.
 import { DataTier, MATERIALS, MatId, RULES, Recipe } from './content';
 import {
-  bufMult, cycleTime, dataYield, effEvery, endDemo, labRate, offlineCap, pipeCap, recipeOf, refillDemand, research, sellValue, wellRate,
+  bufMult, cycleTime, dataYield, demandBurst, effEvery, endDemo, labRate, offlineCap, pipeCap, recipeOf, refillDemand, research, sellValue, wellRate,
 } from './economy';
 import { updateFlow } from './flow';
 import { tickGoal } from './goals';
-import { Graph, graph, isMachine, isPass, isSink } from './graph';
+import { Graph, graph, isMachine, isPass, isSink, leadsToMachine } from './graph';
 import { tickOrders } from './orders';
 import { Bag, Game, GNode, Status, Wire, cloneGame } from './state';
 
@@ -188,6 +188,34 @@ function produceLab(g: Game, n: GNode, dt: number, hasInputs: boolean) {
   if (n.status === 'starved') n.status = n.rate > 0.01 ? 'working' : hasInputs ? 'starved' : 'idle';
 }
 
+/** Per game: for each material, when its current run of over-demand sales began and when the latest one was. */
+const surplusRuns = new WeakMap<Game, Map<MatId, { since: number; last: number }>>();
+
+/**
+ * Called with every sale that went (partly) over demand. The first material to keep that up for a few
+ * seconds sets g.seenSurplus and raises the one-off 'surplus' event (RULES.demand.notice).
+ */
+function noteSurplus(g: Game, m: MatId) {
+  if (g.seenSurplus) return;
+  const N = RULES.demand.notice;
+  let runs = surplusRuns.get(g);
+  if (!runs) surplusRuns.set(g, (runs = new Map()));
+  const run = runs.get(m);
+  if (!run || g.time - run.last > N.gap) {
+    runs.set(m, { since: g.time, last: g.time });
+    return;
+  }
+  run.last = g.time;
+  if (g.time - run.since < N.seconds) return;
+  g.seenSurplus = true;
+  surplusRuns.delete(g);
+  const share = Math.round(RULES.demand.surplusShare * 100);
+  g.events.push({
+    kind: 'surplus', mat: m,
+    text: `${MATERIALS[m].name} is selling faster than Markets want it: the extra goes for ${share}% of the price.`,
+  });
+}
+
 function deliver(g: Game, w: Wire, dest: GNode, m: MatId, amt: number) {
   w.budget -= amt;
   w.flow += amt;
@@ -195,6 +223,7 @@ function deliver(g: Game, w: Wire, dest: GNode, m: MatId, amt: number) {
   w.mat = m;
   if (dest.type === 'market') {
     // The one place sales are paid: full price up to demand, the surplus price beyond, times the Flow bonus.
+    if (!g.seenSurplus && amt > (g.demandLeft[m] ?? demandBurst(g, m)) + EPS) noteSurplus(g, m);
     const earned = sellValue(g, m, amt);
     g.credits += earned;
     g.lifetime += earned;
@@ -240,29 +269,11 @@ function share(
   return remaining;
 }
 
-/** Per graph: does this pass-through node lead on to a machine (through any number of Routers, Mergers and Silos)? */
-const leadsOn = new WeakMap<Graph, Map<number, boolean>>();
-
-function leadsToMachine(c: Graph, id: number, seen = new Set<number>()): boolean {
-  let known = leadsOn.get(c);
-  if (!known) leadsOn.set(c, (known = new Map()));
-  const cached = known.get(id);
-  if (cached != null) return cached;
-  if (seen.has(id)) return false; // a loop of junctions leads nowhere by itself
-  seen.add(id);
-  let found = false;
-  for (const wires of c.outs.get(id) ?? []) {
-    for (const w of wires ?? []) {
-      const d = c.byId.get(w.to);
-      if (d && (isMachine(d) || (isPass(d) && leadsToMachine(c, d.id, seen)))) found = true;
-    }
-  }
-  // Only cache answers that did not depend on cutting a loop short.
-  if (found || seen.size === 1) known.set(id, found);
-  return found;
-}
-
-/** Is this destination served before Markets, Labs and Voids on a plain port? (RULES.fanOut) */
+/**
+ * Is this destination served before Markets, Labs and Voids on a plain port? (RULES.fanOut)
+ * Machines always are. A Router, Merger or Silo is when it leads on to a machine; one whose every path ends
+ * at Markets, Labs, Voids or nowhere waits with them (unless RULES.fanOut.deadEndJunctionsLast is off).
+ */
 function fedFirst(c: Graph, d: GNode): boolean {
   if (isMachine(d)) return true;
   if (!isPass(d)) return false;
@@ -272,9 +283,9 @@ function fedFirst(c: Graph, d: GNode): boolean {
 /**
  * Split `avail` of material m across the wires of one output port. Returns the amount moved.
  *
- * A plain port (anything but a Router) feeds machines and pass-through nodes first, evenly, and lets
- * Markets, Labs and Voids share whatever is left (with RULES.fanOut.deadEndJunctionsLast, a pass-through
- * node that leads to no machine waits with them). A Router follows its mode; its Even mode is truly even.
+ * A plain port (anything but a Router) feeds machines first, evenly, together with any Router, Merger or
+ * Silo that leads on to a machine; Markets, Labs, Voids and the junctions that only lead to those share
+ * whatever is left. A Router follows its mode; its Even mode is truly even.
  */
 function distribute(g: Game, c: Graph, src: GNode, wires: Wire[], m: MatId, avail: number): number {
   const router = src.type === 'router';
@@ -327,6 +338,84 @@ function transferFrom(g: Game, c: Graph, n: GNode) {
   }
 }
 
+/**
+ * The rate over a run of whole gulps (items, seconds, items, seconds..., oldest first), and the longest of them.
+ * If the gulps repeat in rounds of k, the newest k are one round of the pattern and its rate is exact: a
+ * Refiner feeding an Assembler and a Market hands over items every 4, 2, 4, 2 seconds. With no repeat, the
+ * most recent gulps lasting RULES.wires.rate.window together are averaged.
+ */
+function gulpRate(past: number[], dt: number): { est: number; max: number } {
+  const R = RULES.wires.rate;
+  const m = past.length / 2;
+  let max = 0;
+  for (let i = 1; i < past.length; i += 2) max = Math.max(max, past[i]);
+  const same = (a: number, b: number) =>
+    Math.abs(past[2 * a] - past[2 * b]) <= 0.02 * past[2 * a] + 1e-6 && Math.abs(past[2 * a + 1] - past[2 * b + 1]) <= 2 * dt + 1e-6;
+  // How many of the newest gulps make up the last `window` seconds (all of them, if they are shorter than that).
+  let recent = 0;
+  for (let seconds = 0; recent < m && seconds < R.window; recent++) seconds += past[2 * (m - 1 - recent) + 1];
+  // A round of k gulps must repeat at least once, and hold over the last six gulps and over everything in the
+  // window: two equal gulps in a row are not yet a pattern of one, and neither are six when the seventh of
+  // every round is a different one (a Router topping up a full Silo).
+  let take = 0;
+  for (let k = 1; k <= m / 2 && !take; k++) {
+    const back = Math.min(m, Math.max(2 * k, 6, recent));
+    let repeats = true;
+    for (let i = m - back + k; i < m && repeats; i++) repeats = same(i, i - k);
+    if (repeats) take = k;
+  }
+  let items = 0;
+  let seconds = 0;
+  for (let i = m - 1; i >= 0 && (take ? i >= m - take : seconds < R.window); i--) {
+    items += past[2 * i];
+    seconds += past[2 * i + 1];
+  }
+  return { est: seconds > 0 ? items / seconds : 0, max };
+}
+
+/**
+ * Update a wire's displayed rate from what it carried this tick (w.flow). Display only: nothing reads it back.
+ *
+ * Steady flow is smoothed directly, as it always was. Flow that comes in gulps (a machine taking two inputs
+ * per craft, a Refiner handing over one whole item) is measured gulp by gulp instead: from one start of flow
+ * to the next, and the rate is the items over the seconds of one round of the pattern (gulpRate). For a
+ * pattern that repeats that is exactly the long-run rate, with no swing; it settles one gulp after the
+ * pattern starts and lets go when the next gulp is overdue (the flow stopped, or stopped pausing).
+ */
+function measureWire(w: Wire, dt: number) {
+  const R = RULES.wires.rate;
+  const u = (w.gulp ??= { n: 0, t: 0, on: 0, idle: 1, armed: false, past: [], est: 0, max: 0 });
+  const flowing = w.flow > EPS;
+  if (flowing) {
+    if (u.idle > 0) {
+      // Flow starts after a pause: the gulp that began at the last start is whole.
+      if (u.armed && u.t <= R.longest) {
+        u.past.push(u.n, u.t);
+        if (u.past.length > 2 * R.gulps) u.past.splice(0, u.past.length - 2 * R.gulps);
+        const r = gulpRate(u.past, dt);
+        u.est = r.est;
+        u.max = r.max;
+      } else u.past.length = 0;
+      u.armed = true;
+      u.n = 0;
+      u.t = 0;
+      u.on = 0;
+    }
+    u.on += dt;
+    u.idle = 0;
+  } else u.idle += dt;
+  u.n += w.flow;
+  u.t += dt;
+  if (u.on > R.steadyAfter) {
+    // No pause for a long while: steady flow. Whatever comes after the next pause is not a whole gulp.
+    u.past.length = 0;
+    u.armed = false;
+  }
+  // The next gulp is overdue: the pattern is gone, measure directly again.
+  if (u.past.length && u.t > R.overdue * u.max + dt) u.past.length = 0;
+  w.rate = ema(w.rate, u.past.length ? u.est : w.flow / dt, dt, R.smooth);
+}
+
 /** Ticks run per game, so the order nodes hand items on rotates the same way for every game. */
 const tickCount = new WeakMap<Game, number>();
 
@@ -372,7 +461,7 @@ export function tick(g: Game, dt: number) {
     }
   }
 
-  for (const w of g.wires) w.rate = ema(w.rate, w.flow / dt, dt, 1.5);
+  for (const w of g.wires) measureWire(w, dt);
 
   for (const k in MATERIALS) {
     const m = k as MatId;
