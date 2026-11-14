@@ -16,7 +16,7 @@
 import {
   act, connect, cutWire, favour, favouredWire, freeDeposits, materialsAt, pickRecipe, placeNode, upgrade, upgradeAll,
 } from './actions';
-import { DATA_NAMES, DATA_YIELD, DataTier, MATERIALS, MAT_IDS, MatId, NODE_DEFS, NodeType, TECHS, Track } from './content';
+import { DATA_NAMES, DATA_WORTH, DATA_YIELD, DataTier, MATERIALS, MAT_IDS, MatId, NODE_DEFS, NodeType, TECHS, Track } from './content';
 import {
   costText, dataYield, demandInfo, has, labRate, maxLevel, nodeCost, recipeOf, research, techAffordable, techAvailable, trackAvailable,
   upgradeCost, wellRate,
@@ -722,7 +722,8 @@ interface Outcome {
  * Two tips that save the same time are told apart by it: studying Silt that was being thrown away beats
  * studying Ink that was being sold.
  */
-const purse = (copy: Game, w: Wait) => (w.kind === 'credits' ? copy.data.a + 4 * copy.data.b + 12 * copy.data.g : copy.credits);
+const purse = (copy: Game, w: Wait) =>
+  (w.kind === 'credits' ? TIERS.reduce((sum, k) => sum + DATA_WORTH[k] * copy.data[k], 0) : copy.credits);
 
 /** Sooner first; within a second or two per cent of each other, the one that leaves the player richer. */
 function sooner(a: { o: Outcome; rest: number }, b: { o: Outcome; rest: number }): number {
