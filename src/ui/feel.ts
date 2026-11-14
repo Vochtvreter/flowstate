@@ -94,12 +94,13 @@ function payout(from: Pt, r: GoalReward) {
     const to = dataPt(k);
     fly(from, to, DATA_COLORS[k], n, land(`data-${k}`, to, `+${fmt(amount)}${k === 'a' ? 'α' : k === 'b' ? 'β' : 'γ'}`, DATA_COLORS[k], n), { ...quick, shape: 'diamond', size: 4.6 });
   }
-  // A new machine in the hotbar: show the player where it has appeared.
+  // A new machine in the hotbar: stars fly to where it has appeared. (They are drawn as far as the edge
+  // of the stage, which the hotbar sits against.)
   for (const id of r.techs ?? []) {
     for (const type of Object.keys(NODE_DEFS) as NodeType[]) {
       if (NODE_DEFS[type].tech !== id) continue;
       const to = centreOf(`[data-testid="hot-${type}"]`);
-      if (to) fly(from, to, UNLOCK, 5, () => ring(to, UNLOCK, { top: true, size: 36 }), { ttl: 0.42, stagger: 0.04, shape: 'star', size: 5 });
+      if (to) fly(from, to, UNLOCK, 5, undefined, { ttl: 0.42, stagger: 0.04, shape: 'star', size: 5 });
     }
   }
 }
@@ -289,20 +290,41 @@ function onPlace(d: { id: number }) {
 
 let inFlow = false;
 let edge: HTMLElement | null = null;
+/** The glow around the board is wanted (Flow State is on), and how far its bright line has faded in, 0..1. */
 let edgeOn = false;
-let breathTimer = 0;
+let edgeLevel = 0;
+let edgeClock = 0;
+/** Seconds for one breath of the glow. */
+const BREATH = 4.4;
+
+// The bright line along the board's edge, which swells and sinks while the soft glow behind it
+// (four still strips, feel.css) stays put. Drawn here because this canvas is redrawn every frame anyway.
+const edgeOverlay: Overlay = {
+  active: () => edgeOn || edgeLevel > 0.01,
+  draw(c, dt) {
+    edgeLevel += ((edgeOn ? 1 : 0) - edgeLevel) * (1 - Math.exp(-dt / (edgeOn ? 0.5 : 0.9)));
+    edgeClock += dt;
+    const breath = reduced() ? 0.5 : 0.5 - 0.5 * Math.cos((edgeClock / BREATH) * Math.PI * 2);
+    const r = boardRect();
+    c.strokeStyle = '#5CE1FF';
+    c.globalAlpha = edgeLevel * (0.1 + 0.12 * breath);
+    c.lineWidth = 10;
+    c.strokeRect(r.left + 5, r.top + 5, r.width - 10, r.height - 10);
+    c.globalAlpha = edgeLevel * (0.3 + 0.4 * breath);
+    c.lineWidth = 2;
+    c.strokeRect(r.left + 1, r.top + 1, r.width - 2, r.height - 2);
+    c.globalAlpha = 1;
+  },
+};
 
 function tickFlow() {
   const g = ui.g;
   const state = inFlowState(g);
-  // The glow around the board. It fades in and out by itself (feel.css); the breathing is switched off
-  // only once the fade-out has finished, so nothing jumps.
-  if (edge && state !== edgeOn) {
+  // The glow around the board: the strips fade in and out by themselves (feel.css), the line follows (above).
+  if (state !== edgeOn) {
     edgeOn = state;
-    setClass(edge, 'on', state);
-    clearTimeout(breathTimer);
-    if (state) setClass(edge, 'breathe', true);
-    else breathTimer = window.setTimeout(() => edge && setClass(edge, 'breathe', false), 3000);
+    if (state) edgeClock = 0;
+    if (edge) setClass(edge, 'on', state);
   }
   // The hum and the quicker dots stop while the game is paused: a paused factory is not humming.
   const on = state && !g.paused;
@@ -349,12 +371,13 @@ export function initFeel() {
   initCelebrate({ record, payout });
   initHand({ record, busy: celebrating });
   addOverlay(racerOverlay);
+  addOverlay(edgeOverlay);
   addMuteButton();
 
   // The glow around the board's edge in Flow State: four strips, one along each edge of the stage,
-  // above the board and under the HUD.
+  // just above the board and under the HUD.
   const stage = document.getElementById('stage');
-  if (stage) stage.appendChild((edge = el(`<div id="feel-edge" aria-hidden="true"><i><b></b></i><i><b></b></i><i><b></b></i><i><b></b></i></div>`)));
+  if (stage) stage.appendChild((edge = el(`<div id="feel-edge" aria-hidden="true"><i></i><i></i><i></i><i></i></div>`)));
 
   window.addEventListener('pointerdown', (e) => (lastPress = { x: e.clientX, y: e.clientY }), { capture: true, passive: true });
 

@@ -220,7 +220,8 @@ export function celebrateGoal(goalId: string, reward: GoalReward) {
 /** First Glyph: two streams, Ink from the left and Spark from the right, run into the glyph and set it off. */
 function converge(at: Pt, spec: Spec, reward: GoalReward) {
   const r = app.getBoundingClientRect();
-  const reach = Math.min(r.width * 0.46, 520);
+  // (Kept inside the top effects layer, which is about 900 px wide and centred on the glyph.)
+  const reach = Math.min(r.width * 0.46, 420);
   const left = { x: at.x - reach, y: at.y + 30 }, right = { x: at.x + reach, y: at.y - 30 };
   const opts = { ttl: 0.5, stagger: 0.024, spread: 54, size: 6, top: true };
   fly(left, at, MATERIALS.ink.color, 22, () => {
@@ -242,7 +243,7 @@ export function celebrateFlow() {
     color: '#5CE1FF', life: 3000, block: false,
     show: (at, spec) => {
       const from = anchorPt('flow') ?? at;
-      for (let i = 0; i < 3; i++) later(i * 520, () => ring(at, spec.color, { top: true, size: 260 + i * 60, life: 1.5 }));
+      for (let i = 0; i < 3; i++) later(i * 520, () => ring(at, spec.color, { top: true, size: 200 + i * 50, life: 1.5 }));
       ring(from, '#ffffff', { top: true, size: 44, life: 0.7 });
     },
   });
@@ -262,7 +263,7 @@ function lensCard(life: number) {
             const a = (i / RAINBOW.length) * Math.PI * 2 + wave;
             burst({ x: at.x + Math.cos(a) * 60 * wave, y: at.y + Math.sin(a) * 40 * wave }, MATERIALS[m].color, 14, { top: true, power: 2.4 - wave * 0.3, shape: wave === 1 ? 'star' : 'diamond' });
           });
-          ring(at, '#ffffff', { top: true, size: 170 + wave * 90, life: 0.9 });
+          ring(at, '#ffffff', { top: true, size: 150 + wave * 70, life: 0.9 });
         });
       }
       burst(at, '#ffffff', 30, { top: true, power: 2.6 });

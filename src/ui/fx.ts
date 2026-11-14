@@ -3,8 +3,9 @@
 //    wires, the pulse on open ports, and particles that belong to the board (sale floaters, sparks);
 //  - the bar layer (`#fx-bar`, made here, a strip over the top bar and a little below it): whatever
 //    has to be seen up there, such as a coin on the last stretch of its way to the credits counter;
-//  - the top layer (`#fx-top`, made here, over the whole app and above every panel): particles that
-//    must be seen above the HUD in the middle of the screen, such as a celebration's sparks.
+//  - the top layer (`#fx-top`, made here, above every panel): particles that must be seen above
+//    the HUD, such as a celebration's sparks. It is a patch of the screen, not all of it, and it
+//    is moved to wherever the next effect is whenever it is empty.
 // Nothing here touches the DOM after init, and nothing here knows about the game: the board hands
 // over wire geometry as `Flow` objects, everyone else calls the particle functions or adds an
 // overlay (a function that draws its own thing each frame).
@@ -16,7 +17,8 @@
 // menu and the phone's sheets, while coins must fly over the top bar: one canvas cannot be both.
 // And a canvas costs by its size every frame it changes, which the board layer does anyway (the
 // dots) and a strip hardly does at all; so the everyday traffic (coins from every sale) is drawn
-// on those two, and the big top layer is only touched for the second or two of a celebration.
+// on those two, and the top layer is kept to a patch and only touched for the second or two of a
+// celebration.
 
 export interface Pt { x: number; y: number }
 
@@ -123,13 +125,17 @@ interface Surface {
 /** Layer numbers. A particle is on one of them, or on AUTO: wherever it happens to be this frame. */
 const BOARD = 0, TOP = 1, BAR = 2, AUTO = -1;
 /**
- * The top layer is drawn at one canvas pixel per CSS pixel whatever the screen: it only ever holds
- * small moving shapes, and at full ratio on a phone it would be the largest canvas on the page.
+ * The top layer is drawn at one canvas pixel per CSS pixel whatever the screen (it only ever holds
+ * small moving shapes), and is never larger than this, in CSS px.
  */
 const TOP_RATIO = 1;
+const TOP_W = 900, TOP_H = 620;
 /** How far the bar layer reaches below the top bar, in px. */
 const BAR_SKIRT = 44;
 let appEl: HTMLElement | null = null;
+let appX = 0, appY = 0, appW = 0, appH = 0;
+/** Live particles that belong to the top layer. While there are none it may be moved. */
+let topCount = 0;
 let top: Surface | null = null;
 let bar: Surface | null = null;
 let sizeDirty = true;
@@ -208,17 +214,45 @@ function resize() {
   }
   if (!appEl || !top || !bar) return;
   const a = appEl.getBoundingClientRect();
-  place(top, a.left, a.top, Math.max(1, Math.round(a.width)), Math.max(1, Math.round(a.height)), TOP_RATIO);
+  appX = a.left; appY = a.top;
+  appW = Math.max(1, Math.round(a.width)); appH = Math.max(1, Math.round(a.height));
+  // The top layer: a patch in the middle until an effect asks for it somewhere else (see aimTop).
+  const tw = Math.min(appW, TOP_W), th = Math.min(appH, TOP_H);
+  place(top, appX + Math.round((appW - tw) / 2), appY + Math.round((appH - th) / 2), tw, th, TOP_RATIO);
+  moveTop();
   // The strip from the top of the app to a little below the top of the stage: the top bar, in every
   // layout, and room under it for a number to pop up beneath a counter. No strip when there is no bar.
   const barH = Math.round(r.top - a.top);
   place(bar, a.left, a.top, Math.max(1, Math.round(a.width)), barH > 0 ? barH + BAR_SKIRT : 0, d);
 }
 
+function moveTop() {
+  if (top) top.canvas.style.transform = `translate(${top.x - appX}px, ${top.y - appY}px)`;
+}
+
+/** Centre the top layer on a point (as far as the app's edges allow), unless something is still being drawn on it. */
+function aimTop(x: number, y: number) {
+  if (sizeDirty) resize();
+  if (!top || topCount > 0) return;
+  const nx = Math.max(appX, Math.min(appX + appW - top.w, Math.round(x - top.w / 2)));
+  const ny = Math.max(appY, Math.min(appY + appH - top.h, Math.round(y - top.h / 2)));
+  if (nx === top.x && ny === top.y) return;
+  top.x = nx;
+  top.y = ny;
+  moveTop();
+}
+
 const inStage = (x: number, y: number, m = 0) => x >= originX - m && x <= originX + W + m && y >= originY - m && y <= originY + H + m;
 const inBar = (x: number, y: number, m = 0) => !!bar && bar.h > 0 && x >= bar.x - m && x <= bar.x + bar.w + m && y >= bar.y - m && y <= bar.y + bar.h + m;
-/** The layer for something that must be seen above the HUD at this point: the strip if it is over the top bar, else the big one. */
-const above = (x: number, y: number) => (inBar(x, y) ? BAR : TOP);
+/**
+ * The layer for something that must be seen above the HUD at this point: the strip if it is over
+ * the top bar, else the top layer, which is brought here if it is free.
+ */
+function above(x: number, y: number): number {
+  if (inBar(x, y)) return BAR;
+  aimTop(x, y);
+  return TOP;
+}
 
 /**
  * How lively the wires look, 0..1. The feel module raises it in Flow State: dots then run a little
@@ -476,6 +510,7 @@ function spawn(kind: number, layer: number): Particle | null {
       cursor = (cursor + i + 1) % POOL;
       p.kind = kind;
       p.layer = layer;
+      if (layer === TOP) topCount++;
       p.mask = 0;
       p.t = 0;
       p.shape = '';
@@ -491,11 +526,14 @@ function kill(p: Particle) {
   p.kind = 0;
   p.done = null;
   live--;
+  if (p.layer === TOP) topCount--;
 }
 
 /**
  * `top` draws above every panel instead of on the board (where the HUD covers it): on the strip
- * over the top bar when the point is up there, otherwise on the big top layer.
+ * over the top bar when the point is up there, otherwise on the top layer. That layer is a patch
+ * about 900 by 620 px, centred on the first effect that uses it and staying there until it is
+ * empty again, so effects that share it should be near each other.
  */
 export interface LayerOpt { top?: boolean }
 export interface BurstOpts extends LayerOpt {
@@ -540,8 +578,9 @@ export function burst(at: Pt, color: string, count = 10, o?: BurstOpts) {
 /**
  * Send `count` coin-like particles from one point to another along slightly different arcs.
  * Each is drawn on whichever layer it is passing over: on the board while it is over the stage
- * (where the HUD may hide it for a moment), on the strip once it is over the top bar. With `top`
- * the whole flight is above every panel.
+ * (where the HUD may hide it for a moment), on the strip once it is over the top bar; over anything
+ * else (the hotbar, the inspector) it is not drawn. With `top` the whole flight is on the top layer,
+ * above every panel, which is centred on where it is going.
  * `onArrive` runs once, when the first of them lands (or at once, if the pool is full and nothing
  * could be sent), so it is safe to hang a counter update or a sound on it.
  */
@@ -553,6 +592,7 @@ export function fly(from: Pt, to: Pt, color: string, count = 3, onArrive?: () =>
   const spread = o?.spread ?? 12;
   const stagger = o?.stagger ?? 0.06;
   let sent = 0;
+  if (o?.top) aimTop(to.x, to.y);
   for (let i = 0; i < count; i++) {
     const p = spawn(COIN, o?.top ? TOP : AUTO);
     if (!p) break;
@@ -642,10 +682,10 @@ function stepParticles(dt: number) {
     if (p.layer !== AUTO) p.mask = 1 << p.layer;
     else {
       // On the strip when it is under it, else on the board when it is over the stage; near the line
-      // between the two, on both. Over neither (the hotbar, the inspector) only the big layer can show it.
+      // between the two, on both. Over neither (the hotbar, the inspector) it is not drawn.
       const x = p.vx, y = p.vy;
       const onBar = inBar(x, y), onStage = inStage(x, y);
-      let m = onBar ? 1 << BAR : onStage ? 1 << BOARD : 1 << TOP;
+      let m = onBar ? 1 << BAR : onStage ? 1 << BOARD : 0;
       if (onBar && onStage && !inBar(x, y, -EDGE)) m |= 1 << BOARD;
       else if (!onBar && onStage && inBar(x, y, EDGE)) m |= 1 << BAR;
       p.mask = m;
@@ -804,7 +844,7 @@ export interface Overlay {
 
 const overlays: [Overlay[], Overlay[]] = [[], []];
 
-/** Register an overlay on the board layer (under the HUD), or with `onTop` on the big layer above everything. */
+/** Register an overlay on the board layer (under the HUD), or with `onTop` on the top layer above everything. */
 export function addOverlay(o: Overlay, onTop = false) {
   overlays[onTop ? TOP : BOARD].push(o);
 }
