@@ -449,12 +449,13 @@ function pushFlows() {
 
 interface Box { x0: number; y0: number; x1: number; y1: number }
 
-function nodeBoxes(skip?: number): Box[] {
+/** Every card as a box. With `grown`, each is as tall as it could ever become (see roomFor). */
+function nodeBoxes(skip?: number, grown = false): Box[] {
   const out: Box[] = [];
   for (const n of ui.g.nodes) {
     if (n.id === skip) continue;
     const { w, h } = nodeSize(n);
-    out.push({ x0: n.x, y0: n.y, x1: n.x + w, y1: n.y + h });
+    out.push({ x0: n.x, y0: n.y, x1: n.x + w, y1: n.y + (grown ? roomFor(n.type, h) : h) });
   }
   return out;
 }
@@ -902,24 +903,41 @@ function clampToBoard(x: number, y: number, w: number, h: number): Pt {
 
 /**
  * The grid position nearest to (x, y) where a w×h card overlaps no other node and no empty deposit.
- * `skip` is the node being moved, if any.
+ * `skip` is the node being moved, if any; `room` is the height to keep clear for it (see roomFor).
  */
-function freeSpot(x: number, y: number, w: number, h: number, skip?: number): Pt {
-  const boxes = nodeBoxes(skip).concat(depositBoxes());
+function freeSpot(x: number, y: number, w: number, h: number, skip?: number, room = h): Pt {
+  const boxes = nodeBoxes(skip, true).concat(depositBoxes());
   const fits = (px: number, py: number) => {
     for (const b of boxes) {
-      if (px < b.x1 + GAP_X && px + w + GAP_X > b.x0 && py < b.y1 + GAP_Y && py + h + GAP_Y > b.y0) return false;
+      if (px < b.x1 + GAP_X && px + w + GAP_X > b.x0 && py < b.y1 + GAP_Y && py + room + GAP_Y > b.y0) return false;
     }
     return true;
   };
-  const base = clampToBoard(x, y, w, h);
+  const base = clampToBoard(x, y, w, room);
   if (fits(base.x, base.y)) return base;
   const off = offsets();
   for (let i = 0; i < off.length; i += 2) {
-    const p = clampToBoard(base.x + off[i], base.y + off[i + 1], w, h);
+    const p = clampToBoard(base.x + off[i], base.y + off[i + 1], w, room);
     if (fits(p.x, p.y)) return p;
   }
   return base;
+}
+
+const tallest: Partial<Record<NodeType, number>> = {};
+
+/**
+ * Height to keep clear for a card of this type. A machine's card grows when it is given a recipe
+ * with more ports (an Assembler on its first wire, a Refiner switched to Ink), so the tallest it can
+ * become is kept free from the start and it can never grow into the card below.
+ */
+function roomFor(type: NodeType, h: number): number {
+  let max = tallest[type];
+  if (max == null) {
+    max = 0;
+    for (const r of Object.values(RECIPES)) if (r.machine === type) max = Math.max(max, sizeFor(type, r.id).h);
+    tallest[type] = max;
+  }
+  return Math.max(h, max);
 }
 
 /** Size a node of this type and recipe will have once placed. */
@@ -960,7 +978,7 @@ function updateGhost() {
       label = 'No free deposit';
       why = 'expand the board';
     }
-  } else pos = freeSpot(mouse.x - w / 2, mouse.y - h / 2, w, h);
+  } else pos = freeSpot(mouse.x - w / 2, mouse.y - h / 2, w, h, undefined, roomFor(p.type, h));
   setStyle(ghostEl, 'display', 'flex');
   setStyle(ghostEl, 'left', pos.x + 'px');
   setStyle(ghostEl, 'top', pos.y + 'px');
@@ -1037,7 +1055,7 @@ function placeAt(p: Pt, keep: boolean) {
     node = placeNode(g, 'well', d.x, d.y, { depositId: d.id });
   } else {
     const { w, h } = sizeFor(pl.type, pl.recipe);
-    const pos = freeSpot(p.x - w / 2, p.y - h / 2, w, h);
+    const pos = freeSpot(p.x - w / 2, p.y - h / 2, w, h, undefined, roomFor(pl.type, h));
     const over = wireNear(p, 16);
     act(g, () => {
       node = placeNode(g, pl.type, pos.x, pos.y, { recipe: pl.recipe });
@@ -1319,7 +1337,7 @@ function dropNode(d: Extract<Drag, { kind: 'node' }>) {
     // Dropping a loose node on a wire splices it in.
     const loose = !g.wires.some((x) => x.from === n.id || x.to === n.id);
     const over = loose ? wireNear({ x: n.x + w / 2, y: n.y + h / 2 }, 18) : null;
-    const spot = freeSpot(n.x, n.y, w, h, n.id);
+    const spot = freeSpot(n.x, n.y, w, h, n.id, roomFor(n.type, h));
     // The node goes back to where it started for a moment, so that the undo step is taken now
     // (at press time it would also roll back anything else done during the drag) and shows only
     // this node moving. Move and splice are one step: a single undo puts the node back.
@@ -1542,7 +1560,7 @@ export function pickRadial(i: number) {
     const n = placeNode(g, o.type, 0, 0, { recipe: o.recipe });
     if (!n) return false;
     const { w, h } = nodeSize(n);
-    const pos = freeSpot(r.dir === 'consume' ? r.at.x : r.at.x - w, r.at.y - h / 2, w, h, n.id);
+    const pos = freeSpot(r.dir === 'consume' ? r.at.x : r.at.x - w, r.at.y - h / 2, w, h, n.id, roomFor(n.type, h));
     n.x = pos.x;
     n.y = pos.y;
     if (r.dir === 'consume') connect(g, r.from, r.port, n.id);
