@@ -69,6 +69,19 @@ export const isStarted = () => started;
 /** A full-screen card is up: keyboard shortcuts for the board are ignored. */
 export const screenOpen = () => !started || summaryOpen || modalOpen;
 
+/**
+ * While a full-screen card is up, nothing behind it can be reached: the cards already catch every
+ * pointer, and `inert` keeps Tab from walking to the pause button or the hotbar underneath, where
+ * Enter would press them unseen. Everything in #app except the cards themselves is covered, so
+ * whatever another module adds there is covered too.
+ */
+function coverBehind() {
+  const covered = screenOpen();
+  for (const e of Array.from(app.children)) {
+    if (e !== startEl && e !== summaryEl && e !== modalEl) e.toggleAttribute('inert', covered);
+  }
+}
+
 export function initScreens(h: ScreenHooks) {
   hooks = h;
   app = document.getElementById('app')!;
@@ -131,6 +144,7 @@ export function showStart(hasSave: boolean) {
     <button class="start-go" data-do="start" data-testid="start">${hasSave ? 'Continue' : 'Start'}</button>
     ${hasSave ? `<button class="start-new" data-do="new" data-testid="new-game">New game</button>` : ''}</div>`;
   startEl.hidden = false;
+  coverBehind();
   startEl.querySelector<HTMLElement>('.start-go')!.focus({ preventScroll: true });
 }
 
@@ -151,6 +165,7 @@ function begin() {
   // A save that reached the end but never dismissed the summary shows it now; the time away follows it.
   if (ui.g.ended && !summaryDone() && !NO_SUMMARY) openSummary();
   else flushAway();
+  coverBehind();
   touch();
 }
 
@@ -182,6 +197,7 @@ export function openSummary() {
       <button class="sum-over" data-do="over" data-testid="start-over">Start over</button></div></div>`;
   summaryEl.hidden = false;
   summaryOpen = true;
+  coverBehind();
   summaryEl.querySelector<HTMLElement>('.sum-go')!.focus({ preventScroll: true });
 }
 
@@ -190,6 +206,7 @@ function closeSummary() {
   summaryOpen = false;
   summaryEl.hidden = true;
   summaryEl.innerHTML = '';
+  coverBehind();
 }
 
 /** Close the summary for good. The capstone goal is claimed on the way out if it is still waiting. */
@@ -223,14 +240,17 @@ export function showAway(seconds: number, gains: AwayGains) {
     <div class="gains mono">${parts.join('')}</div><button id="collect">Collect</button></div>`;
   modalEl.classList.add('open');
   modalOpen = true;
+  coverBehind();
   const btn = modalEl.querySelector<HTMLElement>('#collect')!;
   btn.addEventListener('click', closeModal);
   btn.focus({ preventScroll: true });
 }
 
 function closeModal() {
+  if (!modalOpen) return;
   modalOpen = false;
   modalEl.classList.remove('open');
+  coverBehind();
 }
 
 // ---------- reset ----------
