@@ -8,6 +8,8 @@
  *   npm run pacing -- --profile=<name>             what-if numbers from tools/pacing-profiles.ts
  *   npm run pacing -- --set=tech.P4=a800,node.assembler.base=1000    one-off what-if numbers (see applyOverrides)
  *   other flags: --minutes=<n>  --quiet (no timeline)  --seeds=1,2,3
+ *                (a seed moves the bot's reaction times and the order generator; --seed=0 leaves the order
+ *                generator alone, so it plays the order sequence every real new game starts with)
  *                --pettyBudget=<0..1>  what-if for the player, not the game: how much of their income a
  *                                      player who is saving for a new toy still spends on small upgrades
  *
