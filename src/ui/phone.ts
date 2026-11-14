@@ -35,6 +35,8 @@ let build: HTMLElement | null;
 let goalEl: HTMLElement | null;
 let orderEl: HTMLElement | null;
 let alertEl: HTMLElement | null;
+let zoomEl: HTMLElement | null;
+let miniEl: HTMLElement | null;
 let thumb: HTMLElement;
 let hint: HTMLElement;
 let hintText: HTMLElement;
@@ -82,6 +84,7 @@ const CLAIM_ROW = 54;
 let measuredKey = '';
 let coverNow: Insets = NONE;
 let stripNow: StripBox | null = null;
+let cornerNow: { x0: number; y0: number } | null = null;
 /** Bumped whenever the strip, a sheet or the stage changed size (see the ResizeObserver in initPhone). */
 let sizeRev = 0;
 let sizeSeen = 0;
@@ -139,8 +142,17 @@ function measure() {
   stripNow = bottom > 0 ? { x0, x1, bottom, goalBottom } : null;
   if (!env.phone) {
     coverNow = NONE;
+    // The zoom buttons over the minimap, in the stage's bottom right corner.
+    let cx = Infinity, cy = Infinity;
+    for (const e of [zoomEl, miniEl]) {
+      if (!e || !e.offsetHeight) continue;
+      cx = Math.min(cx, e.offsetLeft);
+      cy = Math.min(cy, e.offsetTop);
+    }
+    cornerNow = cx < Infinity ? { x0: cx, y0: cy } : null;
     return;
   }
+  cornerNow = null;
   stageH = stage.offsetHeight;
   const hintEl = goalEl?.querySelector<HTMLElement>('.gc-hint');
   if (hintEl?.offsetHeight) hintH = hintEl.offsetHeight + 2;
@@ -157,6 +169,11 @@ function cover(): Insets {
 function strip(): StripBox | null {
   measure();
   return stripNow;
+}
+
+function corner(): { x0: number; y0: number } | null {
+  measure();
+  return cornerNow;
 }
 
 // ---------- sheets ----------
@@ -343,6 +360,8 @@ export function initPhone() {
   goalEl = document.getElementById('goal');
   orderEl = document.getElementById('order');
   alertEl = document.getElementById('hud-alert');
+  zoomEl = document.getElementById('zoom');
+  miniEl = document.getElementById('mini');
 
   // Wording follows the pointer in use. Until the first press, a device whose only pointer is a
   // finger is taken to be touch, so the very first hint already says "tap".
@@ -357,6 +376,7 @@ export function initPhone() {
   buildChrome();
   env.cover = cover;
   env.strip = strip;
+  env.corner = corner;
   applyLayout(true);
   window.addEventListener('resize', () => applyLayout());
   window.addEventListener('orientationchange', () => applyLayout());
@@ -414,7 +434,7 @@ export function initPhone() {
   const attach = () => {
     const hook = (window as unknown as { flowstate?: Record<string, unknown> }).flowstate;
     if (!hook) return false;
-    hook.phone ??= { cover, strip, env };
+    hook.phone ??= { cover, strip, corner, env };
     return true;
   };
   queueMicrotask(() => {

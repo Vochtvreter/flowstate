@@ -37,4 +37,9 @@ export const env = {
    * edge, and the camera keeps things out from under it (see `reveal` in board.ts).
    */
   strip: (): StripBox | null => null,
+  /**
+   * Outside the phone layout the zoom buttons and the minimap sit in the bottom right corner of the
+   * stage: everything right of `x0` and below `y0` (stage pixels) is theirs. Null when they are not shown.
+   */
+  corner: (): { x0: number; y0: number } | null => null,
 };

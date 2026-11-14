@@ -378,6 +378,17 @@ function reveal(bx: number, by: number, bw: number, bh: number) {
   if (top + bh * k > y1) y -= top + bh * k - y1;
   else if (top < y0) y += y0 - top;
   if (env.phone && by * k + y < y0) y = y0 - by * k;
+  // The zoom buttons and the minimap hold the bottom right corner (outside the phone layout): a box
+  // that would end up under them is moved up, or to the left, whichever is less and leaves it in view.
+  const c = env.corner();
+  if (c) {
+    const over = bx * k + x + bw * k - (c.x0 - STRIP_GAP), under = by * k + y + bh * k - (c.y0 - STRIP_GAP);
+    if (over > 0 && under > 0) {
+      const canUp = by * k + y - under >= y0, canLeft = bx * k + x - over >= x0;
+      if (canUp && (under <= over || !canLeft)) y -= under;
+      else if (canLeft) x -= over;
+    }
+  }
   if (x === (glide?.x ?? ui.view.x) && y === (glide?.y ?? ui.view.y)) return;
   moveView(x, y, k, true);
 }
