@@ -121,7 +121,9 @@ const LEAN_BELOW = 0.92;
 
 type WireDrag = { kind: 'wire'; from: number; port: number; mats: MatId[]; a: Pt; p: Pt; target: number | null; tp: Pt; blend: number; armed: boolean; sx: number; sy: number; slop: number; touch: boolean };
 type Drag =
-  | { kind: 'pan'; sx: number; sy: number; vx: number; vy: number; moved: boolean; slop: number; place: boolean }
+  | { kind: 'pan'; sx: number; sy: number; vx: number; vy: number; moved: boolean; slop: number; place: boolean;
+      /** A finger came down near (not on) this output port: if it turns out to be a tap, the port is armed. */
+      near?: { id: number; port: number } }
   | { kind: 'node'; id: number; ox: number; oy: number; x0: number; y0: number; moved: boolean; sx: number; sy: number; slop: number }
   | WireDrag
   | { kind: 'wireIn'; to: number; mat: MatId | null; b: Pt; p: Pt; target: number | null; tp: Pt; blend: number; armed: boolean; sx: number; sy: number; slop: number }
@@ -1464,6 +1466,15 @@ function arm(d: WireDrag) {
   else touch();
 }
 
+/** Arm a port that was tapped near rather than on. */
+function armPort(from: number, port: number) {
+  const g = ui.g;
+  const n = nodeById(g, from);
+  const a = n && outPorts(g, n)[port];
+  if (!a) return;
+  arm({ kind: 'wire', from, port, mats: materialsAt(g, from, port), a, p: a, target: null, tp: a, blend: 0, armed: false, sx: 0, sy: 0, slop: TOUCH_SLOP, touch: true });
+}
+
 function disarm() {
   if (!tapWire) return;
   nodeEls.get(tapWire.from)?.outs[tapWire.port]?.classList.remove('armed');
@@ -1543,6 +1554,8 @@ function tapEmpty(p: Pt) {
 
 type Hit =
   | { kind: 'out'; id: number; port: number }
+  /** Not on the port, but within reach of it: a tap there arms it, a drag there pans. */
+  | { kind: 'reach'; id: number; port: number }
   | { kind: 'in'; id: number; port: number; mat: MatId | null }
   | { kind: 'node'; id: number }
   | { kind: 'wire'; id: number }
@@ -1568,6 +1581,10 @@ function mouseHit(t: HTMLElement): Hit {
  * A finger does not: ports are 14 px dots and wires a few pixels wide. So a touch is matched by
  * distance on screen, whatever the zoom. In order: a port right under the finger, the card under
  * the finger, a wire within reach, the nearest output port within reach.
+ *
+ * Only the first of those starts a wire when the finger drags. The gaps between cards are where
+ * a thumb goes to pan, and they are full of wires and within reach of ports: a drag that starts
+ * there pans, and only a tap there selects the wire or arms the port.
  */
 function touchHit(t: HTMLElement, p: Pt): Hit {
   const g = ui.g;
@@ -1601,7 +1618,7 @@ function touchHit(t: HTMLElement, p: Pt): Hit {
   // would otherwise have nowhere left to be tapped (and so could never be cut).
   const w = wireNear(p, WIRE_REACH / k);
   if (w) return { kind: 'wire', id: w.id };
-  if (out && dOut <= PORT_REACH) return { kind: 'out', ...out };
+  if (out && dOut <= PORT_REACH) return { kind: 'reach', ...out };
   return null;
 }
 
@@ -1764,6 +1781,7 @@ function onDown(e: PointerEvent) {
     return;
   }
   drag = { kind: 'pan', sx: e.clientX, sy: e.clientY, vx: ui.view.x, vy: ui.view.y, moved: false, slop: touchy ? PAN_SLOP : 0, place: false };
+  if (hit?.kind === 'reach') drag.near = { id: hit.id, port: hit.port };
 }
 
 function onMove(e: PointerEvent) {
@@ -1854,9 +1872,14 @@ function steer(cx: number, cy: number, hovering = false) {
     case 'wirePress': {
       if (Math.hypot(cx - drag.sx, cy - drag.sy) < drag.slop) break;
       const press = drag;
+      if (press.touch) {
+        // Under a finger a drag that starts on a wire pans (see touchHit); the board starts from here.
+        drag = { kind: 'pan', sx: cx, sy: cy, vx: ui.view.x, vy: ui.view.y, moved: true, slop: 0, place: false };
+        break;
+      }
       const w = g.wires.find((x) => x.id === press.wireId);
-      // Dragging off the middle of a wire branches a new one from the same port.
-      if (!w || !startWire(w.from, w.port, cx, cy, p, press.touch)) drag = null;
+      // With a mouse, dragging off the middle of a wire branches a new one from the same port.
+      if (!w || !startWire(w.from, w.port, cx, cy, p, false)) drag = null;
       break;
     }
     case 'wire': {
@@ -2012,6 +2035,10 @@ function onUp(e: PointerEvent) {
         // (The gesture is wound up first: the build menu this may open draws with the wire preview.)
         endDrag();
         tapEmpty(p);
+        return;
+      } else if (d.near) {
+        endDrag();
+        armPort(d.near.id, d.near.port);
         return;
       } else if (ui.sel) select(null);
       break;
