@@ -320,6 +320,8 @@ const firstReady = (groups: { list: Tile[] }[]) => {
  */
 export function openTech(id?: string) {
   const g = ui.g;
+  // Asked to open while already open (the top-bar button again): leave the player's place alone.
+  if (ui.techOpen && !id) return;
   ui.techOpen = true;
   const tiles = techTiles(g);
   const want = goalTech(g);
@@ -347,6 +349,12 @@ export function closeTech() {
   ui.techOpen = false;
   setClass(host, 'open', false);
   touch();
+}
+
+/** For a button that both opens and closes the tree. */
+export function toggleTech() {
+  if (ui.techOpen) closeTech();
+  else openTech();
 }
 
 // ---------- markup ----------

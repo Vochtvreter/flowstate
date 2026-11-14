@@ -12,7 +12,7 @@
 @keyframes tech-in { from { opacity: 0; transform: translateY(6px); } }
 
 /* ---------- header: title, Data in hand, close ---------- */
-#tech .thead { grid-column: 1 / -1; display: flex; align-items: center; gap: 14px; min-height: 68px; padding: 10px 16px 10px 24px; border-bottom: 1px solid var(--line); }
+#tech .thead { grid-column: 1 / -1; display: flex; align-items: center; gap: 14px; min-height: 64px; padding: 8px 16px 8px 24px; border-bottom: 1px solid var(--line); }
 #tech .ttl { flex: 1 1 auto; min-width: 0; }
 #tech .ttl h1 { margin: 0; font-family: var(--disp); font-size: 22px; font-weight: 700; letter-spacing: -0.01em; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 #tech .ttl p { margin: 2px 0 0; font-size: 12.5px; color: var(--muted); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
@@ -21,15 +21,14 @@
 #tech .dc b { font-size: 15px; font-weight: 600; color: var(--text); margin-right: 1px; }
 #tech .dc i { font-style: normal; font-size: 10.5px; margin-left: 7px; opacity: 0.85; }
 #tech .tclose { flex: none; display: inline-flex; align-items: center; gap: 8px; height: 40px; padding: 0 12px 0 10px; border-radius: 10px; border: 1px solid var(--border); background: #121929; color: var(--text); font-size: 13px; font-weight: 600; white-space: nowrap; }
-#tech .tclose:hover { background: #1a2338; }
 /* Key names are for people with a keyboard. */
 html[data-input='touch'] #tech .kbd { display: none; }
 
 #tech .ttabs { display: none; }
 
 /* ---------- the tree: one row per branch ---------- */
-#tech .tree { grid-column: 1; grid-row: 2; overflow-x: hidden; overflow-y: auto; overscroll-behavior: contain; padding: 2px 24px 24px; }
-#tech .tbranch { display: grid; grid-template-columns: 150px minmax(0, 1fr); gap: 8px 18px; padding: 14px 0; border-top: 1px solid #1a2234; }
+#tech .tree { grid-column: 1; grid-row: 2; overflow-x: hidden; overflow-y: auto; overscroll-behavior: contain; padding: 0 24px 14px; }
+#tech .tbranch { display: grid; grid-template-columns: 150px minmax(0, 1fr); gap: 8px 18px; padding: 13px 0; border-top: 1px solid #1a2234; }
 #tech .tbranch:first-child { border-top: 0; }
 #tech .bh h2 { margin: 3px 0 0; font-family: var(--disp); font-size: 15px; font-weight: 700; }
 #tech .bh p { margin: 3px 0 0; font-size: 11.5px; line-height: 15px; color: var(--muted); }
@@ -39,11 +38,10 @@ html[data-input='touch'] #tech .kbd { display: none; }
 /* What is already owned follows as a row of small ticked chips. */
 #tech .towned { display: flex; flex-wrap: wrap; gap: 6px 8px; }
 #tech .tlist:empty, #tech .towned:empty { display: none; }
-#tech .more { margin: 0; padding-top: 14px; border-top: 1px solid #1a2234; font-size: 11.5px; color: var(--dim); }
+#tech .more { margin: 0; padding-top: 10px; border-top: 1px solid #1a2234; font-size: 11.5px; line-height: 15px; color: var(--dim); }
 
 /* ---------- a tech: tile on desktop, row on a phone ---------- */
 #tech .tt { position: relative; display: flex; align-items: center; gap: 10px; min-width: 0; min-height: 58px; padding: 8px 12px 10px; border-radius: 12px; border: 1px solid #2c3854; background: #121929; color: var(--text); text-align: left; }
-#tech .tt:hover { background: #172036; }
 #tech .tt .ti { flex: none; width: 28px; height: 28px; border-radius: 8px; display: flex; align-items: center; justify-content: center; background: #1b2438; color: #a9b6d0; }
 #tech .tt .tx { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 2px; }
 #tech .tt .n { font-size: 13px; font-weight: 600; line-height: 17px; }
@@ -54,14 +52,12 @@ html[data-input='touch'] #tech .kbd { display: none; }
 
 /* Owned: quiet and ticked. */
 #tech .tt.own { min-height: 32px; gap: 6px; padding: 4px 12px 4px 6px; border-radius: 10px; background: transparent; border-color: #1b2437; color: #8f9bb5; }
-#tech .tt.own:hover { background: #10172580; }
 #tech .tt.own .ti { width: 22px; height: 22px; background: transparent; color: #46a396; }
 #tech .tt.own .n { font-size: 12.5px; font-weight: 500; }
 #tech .tt.own .c { display: none; color: var(--dim); }
 
 /* Ready: the accent, breathing gently. The glow is a layer of its own, so only its opacity animates. */
 #tech .tt.rdy { background: #0f2421; border-color: var(--rdy); }
-#tech .tt.rdy:hover { background: #12302b; }
 #tech .tt.rdy .ti { background: var(--rdy); color: #062b25; }
 #tech .tt.rdy .st { color: var(--rdy); font-weight: 600; }
 #tech .tt.rdy::after { content: ''; position: absolute; inset: -1px; border-radius: inherit; pointer-events: none; box-shadow: 0 0 0 3px rgba(94, 234, 212, 0.2), 0 0 22px rgba(94, 234, 212, 0.32); animation: tt-breathe 2.2s ease-in-out infinite; }
@@ -78,7 +74,6 @@ html[data-input='touch'] #tech .kbd { display: none; }
 
 /* One step ahead: a silhouette. */
 #tech .tt.veil { background: transparent; border: 1px dashed #27324a; color: #8793ad; }
-#tech .tt.veil:hover { background: #10172580; }
 #tech .tt.veil .ti { background: transparent; color: #5d6880; }
 #tech .tt.veil .c { color: var(--dim); }
 
@@ -120,7 +115,6 @@ html[data-input='touch'] #tech .kbd { display: none; }
 #tech .gnote b { display: block; font-size: 13px; line-height: 18px; color: var(--text); }
 #tech .gnote span { display: block; margin-top: 3px; font-size: 12px; line-height: 17px; color: #a9bbe8; }
 #tech .dgo { align-self: flex-start; height: 40px; padding: 0 14px; border-radius: 10px; border: 1px solid #3a4a70; background: #151d30; color: var(--text); font-size: 13px; font-weight: 600; }
-#tech .dgo:hover { background: #1a2338; }
 #tech .qbox { display: flex; align-items: center; gap: 10px; min-height: 36px; margin-top: 4px; padding: 0; border: 0; background: transparent; color: #c9d3e8; font-size: 12.5px; text-align: left; }
 #tech .sw { flex: none; position: relative; width: 34px; height: 20px; border-radius: 10px; background: #26314b; transition: background 0.15s; }
 #tech .sw::after { content: ''; position: absolute; left: 2px; top: 2px; width: 16px; height: 16px; border-radius: 50%; background: #8f9bb5; transition: transform 0.15s, background 0.15s; }
@@ -132,11 +126,20 @@ html[data-input='touch'] #tech .kbd { display: none; }
 #tech .rbtn .fill { position: absolute; inset: 0; background: rgba(196, 161, 255, 0.2); transform-origin: 0 50%; transition: transform 0.5s linear; }
 #tech .rbtn .lab { position: relative; }
 #tech .rbtn.ok { background: var(--rdy); border-color: var(--rdy); color: #062b25; box-shadow: 0 0 22px rgba(94, 234, 212, 0.25); }
-#tech .rbtn.ok:hover { filter: brightness(1.08); }
 #tech .rbtn.ok:active { transform: scale(0.98); }
 #tech .rbtn.ok .kbd { position: relative; border-color: rgba(6, 43, 37, 0.35); background: rgba(6, 43, 37, 0.12); color: #062b25; }
 #tech .rbtn.wake { animation: tt-wake 0.9s cubic-bezier(0.2, 1.5, 0.4, 1); }
 #tech .owned { display: flex; align-items: center; gap: 8px; height: 48px; font-size: 14px; font-weight: 600; color: var(--rdy); }
+
+/* Hover is for pointers that can hover; on touch it would stick to the last thing tapped. */
+@media (hover: hover) {
+  #tech .tclose:hover, #tech .dgo:hover { background: #1a2338; }
+  #tech .tt:hover { background: #172036; }
+  #tech .tt.own:hover, #tech .tt.veil:hover { background: #10172580; }
+  #tech .tt.rdy:hover { background: #12302b; }
+  #tech .tt.goal:hover { background: #162038; }
+  #tech .rbtn.ok:hover { filter: brightness(1.08); }
+}
 
 /* A narrow window that is not a phone: headings sit above their tiles and the detail column slims down. */
 @media (max-width: 900px) {
