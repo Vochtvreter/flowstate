@@ -6,15 +6,35 @@
 // RULES.orders.staleSeconds is quietly replaced. The next order never asks for the same material as the
 // one it replaces, as long as the player makes something else.
 //
+// An order is sized from what actually reaches Markets (marketRates), not from what is made: a material
+// that machines use up, or that is studied, fills an order only as fast as the rest is sold. Until one has
+// been filled, the order asks for something that is already selling and takes about half a minute, so the
+// first one starts counting the moment it appears with nothing to reroute. Later orders prefer what is
+// selling too, but may ask for something that reaches no Market yet: orderView() says so, and the adviser
+// (src/advice.ts) says where to reroute.
+//
 // Generation uses only g.orderSeed (saved with the game), never Math.random, so the same play gives the
 // same orders.
 import { DATA_WORTH, DATA_YIELD, DataTier, MATERIALS, MAT_IDS, MatId, RULES, TECHS } from './content';
 import { recipeOf, techAvailable, techHidden, valueOf } from './economy';
+import { forecast } from './forecast';
 import { isMachine } from './graph';
 import { Bag, Game, Order, Reward } from './state';
 
 const O = RULES.orders;
 const TIERS: DataTier[] = ['a', 'b', 'g'];
+
+/** Games that never roll a new order: the copies that forecasts and the adviser run ahead of the live game. */
+const frozen = new WeakSet<Game>();
+
+/**
+ * From now on this game never rolls a new order. The one it has still counts sales and can be claimed; after
+ * that there is none. For look-ahead copies only (src/forecast.ts): what the next order would ask for is luck,
+ * and rolling it would need a forecast of its own.
+ */
+export function stopNewOrders(g: Game) {
+  frozen.add(g);
+}
 
 /** Next pseudo-random number in [0, 1), advancing the saved seed. */
 function rand(g: Game): number {
@@ -35,6 +55,14 @@ export function outputRates(g: Game): Bag {
     }
   }
   return out;
+}
+
+/**
+ * Items per second of each material that reach Markets as the board stands: measured on a copy of the game
+ * run forward for a while (src/forecast.ts), so a line built a moment ago counts for what it will sell.
+ */
+export function marketRates(g: Game): Bag {
+  return forecast(g).sold;
 }
 
 /** Has the player ever made something a Lab turns into this Data tier? Orders never pay a tier the player has not met. */
@@ -74,11 +102,17 @@ export function orderReward(g: Game, mat: MatId, need: number): Required<Reward>
   return reward;
 }
 
-/** Materials an order may ask for, newest first: what the player makes right now, raw materials and junk last. */
+/**
+ * Materials an order may ask for, in the order the picker prefers them: what the player makes right now,
+ * refined before raw, never junk; within that, whatever reaches a Market first, and the newest first.
+ */
 export function orderCandidates(g: Game): MatId[] {
   const rates = outputRates(g);
+  const sold = marketRates(g);
+  const selling = (m: MatId) => (sold[m] ?? 0) >= O.minRate;
   const newest = (a: MatId, b: MatId) =>
-    (g.madeAt[b] ?? 0) - (g.madeAt[a] ?? 0) || MATERIALS[b].tier - MATERIALS[a].tier || MATERIALS[b].value - MATERIALS[a].value;
+    Number(selling(b)) - Number(selling(a))
+    || (g.madeAt[b] ?? 0) - (g.madeAt[a] ?? 0) || MATERIALS[b].tier - MATERIALS[a].tier || MATERIALS[b].value - MATERIALS[a].value;
   const wanted = (m: MatId) => MATERIALS[m].value >= O.junkValue;
   const producing = MAT_IDS.filter((m) => wanted(m) && (rates[m] ?? 0) >= O.minRate);
   // Prefer refined goods; fall back to raw materials, then to anything ever made.
@@ -87,11 +121,26 @@ export function orderCandidates(g: Game): MatId[] {
   return (pool.length ? pool : (['glint'] as MatId[])).sort(newest);
 }
 
-/** Build the next order. `avoid` is the material of the order being replaced, skipped when there is a choice. */
+/**
+ * Build the next order. `avoid` is the material of the order being replaced, skipped when there is a choice.
+ * Until the player has filled one, it is a "first order": only something already selling fast enough to
+ * fill it in about half a minute, refined if possible, raw otherwise.
+ */
 export function makeOrder(g: Game, avoid: MatId | null = null): Order {
+  const sold = marketRates(g);
   let pool = orderCandidates(g);
+  let first = false;
+  if (g.stats.ordersFilled === 0) {
+    const quick = (m: MatId) => MATERIALS[m].value >= O.junkValue && (sold[m] ?? 0) * O.first.seconds[0] >= O.first.minNeed;
+    const refined = pool.filter(quick);
+    const any = MAT_IDS.filter(quick).sort((a, b) => MATERIALS[b].tier - MATERIALS[a].tier || (sold[b] ?? 0) - (sold[a] ?? 0));
+    if (refined.length) pool = refined;
+    else if (any.length) pool = any;
+    // With nothing selling fast enough it is an order like any other: the player has to send something first.
+    first = refined.length + any.length > 0;
+  }
   if (avoid && pool.length > 1) pool = pool.filter((m) => m !== avoid);
-  // Weighted pick over the newest few.
+  // Weighted pick over the first few.
   const weights = O.pick.slice(0, pool.length);
   const total = weights.reduce((s, w) => s + w, 0);
   let roll = rand(g) * total;
@@ -103,9 +152,10 @@ export function makeOrder(g: Game, avoid: MatId | null = null): Order {
       break;
     }
   }
-  const seconds = O.minSeconds + (O.maxSeconds - O.minSeconds) * rand(g);
-  let need = Math.max(O.minNeed, Math.round((outputRates(g)[mat] ?? 0) * seconds));
-  if (need > 20) need = Math.round(need / 5) * 5; // a tidy number to read
+  const [lo, hi] = first ? O.first.seconds : [O.minSeconds, O.maxSeconds];
+  const seconds = lo + (hi - lo) * rand(g);
+  let need = Math.max(first ? O.first.minNeed : O.minNeed, Math.round((sold[mat] ?? 0) * seconds));
+  if (need > 20 && !first) need = Math.round(need / 5) * 5; // a tidy number to read
   return {
     mat, need, base: g.sold[mat] ?? 0, got: 0,
     reward: orderReward(g, mat, need),
@@ -116,6 +166,10 @@ export function makeOrder(g: Game, avoid: MatId | null = null): Order {
 const orderText = (o: Order) => `Deliver ${o.need} ${MATERIALS[o.mat].name}`;
 
 function roll(g: Game, avoid: MatId | null, quiet: boolean) {
+  if (frozen.has(g)) {
+    g.order = null;
+    return;
+  }
   const order = makeOrder(g, avoid);
   g.order = order;
   g.events.push({ kind: 'order-new', order, quiet, text: `New order: ${orderText(order)}` });
@@ -161,9 +215,40 @@ export function claimOrder(g: Game): boolean {
   return true;
 }
 
+export interface OrderView {
+  order: Order;
+  name: string;
+  got: number;
+  need: number;
+  ready: boolean;
+  reward: Required<Reward>;
+  /**
+   * Is any of the ordered material reaching a Market? False means the count cannot move until the player
+   * sends some there: the chip should say so ("not reaching a Market") and advice(g) says where to reroute.
+   * Always true once the order is filled.
+   */
+  reachesMarket: boolean;
+  /** Items per second of it being sold right now (smoothed), and the seconds left at that rate (Infinity at zero). */
+  rate: number;
+  eta: number;
+}
+
+/** Is the ordered material being sold at all? Goes by recent sales, so it turns true with the first item delivered. */
+export function orderReachesMarket(g: Game): boolean {
+  const o = g.order;
+  if (!o) return false;
+  if (o.ready || (g.soldRate[o.mat] ?? 0) >= O.sellingRate) return true;
+  return o.got > 0 && g.time - o.lastProgress < O.sellingMemory;
+}
+
 /** Progress of the active order, for the order chip. null when there is none. */
-export function orderView(g: Game): { order: Order; name: string; got: number; need: number; ready: boolean; reward: Required<Reward> } | null {
+export function orderView(g: Game): OrderView | null {
   const o = g.order;
   if (!g.ordersOn || !o) return null;
-  return { order: o, name: MATERIALS[o.mat].name, got: Math.floor(o.got + 1e-9), need: o.need, ready: o.ready, reward: o.reward };
+  const rate = g.soldRate[o.mat] ?? 0;
+  return {
+    order: o, name: MATERIALS[o.mat].name, got: Math.floor(o.got + 1e-9), need: o.need, ready: o.ready, reward: o.reward,
+    reachesMarket: orderReachesMarket(g), rate,
+    eta: o.ready ? 0 : rate > 1e-6 ? (o.need - o.got) / rate : Infinity,
+  };
 }

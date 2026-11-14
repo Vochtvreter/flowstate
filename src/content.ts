@@ -320,12 +320,21 @@ export const RULES = {
     seed: 0x5eed1e55,
     /** An order asks for between this many... */
     minSeconds: 45,
-    /** ...and this many seconds of the material's current output... */
+    /** ...and this many seconds of what currently reaches Markets of that material... */
     maxSeconds: 90,
     /** ...but never fewer items than this. */
     minNeed: 8,
-    /** A material counts as "currently produced" above this output (items/s). */
+    /**
+     * Until the player has filled an order: something that is already selling, sized to this many seconds of it
+     * (so it fills in 30 to 40 s with nothing rerouted), and at least `minNeed` items.
+     */
+    first: { seconds: [32, 37] as [number, number], minNeed: 3 },
+    /** A material counts as "currently produced", or as reaching a Market, above this rate (items/s). */
     minRate: 0.02,
+    /** orderView: the ordered material "reaches a Market" while its smoothed sales stay above this rate (items/s)... */
+    sellingRate: 0.005,
+    /** ...or for this many seconds after the order's last delivery, so that a slow trickle still counts. */
+    sellingMemory: 30,
     /** Materials worth less than this are never asked for (Silt). */
     junkValue: 1,
     /** Chance of asking for the newest, second-newest and third-newest material the player makes. */
