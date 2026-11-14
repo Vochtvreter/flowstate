@@ -51,6 +51,13 @@ export interface Signals {
   sale: { id: number; amount: number; at: { x: number; y: number } };
   /** A hotbar item the player could not afford a moment ago can now be bought. `at` is its button. */
   afford: { type: NodeType; at: { x: number; y: number } };
+  /**
+   * The goal card's tip (the adviser's one suggestion during a wait). `shown`: a tip has just appeared.
+   * `stale`: the same tip has been on offer for a while and nothing was done about it; sent again every
+   * so often while that lasts. `gone`: the tip left the card. `at` is the middle of its "Show me" button,
+   * in client pixels.
+   */
+  tip: { state: 'shown' | 'stale' | 'gone'; at: { x: number; y: number } };
 }
 
 const listeners: { [K in keyof Signals]?: ((detail: Signals[K]) => void)[] } = {};
