@@ -14,7 +14,7 @@ import {
 import { boardRect, toClient } from './board';
 import { celebrateEnd, celebrateFlow, celebrateGoal, cancelCelebrations, celebrating, initCelebrate } from './celebrate';
 import { anchorPt, el, pulseAnchor, setAttr, setClass, setHTML } from './dom';
-import { Overlay, addOverlay, burst, clearParticles, floater, fly, pop, ring, setMood } from './fx';
+import { FlyOpts, Overlay, addOverlay, burst, clearParticles, floater, fly, pop, ring, setMood } from './fx';
 import { Pt, bezierAt, matColor, nodeSize, outPorts, wireEnds } from './geom';
 import { actOut, handState, initHand, pointAt } from './hand';
 import { addTopItem } from './panels';
@@ -56,6 +56,8 @@ const centreOf = (selector: string): Pt | null => {
 };
 
 const creditsPt = (): Pt => anchorPt('credits') ?? centreOf('[data-testid="credits"]') ?? { x: 60, y: 28 };
+/** The top bar is what shows at this point: nothing (the tech tree on a phone, a full-screen card) lies over it. Reads layout: used once per payout. */
+const inTopBar = (p: Pt): boolean => !!document.elementFromPoint(p.x, p.y)?.closest('#top');
 /** A Data counter: the HUD's anchor if it has one, else the chip itself, else the credits counter. */
 const dataPt = (k: DataTier): Pt => anchorPt(`data-${k}`) ?? centreOf(`[data-testid="data-${k}"] .sym`) ?? creditsPt();
 
@@ -68,38 +70,43 @@ const coinCount = (amount: number) => Math.max(3, Math.min(9, 2 + Math.round(Mat
  * Send a reward from where it was earned to where it is counted: coins to the credits counter,
  * Data to its chip, and a spark to each hotbar button a new tech has just added. Each lands with a
  * pulse on the counter, the amount written over it, and a short rising run of ticks.
+ * (With less motion asked for nothing flies: fx.fly() delivers at once, so the amount and the ticks
+ * come straight away, and the counter does not pulse.)
  *
  * The coins are ordinary ones (fx.fly without `top`): over the stage they are drawn on the board
  * layer, so they come out from under the goal card rather than over it, and the big top layer stays
  * idle. That is deliberate: see the note on cost at the top of fx.ts.
  */
 function payout(from: Pt, r: GoalReward) {
-  if (reduced()) return;
   let ticked = false;
   const at = (p: Pt) => `${Math.round(p.x)},${Math.round(p.y)}`;
-  const send = (anchor: string, amount: number, to: Pt, text: string, color: string, n: number) => {
+  // Each flight is noted when it leaves and when it lands, and lands with a pulse, a label and ticks.
+  // A counter that cannot be seen (on a phone the open tech tree lies over the top bar) gets the
+  // ticks only: coins and a "+40¢" arriving on top of the tree would point at nothing.
+  const send = (anchor: string, amount: number, to: Pt, text: string, color: string, n: number, opts: FlyOpts) => {
     record('pay', 'send', `${anchor} ${amount} from ${at(from)} to ${at(to)}`);
-    return () => {
+    const seen = inTopBar(to);
+    const land = () => {
       record('pay', 'land', `${anchor} ${amount}`);
-      pulseAnchor(anchor);
+      if (seen && !reduced()) pulseAnchor(anchor);
       // The amount pops up just under the counter it has been added to.
-      floater({ x: to.x + 12, y: to.y + 60 }, text, color, 13, { top: true, life: 0.95, rise: 18 });
+      if (seen) floater({ x: to.x + 12, y: to.y + 60 }, text, color, 13, { top: true, life: 0.95, rise: 18 });
       if (!ticked) cuePayout(Math.min(6, n));
       ticked = true;
     };
+    if (seen) fly(from, to, color, n, land, opts);
+    else land();
   };
   const quick = { ttl: 0.3, stagger: 0.035 };
   if (r.credits) {
     const n = coinCount(r.credits);
-    const to = creditsPt();
-    fly(from, to, GOLD, n, send('credits', r.credits, to, `+${fmt(r.credits)}¢`, GOLD, n), quick);
+    send('credits', r.credits, creditsPt(), `+${fmt(r.credits)}¢`, GOLD, n, quick);
   }
   for (const k of ['a', 'b', 'g'] as DataTier[]) {
     const amount = r[k];
     if (!amount) continue;
     const n = coinCount(amount);
-    const to = dataPt(k);
-    fly(from, to, DATA_COLORS[k], n, send(`data-${k}`, amount, to, `+${fmt(amount)}${k === 'a' ? 'α' : k === 'b' ? 'β' : 'γ'}`, DATA_COLORS[k], n), { ...quick, shape: 'diamond', size: 4.6 });
+    send(`data-${k}`, amount, dataPt(k), `+${fmt(amount)}${k === 'a' ? 'α' : k === 'b' ? 'β' : 'γ'}`, DATA_COLORS[k], n, { ...quick, shape: 'diamond', size: 4.6 });
   }
   // A new machine in the hotbar: stars fly to where it has appeared. (They are drawn as far as the edge
   // of the stage, which the hotbar sits against.)
@@ -117,8 +124,8 @@ function smallCelebration(name: string, from: Pt, r: GoalReward, color = GOLD, o
   record('celebrate', 'small:' + name);
   cueClaim();
   buzz('claim', 15);
-  if (reduced()) return;
   // On the board layer: sparks that clear the card they came from are seen, the rest are not missed.
+  // (With less motion asked for, fx draws neither sparks nor ring, and the reward arrives at once.)
   burst(from, color, 10, { top: onTop, power: 1.2 });
   ring(from, color, { top: onTop, size: 44 });
   payout(from, r);
@@ -149,7 +156,8 @@ function handleEvents(events: GameEvent[]) {
           celebrateGoal(ev.goal, ev.reward);
         } else {
           claimed = claimed ?? 'small';
-          smallCelebration('goal', anchorPt('goal') ?? centre(), ev.reward);
+          // (Claimed from the slim bar over the open tech tree: the sparks go above the tree too.)
+          smallCelebration('goal', anchorPt('goal') ?? centre(), ev.reward, GOLD, ui.techOpen);
         }
         break;
       case 'order-claimed':
