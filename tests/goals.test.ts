@@ -76,8 +76,41 @@ describe('goal chain: the table (2.4)', () => {
     expect(rewardText(reward('three-orders'))).toBe('Bulk Upgrade + 1200¢ + 60β');
   });
 
-  it('flags four goals as big celebrations (the fifth is the first Flow State)', () => {
-    expect(GOALS.filter((x) => x.big).map((x) => x.id)).toEqual(['sell-shard', 'feed-lab', 'make-glyph', 'make-lens']);
+  it('flags six goals as big celebrations (the seventh is the first Flow State): a peak every three to four minutes', () => {
+    expect(GOALS.filter((x) => x.big).map((x) => x.id)).toEqual(['sell-shard', 'feed-lab', 'make-spark', 'make-glyph', 'make-prism', 'make-lens']);
+    // None of them is a free-play goal, and the card's view says the same as the table.
+    for (const goal of GOALS) {
+      if (goal.big) expect(goal.free, goal.id).toBeFalsy();
+      const g = fresh();
+      g.goal = { i: GOALS.indexOf(goal), ready: false };
+      expect(goalView(g)!.big, goal.id).toBe(!!goal.big);
+    }
+  });
+
+  it('the first Spark and the first Prism carry the big flag on their claim, with Orders and the reward as before', () => {
+    for (const [id, mat] of [['make-spark', 'spark'], ['make-prism', 'prism']] as const) {
+      const g = fresh();
+      g.goal = { i: GOALS.findIndex((x) => x.id === id), ready: false };
+      g.made[mat] = true;
+      run(g, 0.05);
+      expect(g.goal.ready, id).toBe(true);
+      g.events = [];
+      const before = { credits: g.credits, a: g.data.a, b: g.data.b };
+      expect(claimGoal(g)).toBe(true);
+      const ev = take(g, 'goal-claimed');
+      expect(ev.length).toBe(1);
+      expect(ev[0]).toMatchObject({ goal: id, big: true, reward: goalById(id)!.reward });
+      if (id === 'make-spark') {
+        expect(g.ordersOn).toBe(true);
+        expect(g.data.a - before.a).toBe(25);
+      } else {
+        expect(g.credits - before.credits).toBe(600);
+        expect(g.data.b - before.b).toBe(40);
+      }
+    }
+    // The goals between them are not big: the next one after the first Spark, for one.
+    expect(goalById('first-order')!.big).toBeFalsy();
+    expect(goalById('make-mist')!.big).toBeFalsy();
   });
 
   it('is the only way to get Refining, Lab, Routing and Bulk Upgrade', () => {
@@ -343,12 +376,77 @@ describe('goal chain: conditions and progress', () => {
   it('every card that has the player make something new says to sell it', () => {
     // Without this a newcomer who does only what the card says leaves Spark, Glyph, Mist and Prism unsold:
     // the machines block, and the Fabricator has to be paid for from Shard and Ink alone.
-    for (const [id, what] of [['make-spark', 'sell the Spark'], ['make-glyph', 'sell its Glyph at the Market'], ['make-mist', 'sell the Mist'], ['make-prism', 'sell its Prism at the Market']]) {
+    for (const [id, what] of [['make-spark', 'sell the Spark'], ['make-glyph', 'wire it to the Market'], ['make-mist', 'sell the Mist'], ['make-prism', 'wire it to the Market']]) {
       const hint = goalById(id)!.hint;
       expect(hint.mouse, id).toContain(what);
       expect(hint.touch, id).toContain(what);
     }
     expect(goalById('silt-exit')!.hint.mouse).toContain('sell the Ink at the Market');
+  });
+
+  it('the Assembler cards say where to build from, and name the Market before the wire that completes the goal', () => {
+    // The goal completes with the first Glyph (or Prism), and a card that is ready shows Claim and no hint. With
+    // the Market last in the sentence, the gesture still to come was the sale, and it was the one left out.
+    expect(goalById('make-glyph')!.hint.mouse).toBe('Research Assembly, build an Assembler from the Ink Refiner\'s Ink port, wire it to the Market, then wire Spark into it to make Glyph.');
+    expect(goalById('make-prism')!.hint.mouse).toBe('Build another Assembler from the Mist Refiner\'s port, wire it to the Market, then wire Shard into it to make Prism (two for every Mist).');
+    expect(goalById('build-fabricator')!.hint.mouse).toBe('Research Fabrication, then save up and build a Fabricator from the Prism Assembler\'s port: orders and a high Flow get you there faster.');
+    const longest = (touch: boolean) => Math.max(...['silt-exit', 'route-lab'].map((id) => [...(touch ? goalById(id)!.hint.touch : goalById(id)!.hint.mouse)].length));
+    for (const id of ['make-glyph', 'make-prism', 'build-fabricator']) {
+      const hint = goalById(id)!.hint;
+      expect(hint.touch, id).toBe(hint.mouse); // nothing in them names a click, a drag or a tap
+      expect(hint.mouse, id).not.toMatch(/\b(click|drag|tap|press|key)\b/i);
+      expect([...hint.mouse].length, id).toBeLessThanOrEqual(longest(false));
+      expect([...hint.touch].length, id).toBeLessThanOrEqual(longest(true));
+    }
+    // Done to the letter on a real board: built from the named port the machine arrives wired and set to its
+    // recipe, and the goal is not complete until the last wire of the sentence is made.
+    const g = rich();
+    g.techs = ['P1', 'R1', 'P2', 'P3', 'P4', 'P5', 'P7'];
+    const m = market(g);
+    const make = (dep: number, recipe: string) => {
+      const r = placeNode(g, 'refiner', 400, 100 * dep, { recipe })!;
+      connect(g, placeNode(g, 'well', 0, 0, { depositId: dep })!.id, 0, r.id);
+      connect(g, r.id, 0, m.id);
+      return r;
+    };
+    const shard = placeNode(g, 'refiner', 400, 100, { recipe: 'shard' })!;
+    connect(g, well(g).id, 0, shard.id);
+    connect(g, shard.id, 0, m.id);
+    const ink = make(3, 'ink');
+    connect(g, ink.id, 1, placeNode(g, 'void', 700, 650)!.id); // (its Silt has somewhere to go)
+    const spark = make(4, 'spark');
+    const mist = make(5, 'mist');
+    run(g, 20);
+    at(g, 'make-glyph');
+    const glyph = placeNode(g, 'assembler', 700, 300)!; // "build an Assembler from the Ink Refiner's Ink port"
+    connect(g, ink.id, 0, glyph.id);
+    expect(glyph.recipe).toBe('glyph');
+    connect(g, glyph.id, 0, m.id); // "wire it to the Market"
+    run(g, 20);
+    expect(g.goal.ready).toBe(false);
+    connect(g, spark.id, 0, glyph.id); // "then wire Spark into it"
+    run(g, 10);
+    expect(g.goal.ready).toBe(true);
+    expect(g.sold.glyph ?? 0).toBeGreaterThan(0); // sold from the first one
+    at(g, 'make-prism');
+    const prism = placeNode(g, 'assembler', 700, 500)!; // "Build another Assembler from the Mist Refiner's port"
+    connect(g, mist.id, 0, prism.id);
+    expect(prism.recipe).toBe('prism');
+    connect(g, prism.id, 0, m.id);
+    run(g, 20);
+    expect(g.goal.ready).toBe(false);
+    connect(g, shard.id, 0, prism.id);
+    run(g, 20);
+    expect(g.goal.ready).toBe(true);
+    expect(g.sold.prism ?? 0).toBeGreaterThan(0);
+    at(g, 'build-fabricator');
+    run(g, 0.1);
+    expect(g.goal.ready).toBe(false);
+    const fab = placeNode(g, 'fabricator', 1000, 500)!; // "build a Fabricator from the Prism Assembler's port"
+    connect(g, prism.id, 0, fab.id);
+    expect(fab.recipe).toBe('lens');
+    run(g, 0.1);
+    expect(g.goal.ready).toBe(true);
   });
 
   it('a goal that asks for a research and then a machine says so: the step carries the price that follows', () => {
@@ -435,6 +533,7 @@ describe('"Hold 95% Flow": the bar, and the valve for a board nobody can fix', (
     expect(v.flow!.pct).toBeCloseTo(0.9, 2);
     expect(v.flow!.pct).toBe(g.flow);
     expect(v.flow!.need).toBe(RULES.flow.holdShare);
+    expect(v.flow!.valve).toBeUndefined(); // the bar has not come down yet
     expect(v.progress).toEqual([0, 10, 's']);
     expect(v.ready).toBe(false);
     // No other goal carries it.
@@ -454,12 +553,61 @@ describe('"Hold 95% Flow": the bar, and the valve for a board nobody can fix', (
     expect(g.flowHold).toBe(0);
     expect(g.flowNear).toBeGreaterThan(80); // ...but it has been "all but one" all along
     expect(goalView(g)!.flow!.need).toBe(0.95);
+    expect(goalView(g)!.flow!.valve).toBeUndefined();
+    expect(goalView(g)!.progress).toEqual([0, 10, 's']);
     run(g, 1);
-    expect(g.goal.ready).toBe(true); // the valve opens at 90 s, and those ten seconds have long been held
-    expect(g.time - start).toBeLessThan(91);
+    // The valve opens at 90 s. The ten seconds are counted from that moment, where the player can see them:
+    // the long stretch at "all but one" before it does not pass the goal the instant the bar comes down.
+    expect(g.goal.ready).toBe(false);
+    let v = goalView(g)!;
+    expect(v.flow!.valve).toBe(true);
+    expect(v.flow!.need).toBeCloseTo(0.9, 9);
+    expect(v.progress![0]).toBeCloseTo(0.5, 6);
+    expect(v.progress!.slice(1)).toEqual([10, 's']);
+    // The count runs with the clock, a second a second.
+    run(g, 4);
+    expect(goalView(g)!.progress![0]).toBeCloseTo(4.5, 6);
+    run(g, 5);
+    expect(g.goal.ready).toBe(false); // 99.5 s
+    expect(goalView(g)!.progress![0]).toBeCloseTo(9.5, 6);
+    run(g, 0.6);
+    expect(g.goal.ready).toBe(true); // 100 s after the goal came up, never before
+    expect(g.time - start).toBeGreaterThanOrEqual(100);
+    expect(g.time - start).toBeLessThan(100.2);
+    v = goalView(g)!;
+    expect(v.flow!.valve).toBe(true); // the flag stays for as long as the goal does
     expect(take(g, 'goal-ready').map((e) => e.goal)).toEqual(['hold-flow']);
     expect(claimGoal(g)).toBe(true);
     expect(claimGoal(g)).toBe(false);
+    expect(goalView(g)!.flow).toBeUndefined();
+  });
+
+  it('under the valve the count stops and starts again with the board, like the bar\'s own', () => {
+    const g = flowBoard(8, 1);
+    // A second Spark Refiner on the same Ember Well, its port not wired yet: it does not count toward Flow.
+    const ember = g.nodes.find((n) => n.material === 'ember')!;
+    const extra = placeNode(g, 'refiner', 400, 700, { recipe: 'spark' })!;
+    connect(g, ember.id, 0, extra.id);
+    run(g, 94);
+    expect(goalView(g)!.flow).toMatchObject({ of: 10, running: 9, valve: true });
+    expect(goalView(g)!.progress![0]).toBeGreaterThan(3);
+    // Wired to the Market it counts, and the two Refiners share what one was short of: nine of eleven.
+    const sold = connect(g, extra.id, 0, market(g).id)!;
+    run(g, 6);
+    expect(goalView(g)!.flow).toMatchObject({ of: 11, running: 9, valve: true });
+    expect(goalView(g)!.progress![0]).toBe(0);
+    run(g, 20);
+    expect(g.goal.ready).toBe(false); // two short is one too many, valve or no valve
+    // Taken off again, the count starts from nothing: ten more seconds, not the four held before.
+    expect(cutWire(g, sold.id)).toBe(true);
+    let waited = 0;
+    while (goalView(g)!.progress![0] <= 0 && waited++ < 60) run(g, 1);
+    expect(waited).toBeLessThan(40);
+    expect(g.goal.ready).toBe(false);
+    run(g, 8);
+    expect(g.goal.ready).toBe(false);
+    run(g, 2.5);
+    expect(g.goal.ready).toBe(true);
   });
 
   it('with the valve open the card shows the lower bar, and the ten seconds still have to be held', () => {
@@ -494,7 +642,7 @@ describe('"Hold 95% Flow": the bar, and the valve for a board nobody can fix', (
     run(lone, 30);
     at(lone, 'hold-flow');
     run(lone, 200);
-    expect(goalView(lone)!.flow).toMatchObject({ of: 1, running: 0, need: 0.95 });
+    expect(goalView(lone)!.flow).toMatchObject({ of: 1, running: 0, need: 0.95, valve: true });
     expect(lone.goal.ready).toBe(false);
     // Two producers, one flowing: after 90 s that is all but one.
     connect(lone, well(lone).id, 0, market(lone).id);
@@ -525,7 +673,18 @@ describe('"Hold 95% Flow": the bar, and the valve for a board nobody can fix', (
     expect(goalAge(copy)).toBeCloseTo(60, 6);
     run(copy, 29);
     expect(copy.goal.ready).toBe(false);
+    expect(goalView(copy)!.flow!.valve).toBeUndefined();
     run(copy, 2);
+    expect(copy.goal.ready).toBe(false); // the valve is open (second 91), and its ten seconds have begun
+    expect(goalView(copy)!.flow!.valve).toBe(true);
+    // A save made while the valve's count is running picks it up where it was.
+    const mid = deserialize(serialize(copy))!;
+    expect(goalView(mid)!.progress![0]).toBeCloseTo(goalView(copy)!.progress![0], 6);
+    run(mid, 8.5);
+    expect(mid.goal.ready).toBe(false);
+    run(mid, 1);
+    expect(mid.goal.ready).toBe(true); // 100 s on the goal in all
+    run(copy, 9.5);
     expect(copy.goal.ready).toBe(true);
     // A save taken mid-goal by the build before this one has no such count: its 90 s start when it is loaded.
     const raw = JSON.parse(serialize(g));
@@ -534,7 +693,7 @@ describe('"Hold 95% Flow": the bar, and the valve for a board nobody can fix', (
     const old = deserialize(JSON.stringify(raw))!;
     expect(old.flowNear).toBe(0);
     expect(goalAge(old)).toBe(0);
-    run(old, 89);
+    run(old, 99);
     expect(old.goal.ready).toBe(false);
     run(old, 2);
     expect(old.goal.ready).toBe(true);

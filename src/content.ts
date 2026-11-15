@@ -174,7 +174,7 @@ const T = (
  *    the two Assemblers take the Shard, Ink and Spark the Labs were studying, and a newcomer's α income falls
  *    by a third. At 720 α the card's last wait is for the Fabricator's credits, not for the research, for the
  *    card player who takes the adviser's tips and for the one who takes none (`npm run pacing`, policies
- *    newcomer and cardonly): that is what makes the card's line for that wait true ("remove the wire from the
+ *    newcomer and cardonly): that is what makes the card's line for that wait true ("cut the wire from the
  *    Glyph Assembler to the Lab", tests/meanwhile.test.ts). At 900 α the player who takes no tip had the
  *    Fabricator's price in hand before the research on every seed, and the line was worth nothing to them.
  *    The fast players wait for the Fabricator's credits whatever this costs, so it does not move their Lens.

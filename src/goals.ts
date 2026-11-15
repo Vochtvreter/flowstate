@@ -20,11 +20,11 @@
 // player obeys, so the structural advice lives there and not in the adviser's tips (src/advice.ts), which
 // nobody is sure to follow. How the lines were chosen is in docs/CONTENT.md ("While you wait").
 import { EXPANSION_DEPOSITS, MATERIALS, MatId, NODE_DEFS, NodeType, RULES, TECHS } from './content';
-import { endDemo, expansionCost, grantTech, has, nodeCost, nodeCount, upgradeCost } from './economy';
+import { endDemo, expansionCost, grantTech, has, nodeCost, nodeCount, recipeOf, upgradeCost } from './economy';
 import { countsForFlow, isFlowing, nearShare } from './flow';
-import { graph } from './graph';
+import { graph, isMachine, isPass } from './graph';
 import { startOrders } from './orders';
-import { Game, GNode, GoalReward } from './state';
+import { Game, GNode, GoalReward, Wire } from './state';
 
 /** [current, target, unit]. Unit '¢' means "saving up credits"; 'α' / 'β' / 'γ' mean saving up Data. */
 export type GoalProgress = [current: number, target: number, unit: string];
@@ -51,7 +51,7 @@ export interface Goal {
    */
   step?(g: Game): GoalStep | null;
   reward: GoalReward;
-  /** One of the big celebrations (the fifth is the first Flow State, see the 'flow-state' event). */
+  /** One of the big celebrations: six goals carry one (the seventh is the first Flow State, see the 'flow-state' event). */
   big?: boolean;
   /** A free-play goal after the capstone. */
   free?: boolean;
@@ -72,8 +72,8 @@ export interface Meanwhile {
   /** Does the line apply right now? Absent = for as long as the goal is the active one. While it does not, the card leaves it out. */
   when?(g: Game): boolean;
   /**
-   * Wires the line asks the player to remove, if it asks for that. The adviser reads it: "remove this wire"
-   * is only ever a tip when a card says the same.
+   * Wires the line asks the player to cut, if it asks for that. The adviser reads it: "cut this wire" is only
+   * ever said when a card says the same.
    */
   cuts?(g: Game): number[];
 }
@@ -149,20 +149,59 @@ function siltHandled(g: Game): boolean {
 
 const typeOf = (g: Game, id: number) => graph(g).byId.get(id)?.type;
 
-/** Wires that run straight from a machine making `recipe` (its first port) into a Lab. */
-const studyWires = (g: Game, recipe: string) =>
-  g.wires.filter((w) => w.port === 0 && graph(g).byId.get(w.from)?.recipe === recipe && typeOf(g, w.to) === 'lab');
+/** Can this material come down this wire: straight from what makes it, or through Routers, Mergers and Silos? */
+function carries(g: Game, w: Wire, m: MatId, seen = new Set<number>()): boolean {
+  const c = graph(g);
+  const n = c.byId.get(w.from);
+  if (!n) return false;
+  if (n.type === 'well') return n.material === m;
+  if (isMachine(n)) return recipeOf(n)?.outputs[w.port]?.[0] === m;
+  if (!isPass(n) || seen.has(n.id)) return false;
+  seen.add(n.id);
+  return (c.ins.get(n.id) ?? []).some((x) => carries(g, x, m, seen));
+}
 
 /**
- * Labs that study what Wells give them and nothing else: a Well with a Lab of its own is 1 α a second for
- * good. (A Well wired into a Lab that also studies Shard or Glyph does not count: it takes their place.)
+ * Wires into a Lab that this material can come down: the wire straight from the machine that makes it, and
+ * the Lab's wire of a Router (or Merger, or Silo) the material passes through. Those are the wires to cut to
+ * stop it being studied.
+ */
+const studyWires = (g: Game, m: MatId) => g.wires.filter((w) => typeOf(g, w.to) === 'lab' && carries(g, w, m));
+
+/**
+ * Wells with a Lab of their own: pairs of a Well and a Lab that studies what Wells give it and nothing else,
+ * each Well and each Lab counted once. Such a pair is 1 α a second for good. (A Well wired into a Lab that
+ * also studies Shard or Glyph does not count: it takes their place. Nor does one Well wired into two Labs
+ * count twice: it has no more to give the second than the first leaves over.)
  */
 function wellLabs(g: Game): number {
   const c = graph(g);
-  return g.nodes.filter((n) => {
+  /** For each Lab fed by Wells alone: those Wells. */
+  const labs: number[][] = [];
+  for (const n of g.nodes) {
     const fed = n.type === 'lab' ? c.ins.get(n.id) ?? [] : [];
-    return fed.length > 0 && fed.every((w) => c.byId.get(w.from)?.type === 'well');
-  }).length;
+    if (fed.length > 0 && fed.every((w) => c.byId.get(w.from)?.type === 'well')) labs.push(fed.map((w) => w.from));
+  }
+  if (labs.length < 2) return labs.length;
+  // The most Labs that can each be given a Well of their own: a Lab takes a free Well, or one whose Lab can take another.
+  const labOf = new Map<number, number>();
+  const give = (lab: number, tried: Set<number>): boolean => {
+    for (const well of labs[lab]) {
+      if (tried.has(well)) continue;
+      tried.add(well);
+      const other = labOf.get(well);
+      if (other == null || give(other, tried)) {
+        labOf.set(well, lab);
+        return true;
+      }
+    }
+    return false;
+  };
+  let pairs = 0;
+  labs.forEach((_, lab) => {
+    if (give(lab, new Set())) pairs++;
+  });
+  return pairs;
 }
 
 /**
@@ -228,7 +267,12 @@ export const goalAge = (g: Game) => (g.goalAt && g.goalAt.i === g.goal.i ? Math.
  * long. (A board with one producer that nobody can get flowing would otherwise stop the chain for good.)
  */
 const flowValveOpen = (g: Game) => goalAge(g) >= RULES.flow.valveAfter;
-const flowHeld = (g: Game) => (flowValveOpen(g) ? Math.max(g.flowHold, g.flowNear) : g.flowHold);
+/**
+ * Seconds held toward the goal. Under the valve's lower bar they are counted from the moment it opens, however
+ * long the board has been at "all but one" before: the player sees the bar come down and the ten seconds run.
+ */
+const flowHeld = (g: Game) =>
+  (flowValveOpen(g) ? Math.max(g.flowHold, Math.min(g.flowNear, goalAge(g) - RULES.flow.valveAfter)) : g.flowHold);
 
 /** What the Flow goal's card shows beside its count-down. */
 export interface FlowGoalView {
@@ -251,7 +295,8 @@ function flowGoalView(g: Game): FlowGoalView {
     of++;
     if (isFlowing(n)) running++;
   }
-  return { pct: g.flow, running, of, need: flowValveOpen(g) ? nearShare(of) : RULES.flow.holdShare };
+  const valve = flowValveOpen(g);
+  return { pct: g.flow, running, of, need: valve ? nearShare(of) : RULES.flow.holdShare, ...(valve ? { valve } : {}) };
 }
 
 // ---------- the chain ----------
@@ -367,6 +412,7 @@ export const GOALS: Goal[] = [
       when: (g) => count(g, 'lab') > 0 && g.nodes.some((n) => n.recipe === 'ink'),
     },
     reward: { a: 25, unlock: 'orders' },
+    big: true,
   },
   {
     id: 'first-order', title: 'Fill your first order',
@@ -404,7 +450,11 @@ export const GOALS: Goal[] = [
   },
   {
     id: 'make-glyph', title: 'Assemble your first Glyph',
-    hint: hint('Research Assembly, then build an Assembler, wire both Ink and Spark into it and sell its Glyph at the Market.'),
+    // Where the Assembler is built from is said: dragged out of the Ink port it arrives wired, set to Glyph.
+    // The Market comes before the Spark: the goal completes with the first Glyph, the card then shows Claim
+    // and no hint, and a player who had still to "sell its Glyph" never read that again (the Glyph sat
+    // unsold until a tip said so, six minutes on).
+    hint: hint('Research Assembly, build an Assembler from the Ink Refiner\'s Ink port, wire it to the Market, then wire Spark into it to make Glyph.'),
     done: (g) => made(g, 'glyph'),
     ...buying((g) => techThenNode(g, 'P4', 'assembler', 'glyph')),
     // The board has just grown by two deposits. A Well with a Lab of its own is 1 α a second for good: wired
@@ -456,10 +506,12 @@ export const GOALS: Goal[] = [
   },
   {
     id: 'make-prism', title: 'Assemble your first Prism',
-    hint: hint('Build another Assembler, feed it two Shard for every Mist and sell its Prism at the Market.'),
+    // The Market before the Shard, for the same reason as on "Assemble your first Glyph".
+    hint: hint('Build another Assembler from the Mist Refiner\'s port, wire it to the Market, then wire Shard into it to make Prism (two for every Mist).'),
     done: (g) => made(g, 'prism'),
     ...buying((g) => techThenNode(g, 'P5', 'assembler', 'prism')),
     reward: { credits: 600, b: 40 },
+    big: true,
   },
   {
     id: 'three-orders', title: 'Fill three orders',
@@ -471,7 +523,7 @@ export const GOALS: Goal[] = [
   },
   {
     id: 'build-fabricator', title: 'Build a Fabricator',
-    hint: hint('Research Fabrication, then save up for the Fabricator: orders and a high Flow get you there faster.'),
+    hint: hint('Research Fabrication, then save up and build a Fabricator from the Prism Assembler\'s port: orders and a high Flow get you there faster.'),
     done: (g) => count(g, 'fabricator') >= 1,
     ...buying((g) => (has(g, 'P7') ? price(nodeCost(g, 'fabricator'), THE.fabricator) : tech('P7', nodeCost(g, 'fabricator'), THE.fabricator))),
     // Goal 17 had the player study Glyph. Fabrication's β is in hand by now (the two goals before pay it), and
@@ -480,10 +532,8 @@ export const GOALS: Goal[] = [
     // It applies while the β is covered and the Fabricator's price is not: a player who already has the
     // credits (one who never spent any on upgrades) gains nothing by it, and is not asked.
     meanwhile: {
-      text: hint(
-        'You have the β you need: remove the wire from the Glyph Assembler to the Lab.',
-        'You have the β you need: remove the wire from the Glyph Assembler to the Lab.',
-      ),
+      text: hint('You have the β you need: cut the wire from the Glyph Assembler to the Lab.'),
+      // No Glyph reaches a Lab any more, by a wire of its own or through a Router.
       done: (g) => studyWires(g, 'glyph').length === 0,
       when: sellGlyphNow,
       cuts: (g) => (sellGlyphNow(g) ? studyWires(g, 'glyph').map((w) => w.id) : []),

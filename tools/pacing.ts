@@ -25,6 +25,7 @@
  *                --tipEvery=<n>[,<k>]  what-if: they follow only every nth tip that comes due, starting with
  *                                      the kth (the nth when left out), and let the others pass
  *                --hands=<seconds>     what-if: seconds per action of every card player (cardonly at 10 s)
+ *                --minShare=<0..1>     what-if: the share of a wait a tip has to save (ADVICE.minShare)
  *                --trials              with --policy=newcomer: for every wait that begins with no tip on offer,
  *                                      list what the adviser weighed and how each candidate did
  *
@@ -60,7 +61,8 @@
  *   newcomer10  the same person at 10 s per action
  *   cardonly    the newcomer who never follows a tip, not even on the Flow goal: the cards and their lines
  *               alone. The cards have to carry the game by themselves, so this player has targets too. Their
- *               Flow goal is passed by its valve (RULES.flow.valveAfter), in about 100 s
+ *               Flow goal is passed by its valve (RULES.flow.valveAfter): it opens at 90 s, its ten seconds
+ *               are counted from there, and the Claim follows 8–16 s later, so about 110–116 s on the goal
  * For these players the report also counts the tips: how many came on offer, how many were followed, and the
  * smallest and the median saving the followed ones promised.
  *
@@ -77,7 +79,7 @@ import {
   claimGoal, claimOrder, clearHistory, connect, cutWire, deleteNode, expandBoard, favour, freeDeposits, materialsAt, placeNode, setMode,
   setWeight, upgrade, upgradeAll, upgradeWire,
 } from '../src/actions';
-import { Advice, advice, adviceTrials, applyAdvice, waitInfo, waitKind } from '../src/advice';
+import { ADVICE, Advice, advice, adviceTrials, applyAdvice, waitInfo, waitKind } from '../src/advice';
 import {
   cycleTime, demandRate, expansionCost, flowMult, fmt, has, maxLevel, maxPipeTier, nodeCost, pipeCap, readyTechs, recipeOf, recipeUnlocked, research,
   saturation, techAffordable, techAvailable, techEta, trackAvailable, upgradeCost, upgradeCostAt, valueOf, wellRate,
@@ -1110,19 +1112,28 @@ export class Bot {
       case 'make-glyph': {
         if (!has(g, 'P4')) return study('P4');
         const a = this.maker('glyph');
-        if (!a) return buy('assembler', 'glyph');
+        const ink = this.maker('ink');
+        // "...build an Assembler from the Ink Refiner's Ink port, wire it to the Market, then wire Spark into it."
+        if (!a) return ink ? from(ink, 0, 'assembler', 'glyph') : buy('assembler', 'glyph');
         const fed = (m: MatId) => this.ins(a).some((w) => materialsAt(g, w.from, w.port).includes(m));
-        return (fed('ink') ? null : wireIf(this.maker('ink'), 0, a)) ?? (fed('spark') ? null : wireIf(this.maker('spark'), 0, a)) ?? wireIf(a, 0, market);
+        return (fed('ink') ? null : wireIf(this.maker('ink'), 0, a)) ?? wireIf(a, 0, market) ?? (fed('spark') ? null : wireIf(this.maker('spark'), 0, a));
       }
       case 'study-glyph': return wireIf(this.maker('glyph'), 0, lab);
       case 'make-mist': return rawLine('P5', 'breeze', 'mist');
       case 'make-prism': {
         const a = this.maker('prism');
-        if (!a) return has(g, 'P5') ? buy('assembler', 'prism') : null;
+        const mist = this.maker('mist');
+        // "Build another Assembler from the Mist Refiner's port, wire it to the Market, then wire Shard into it."
+        if (!a) return !has(g, 'P5') ? null : mist ? from(mist, 0, 'assembler', 'prism') : buy('assembler', 'prism');
         const fed = (m: MatId) => this.ins(a).some((w) => materialsAt(g, w.from, w.port).includes(m));
-        return (fed('shard') ? null : wireIf(this.maker('shard'), 0, a)) ?? (fed('mist') ? null : wireIf(this.maker('mist'), 0, a)) ?? wireIf(a, 0, market);
+        return (fed('mist') ? null : wireIf(this.maker('mist'), 0, a)) ?? wireIf(a, 0, market) ?? (fed('shard') ? null : wireIf(this.maker('shard'), 0, a));
       }
-      case 'build-fabricator': return has(g, 'P7') ? buy('fabricator', 'lens') : study('P7');
+      case 'build-fabricator': {
+        // "Research Fabrication, then save up and build a Fabricator from the Prism Assembler's port."
+        if (!has(g, 'P7')) return study('P7');
+        const prism = this.maker('prism');
+        return prism ? from(prism, 0, 'fabricator', 'lens') : buy('fabricator', 'lens');
+      }
       case 'make-lens': {
         const f = this.maker('lens');
         if (!f) return null;
@@ -1198,10 +1209,10 @@ export class Bot {
         };
       }
       case 'build-fabricator': {
-        // "Remove the wire from the Glyph Assembler to the Lab."
+        // "Cut the wire from the Glyph Assembler to the Lab."
         const id = line.cuts?.(g)[0];
         const w = id == null ? null : g.wires.find((x) => x.id === id) ?? null;
-        return !w ? null : { cls: 'fix', kind: 'cut', cost: 0, label: `card, meanwhile: remove wire ${this.name(this.node(w.from))} → ${this.name(this.node(w.to))}`, run: () => cutWire(g, w.id) };
+        return !w ? null : { cls: 'fix', kind: 'cut', cost: 0, label: `card, meanwhile: cut wire ${this.name(this.node(w.from))} → ${this.name(this.node(w.to))}`, run: () => cutWire(g, w.id) };
       }
       default: return null;
     }
@@ -2125,6 +2136,7 @@ function main() {
     else if (k === 'noBulk') CFG.bulk = false;
     else if (k === 'noTips') CFG.tips = false;
     else if (k === 'noMeanwhile') CFG.meanwhile = false;
+    else if (k === 'minShare' && v) ADVICE.minShare = Number(v);
     else if (k === 'skipLine' && v) CFG.skipLines = v.split(',');
     else if (k === 'lineDelay' && v) CFG.lineDelay = Number(v);
     else if (k === 'tipDelay' && v) {
@@ -2161,7 +2173,7 @@ function main() {
   const what = [
     profileName !== 'current' ? `profile "${profileName}": ${profile.describe}` : '', ...overrides.map((o) => `--set=${o}`),
     CFG.bulk ? '' : '--noBulk', CFG.tips ? '' : '--noTips', CFG.meanwhile ? '' : '--noMeanwhile',
-    ...process.argv.slice(2).filter((a) => /^--(skipLine|lineDelay|tipDelay|tipEvery|hands)=/.test(a)),
+    ...process.argv.slice(2).filter((a) => /^--(skipLine|lineDelay|tipDelay|tipEvery|hands|minShare)=/.test(a)),
   ].filter(Boolean).join('  ');
   const play = (p: Policy, s: number) => {
     const bot = new Bot(p, s, minutes ?? (p.card ? CFG.minutesCard : p.fast ? CFG.minutesFast : CFG.minutesSlow));
@@ -2202,12 +2214,14 @@ export function playOnce(policy: string, seed: number): {
   checks: { label: string; value: string; target: string; ok: boolean }[];
   /** Tips that came on offer and tips followed (card players; both 0 for a player who takes none). */
   tips: { offered: number; followed: number };
+  /** Seconds on "Hold 95% Flow", from the claim before it to its own (null if it was never claimed). */
+  flowGoal: number | null;
 } {
   const p = POLICIES[policy];
   const bot = new Bot(p, seed, p.card ? CFG.minutesCard : p.fast ? CFG.minutesFast : CFG.minutesSlow);
   bot.run();
   const r = measure(bot);
-  return { lens: r.lens, checks: checks(r), tips: { offered: r.tipStats.offered, followed: r.tipStats.followed } };
+  return { lens: r.lens, checks: checks(r), tips: { offered: r.tipStats.offered, followed: r.tipStats.followed }, flowGoal: r.flowGoal?.seconds ?? null };
 }
 
 // From the command line (npm run pacing) this file is the program; a test that imports it only wants the exports.
