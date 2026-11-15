@@ -327,6 +327,12 @@ html[data-input='touch'] #insp .link::after { content: ''; position: absolute; i
 #app.phone #toasts { position: static; transform: none; align-self: center; margin-top: 6px; max-width: 100%; }
 #app.phone .toast { max-width: 100%; }
 
+/* ---------- inspector under touch: what the rules above leave short of 44 px ----------
+   The Router's mode buttons were 40 px tall, and the reach around its small steppers and filter chips came
+   out as 42 px: it is measured from inside their 1 px border. */
+html[data-input='touch'] #insp .seg button { height: 44px; }
+html[data-input='touch'] #insp .step::after, html[data-input='touch'] #insp .filt::after { inset: -7px; }
+
 /* ---------- toasts ----------
    Outside the phone layout toasts dock at the bottom left of the stage, above the row of key hints, and keep
    their hands off every control: the zoom buttons and the minimap have the bottom right corner (192 px
