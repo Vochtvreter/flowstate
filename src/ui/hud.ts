@@ -572,9 +572,9 @@ const problemKey = (g: Game, n: GNode) => {
  * idle, is settling after a change, or is in trouble in a goal's first seconds: the card is speaking of it). Nothing
  * is flagged before the first wire. A problem the player has put away (alertPut) is passed over for the others.
  */
-function pickProblem(g: Game): { n: GNode; text: string } | null {
+function pickProblem(g: Game, focus: number[]): { n: GNode; text: string } | null {
   const worst = !g.wires.length && g.stats.wiresMade === 0 ? null
-    : alertPick(g, alertNode, (n) => (alertPut && problemKey(g, n) === alertPut ? null : problemText(g, n)));
+    : alertPick(g, alertNode, (n) => (alertPut && problemKey(g, n) === alertPut ? null : problemText(g, n)), focus);
   alertNode = worst ? worst.n.id : -1;
   return worst;
 }
@@ -617,11 +617,11 @@ function adviceNodes(g: Game, a: Advice | null | undefined): number[] {
  * offer or the line's next step is about the node or about where its trouble comes from (a starved machine's
  * supplier: "buy Speed on the Ember Well" says what "Refiner (Spark) needs more Ember" says).
  */
-function cardSays(g: Game, n: GNode): boolean {
+function cardSays(g: Game, n: GNode, focus: number[]): boolean {
   const about = new Set<number>([n.id]);
   const culprit = diagnose(g, n).culprit;
   if (culprit != null) about.add(culprit);
-  const named = [...goalFocus(g), ...adviceNodes(g, tipShown()), ...adviceNodes(g, lineShown()?.step)];
+  const named = [...focus, ...adviceNodes(g, tipShown()), ...adviceNodes(g, lineShown()?.step)];
   return named.some((id) => about.has(id));
 }
 
@@ -648,10 +648,12 @@ function renderAlert(g: Game, force: boolean) {
       else if (putGone < 0) putGone = g.time;
       else if (g.time - putGone > ALERT_CALM) alertPut = '';
     }
-    const worst = pickProblem(g);
+    // (What the goal is about, looked up once for both: it asks the adviser's line.)
+    const focus = goalFocus(g);
+    const worst = pickProblem(g, focus);
     const key = worst ? problemKey(g, worst.n) : '';
     alertKey = key;
-    const left = !worst ? undefined : cardSays(g, worst.n) ? 'card' : undefined;
+    const left = !worst ? undefined : cardSays(g, worst.n, focus) ? 'card' : undefined;
     alertSaid = { kind: worst && !left ? 'problem' : '', key, left };
     if (worst && !left) {
       kind = 'problem';
