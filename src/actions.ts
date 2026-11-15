@@ -250,7 +250,9 @@ export function upgradeAll(g: Game, type: NodeType, track: Track): number {
   });
   if (count) {
     noteEdit(g, upgradeAllNote(type, track));
-    g.bulkAt = g.time;
+    // "Upgrade all your Wells at once" (goal 20) counts a press that raised Wells, and no other kind. The time is
+    // part of the undo step (state.ts snapshot), so an undo of the press takes the goal's readiness back with it.
+    if (type === 'well') g.bulkAt = g.time;
   }
   return count;
 }

@@ -242,9 +242,10 @@ export interface Game {
    */
   edits?: Edit[];
   /**
-   * Game time of the last press of Upgrade all (src/actions.ts upgradeAll). "Upgrade all your Wells at once" is
-   * met by a press made since the goal came up; `edits` cannot carry that, as it forgets anything older than a
-   * minute, and the Claim then went with the next undo or reload.
+   * Game time of the last press of Upgrade all on Wells (src/actions.ts upgradeAll; a press on any other kind
+   * leaves it alone). "Upgrade all your Wells at once" is met by such a press made since the goal came up; `edits`
+   * cannot carry that, as it forgets anything older than a minute, and the Claim then went with the next undo or
+   * reload. It is part of the undo step (Snapshot.bulkAt): undoing the press takes the goal's readiness back.
    */
   bulkAt?: number;
   // --- not saved ---
@@ -598,6 +599,11 @@ export interface Snapshot {
   /** The board's size and its deposits: an expansion is undone with the rest (actions.ts expandBoard). */
   board?: Game['board'];
   deposits?: Deposit[];
+  /**
+   * The last press of Upgrade all on Wells (Game.bulkAt), null for none: undoing the press takes back "Upgrade
+   * all your Wells at once" with it, which is met by that press alone (actions.ts unready).
+   */
+  bulkAt?: number | null;
 }
 
 export function snapshot(g: Game): Snapshot {
@@ -611,6 +617,7 @@ export function snapshot(g: Game): Snapshot {
     })),
     board: { ...g.board },
     deposits: g.deposits.map((d) => ({ ...d })),
+    bulkAt: g.bulkAt ?? null,
   };
 }
 
@@ -668,5 +675,9 @@ export function restore(g: Game, s: Snapshot) {
   });
   if (s.board) g.board = { ...s.board };
   if (s.deposits) g.deposits = s.deposits.map((d) => ({ ...d }));
+  if (s.bulkAt !== undefined) {
+    if (s.bulkAt == null) delete g.bulkAt;
+    else g.bulkAt = s.bulkAt;
+  }
   g.rev++;
 }

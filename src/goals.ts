@@ -394,13 +394,12 @@ export function lensFeeds(g: Game): { mat: MatId; name: string; fed: boolean }[]
 const lensFed = (g: Game, m: MatId) => !!lensFeeds(g)?.find((x) => x.mat === m)?.fed;
 
 /**
- * "Upgrade all your Wells at once": an Upgrade all has been pressed since this goal came up (g.bulkAt, kept with
- * the save; the edit notes are only a fallback, as they forget anything older than a minute).
+ * "Upgrade all your Wells at once": Upgrade all has raised the Wells since this goal came up (g.bulkAt, kept with
+ * the save and set only by a press on Wells; an undo of that press takes it back, and the goal's readiness with it).
  */
 const bulkSince = (g: Game) => {
   const since = g.goalAt && g.goalAt.i === g.goal.i ? g.goalAt.t : g.time;
-  if (g.bulkAt != null && g.bulkAt >= since - 1e-9) return true;
-  return (g.edits ?? []).some((e) => e.what.startsWith('upgrade-all:') && e.at >= since - 1e-9);
+  return g.bulkAt != null && g.bulkAt >= since - 1e-9;
 };
 
 /** The cheapest single Speed level on a Well: what one press of Upgrade all on the Wells costs at the least. */

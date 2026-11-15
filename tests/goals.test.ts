@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { claimGoal, connect, cutWire, expandBoard, favour, placeNode, setMode, setWeight, undo, upgrade, upgradeAll } from '../src/actions';
+import { claimGoal, connect, cutWire, expandBoard, favour, placeNode, redo, setMode, setWeight, undo, upgrade, upgradeAll } from '../src/actions';
 import { RULES, TECHS } from '../src/content';
 import { has, nodeCost, research } from '../src/economy';
 import { GOALS, MAIN_GOALS, activeGoal, goalAge, goalById, goalView, rewardText, routerFavoursLab } from '../src/goals';
@@ -270,6 +270,50 @@ describe('goal chain: ready, claim, skip ahead', () => {
     expect(activeGoal(back)!.id).toBe('bulk-upgrade');
     expect(back.goal.ready).toBe(true);
     expect(claimGoal(back)).toBe(true);
+  });
+
+  it('"Upgrade all your Wells at once" counts a press on the Wells only, and an undo of that press takes its Claim back', () => {
+    const g = rich();
+    g.techs = ['P1', 'R1', 'L1', 'S1'];
+    g.credits = 5000;
+    placeNode(g, 'well', 0, 0, { depositId: 2 });
+    placeNode(g, 'refiner', 300, 100, { recipe: 'shard' });
+    placeNode(g, 'refiner', 300, 300, { recipe: 'shard' });
+    placeNode(g, 'lab', 500, 100);
+    at(g, 'bulk-upgrade');
+    run(g, 1);
+    // Upgrade all on another kind is not what the card asks for (it was taken as the goal's press).
+    expect(upgradeAll(g, 'refiner', 'speed')).toBe(2);
+    expect(upgradeAll(g, 'lab', 'speed')).toBe(1);
+    run(g, 0.5);
+    expect(g.goal.ready).toBe(false);
+    // On the Wells it is.
+    const before = g.credits;
+    expect(upgradeAll(g, 'well', 'speed')).toBe(2);
+    run(g, 0.1);
+    expect(g.goal.ready).toBe(true);
+    // Undone, the press is refunded and the goal is not met any more: no reward for a press given back...
+    expect(undo(g)).toBe(true);
+    expect(g.credits).toBe(before);
+    run(g, 0.5);
+    expect(g.goal.ready).toBe(false);
+    expect(claimGoal(g)).toBe(false);
+    // ...and redone, it is met again.
+    expect(redo(g)).toBe(true);
+    run(g, 0.1);
+    expect(g.goal.ready).toBe(true);
+    // An undo of the Refiners' press, made before, leaves the Wells' press standing (it came later: it goes first).
+    expect(undo(g)).toBe(true); // the Wells' press
+    expect(undo(g)).toBe(true); // the Lab's
+    run(g, 0.1);
+    expect(g.goal.ready).toBe(false);
+    expect(redo(g)).toBe(true); // the Lab's again
+    run(g, 0.1);
+    expect(g.goal.ready).toBe(false);
+    expect(redo(g)).toBe(true); // the Wells' again
+    run(g, 0.1);
+    expect(g.goal.ready).toBe(true);
+    expect(claimGoal(g)).toBe(true);
   });
 
   it('unlocks Orders, the Flow meter and the end of the demo', () => {
