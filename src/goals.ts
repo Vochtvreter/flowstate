@@ -19,7 +19,7 @@
 // shortens that wait most for a player who does only what the cards say. The card is the channel every
 // player obeys, so the structural advice lives there and not in the adviser's tips (src/advice.ts), which
 // nobody is sure to follow. How the lines were chosen is in docs/CONTENT.md ("While you wait").
-import { MATERIALS, MatId, NODE_DEFS, NodeType, RULES, TECHS } from './content';
+import { EXPANSION_DEPOSITS, MATERIALS, MatId, NODE_DEFS, NodeType, RULES, TECHS } from './content';
 import { endDemo, expansionCost, grantTech, has, nodeCost, nodeCount, upgradeCost } from './economy';
 import { countsForFlow, isFlowing, nearShare } from './flow';
 import { graph } from './graph';
@@ -163,6 +163,24 @@ function wellLabs(g: Game): number {
     const fed = n.type === 'lab' ? c.ins.get(n.id) ?? [] : [];
     return fed.length > 0 && fed.every((w) => c.byId.get(w.from)?.type === 'well');
   }).length;
+}
+
+/**
+ * Has a deposit that came with the board's second expansion (or a later one) got a Well with a Lab of its own?
+ * What "Make your first Mist" asks for meanwhile, read to the letter: a player who left the first expansion's
+ * deposits alone and does exactly this has done it too.
+ */
+function laterWellLab(g: Game): boolean {
+  let n = 0;
+  for (let i = 1; i < g.board.expansions; i++) n += EXPANSION_DEPOSITS[i % EXPANSION_DEPOSITS.length].length;
+  if (n <= 0) return false;
+  const later = new Set(g.deposits.slice(-n).map((d) => d.id));
+  const c = graph(g);
+  return g.nodes.some((lab) => {
+    const fed = lab.type === 'lab' ? c.ins.get(lab.id) ?? [] : [];
+    const wells = fed.map((w) => c.byId.get(w.from));
+    return fed.length > 0 && wells.every((x) => x?.type === 'well') && wells.some((x) => x?.depositId != null && later.has(x.depositId));
+  });
 }
 
 /** Is there a deposit with no Well on it that the player could put one on, or a Well that has not been wired to anything yet? */
@@ -427,9 +445,10 @@ export const GOALS: Goal[] = [
     // Both deposits of the first expansion are in use by now; the second expansion costs 500¢ and brings two more.
     meanwhile: {
       text: hint('Expand the board again, then give a new deposit a Well and a Lab of its own.'),
-      done: (g) => wellLabs(g) >= 3,
+      // Three such pairs (the two of the Glyph card's line and one more), or the very thing the line names.
+      done: (g) => wellLabs(g) >= 3 || laterWellLab(g),
       // Not the Breeze deposit this very card is about to ask for: only while Breeze is still locked, or done.
-      when: (g) => wellLabs(g) >= 3 || !has(g, 'P5'),
+      when: (g) => wellLabs(g) >= 3 || laterWellLab(g) || !has(g, 'P5'),
     },
     reward: { a: 50 },
   },

@@ -145,6 +145,46 @@ describe('"while you wait": the four lines', () => {
     clearHistory();
   });
 
+  it('goal 18\'s line is ticked for the player who does exactly what it says, whatever they did with the line before it', () => {
+    // A player who left the first expansion's deposits alone (the Glyph card's line never followed).
+    const g = rich();
+    g.techs = ['P1', 'R1', 'P2', 'P3', 'P4'];
+    const m = market(g);
+    connect(g, well(g).id, 0, m.id);
+    expect(expandBoard(g)).toBe(true);
+    at(g, 'make-mist');
+    expect(wellLabs(g)).toBe(0);
+    expect(goalView(g)!.meanwhile).toEqual({ text: LINES['make-mist'].mouse, done: false });
+    // A Well and a Lab of its own on a deposit of the FIRST expansion is not what this line asks for.
+    const first = g.deposits[g.deposits.length - 2];
+    const w0 = placeNode(g, 'well', first.x, first.y, { depositId: first.id })!;
+    connect(g, w0.id, 0, placeNode(g, 'lab', 900, 500)!.id);
+    expect(goalView(g)!.meanwhile!.done).toBe(false);
+    // "Expand the board again, then give a new deposit a Well and a Lab of its own."
+    expect(expandBoard(g)).toBe(true);
+    expect(goalView(g)!.meanwhile!.done).toBe(false);
+    const fresh2 = g.deposits[g.deposits.length - 1];
+    const w = placeNode(g, 'well', fresh2.x, fresh2.y, { depositId: fresh2.id })!;
+    expect(goalView(g)!.meanwhile!.done).toBe(false); // the Well alone
+    const lab = placeNode(g, 'lab', 900, 300)!;
+    const wire = connect(g, w.id, 0, lab.id)!;
+    expect(wellLabs(g)).toBe(2);
+    expect(goalView(g)!.meanwhile).toEqual({ text: LINES['make-mist'].mouse, done: true });
+    // Its Lab has to be its own: with a Refiner's output wired in as well, it is no longer that.
+    const shard = placeNode(g, 'refiner', 400, 100)!;
+    connect(g, well(g).id, 0, shard.id);
+    const mixed = connect(g, shard.id, 0, lab.id)!;
+    expect(goalView(g)!.meanwhile!.done).toBe(false);
+    cutWire(g, mixed.id);
+    expect(goalView(g)!.meanwhile!.done).toBe(true);
+    // Done stays on the card after Breeze Deposits is researched; undone, the line goes then (the card itself asks for a Well).
+    g.techs.push('P5');
+    expect(goalView(g)!.meanwhile!.done).toBe(true);
+    cutWire(g, wire.id);
+    expect(goalView(g)!.meanwhile).toBeUndefined();
+    clearHistory();
+  });
+
   it('"remove the Glyph wire" is asked only while the β is covered and the Fabricator is not paid for', () => {
     const g = rich();
     g.techs = ['P1', 'R1', 'P2', 'P3', 'P4', 'P5'];
