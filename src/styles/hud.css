@@ -452,7 +452,7 @@ html[data-input='mouse'] #hud-strip.tight .claim.sm { height: 32px; }
 /* The tip: what it buys, the sentence and its price, beside the button. */
 #app.phone .gc-tip > .gc-in { flex-wrap: nowrap; gap: 8px; margin-top: 2px; padding-top: 4px; font-size: 12px; line-height: 15px; }
 #app.phone .gc-tipbody { flex: 1 1 auto; gap: 1px; }
-#app.phone .gc-tiplead { min-height: 15px; gap: 6px; }
+#app.phone .gc-tiplead { height: 15px; gap: 6px; }
 #app.phone .gc-tipbadge { height: 14px; line-height: 14px; }
 #app.phone .gc-tipold { top: 16px; }
 
@@ -502,6 +502,8 @@ html[data-input='mouse'] #hud-strip.tight .claim.sm { height: 32px; }
   #app.phone .gc-title { grid-area: title; }
   #app.phone .gc-prog { grid-area: prog; margin: 0; }
   #app.phone .gc-prog .pbar, #app.phone .gc-prog .fl-bar { flex: none; width: 48px; }
+  /* (Beside the title there is room for the count and the time left, or for a bar: while a time is shown, not for both.) */
+  #app.phone .gc-prog:has(.gc-eta) > .pbar { display: none; }
   #app.phone .gc-prog .fl-bar .pbar { flex: 1; width: auto; }
   #app.phone .gc-valve { flex: 0 1 auto; }
   #app.phone div.gc-rewards { grid-area: prog; margin: 0; flex-wrap: nowrap; }

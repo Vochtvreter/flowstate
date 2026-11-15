@@ -81,8 +81,11 @@ export function initHud() {
     } else if (a === 'claim-order') {
       const pressed = orderEl.querySelector('[data-testid="order-claim"]')?.getBoundingClientRect();
       if (claimOrder(g) && pressed) pressClaim(pressed, true);
-    } else if (a === 'show') return showTip(g, () => renderPanels(true));
-    else if (a === 'show-line') return showLine(g, () => renderPanels(true));
+    } else if (a === 'show' || a === 'show-line') {
+      // The player is being taken to the board: on a phone the card gives it room first.
+      foldHint();
+      return a === 'show' ? showTip(g, () => renderPanels(true)) : showLine(g, () => renderPanels(true));
+    }
     else if (a === 'jump') jumpTo(Number(args[0]));
     renderPanels(true);
   });
@@ -115,6 +118,16 @@ export function initHud() {
     pressGhost = null;
     justClaimed = -1;
   });
+}
+
+/**
+ * On a phone, where the card folds its hint behind a tap (phone.ts: #app.fold, #app.hint-open), an open hint
+ * is folded away, as it is at a press on the board. phone.ts keeps that state and turns it over at a tap on
+ * the card that is not on a button: this is such a tap (the event does not bubble, so nothing else hears it).
+ */
+function foldHint() {
+  const app = document.getElementById('app');
+  if (env.phone && app?.classList.contains('fold') && app.classList.contains('hint-open')) goalEl.dispatchEvent(new MouseEvent('click'));
 }
 
 // ---------- how much room the strip has ----------

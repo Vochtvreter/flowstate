@@ -53,14 +53,15 @@
    its price; and Show me. Only on a very narrow card does the button drop under the text. */
 .gc-tip > .gc-in { display: flex; flex-wrap: wrap; align-items: center; gap: 6px 10px; padding-top: 7px; border-top: 1px dashed #2a3a63; font-size: 12px; line-height: 16px; color: #c9d3e8; }
 .gc-tipbody { flex: 1 1 170px; min-width: 0; position: relative; display: flex; flex-direction: column; gap: 2px; }
-.gc-tiplead { display: flex; align-items: center; gap: 7px; min-height: 16px; }
+.gc-tiplead { display: flex; align-items: center; gap: 7px; height: 16px; white-space: nowrap; }
 .gc-tiplead strong { font-weight: 700; color: #fff; }
 .gc-tipbadge { flex: none; display: inline-flex; align-items: center; padding: 0 6px; border-radius: 5px; font-size: 10px; font-weight: 700; letter-spacing: 0.07em; line-height: 16px; height: 16px; text-transform: uppercase; white-space: nowrap; color: #0b1430; background: #9db8ff; }
 .gc-tipbadge.ok { padding: 0 3px; background: #4ade80; color: #04240f; }
 .gc-tipbadge .ic { stroke-width: 3; }
 .gc-tiptxt { display: block; }
 /* What it costs, after the sentence. */
-.gc-tipcost { color: var(--credits); font-weight: 600; white-space: nowrap; }
+/* (Its own font must not make its line of the sentence a pixel taller than the others.) */
+.gc-tipcost { color: var(--credits); font-weight: 600; line-height: 1; white-space: nowrap; }
 /* Followed: for a while the row says what that bought, over the sentence that has been done. */
 .gc-tip.done .gc-tiplead strong { color: #4ade80; }
 .gc-tip.done .gc-tiptxt { color: #7d8aa6; }
