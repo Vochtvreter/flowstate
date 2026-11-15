@@ -18,12 +18,13 @@ import { recipeOf } from '../economy';
 import { GOALS } from '../goals';
 import { graph, isMachine } from '../sim';
 import { GNode, GoalReward } from '../state';
-import { boardRect, fitView, toClient } from './board';
+import { boardRect, fitView, frameNodes, toClient } from './board';
 import { anchorPt } from './dom';
 import { SUMMARY_DELAY } from './hud-screens';
 import { Overlay, addOverlay, burst, fly, holdFlows, ring } from './fx';
 import { Pt, bezierAt, nodeSize, wireEnds } from './geom';
 import { esc, icon, matGlyph, nodeIcon } from './icons';
+import { env } from './phone-env';
 import { Fanfare, buzz, cueBowNote, cueFanfare, cueResearch, cueWhoosh } from './audio';
 import { ui } from './ui';
 
@@ -615,13 +616,18 @@ function startBow() {
       wires.push({ pts, from: depth.get(wire.from)! * step, to: d * step, color: ends.mat ? MATERIALS[ends.mat].color : '#9DB8FF' });
     }
   }
-  // Bring the whole line into view if part of it is off screen.
+  // Bring the line into view if part of it is off screen. On a phone, Fit: its overview (every card an
+  // icon) is how a phone shows the whole factory, and the Lens moment uses it. Elsewhere, as little camera
+  // movement as it takes, among the cards (the board's frameNodes, the Wells first and the Lens last, so
+  // that the Lens is the one shown when they cannot all be): Fit drops a large factory into the overview
+  // there too, and turning every card into an icon at once was the longest frame of the whole moment.
   const r = boardRect();
   const off = [...nodes, ...(lensBox ? [lensBox] : [])].some((b) => {
     const p = toClient({ x: b.x + b.w / 2, y: b.y + b.h / 2 });
     return p.x < r.left + 20 || p.x > r.right - 20 || p.y < r.top + 20 || p.y > r.bottom - 20;
   });
-  if (off) fitView();
+  if (off && env.phone) fitView();
+  else if (off) frameNodes([...depth.keys()].sort((a, b) => depth.get(a)! - depth.get(b)!));
   const t0 = performance.now();
   const timers: number[] = [];
   bow = { t0, step, rows, wires, nodes, lens: lensBox, revealAt: (rows - 1) * step + 0.3, revealed: false, fadeFrom: Infinity, timers };
