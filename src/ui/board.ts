@@ -294,8 +294,11 @@ function zoomMin(): number {
   return k >= floor ? floor : Math.max(ZOOM.min, k * 0.9);
 }
 
-/** (Never forces the camera in: a view that is already further out than the limit may stay where it is.) */
-const clampK = (k: number) => Math.max(Math.min(zoomMin(), ui.view.k), Math.min(zoomMax(), k));
+/**
+ * (Never forces the camera in: a view that is already further out than the limit may stay where it is,
+ * though nothing is ever further out than ZOOM.min.)
+ */
+const clampK = (k: number) => Math.max(ZOOM.min, Math.min(zoomMin(), ui.view.k), Math.min(zoomMax(), k));
 
 /**
  * A camera move in progress: the view eases to `x`, `y`, `k`. With `from`, it is a timed move (`t` of
@@ -587,8 +590,11 @@ export function ensureVisible(id: number) {
  * an open sheet and the corner controls. The zoom is kept when they fit at it; otherwise the camera
  * pulls back, but never out of the detailed tier. Nodes too far apart even for that: the last one named
  * is brought into view. Does nothing when they can all be seen already.
+ *
+ * From the overview the zoom is left alone too, unless `readable` is set (for a caller that is about
+ * to point at ports, which the overview does not show): then the camera comes back in among the cards.
  */
-export function frameNodes(ids: number[]): void {
+export function frameNodes(ids: number[], readable = false): void {
   const g = ui.g;
   let box: Box | null = null;
   let last: Box | null = null;
@@ -599,8 +605,10 @@ export function frameNodes(ids: number[]): void {
     box = boxUnion(box, last);
   }
   if (!box || !last) return;
-  const cur = viewAhead();
   const floor = zoomFloor();
+  const now = viewAhead();
+  // (Coming in from the overview: start from 100% on the middle of the nodes, and pull back from there as needed.)
+  const cur = readable && now.k < floor ? centreView(box, { x0: 0, y0: 0, x1: rectOf().width, y1: rectOf().height }, READ_ZOOM) : now;
   // The areas the nodes may be shown in, in order of preference (roomy margins first, then thin ones),
   // and what must not lie over them there.
   const tiers: Box[][] = [];
@@ -663,18 +671,25 @@ export function frameNodes(ids: number[]): void {
     // No room for even one card clear of everything (a very small stage): show its top left corner.
     const tier = tiers[tiers.length - 1];
     const v = frameBox(cur, last, tier[tier.length - 1], floor);
-    if (v !== cur) moveView(v.x, v.y, v.k, true, FRAME_MS);
+    if (!sameView(v, now)) moveView(v.x, v.y, v.k, true, FRAME_MS);
     return;
   }
-  if (next !== cur && !sameView(next, cur)) moveView(next.x, next.y, next.k, true, FRAME_MS);
+  if (!sameView(next, now)) moveView(next.x, next.y, next.k, true, FRAME_MS);
 }
 
+/**
+ * Zoom about a point (the middle of the stage when none is given). Asked to zoom by nothing
+ * (`zoomBy(1)`), it applies a view that was written to `ui.view` from outside, as Show me does: such a
+ * view is brought inside the limits, and one written from among the cards stays among the cards (it is
+ * brought in to the floor of the detailed tier rather than left in the overview, where there are no
+ * ports to point at).
+ */
 export function zoomBy(factor: number, cx?: number, cy?: number) {
   glide = null;
   const r = rectOf();
   const px = (cx ?? r.left + r.width / 2) - r.left;
   const py = (cy ?? r.top + r.height / 2) - r.top;
-  const k = clampK(ui.view.k * factor);
+  const k = factor === 1 && !over && ui.view.k < zoomFloor() ? zoomFloor() : clampK(ui.view.k * factor);
   const f = k / ui.view.k;
   ui.view.x = px - (px - ui.view.x) * f;
   ui.view.y = py - (py - ui.view.y) * f;
