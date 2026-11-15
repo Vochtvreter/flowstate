@@ -1139,7 +1139,7 @@ function expandAsked(g: Game): boolean {
 /** What the button's surroundings depend on that can be read without reading layout: when it changes, they are measured again. */
 function expandKey(g: Game): string {
   const c = env.cover(), s = env.strip(), k = env.corner();
-  return `${c.top}|${c.right}|${c.bottom}|${c.row}|${s ? `${s.x0},${s.x1},${s.bottom}` : ''}|${k ? `${k.x0},${k.y0}` : ''}|${ui.uiRev}|${g.goal.i}${g.goal.ready ? 'r' : ''}|${toastsEl?.childElementCount ?? 0}|${hintsEl?.hidden ? 1 : 0}`;
+  return `${c.top}|${c.right}|${c.bottom}|${c.row}|${s ? `${s.x0},${s.x1},${s.bottom}` : ''}|${k ? `${k.x0},${k.y0}` : ''}|${ui.uiRev}|${g.goal.i}${g.goal.ready ? 'r' : ''}|${toastsEl?.childElementCount ?? 0}|${hintsEl?.hidden ? 1 : 0}|${tidyBtn && !tidyBtn.hidden ? 1 : 0}`;
 }
 
 /** What stands on the stage that the button must keep clear of. Reads layout: only when something may have changed. */
@@ -1188,9 +1188,18 @@ function measureExpand() {
     // alert chip whether it is showing or not.
     const s = env.strip();
     if (s) out.push({ x0: s.x0, y0: -1e6, x1: s.x1, y1: Math.max(s.bottom, s.goalBottom + ALERT_ROOM) });
-    // The zoom buttons and the minimap: everything right of and below their corner.
-    const c = env.corner();
-    if (c) out.push({ x0: c.x0, y0: c.y0, x1: 1e6, y1: 1e6 });
+    // The zoom buttons and the minimap: everything right of and below their corner, as they are laid out now
+    // (the corner the shell keeps is measured when the stage changes size, and lags behind the cluster growing
+    // its Tidy button: the button stood 36 px into the cluster at 1024x768 for up to two seconds).
+    let cx = Infinity, cy = Infinity;
+    for (const id of ['zoom', 'mini']) {
+      const b = stageBoxOf(document.getElementById(id));
+      if (b) {
+        cx = Math.min(cx, b.x0);
+        cy = Math.min(cy, b.y0);
+      }
+    }
+    if (cx < Infinity) out.push({ x0: cx, y0: cy, x1: 1e6, y1: 1e6 });
     add(hintsEl);
     // (For a finger on a wide screen the "tap where..." line shows under the strip.)
     add(document.getElementById('tap-hint'));
