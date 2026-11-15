@@ -347,6 +347,9 @@ function handleEvents(events: GameEvent[]) {
   // The tech the goal card was saving for has been researched (not granted with a claim): its own card.
   const goalTech = researchCardTech();
   const researched = !!goalTech && !events.some((e) => e.kind === 'goal-claimed') && events.some((e) => e.kind === 'tech' && e.id === goalTech);
+  // β that comes with a claim is the claim's to announce, from the moment of the claim: a big card's payout
+  // only flies a second later, and by then the beat has seen the counter turn (see tickBeta).
+  if (events.some((e) => (e.kind === 'goal-claimed' || e.kind === 'order-claimed') && !!e.reward.b)) betaPaidAt = performance.now();
   let claimed: 'big' | 'small' | null = ended ? 'big' : null;
   for (const ev of events) {
     switch (ev.kind) {
