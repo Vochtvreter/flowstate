@@ -72,6 +72,15 @@ function setSummaryDone(done: boolean) {
 
 /** The player has pressed Start or Continue: the simulation may run and the game may be saved. */
 export const isStarted = () => started;
+
+/** Free play has begun: the demo has ended and the player has left its summary (Keep playing). */
+let freePlayNow = false;
+/**
+ * The demo has ended and the player has gone on into free play (Keep playing, or a save that already had).
+ * Between the first Lens and that moment the board is the ending's picture (see status.ts). Under `?nosummary`
+ * there is no summary to leave, so free play is there as soon as the demo ends.
+ */
+export const freePlay = () => freePlayNow || (NO_SUMMARY && !!ui.g?.ended);
 /** A full-screen card is up: keyboard shortcuts for the board are ignored. */
 export const screenOpen = () => !started || summaryOpen || modalOpen;
 
@@ -223,6 +232,8 @@ function begin(pressed = true) {
     }, START_FADE);
   }
   if (document.activeElement instanceof HTMLElement && startEl.contains(document.activeElement)) document.activeElement.blur();
+  // (A save that ended and whose summary was already left is in free play from the start.)
+  freePlayNow = !!ui.g.ended && summaryDone();
   const earned = hooks.begin();
   pendingAway = earned ? { ...earned, away: Math.max(awayFor, earned.seconds) } : null;
   if (pressed && resuming && ui.g.paused) ui.g.paused = false;
@@ -396,6 +407,7 @@ function keepPlaying() {
   const goal = activeGoal(g);
   if (goal && g.goal.ready && goal.reward.unlock === 'end') claimGoal(g);
   setSummaryDone(true);
+  freePlayNow = true;
   closeSummary();
   flushAway();
   touch();
@@ -465,6 +477,7 @@ function closeModal() {
  */
 export function backToStart() {
   setSummaryDone(false);
+  freePlayNow = false;
   summaryDue = 0;
   pendingAway = null;
   closeSummary();
