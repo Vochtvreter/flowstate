@@ -107,6 +107,7 @@
 @media (prefers-reduced-motion: reduce) {
   .gc-row.open { animation: tip-in 0.3s ease-out; }
   .gc-row.open > .gc-in, .gc-row.out, .gc-row.out > .gc-in, .gc-line.pop .gc-tick { animation: none; }
+  .gc-tick, .gc-linetxt { transition: none; }
   .gc-tip .gc-tiptxt, .gc-tip .gc-tiplead strong, .gc-tip .gc-tipbadge, .gc-show::before, #insp .hl, #expand.hl { animation: none !important; }
   .gc-tipold { display: none; }
 }
