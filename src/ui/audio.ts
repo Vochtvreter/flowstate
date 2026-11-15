@@ -251,6 +251,8 @@ interface ToneOpts {
   glide?: number;
   /** -1 (left) to 1 (right). */
   pan?: number;
+  /** Where it plays into, instead of the bus (a voice with a gain of its own). */
+  out?: AudioNode;
 }
 
 /** One oscillator with a fast-attack, exponential-decay envelope. `peak` is its gain into the bus. */
@@ -274,7 +276,7 @@ function tone(gr: Graph, type: OscillatorType, freq: number, t: number, peak: nu
     g.connect(p);
     out = p;
   }
-  out.connect(gr.bus);
+  out.connect(o?.out ?? gr.bus);
   osc.start(t);
   osc.stop(t + attack + decay + 0.03);
   osc.onended = () => {
@@ -362,46 +364,160 @@ export function cueConnect() {
   sConnect(g, soon(g), run);
 }
 
-/** Pentatonic steps above C5: whatever the mix of sales, the ticks are in tune with each other. */
-const PENTA = [0, 2, 4, 7, 9, 12, 14, 16, 19, 21];
+/**
+ * Pentatonic steps above C5: whatever the mix of sales, the ticks are in tune with each other.
+ * (Twelve of them: a sale's step is one of the first ten, and its figure reaches two above it.)
+ */
+const PENTA = [0, 2, 4, 7, 9, 12, 14, 16, 19, 21, 24, 26];
 const C5 = 523.25;
+/** The highest step a sale or a payout starts from. */
+const TOP_STEP = 9;
 
-function tick(g: Graph, step: number, t: number, peak: number) {
+function tick(g: Graph, step: number, t: number, peak: number, out?: AudioNode) {
   const f = C5 * 2 ** (PENTA[Math.max(0, Math.min(PENTA.length - 1, step))] / 12);
-  tone(g, 'sine', f, t, peak, 0.003, 0.07);
-  tone(g, 'triangle', f * 2, t, peak * 0.22, 0.002, 0.04);
+  tone(g, 'sine', f, t, peak, 0.003, 0.07, { out });
+  tone(g, 'triangle', f * 2, t, peak * 0.22, 0.002, 0.04, { out });
 }
 
 /** Pitch step for a sale worth `amount` credits: about one step for every doubling. */
-export const saleStep = (amount: number) => Math.max(0, Math.min(PENTA.length - 1, Math.round(Math.log2(1 + Math.max(0, amount)) * 1.25) - 1));
+export const saleStep = (amount: number) => Math.max(0, Math.min(TOP_STEP, Math.round(Math.log2(1 + Math.max(0, amount)) * 1.25) - 1));
 
 /** The most ticks one second of sales may make, however many Markets sold. */
 const SALE_TICKS = 3;
+/** Seconds from one tick of a second's sales to the next. */
+const SALE_GAP = 0.085;
+/** The figure the sales walk, in steps above their own: one note of it for each second's sales. */
+const SALE_FIGURE = [0, 1, 2, 1];
+/** Each tick is moved by a random time up to this either way, in seconds, so the patter never falls into a grid. */
+const SALE_JITTER = 0.015;
+/** A tick is scheduled this far ahead on the audio clock, so that "a little early" is still in the future. */
+const SALE_LEAD = 0.018;
+/** Peak of one sale tick into the sale voice. */
+const SALE_PEAK = 0.05;
+/** Seconds of nothing new before the sale voice steps back, how far it steps back, and how long that takes. */
+const SALE_TIRE = 30;
+const SALE_BACK = 0.5;
+const SALE_FALL = 2;
+/** Seconds the voice stays at full level after it has been brought back (a new step, or Flow State starting). */
+const SALE_FRESH = 10;
+
+/**
+ * The sale voice on one signal path: its own gain (so it can step back without touching anything
+ * else), where it is in the figure, which steps the ear has had lately, and when its last ticks were.
+ * The live path has one, made with the context; renderSales() makes one on an offline path and
+ * drives it with the same code, so what is measured is what plays.
+ */
+interface SaleVoice {
+  gain: GainNode;
+  /** Batches played: the figure's note is this modulo its length. */
+  beat: number;
+  /** When each step last sounded, in audio seconds (-Infinity: never). */
+  heard: number[];
+  /** When the voice steps back unless something new is heard first, and whether it has. */
+  tireAt: number;
+  back: boolean;
+  everBack: boolean;
+  lastBatch: number;
+  /** Start times of the last three ticks, oldest first. */
+  times: number[];
+}
+
+function makeSaleVoice(g: Graph): SaleVoice {
+  const gain = g.ctx.createGain();
+  gain.gain.value = 1;
+  gain.connect(g.bus);
+  return { gain, beat: 0, heard: PENTA.map(() => -Infinity), tireAt: Infinity, back: false, everBack: false, lastBatch: -Infinity, times: [] };
+}
+
+/** Bring the sale voice back to full level at audio time `t`, for SALE_FRESH seconds (SALE_TIRE the first time round). */
+function freshen(v: SaleVoice, t: number) {
+  v.tireAt = t + (v.everBack ? SALE_FRESH : SALE_TIRE);
+  if (!v.back) return;
+  v.back = false;
+  v.gain.gain.cancelScheduledValues(t);
+  v.gain.gain.setTargetAtTime(1, t, 0.05);
+}
+
+/**
+ * One second's sales on a signal path, at audio time `now`: `steps` are the pitch steps of the
+ * Markets that sold. At most three ticks (lowest, middle, highest), SALE_GAP apart, each a little
+ * early or late, all moved up by this second's note of the figure. Returns what was scheduled.
+ *  - A step that has not sounded for SALE_TIRE seconds is news: the voice comes back to full level.
+ *    With nothing new for that long it steps back to half over SALE_FALL seconds.
+ *  - No tick starts less than a second after the tick three before it, so there are never more than
+ *    three in any second, jitter and all. (A tick that would have to wait more than the jitter for
+ *    that is left out.)
+ */
+function saleBatch(g: Graph, v: SaleVoice, now: number, steps: number[], rand: () => number = Math.random): { t: number; step: number }[] {
+  // One batch a second: a second batch inside 600 ms (two games in one page, a test poking signals) is dropped.
+  if (!steps.length || now - v.lastBatch < 0.6) return [];
+  v.lastBatch = now;
+  const sorted = [...new Set(steps)].sort((a, b) => a - b);
+  const picked = sorted.length <= SALE_TICKS ? sorted : [sorted[0], sorted[sorted.length >> 1], sorted[sorted.length - 1]];
+  if (v.tireAt === Infinity) v.tireAt = now + SALE_TIRE;
+  if (picked.some((step) => now - v.heard[step] > SALE_TIRE)) freshen(v, now);
+  for (const step of picked) v.heard[step] = now;
+  if (!v.back && now >= v.tireAt) {
+    v.back = v.everBack = true;
+    v.gain.gain.cancelScheduledValues(now);
+    v.gain.gain.setValueAtTime(1, now);
+    v.gain.gain.linearRampToValueAtTime(SALE_BACK, now + SALE_FALL);
+  }
+  const up = SALE_FIGURE[v.beat++ % SALE_FIGURE.length];
+  const out: { t: number; step: number }[] = [];
+  picked.forEach((step, i) => {
+    const due = now + SALE_LEAD + i * SALE_GAP;
+    let t = due + (rand() * 2 - 1) * SALE_JITTER;
+    if (v.times.length >= SALE_TICKS) t = Math.max(t, v.times[v.times.length - SALE_TICKS] + 1.001);
+    if (t > due + SALE_JITTER + 1e-6) return;
+    v.times.push(t);
+    if (v.times.length > SALE_TICKS) v.times.shift();
+    tick(g, step + up, t, SALE_PEAK, v.gain);
+    out.push({ t, step: step + up });
+  });
+  return out;
+}
+
+let saleVoice: SaleVoice | null = null;
 
 /**
  * What the Markets sold in the last second, as credits per Market. However many Markets there are,
- * at most three soft ticks are played, low to high and a moment apart: a patter, never a buzz.
+ * at most three soft ticks are played, low to high and a moment apart, and from one second to the
+ * next they walk a four-note figure (the step, one up, two up, one up): a patter with a tune in it,
+ * never a buzz and never a metronome. See saleBatch for the rest.
  */
 export function cueSales(amounts: number[]) {
-  if (!amounts.length || !live()) return;
-  const steps = [...new Set(amounts.map(saleStep))].sort((a, b) => a - b);
-  const picked = steps.length <= SALE_TICKS ? steps : [steps[0], steps[steps.length >> 1], steps[steps.length - 1]];
+  const g = live();
+  if (!amounts.length || !g) return;
+  // Sales give way like any everyday cue: when the second is already full, this second's are left out.
   const now = performance.now();
-  // One batch a second: a second batch inside 600 ms (two games in one page, a test poking signals) is dropped.
-  if (now - (lastAt.saleBatch ?? -1e9) < 600) return;
-  lastAt.saleBatch = now;
-  picked.forEach((step, i) => {
-    const g = admit('sale', 0, false, step);
-    if (g) tick(g, step, soon(g, 0.005) + i * 0.085, 0.05);
-  });
+  prune(now);
+  if (recent.length >= MAX_PER_SECOND) return;
+  saleVoice ??= makeSaleVoice(g);
+  const played = saleBatch(g, saleVoice, g.ctx.currentTime, amounts.map(saleStep));
+  for (const p of played) {
+    recent.push(now);
+    recorder('cue', 'sale', p.step);
+  }
 }
+
+/** Something has changed that the player will want to hear the sales against (Flow State has started): full level again. */
+export function freshenSales() {
+  const g = live();
+  if (g && saleVoice) freshen(saleVoice, g.ctx.currentTime);
+}
+
+/** The thump's tick: its pitch in Hz, and its peak into the bus. */
+const THUMP_TICK = 2000;
 
 function sPlace(g: Graph, t: number) {
   tone(g, 'sine', 150, t, 0.24, 0.005, 0.16, { to: 55, glide: 0.12 });
   noise(g, t, 0.06, 0.002, 0.05, 'lowpass', 500);
+  // A phone's speaker gives back almost nothing under 300 Hz: this short tick is the part of the thump it can play.
+  tone(g, 'triangle', THUMP_TICK, t, 0.05, 0.001, 0.028);
 }
 
-/** Something was bought or placed: a low thump. */
+/** Something was bought or placed: a low thump, with a small tick on top of it. */
 export function cuePlace() {
   const g = admit('place', 80);
   if (g) sPlace(g, soon(g));
@@ -451,14 +567,24 @@ export function cueReady() {
   if (g) sReady(g, soon(g));
 }
 
-function sPayout(g: Graph, t: number, n: number, from: number) {
-  for (let i = 0; i < n; i++) tick(g, from + i, t + i * 0.045, 0.06);
+/** Seconds between two coins of a payout landing (feel.ts sends them this far apart). */
+const PAYOUT_GAP = 0.04;
+
+function sPayout(g: Graph, t: number, n: number) {
+  // Six ticks climb from the fourth step; a longer run starts lower, so that it ends as high and no higher.
+  const from = Math.max(0, Math.min(3, TOP_STEP + 1 - n));
+  for (let i = 0; i < n; i++) tick(g, from + i, t + i * PAYOUT_GAP, 0.06);
 }
 
-/** Coins or Data landing on a counter: `n` quick ticks, each a step higher than the last. */
-export function cuePayout(n: number, from = 3) {
-  const g = admit('payout', 150, true, n);
-  if (g) sPayout(g, soon(g), n, from);
+/**
+ * Coins or Data landing on a counter, one tick for each (at most ten), each a step higher than the
+ * last. Call when the first one lands: the rest are scheduled on the audio clock, 40 ms apart, which
+ * is how far apart the coins land.
+ */
+export function cuePayout(n: number) {
+  const count = Math.max(1, Math.min(10, Math.round(n)));
+  const g = admit('payout', 150, true, count);
+  if (g) sPayout(g, soon(g), count);
 }
 
 /** The least time between two tip cues, in ms. */
@@ -475,9 +601,74 @@ export function cueTip() {
   if (g) sTip(g, soon(g));
 }
 
+function sStart(g: Graph, t: number) {
+  tone(g, 'sine', 196, t, 0.075, 0.07, 0.55, { to: 293.66, glide: 0.32 });
+  tone(g, 'triangle', 392, t + 0.02, 0.03, 0.08, 0.5, { to: 587.33, glide: 0.32 });
+  tone(g, 'sine', hz(81), t + 0.3, 0.04, 0.012, 0.6);
+}
+
+/**
+ * The press on Start (or Continue): the first sound of the game. A short warm rise, a fifth up, that
+ * settles on one soft note. It is asked for inside the press that makes the audio context, so it
+ * waits (at most half a second) for the context to be running.
+ */
+export function cueStart() {
+  if (muted) return;
+  whenRunning(() => {
+    const g = admit('start', 1500, true);
+    if (g) sStart(g, soon(g, 0.02));
+  });
+}
+
+function sLineDone(g: Graph, t: number) {
+  pluck(g, 81, t, 0.05, 0.14);
+  pluck(g, 85, t + 0.065, 0.055, 0.3);
+}
+
+/** The goal card's "while you wait" line has been done: two quick notes, a third apart, like a pencil tick. */
+export function cueLineDone() {
+  const g = admit('line-done', 1000);
+  if (g) sLineDone(g, soon(g));
+}
+
+function sSurplus(g: Graph, t: number) {
+  // B falling to F: a tritone, neither a reward's fourth nor a refusal's knock. A quiet E under the F rubs against it.
+  tone(g, 'triangle', hz(83), t, 0.06, 0.012, 0.3);
+  tone(g, 'triangle', hz(77), t + 0.21, 0.065, 0.012, 0.55);
+  tone(g, 'sine', hz(76), t + 0.21, 0.022, 0.03, 0.5);
+}
+
+/** Something is selling over its demand for the first time: two falling notes that do not quite resolve. News, not a reward and not a refusal. */
+export function cueSurplus() {
+  const g = admit('surplus', 2000, true);
+  if (g) sSurplus(g, soon(g, 0.01));
+}
+
+function sExpand(g: Graph, t: number) {
+  noise(g, t, 0.028, 0.22, 0.42, 'bandpass', 420, 1.1, 2600);
+}
+
+/** The board has grown and the camera is gliding out to show it: a soft rush of air, about as long as the glide (0.6 s). */
+export function cueExpand() {
+  const g = admit('expand', 500, true);
+  if (g) sExpand(g, soon(g, 0.005));
+}
+
+function sExpandPop(g: Graph, t: number, i: number) {
+  const f = C5 * 2 ** (PENTA[Math.max(0, Math.min(PENTA.length - 1, 2 + i))] / 12);
+  tone(g, 'sine', f * 1.6, t, 0.1, 0.003, 0.1, { to: f, glide: 0.045 });
+  tone(g, 'triangle', f * 2, t, 0.02, 0.002, 0.05);
+}
+
+/** A new deposit pops up: a small bubble of a note, a step higher for each one (`i` counts from 0). */
+export function cueExpandPop(i: number) {
+  const g = admit('expand-pop', 30, true, i);
+  if (g) sExpandPop(g, soon(g), i);
+}
+
 // ---------- celebrations ----------
 
-export type Fanfare = 'shard' | 'lab' | 'glyph' | 'flow' | 'lens';
+export type Fanfare = 'shard' | 'lab' | 'spark' | 'glyph' | 'flow' | 'prism' | 'lens';
 
 function sFanfare(g: Graph, t: number, kind: Fanfare) {
   switch (kind) {
@@ -493,6 +684,22 @@ function sFanfare(g: Graph, t: number, kind: Fanfare) {
       pluck(g, 90, t + 0.44, 0.06, 0.7);
       pluck(g, 93, t + 0.58, 0.05, 0.9);
       pad(g, [62, 69, 74], t, 0.033, 0.05, 1.7);
+      break;
+    case 'spark':
+      // A crackle, a strike that leaps two octaves, and E major straight up after it: about 1.6 s.
+      noise(g, t, 0.035, 0.001, 0.022, 'highpass', 5200);
+      noise(g, t + 0.07, 0.028, 0.001, 0.018, 'highpass', 6500);
+      tone(g, 'sine', 329.63, t + 0.02, 0.08, 0.004, 0.17, { to: 1318.5, glide: 0.11 });
+      [76, 80, 83, 88].forEach((m, i) => pluck(g, m, t + 0.14 + [0, 0.07, 0.14, 0.24][i], 0.085, 0.5));
+      bell(g, hz(92), t + 0.52, 0.05, 0.8);
+      pad(g, [64, 71], t + 0.14, 0.035, 0.04, 1.3);
+      break;
+    case 'prism':
+      // One clear note goes in; a fan of five comes out, left to right and low to high, over an open A. About 2.1 s.
+      bell(g, hz(81), t, 0.09, 0.5);
+      [73, 76, 80, 83, 88].forEach((m, i) => bell(g, hz(m), t + 0.3 + i * 0.09, 0.06, 0.9, -0.8 + i * 0.4));
+      pad(g, [57, 64, 69], t + 0.3, 0.035, 0.05, 1.6);
+      noise(g, t + 0.28, 0.012, 0.2, 0.9, 'highpass', 7000);
       break;
     case 'glyph': {
       // Two streams: one falls from the left, one climbs from the right; they meet on G and bloom. About 2.5 s.
@@ -530,9 +737,10 @@ function sFanfare(g: Graph, t: number, kind: Fanfare) {
 }
 
 /**
- * The big moments, in three sizes: small (first Shard, and the Lab a little longer), medium (first
- * Glyph: two lines, one falling and one rising, that meet on one note and open into a chord), and
- * large (the first Lens; see also cueBowNote, which plays while the factory lights up before it).
+ * The big moments, in three sizes: small (first Shard, the Lab a little longer, then the first Spark
+ * and the first Prism, each with a shape of its own), medium (first Glyph: two lines, one falling and
+ * one rising, that meet on one note and open into a chord), and large (the first Lens; see also
+ * cueBowNote, which plays while the factory lights up before it).
  * The first Flow State is not a fanfare at all but a slow swell.
  */
 export function cueFanfare(kind: Fanfare) {
@@ -579,6 +787,8 @@ export function cueFlowIn() {
 
 /** Peak gain of the whole drone into the bus. */
 const DRONE_LEVEL = 0.03;
+/** The hum's highest voice, in Hz. */
+const DRONE_HIGH = 392;
 let droneOn = false;
 let drone: { gain: GainNode; stop: () => void } | null = null;
 let droneTimer = 0;
@@ -607,6 +817,8 @@ function makeDrone(g: Graph): { gain: GainNode; stop: () => void } {
   voice('sine', 98.45, 0.7);
   voice('sine', 146.83, 0.6);
   voice('triangle', 196, 0.18);
+  // Two octaves up, quietly: what is left of the hum on a phone's speaker, which plays almost nothing under 300 Hz.
+  voice('sine', DRONE_HIGH, 0.2);
   // A very slow swell, so the hum breathes.
   const lfo = ctx.createOscillator();
   const depth = ctx.createGain();
@@ -638,7 +850,7 @@ function makeDrone(g: Graph): { gain: GainNode; stop: () => void } {
 
 /**
  * The hum of a factory in Flow State: G and the D above it, the low G doubled a hair sharp so it
- * beats slowly, through a low-pass, swelling and sinking a little every eight seconds.
+ * beats slowly, and a quiet G two octaves up, through a low-pass, swelling and sinking a little every eight seconds.
  * Fades in over about two seconds and out over `fade` seconds (the time constant; three of them to silence).
  */
 export function setDrone(on: boolean, fade = 0.8) {
@@ -677,6 +889,11 @@ export function resetAudio() {
   run = 0;
   lastConnect = -1e9;
   delete lastAt.tip;
+  // The sale voice starts over: full level, the first note of its figure, nothing heard yet.
+  if (saleVoice && live_) {
+    saleVoice.gain.disconnect();
+    saleVoice = makeSaleVoice(live_);
+  }
 }
 
 // ---------- haptics ----------
@@ -715,29 +932,37 @@ export interface PeakReport {
 /** Every cue this file can make, for renderPeak. */
 const ALL_CUES: ((g: Graph, t: number) => void)[] = [
   (g, t) => sConnect(g, t, 0), (g, t) => sPlace(g, t), (g, t) => sClaim(g, t), (g, t) => sAfford(g, t), (g, t) => sError(g, t),
-  (g, t) => sReady(g, t), (g, t) => sPayout(g, t, 6, 3), (g, t) => sTip(g, t), (g, t) => sWhoosh(g, t), (g, t) => sFlowIn(g, t),
-  (g, t) => sBowNote(g, t, 5, 6),
-  // One second's sales at their loudest: three ticks together.
-  (g, t) => [2, 5, 9].forEach((step, i) => tick(g, step, t + i * 0.085, 0.05)),
+  (g, t) => sReady(g, t), (g, t) => sPayout(g, t, 10), (g, t) => sTip(g, t), (g, t) => sWhoosh(g, t), (g, t) => sFlowIn(g, t),
+  (g, t) => sBowNote(g, t, 5, 6), (g, t) => sStart(g, t), (g, t) => sLineDone(g, t), (g, t) => sSurplus(g, t), (g, t) => sExpand(g, t),
+  (g, t) => [0, 1, 2, 3].forEach((i) => sExpandPop(g, t + i * 0.08, i)),
+  // One second's sales at their loudest: three ticks together, at the top of their figure.
+  (g, t) => [4, 7, 11].forEach((step, i) => tick(g, step, t + i * SALE_GAP, SALE_PEAK)),
 ];
+
+const FANFARES: Fanfare[] = ['shard', 'lab', 'spark', 'glyph', 'flow', 'prism', 'lens'];
+
+const offlineCtx = (seconds: number, rate = 44100) => {
+  const Offline: typeof OfflineAudioContext | undefined = window.OfflineAudioContext ?? (window as unknown as { webkitOfflineAudioContext?: typeof OfflineAudioContext }).webkitOfflineAudioContext;
+  if (!Offline) throw new Error('no OfflineAudioContext here');
+  return new Offline(2, Math.round(rate * seconds), rate);
+};
 
 /**
  * Render a pile-up on an offline copy of the signal path and measure what comes out.
  *  - 'celebration': the worst that play can produce. One fanfare (`fanfare`, the Lens by default) at
- *    the same instant as a second's sales, a claim with its payout, a goal turning ready, a wire, a
- *    purchase, a refusal, a tip, the afford bell, and the Flow State hum at full level. The rate
- *    limiter lets at most 12 cues start in a second, and no cue twice within its own gap, so nothing
- *    louder than this can be asked for in play.
- *  - 'everything': every cue this file has, and all five fanfares, started on the same sample. The
+ *    the same instant as a second's sales, a claim with its payout of ten coins, a goal turning ready,
+ *    a wire, a purchase, a refusal, a tip, the afford bell, the Start cue, a line ticked, the surplus
+ *    cue, an expansion with four deposits, and the Flow State hum at full level. The rate limiter lets
+ *    at most 12 cues start in a second, and no cue twice within its own gap, so nothing louder than
+ *    this can be asked for in play.
+ *  - 'everything': every cue this file has, and all seven fanfares, started on the same sample. The
  *    limiter and the voice cap never allow it; it shows what the clipper does with the impossible.
  */
 export async function renderPeak(scene: 'celebration' | 'everything' = 'celebration', fanfare: Fanfare = 'lens'): Promise<PeakReport> {
-  const Offline: typeof OfflineAudioContext | undefined = window.OfflineAudioContext ?? (window as unknown as { webkitOfflineAudioContext?: typeof OfflineAudioContext }).webkitOfflineAudioContext;
-  if (!Offline) throw new Error('no OfflineAudioContext here');
   const rate = 44100, seconds = 4;
   let voices = 0;
   const render = async (clip: boolean) => {
-    const ctx = new Offline(2, rate * seconds, rate);
+    const ctx = offlineCtx(seconds, rate);
     const g = build(ctx, clip);
     const t = 0.05;
     // The hum, already at its full level (in play it takes two seconds to get there).
@@ -746,7 +971,7 @@ export async function renderPeak(scene: 'celebration' | 'everything' = 'celebrat
     if (scene === 'everything') {
       // The cap is lifted for this one: the point is to see the clipper hold what the cap would have refused.
       g.voices = -1e6;
-      for (const k of ['shard', 'lab', 'glyph', 'flow', 'lens'] as Fanfare[]) sFanfare(g, t, k);
+      for (const k of FANFARES) sFanfare(g, t, k);
       for (const cue of ALL_CUES) cue(g, t);
       voices = Math.max(voices, g.voices + 1e6);
     } else {
@@ -773,4 +998,148 @@ export async function renderPeak(scene: 'celebration' | 'everything' = 'celebrat
   const clipped = await render(true);
   const raw = await render(false);
   return { peak: +clipped.peak.toFixed(4), peakBeforeClip: +raw.peak.toFixed(4), rms: +clipped.rms.toFixed(4), voices, seconds };
+}
+
+/** The cues that can be rendered alone, by the name they are logged under. */
+const SOLO: Record<string, (g: Graph, t: number) => void> = {
+  connect: (g, t) => sConnect(g, t, 0), place: sPlace, claim: sClaim, afford: sAfford, error: sError, ready: sReady,
+  payout: (g, t) => sPayout(g, t, 10), tip: sTip, start: sStart, 'line-done': sLineDone, surplus: sSurplus, expand: sExpand,
+  'expand-pop': (g, t) => sExpandPop(g, t, 0), whoosh: sWhoosh, 'flow-in': sFlowIn,
+  drone: (g) => void (makeDrone(g).gain.gain.value = DRONE_LEVEL),
+  ...Object.fromEntries(FANFARES.map((k) => ['fanfare-' + k, (g: Graph, t: number) => sFanfare(g, t, k)])),
+};
+
+/** The amplitude of one frequency in a stretch of samples (a single-bin Fourier sum, Hann-windowed): 1 for a full-scale sine. */
+function amplitudeAt(data: Float32Array, rate: number, hzAt: number, from: number, to: number): number {
+  let re = 0, im = 0, norm = 0;
+  const w = (2 * Math.PI * hzAt) / rate;
+  const n = to - from;
+  for (let i = from; i < to; i++) {
+    const hann = 0.5 - 0.5 * Math.cos((2 * Math.PI * (i - from)) / (n - 1));
+    re += data[i] * hann * Math.cos(w * i);
+    im += data[i] * hann * Math.sin(w * i);
+    norm += hann;
+  }
+  return (2 * Math.hypot(re, im)) / norm;
+}
+
+export interface CueReport {
+  /** Largest sample at the speakers, of a full scale of 1, and when it comes (s after the cue starts). */
+  peak: number;
+  peakAt: number;
+  /** Root mean square over the whole render. */
+  rms: number;
+  /** Seconds until the sound has fallen to a hundredth of its peak for good. */
+  length: number;
+  /** For each frequency asked for: its amplitude in the window, of a full scale of 1. */
+  at: Record<string, number>;
+}
+
+/**
+ * Render one cue alone on an offline copy of the signal path (`name` as in the cue log: 'place',
+ * 'drone', 'fanfare-spark', ...) and say how loud it is and how much of it lies at each of `freqs`
+ * (Hz), measured over `window` (seconds from the start of the cue; by default the whole render).
+ */
+export async function renderCue(name: string, freqs: number[] = [], window?: [number, number], seconds = 3): Promise<CueReport> {
+  const cue = SOLO[name];
+  if (!cue) throw new Error(`no cue called ${name}: ${Object.keys(SOLO).join(', ')}`);
+  const rate = 44100, t0 = 0.05;
+  const ctx = offlineCtx(seconds, rate);
+  const g = build(ctx);
+  cue(g, t0);
+  const out = await ctx.startRendering();
+  const data = out.getChannelData(0), right = out.getChannelData(1);
+  // (Both channels: a panned note is in one more than the other.)
+  const mono = new Float32Array(data.length);
+  let peak = 0, peakAt = 0, sum = 0;
+  for (let i = 0; i < data.length; i++) {
+    mono[i] = (data[i] + right[i]) / 2;
+    const v = Math.max(Math.abs(data[i]), Math.abs(right[i]));
+    if (v > peak) { peak = v; peakAt = i; }
+    sum += mono[i] * mono[i];
+  }
+  let last = 0;
+  for (let i = data.length - 1; i >= 0; i--) if (Math.max(Math.abs(data[i]), Math.abs(right[i])) > peak / 100) { last = i; break; }
+  const from = Math.round((t0 + (window?.[0] ?? 0)) * rate), to = Math.min(data.length, Math.round((t0 + (window?.[1] ?? seconds)) * rate));
+  const at: Record<string, number> = {};
+  for (const f of freqs) at[String(f)] = +amplitudeAt(mono, rate, f, from, to).toFixed(5);
+  return { peak: +peak.toFixed(4), peakAt: +(peakAt / rate - t0).toFixed(3), rms: +Math.sqrt(sum / data.length).toFixed(5), length: +(last / rate - t0).toFixed(3), at };
+}
+
+export interface SalesReport {
+  /** Every tick as it was scheduled: when (s), and which step of the scale it played. */
+  ticks: { t: number; step: number }[];
+  /** Ticks found in the rendered sound itself (onsets of its envelope), in seconds. */
+  onsets: number[];
+  /** The most ticks in any one second, by the schedule and by the sound. */
+  mostPerSecond: number;
+  mostPerSecondHeard: number;
+  /** How far each tick is from where it would be with no jitter, in ms: smallest and largest. */
+  jitterMs: [number, number];
+  /** The peak of the rendered sound in each whole second. */
+  peakBySecond: number[];
+}
+
+/**
+ * Render `seconds` of sales on an offline copy of the signal path, driven by the code that drives
+ * the live one: a batch of sales every `every` seconds (1 in play), whose steps `stepsAt(second)`
+ * gives; `freshAt` are the seconds at which Flow State starts. For checking, without ears, that the
+ * figure cycles, that the voice steps back and comes back, and that there are never more than three
+ * ticks in a second.
+ */
+export async function renderSales(seconds: number, stepsAt: (second: number) => number[], freshAt: number[] = [], every = 1): Promise<SalesReport> {
+  const rate = 22050;
+  const ctx = offlineCtx(seconds + 1, rate);
+  const g = build(ctx);
+  const v = makeSaleVoice(g);
+  const ticks: { t: number; step: number }[] = [];
+  const offs: number[] = [];
+  const fresh = freshAt.slice().sort((a, b) => a - b);
+  for (let k = 0; k * every < seconds; k++) {
+    const now = k * every;
+    while (fresh.length && fresh[0] <= now) freshen(v, fresh.shift()!);
+    saleBatch(g, v, now, stepsAt(now)).forEach((p, i) => {
+      ticks.push(p);
+      offs.push((p.t - (now + SALE_LEAD + i * SALE_GAP)) * 1000);
+    });
+  }
+  const out = await ctx.startRendering();
+  const data = out.getChannelData(0);
+  // Onsets: the envelope (peak over 4 ms) rising through a tenth of the loudest tick after 25 ms below it.
+  const hop = Math.round(rate * 0.004);
+  const env: number[] = [];
+  let top = 0;
+  for (let i = 0; i + hop <= data.length; i += hop) {
+    let m = 0;
+    for (let j = i; j < i + hop; j++) m = Math.max(m, Math.abs(data[j]));
+    env.push(m);
+    top = Math.max(top, m);
+  }
+  const onsets: number[] = [];
+  let quiet = 99;
+  for (let i = 0; i < env.length; i++) {
+    // (A tick decays in 70 ms; the next one of its batch starts 70 to 115 ms after it, well above what is left of it.)
+    const rising = i > 0 && env[i] > top * 0.08 && env[i] > env[i - 1] * 1.8;
+    if (rising && quiet >= 6) { onsets.push(+((i * hop) / rate).toFixed(3)); quiet = 0; } else quiet++;
+  }
+  const most = (times: number[]) => {
+    let best = 0;
+    for (let i = 0; i < times.length; i++) {
+      let n = 0;
+      for (let j = i; j < times.length && times[j] - times[i] < 1; j++) n++;
+      best = Math.max(best, n);
+    }
+    return best;
+  };
+  const peakBySecond: number[] = [];
+  for (let sec = 0; sec < seconds; sec++) {
+    let m = 0;
+    for (let i = sec * rate; i < (sec + 1) * rate && i < data.length; i++) m = Math.max(m, Math.abs(data[i]));
+    peakBySecond.push(+m.toFixed(4));
+  }
+  return {
+    ticks: ticks.map((p) => ({ t: +p.t.toFixed(4), step: p.step })), onsets,
+    mostPerSecond: most(ticks.map((p) => p.t)), mostPerSecondHeard: most(onsets),
+    jitterMs: [+Math.min(...offs).toFixed(2), +Math.max(...offs).toFixed(2)], peakBySecond,
+  };
 }

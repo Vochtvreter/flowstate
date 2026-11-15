@@ -1,8 +1,10 @@
-// The big moments: first Shard, the Lab, first Glyph, the first Flow State and the first Lens.
-// Each gets a colour wash, a card in the middle of the screen, particles and a fanfare, and each is
-// bigger than the one before. The Lens is also the end of the demo: the moment it is made the factory
-// takes a bow (a pulse runs along the wires from the Wells to the Lens, lighting each card it passes)
-// and then its card comes up.
+// The big moments: first Shard, the Lab, first Spark, first Glyph, the first Flow State, first Prism
+// and the first Lens: one every three to four minutes of a first game.
+// Each gets a colour wash, a card in the middle of the screen, particles and a fanfare. Shard, Lab,
+// Glyph and Lens are each bigger than the one before; Spark and Prism are the Shard's size, each with
+// a motif of its own in its material's shape and colour. The Lens is also the end of the demo: the
+// moment it is made the factory takes a bow (a pulse runs along the wires from the Wells to the Lens,
+// lighting each card it passes) and then its card comes up.
 //
 // Nothing here ever takes input: every layer ignores the pointer, so a press during a celebration
 // lands on the game underneath, and it also sends the celebration on its way (the reward flies at
@@ -38,6 +40,8 @@ interface Spec {
   /** What the goal paid. It flies from the glyph to the counters `payAt` ms in, or at once if the card is sent away sooner. */
   reward?: GoalReward;
   payAt?: number;
+  /** Runs when the card starts to leave (its time is up, or a press sent it away). */
+  leaving?: () => void;
   /** Runs when it ends, however it ends. */
   done?: () => void;
 }
@@ -49,7 +53,7 @@ interface Spec {
  */
 const MIN_SHOWN_MS = 400;
 /** How far the middle of the glyph is above the middle of the card, in px, for each size of card. */
-const GLYPH_RISE: Record<BigKind, number> = { shard: 36, lab: 37, glyph: 41, flow: 36, lens: 47 };
+const GLYPH_RISE: Record<BigKind, number> = { shard: 36, lab: 37, spark: 36, glyph: 41, flow: 36, prism: 36, lens: 47 };
 const OUT_MS = 320;
 
 let app: HTMLElement;
@@ -105,6 +109,7 @@ export function cancelCelebrations() {
   queue.length = 0;
   endBow();
   if (current) remove();
+  for (const e of leads.splice(0)) e.remove();
 }
 
 // ---------- the card ----------
@@ -155,7 +160,7 @@ function start(spec: Spec) {
     },
     () => {
       cueFanfare(spec.kind);
-      buzz('big', spec.kind === 'lens' ? [30, 60, 30, 60, 60] : spec.kind === 'glyph' ? [20, 50, 30] : [20, 40, 20]);
+      buzz('big', spec.kind === 'lens' ? [30, 60, 30, 60, 60] : spec.kind === 'glyph' ? [20, 50, 30] : spec.kind === 'spark' ? [10, 30, 30] : [20, 40, 20]);
     },
     () => !calm && spec.show?.(at, spec),
   ];
@@ -199,6 +204,7 @@ function leave() {
   c.leaving = true;
   // Sent away before the reward had flown: it flies now.
   pay(c);
+  c.spec.leaving?.();
   c.wrap.classList.add('out');
   // The wash fades from wherever its own animation has got to. (Done in script: a class that swapped
   // the animation for a transition would snap it to nothing instead.)
@@ -278,6 +284,19 @@ export function celebrateGoal(goalId: string, reward: GoalReward) {
         kind: 'lab', title: 'First Data', line, glyph: nodeIcon('lab', 60), color: DATA_COLORS.a,
         life: 1900, show: sparks(30, 1.7, 'diamond'), reward, payAt: 700,
       });
+    case 'make-spark':
+      // (This goal also switches Orders on, and no toast says so: the line under the title does.)
+      return start({
+        kind: 'spark', title: 'First Spark', line, glyph: matGlyph('spark', 64), color: MATERIALS.spark.color,
+        life: 1750, show: ignite, reward, payAt: 760,
+        // The order chip has just appeared beside the goal card: one ring closes on it as the card goes.
+        leaving: reward.unlock === 'orders' ? () => leadTo('order', '#order', MATERIALS.spark.color) : undefined,
+      });
+    case 'make-prism':
+      return start({
+        kind: 'prism', title: 'First Prism', line, glyph: matGlyph('prism', 64), color: MATERIALS.prism.color,
+        life: 1950, show: refract, reward, payAt: 980,
+      });
     case 'make-glyph':
       return start({
         kind: 'glyph', title: 'First Glyph', line, glyph: matGlyph('glyph', 72), color: MATERIALS.glyph.color,
@@ -286,7 +305,8 @@ export function celebrateGoal(goalId: string, reward: GoalReward) {
     case 'make-lens':
       return lensCard(reduced() ? 4500 : 2600);
     default: {
-      // A big goal this file has not met: celebrate it at the smallest size, with the goal's own words.
+      // A big goal this file has not met: celebrate it at the smallest size, with the goal's own words
+      // (the Shard's fanfare and sparks, in gold, under a star).
       const goal = GOALS.find((x) => x.id === goalId);
       return start({
         kind: 'shard', title: goal?.title ?? 'Goal complete', line, glyph: '<span class="cel-star">★</span>', color: '#FFC857',
@@ -294,6 +314,63 @@ export function celebrateGoal(goalId: string, reward: GoalReward) {
       });
     }
   }
+}
+
+/** First Spark: it crackles twice beside the glyph, and then it strikes. Four-pointed sparks, in the Spark's red. */
+function ignite(at: Pt, spec: Spec) {
+  [0, 70].forEach((ms, i) => later(ms, () => {
+    const a = Math.random() * Math.PI * 2, d = 36 + Math.random() * 20;
+    burst({ x: at.x + Math.cos(a) * d, y: at.y + Math.sin(a) * d * 0.8 }, i ? '#ffffff' : spec.color, 5, { top: true, power: 0.7, shape: 'star' });
+  }));
+  later(150, () => {
+    burst(at, spec.color, 24, { top: true, power: 1.8, shape: 'star' });
+    burst(at, '#FFD9A0', 8, { top: true, power: 1.2, shape: 'star' });
+    ring(at, spec.color, { top: true, size: 110, life: 0.6 });
+    ring(at, '#ffffff', { top: true, size: 64, life: 0.4 });
+  });
+}
+
+/** The colours a Prism splits light into, red to violet, each from a material of that colour. */
+const SPECTRUM = ['spark', 'ember', 'glint', 'shard', 'breeze', 'ink', 'murk'] as const;
+
+/** First Prism: a ray of white comes in from the left, and leaves on the right as a fan of seven colours. Diamonds, as Prism is on the wires. */
+function refract(at: Pt, spec: Spec) {
+  const reach = Math.min(window.innerWidth * 0.42, 200);
+  const ray = { top: true, jitter: 0, bend: 0, shape: 'diamond' as const };
+  fly({ x: at.x - reach, y: at.y }, at, '#ffffff', 8, () => {
+    SPECTRUM.forEach((m, i) => {
+      const a = ((i - (SPECTRUM.length - 1) / 2) / (SPECTRUM.length - 1)) * 1.3;
+      fly(at, { x: at.x + Math.cos(a) * reach, y: at.y + Math.sin(a) * reach }, MATERIALS[m].color, 4, undefined, { ...ray, ttl: 0.5, stagger: 0.045, spread: 0, size: 5 });
+    });
+    burst(at, '#ffffff', 10, { top: true, power: 1.1, shape: 'diamond' });
+    ring(at, spec.color, { top: true, size: 100, life: 0.6 });
+  }, { ...ray, ttl: 0.3, stagger: 0.022, spread: 3, size: 4 });
+}
+
+// A ring that closes on something in the HUD as a card leaves, to lead the eye there: an outline of
+// the thing's own box, a little larger at first. It is an element of its own (above the panels, and
+// it never takes input); with less motion asked for it does not move, it only fades in and out.
+const leads: HTMLElement[] = [];
+const LEAD_MS = 900;
+
+function leadTo(anchor: string, selector: string, color: string) {
+  // (The anchor says whether the thing is on screen at all; its box is measured once, here.)
+  if (!anchorPt(anchor)) return;
+  const r = document.querySelector(selector)?.getBoundingClientRect();
+  if (!r || r.width < 8 || r.height < 8) return;
+  const a = app.getBoundingClientRect();
+  const e = document.createElement('div');
+  e.className = `cel-lead${reduced() ? ' calm' : ''}`;
+  e.setAttribute('aria-hidden', 'true');
+  e.style.cssText = `left:${Math.round(r.left - a.left) - 3}px;top:${Math.round(r.top - a.top) - 3}px;width:${Math.round(r.width) + 6}px;height:${Math.round(r.height) + 6}px;--c:${color}`;
+  app.appendChild(e);
+  leads.push(e);
+  record('celebrate', 'lead', `${anchor} ${Math.round(r.left + r.width / 2)},${Math.round(r.top + r.height / 2)}`);
+  window.setTimeout(() => {
+    e.remove();
+    const i = leads.indexOf(e);
+    if (i >= 0) leads.splice(i, 1);
+  }, LEAD_MS + 60);
 }
 
 /** First Glyph: two streams, Ink from the left and Spark from the right, run into the glyph and set it off. */

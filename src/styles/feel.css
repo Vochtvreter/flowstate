@@ -28,6 +28,23 @@
 /* A finger gets a full-size target, in the phone layout and on a tablet (desktop layout, touch input). */
 #app.phone [data-testid='mute'], html[data-input='touch'] [data-testid='mute'] { width: 44px; height: 44px; }
 
+/* ---------- a counter takes a coin ----------
+   feel.ts puts the class `pop` on a counter of the top bar ([data-testid='credits'], 'data-a' and so
+   on) for as long as coins of a payout are landing on it. The counter's number and its symbol jump to
+   1.2 times their size and settle back in 120 ms: a transform on those two, so the chip keeps its
+   box, nothing beside it moves and the bar is not laid out again. Each coin restarts the jump; that
+   is what `pop2`, flipped with every coin, is for (the same keyframes under a second name). */
+.res.pop .sym, .res.pop .nums b { animation: feel-pop-a 0.12s cubic-bezier(0.3, 0, 0.6, 1); }
+.res.pop.pop2 .sym, .res.pop.pop2 .nums b { animation-name: feel-pop-b; }
+.res.pop .nums b { transform-origin: 0 50%; }
+@keyframes feel-pop-a { from { transform: scale(1.2); } to { transform: none; } }
+@keyframes feel-pop-b { from { transform: scale(1.2); } to { transform: none; } }
+/* On a narrow bar the Data counters are lines of one block, each number against the block's right edge: it grows leftwards. */
+@media (max-width: 900px) {
+  .datas .res.pop .nums b { transform-origin: 100% 50%; }
+  .datas .res.pop .sym { transform-origin: 0 50%; }
+}
+
 /* ---------- board polish ---------- */
 /* A new node drops in, squashes as it lands and settles. (board.ts adds .pop once, for 320 ms.) */
 #nodes .node.pop { animation: feel-drop 0.3s cubic-bezier(0.25, 0.8, 0.35, 1) both; transform-origin: 50% 100%; }
@@ -88,6 +105,12 @@ g.wire.sat .base { stroke-opacity: 0.58; }
 .cel-title { font-family: var(--disp); font-size: 34px; font-weight: 700; letter-spacing: -0.01em; line-height: 1.1; color: #fff; }
 .cel-line { font-size: 15px; line-height: 1.35; color: #c9d3e8; }
 
+/* A ring that closes on something in the HUD as a card leaves (the order chip, after the first Spark). */
+.cel-lead { position: absolute; z-index: 55; pointer-events: none; border-radius: 16px; border: 2px solid var(--c); box-shadow: 0 0 12px color-mix(in srgb, var(--c) 55%, transparent); opacity: 0; animation: cel-lead 0.9s ease-out both; will-change: transform, opacity; }
+@keyframes cel-lead { 0% { opacity: 0; transform: scale(1.3); } 22% { opacity: 1; } 55% { opacity: 1; transform: none; } 100% { opacity: 0; transform: none; } }
+.cel-lead.calm { animation-name: cel-lead-calm; }
+@keyframes cel-lead-calm { 0% { opacity: 0; } 22% { opacity: 1; } 60% { opacity: 1; } 100% { opacity: 0; } }
+
 /* Escalation: each is a little larger than the last. */
 .k-lab .cel-title { font-size: 36px; }
 .k-glyph .cel-card { padding: 26px 36px 24px; }
@@ -136,6 +159,7 @@ g.wire.sat .base { stroke-opacity: 0.58; }
 
 @media (prefers-reduced-motion: reduce) {
   #nodes .node.pop { animation: none; }
+  .res.pop .sym, .res.pop .nums b { animation: none; }
   #feel-edge > i, #feel-edge.on > i { transition-duration: 0.4s; }
   .cel-wash { display: none; }
 }
