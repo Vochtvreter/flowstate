@@ -785,6 +785,7 @@ function expandAsked(g: Game): boolean {
 /** What stands on the stage that the button must keep clear of. Reads layout: only when something may have changed. */
 function measureExpand() {
   ex.stale = false;
+  watchStage();
   const r = rectOf();
   const out: Box[] = [];
   const add = (e: Element | null | undefined) => {
@@ -796,6 +797,13 @@ function measureExpand() {
     // Tidy stands above the thumb row; toasts come up under the strip.
     add(fabsEl?.querySelector('[data-testid="fab-tidy"]:not([hidden])'));
     if (toastsEl?.childElementCount) add(toastsEl);
+    // The strip as it is laid out this moment (an alert chip that has just come in makes it taller
+    // before the cover is measured again).
+    const strip = document.getElementById('hud-strip');
+    if (strip && !strip.hidden) {
+      const b = strip.getBoundingClientRect();
+      if (b.height > 1) out.push({ x0: -1e6, y0: -1e6, x1: 1e6, y1: b.bottom - r.top });
+    }
   } else {
     // The goal card with the order beside it, over the middle of the top edge, and room under it for the
     // alert chip whether it is showing or not.
@@ -810,6 +818,28 @@ function measureExpand() {
     // Toasts are not in the list: outside the phone layout they step up above the button themselves (hud-toasts.ts).
   }
   ex.blocks = out;
+}
+
+/**
+ * The strip grows when the alert chip comes in, toasts come and go, Tidy shows: each of these may take
+ * the button's place, so a change in their size has the button moved at once rather than at the next
+ * slow refresh. (They are made after the board, so they are looked for here.)
+ */
+let stageWatch: ResizeObserver | null = null;
+const watched = new Set<string>();
+function watchStage() {
+  if (typeof ResizeObserver === 'undefined') return;
+  stageWatch ??= new ResizeObserver(() => {
+    ex.stale = true;
+    placeExpand();
+  });
+  for (const id of ['hud-strip', 'toasts', 'fabs', 'hints', 'zoom']) {
+    if (watched.has(id)) continue;
+    const e = document.getElementById(id);
+    if (!e) continue;
+    watched.add(id);
+    stageWatch.observe(e);
+  }
 }
 
 /** The part of the stage the docked button may stand in. */
