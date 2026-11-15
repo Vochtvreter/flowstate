@@ -3,6 +3,7 @@
 import { describe, expect, it } from 'vitest';
 import { claimGoal, connect, placeNode, upgrade } from '../src/actions';
 import { has, nodeCost, research, upgradeCost } from '../src/economy';
+import { RULES } from '../src/content';
 import { GOALS, MAIN_GOALS, activeGoal } from '../src/goals';
 import { Game, GNode } from '../src/state';
 import { CardRun, clock, playByTheCard } from './cardPlayer';
@@ -179,16 +180,23 @@ describe('the whole demo, by the card alone', () => {
       expect(g.ended).toBe(true);
       expect(g.stats.firstLensAt).not.toBeNull();
       expect(g.credits).toBeGreaterThanOrEqual(0);
-      // No side techs, and no tip but the Flow ring's. The only upgrades are the Well's of goal 6 and what the ring led to.
-      expect([...g.techs].sort()).toEqual(SPINE);
+      // No side techs, and no tip but the Flow ring's. The only upgrades are what the cards asked for: the Well's
+      // of goal 6, one level on every Well with "Upgrade all" (goal 20), and the steps of the lines (the Flow fix,
+      // Speed on the pairs), or the ring's fix where no line named it.
+      // (Market Lens comes by itself with the first sale over demand.)
+      expect(g.techs.filter((id) => id !== 'C1').sort()).toEqual(SPINE);
+      expect(g.techs.includes('C1')).toBe(g.seenSurplus);
       expect(run.tips.every((t) => t.kind === 'flow')).toBe(true);
-      expect(g.nodes.reduce((s, n) => s + n.lv.speed + n.lv.eff + n.lv.buffer, 0)).toBe(1 + run.tips.length);
+      const levels = g.nodes.reduce((s, n) => s + n.lv.speed + n.lv.eff + n.lv.buffer, 0);
+      expect(levels).toBe(1 + run.bulkLevels + run.tips.length + run.lines.filter((x) => x.upgrade).length);
     }
-    // The hints ask for one Lab. The lines add three more, each with a Well of its own, on a board expanded twice.
+    // With the lines the player never needs the ring's tip: the Flow goal's line names the fix.
+    expect(plain.tips.length).toBe(0);
+    // The hints ask for one Lab. The lines add five more, four of them with a Well of their own, on a board expanded twice.
     expect(bare.g.nodes.filter((n) => n.type === 'lab').length).toBe(1);
     expect(bare.g.board.expansions).toBe(1);
-    expect(plain.g.nodes.filter((n) => n.type === 'lab').length).toBe(4);
-    expect(plain.g.nodes.filter((n) => n.type === 'well').length).toBe(bare.g.nodes.filter((n) => n.type === 'well').length + 3);
+    expect(plain.g.nodes.filter((n) => n.type === 'lab').length).toBe(6);
+    expect(plain.g.nodes.filter((n) => n.type === 'well').length).toBe(bare.g.nodes.filter((n) => n.type === 'well').length + 4);
     expect(plain.g.board.expansions).toBe(2);
     // ...Ink is studied, and Glyph no longer is by the time the Fabricator is saved for.
     const wired = (g: typeof plain.g, recipe: string, type: string) =>
@@ -200,15 +208,18 @@ describe('the whole demo, by the card alone', () => {
   });
 
   it('"Hold 95% Flow" is earned: it does not complete until the one machine short of its input is fixed', () => {
-    // The card sends the player to the Flow ring; what holds Flow back is the Spark Refiner, short of Ember.
-    for (const run of [bare, plain]) {
-      const fixes = run.tips.filter((t) => t.goal === 'hold-flow');
-      expect(fixes.length).toBeGreaterThanOrEqual(1);
-      expect(fixes.length).toBeLessThanOrEqual(2);
-      expect(fixes[0].text).toBe('The Spark Refiner needs more Ember: buy Speed on the Ember Well (50¢).');
-      expect(on(run, 'hold-flow').seconds).toBeGreaterThan(30);
-      expect(on(run, 'hold-flow').seconds).toBeLessThan(120);
-    }
+    // The card sends the player to the Flow ring; what holds Flow back is the Spark Refiner, short of Ember. The
+    // card's line names the fix, in the words the ring's tip used to: "buy Speed on the Ember Well".
+    const steps = plain.lines.filter((x) => x.goal === 'hold-flow');
+    expect(steps.length).toBeGreaterThanOrEqual(1);
+    expect(steps[0].text).toMatch(/^The Spark Refiner needs more Ember: buy Speed on (the|an) Ember Well \(50¢\)\.$/);
+    expect(on(plain, 'hold-flow').seconds).toBeGreaterThan(20);
+    expect(on(plain, 'hold-flow').seconds).toBeLessThan(60);
+    // A player who ignores the lines gets no tip for it either (a tip never says what the card says): the valve
+    // lets that board through, all but one producer flowing, after 90 s.
+    expect(bare.tips.filter((t) => t.goal === 'hold-flow')).toEqual([]);
+    expect(on(bare, 'hold-flow').seconds).toBeGreaterThan(RULES.flow.valveAfter);
+    expect(on(bare, 'hold-flow').seconds).toBeLessThan(RULES.flow.valveAfter + 30);
   });
 
   it('the lines are what makes it a twenty-minute game: with the hints alone every long wait is for α, and long', () => {
@@ -221,16 +232,17 @@ describe('the whole demo, by the card alone', () => {
     ]);
     // Most of an hour to the Lens with the hints alone, about twenty minutes with the lines: no tip involved.
     expect(lens(bare)).toBeGreaterThan(40 * 60);
-    expect(lens(bare)).toBeLessThan(60 * 60);
+    expect(lens(bare)).toBeLessThan(70 * 60);
     expect(lens(plain)).toBeGreaterThan(17 * 60);
     expect(lens(plain)).toBeLessThan(22 * 60);
     for (const id of LONG) expect(on(plain, id).seconds, id).toBeLessThan(0.75 * on(bare, id).seconds);
     // No goal takes four and a half minutes (the pacing tool's card-only player, who claims late, has six).
     expect(Math.max(...plain.spent.map((x) => x.seconds))).toBeLessThan(270);
     expect(plain.g.stats.fromSales + plain.g.stats.fromGoals + plain.g.stats.fromOrders).toBeGreaterThan(9000);
-    // The two-price rule never shows itself to this player, and Market Lens with it.
-    expect(plain.g.seenSurplus).toBe(false);
-    expect(plain.g.techs).not.toContain('C1');
+    // The two-price rule does not show itself to this player before the Fabricator is saved for (then the raw
+    // goods the last line sends to the Market can go over demand), and Market Lens comes with it.
+    if (plain.surplusAt != null) expect(plain.surplusAt).toBeGreaterThan(on(plain, 'bulk-upgrade').seconds + plain.spent.slice(0, GOALS.findIndex((x) => x.id === 'bulk-upgrade')).reduce((s, x) => s + x.seconds, 0) - 1);
+    expect(plain.g.techs.includes('C1')).toBe(plain.g.seenSurplus);
   });
 });
 
@@ -246,12 +258,14 @@ describe('the whole demo, by the card and the tips', () => {
       expect(g.ended, name).toBe(true);
       expect(g.credits, name).toBeGreaterThanOrEqual(0);
       expect(spent.reduce((s, x) => s + x.tips, 0), name).toBe(tips.length);
-      // Every upgrade on the board beyond the one goal 6 asks for was a tip.
-      const levels = g.nodes.reduce((s, n) => s + n.lv.speed + n.lv.eff + n.lv.buffer, 0);
-      expect(levels - 1, name).toBeLessThanOrEqual(tips.filter((t) => /buy Speed|Upgrade all/.test(t.text)).length * 8);
-      if (levels > 1) expect(tips.some((t) => /buy Speed|Upgrade all/.test(t.text)), name).toBe(true);
-      // No tech was researched that the card did not ask for, unless a tip said so.
-      const side = g.techs.filter((id) => !SPINE.includes(id));
+      // Every upgrade on the board beyond what the cards asked for (goal 6's, goal 20's "Upgrade all", the
+      // lines' steps) was a tip.
+      const levels = g.nodes.reduce((s, n) => s + n.lv.speed + n.lv.eff + n.lv.buffer, 0) - 1 - run.bulkLevels - run.lines.filter((x) => x.upgrade).length;
+      expect(levels, name).toBeGreaterThanOrEqual(0);
+      expect(levels, name).toBeLessThanOrEqual(tips.filter((t) => /buy Speed|Upgrade all/.test(t.text)).length * 8);
+      if (levels > 0) expect(tips.some((t) => /buy Speed|Upgrade all/.test(t.text)), name).toBe(true);
+      // No tech was researched that the card did not ask for, unless a tip said so. (Market Lens comes by itself.)
+      const side = g.techs.filter((id) => !SPINE.includes(id) && id !== 'C1');
       expect(side.length, name).toBe(tips.filter((t) => /^Research /.test(t.text)).length);
     }
   });
@@ -259,12 +273,12 @@ describe('the whole demo, by the card and the tips', () => {
   it('tips are few and large: a handful a run, none under 15 s, and the game does not depend on them', () => {
     for (const { name, run } of runs) {
       const { tips } = run;
-      // The Flow goal takes a fix or two, each named by the adviser; beyond that, a handful.
+      // The Flow goal's fix is the card's own line now; the adviser adds at most a handful, and the game does
+      // not wait for any of them (the lines carry the moves the tips used to).
       const fixes = tips.filter((t) => t.goal === 'hold-flow');
-      expect(fixes.length, name).toBeGreaterThanOrEqual(1);
       expect(fixes.length, name).toBeLessThanOrEqual(3);
       expect(fixes.every((t) => t.kind === 'flow' && / (needs more|gets no|makes more|has nowhere|has nothing|is backed up|is short)/.test(t.text)), name).toBe(true);
-      expect(tips.length, name).toBeGreaterThanOrEqual(1);
+      expect(run.lines.some((x) => x.goal === 'hold-flow'), name).toBe(true);
       expect(tips.length, name).toBeLessThanOrEqual(8);
       for (const t of tips) {
         expect(t.saves, `${name}: ${t.text}`).toBeDefined();
@@ -284,9 +298,9 @@ describe('the whole demo, by the card and the tips', () => {
       expect(Math.max(...run.spent.map((x) => x.seconds)), name).toBeLessThanOrEqual(name === '10 s hands' ? 300 : 240);
       // The first order starts counting at once and is done in about half a minute, for everyone.
       expect(on(run, 'first-order').tipless, name).toBeLessThanOrEqual(45);
-      // The two-price rule never bites before the Lens.
-      expect(run.surplusAt, name).toBeNull();
-      expect(run.g.techs, name).not.toContain('C1');
+      // The two-price rule never bites before the Fabricator is saved for.
+      if (run.surplusAt != null) expect(run.surplusAt, name).toBeGreaterThan(14 * 60);
+      expect(run.g.techs.includes('C1'), name).toBe(run.g.seenSurplus);
     }
   });
 

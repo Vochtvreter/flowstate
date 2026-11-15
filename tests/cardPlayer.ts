@@ -16,8 +16,8 @@
 // Used by tests/playthrough.test.ts (every goal can be done; how long each takes) and tests/advice.test.ts
 // (real game states to check tips against).
 import { expect } from 'vitest';
-import { claimGoal, claimOrder, connect, cutWire, expandBoard, favour, freeDeposits, placeNode, upgrade } from '../src/actions';
-import { Advice, advice, applyAdvice } from '../src/advice';
+import { claimGoal, claimOrder, connect, expandBoard, favour, placeNode, upgrade, upgradeAll } from '../src/actions';
+import { Advice, advice, applyAdvice, lineAdvice } from '../src/advice';
 import { NodeType, RECIPES, TECHS } from '../src/content';
 import { expansionCost, nodeCost, research, techAffordable, upgradeCost } from '../src/economy';
 import { activeGoal, goalById, meanwhileOf } from '../src/goals';
@@ -63,42 +63,22 @@ export interface GoalTime {
 export interface TipTaken { at: number; goal: string; text: string; kind: Advice['kind']; eta: number; saves: number | undefined; cost: number }
 
 /**
- * The next gesture of the active goal's "while you wait" line, read the way the hints are read. Returns false
- * when there is nothing (more) to do for it right now: no line, not applicable, done, or not affordable yet.
+ * The next gesture of the active goal's "while you wait" line (the one the card shows: its lines come one at a
+ * time), as the card's "Show me" acts it out (lineAdvice in src/advice.ts, which tests/meanwhile.test.ts holds
+ * to the line's own words). Returns false when there is nothing (more) to do for it right now: no line, not
+ * applicable, done, or not affordable yet.
  */
-export function followMeanwhile(g: Game): boolean {
+export function followMeanwhile(g: Game, log?: LineStep[]): boolean {
   const line = meanwhileOf(g);
   if (!line || line.done(g)) return false;
-  const lab = g.nodes.find((n) => n.type === 'lab');
-  switch (activeGoal(g)!.id) {
-    case 'make-spark': {
-      // "Drag from the Ink Refiner's Ink port to the Lab too."
-      const ink = g.nodes.find((n) => n.recipe === 'ink');
-      return !!ink && !!lab && !!connect(g, ink.id, 0, lab.id);
-    }
-    case 'make-glyph': case 'make-mist': {
-      // "Give each new deposit a Well and a Lab built from its port": one deposit after the other, a Well and
-      // then its Lab (two gestures each). On "Make your first Mist" the board has to grow first: "Expand the
-      // board again, then give a new deposit a Well and a Lab of its own."
-      const bare = g.nodes.find((n) => n.type === 'well' && !g.wires.some((w) => w.from === n.id));
-      if (bare) {
-        if (g.credits < nodeCost(g, 'lab')) return false;
-        const built = placeNode(g, 'lab', bare.x + 240, bare.y);
-        return !!built && !!connect(g, bare.id, 0, built.id);
-      }
-      const d = freeDeposits(g)[0];
-      if (!d && activeGoal(g)!.id === 'make-mist') return expandBoard(g);
-      return !!d && g.credits >= nodeCost(g, 'well') && !!placeNode(g, 'well', d.x, d.y, { depositId: d.id });
-    }
-    case 'build-fabricator': {
-      // "Cut the wire from the Glyph Assembler to the Lab."
-      const id = line.cuts?.(g)[0];
-      return id != null && cutWire(g, id);
-    }
-    default:
-      return false;
-  }
+  const a = lineAdvice(g);
+  if (!a || !applyAdvice(g, a)) return false;
+  log?.push({ at: g.time, goal: activeGoal(g)!.id, line: line.id, text: a.text.mouse, upgrade: !!a.upgrade });
+  return true;
 }
+
+/** A step of a card's "while you wait" line the player took. */
+export interface LineStep { at: number; goal: string; line: string; text: string; upgrade: boolean }
 
 export interface CardRun {
   g: Game;
@@ -108,6 +88,9 @@ export interface CardRun {
   longestTipless: number;
   /** When the first surplus sale was noted (g.seenSurplus), or null. */
   surplusAt: number | null;
+  /** Every step of a card's line the player took, and the levels "Upgrade all your Wells at once" bought. */
+  lines: LineStep[];
+  bulkLevels: number;
 }
 
 /** Plays the demo to the first Lens by the card. */
@@ -128,6 +111,8 @@ export function playByTheCard(opts: CardOptions = {}): CardRun {
   let longestTipless = 0;
   let offered = 0; // seconds a tip has been on offer
   let surplusAt: number | null = null;
+  const lines: LineStep[] = [];
+  let bulkLevels = 0;
   const m = market(g);
   const tickSurplus = () => {
     if (surplusAt == null && g.seenSurplus) surplusAt = g.time;
@@ -147,7 +132,7 @@ export function playByTheCard(opts: CardOptions = {}): CardRun {
       claimOrder(g);
       return;
     }
-    const asked = activeGoal(g)?.id === 'first-order' || activeGoal(g)?.id === 'three-orders';
+    const asked = activeGoal(g)?.id === 'first-order';
     if (tend === 'asked' && !asked) return;
     for (const n of g.nodes) {
       const port = n.recipe ? RECIPES[n.recipe].outputs.findIndex((out) => out[0] === o.mat) : -1;
@@ -166,7 +151,7 @@ export function playByTheCard(opts: CardOptions = {}): CardRun {
     const line = opts.meanwhile === false ? null : meanwhileOf(g);
     if (line && !line.done(g) && !g.goal.ready) {
       const before = g.rev;
-      if (followMeanwhile(g)) {
+      if (followMeanwhile(g, lines)) {
         act();
         offered = 0;
         return;
@@ -306,7 +291,11 @@ export function playByTheCard(opts: CardOptions = {}): CardRun {
   wire(prism, m); // "...wire it to the Market..."
   wire(shard, prism); // "...then wire Shard into it to make Prism (two for every Mist)"
   claim('make-prism');
-  claim('three-orders');
+  wait('credits for Upgrade all', () => g.credits >= upgradeCost(g.nodes.find((n) => n.type === 'well')!, 'speed'));
+  act();
+  bulkLevels = upgradeAll(g, 'well', 'speed'); // "Select a Well and press Upgrade all beside Speed"
+  expect(bulkLevels).toBeGreaterThan(0);
+  claim('bulk-upgrade');
   // 21–22: the Fabricator and the Lens.
   study('P7');
   const fab = from(prism, 'fabricator'); // "...then save up and build a Fabricator from the Prism Assembler's port"
@@ -315,7 +304,7 @@ export function playByTheCard(opts: CardOptions = {}): CardRun {
   wire(glyph, fab); // "Feed the Fabricator one Prism and two Glyph for every Lens": the Prism is wired already
   claim('make-lens');
   tickSurplus();
-  return { g, spent, tips, longestTipless, surplusAt };
+  return { g, spent, tips, longestTipless, surplusAt, lines, bulkLevels };
 }
 
 /** mm:ss */

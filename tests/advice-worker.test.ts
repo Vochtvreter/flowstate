@@ -92,9 +92,10 @@ describe('the adviser through its worker code', () => {
         expect(via.kind).toBe(waitKind(g));
         expect(via.info).toEqual(waitInfo(g));
         expect(via.advice).toEqual(a);
-        // The verdict was not worked out again: it is the one from a second ago, a second older.
+        // The verdict was not worked out again: it is the one from a second ago, a second older. (Seconds with
+        // no wait at all, once the credits are in hand and nobody builds, have no verdict to keep or work out.)
         if (before && via.kind && Math.abs(before.life - 1 - via.life) < 1e-6) kept++;
-        else fresh++;
+        else if (via.kind) fresh++;
         before = via;
         // Half-way, the player does what the tip says: a different board, and both must think again.
         if (s === 30 && a) expect(applyAdvice(g, a)).toBe(true);
@@ -215,7 +216,7 @@ describe('what the adviser remembers, through its worker code', () => {
 });
 
 const idOf = (g: Game) => ['wire-market', 'second-well', 'wire-all-wells', 'build-refiner', 'sell-shard', 'upgrade-well', 'feed-lab', 'research-murk', 'make-ink',
-  'silt-exit', 'make-spark', 'first-order', 'route-lab', 'expand', 'make-glyph', 'hold-flow', 'study-glyph', 'make-mist', 'make-prism', 'three-orders',
+  'silt-exit', 'make-spark', 'first-order', 'route-lab', 'expand', 'make-glyph', 'hold-flow', 'study-glyph', 'make-mist', 'make-prism', 'bulk-upgrade',
   'build-fabricator', 'make-lens'][g.goal.i];
 
 describe('what counts as "the board changed" for a tip', () => {

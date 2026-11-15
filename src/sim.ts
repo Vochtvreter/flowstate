@@ -1,7 +1,7 @@
 // Deterministic, DOM-free simulation. tick(game, dt) advances everything.
 import { DataTier, MATERIALS, MatId, RULES, Recipe } from './content';
 import {
-  bufMult, cycleTime, dataYield, demandBurst, effEvery, endDemo, grantTech, labRate, offlineCap, pipeCap, recipeOf, refillDemand, research,
+  adoptRecipes, bufMult, cycleTime, dataYield, demandBurst, effEvery, endDemo, grantTech, labRate, offlineCap, pipeCap, recipeOf, refillDemand, research,
   sellValue, wellRate,
 } from './economy';
 import { updateFlow } from './flow';
@@ -426,6 +426,8 @@ const tickCount = new WeakMap<Game, number>();
 export function tick(g: Game, dt: number) {
   // Every rate divides by dt: a zero, negative or broken step would turn them all into NaN.
   if (!(dt > 0) || !isFinite(dt)) return;
+  // A machine without a recipe that research has since given one for what is wired into it takes it now.
+  adoptRecipes(g);
   const c = graph(g);
   g.time += dt;
   const acc = g.tickAcc;

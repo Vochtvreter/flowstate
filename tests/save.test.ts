@@ -552,12 +552,14 @@ describe('damaged and old saves cannot poison the game', () => {
     expect(again.text).toEqual(pending.text);
     expect(again.saves!).toBeGreaterThanOrEqual(15);
     // So is the card's own line for this goal, and its next step (which the tip never repeats).
-    expect(goalView(loaded)!.meanwhile).toEqual({ text: 'Drag from the Ink Refiner\'s Ink port to the Lab too: studied Ink is 3 α each.', done: false });
+    expect(goalView(loaded)!.meanwhile).toEqual({ text: 'Drag from the Ink Refiner\'s Ink port to the Lab too: studied Ink is 3 α each.', done: false, step: 1, of: 2 });
     const stepAgain = lineAdvice(loaded)!;
     expect(stepAgain.text).toEqual(step.text);
     expect(stepAgain.wire).toEqual(step.wire);
     expect(applyAdvice(loaded, stepAgain)).toBe(true);
-    expect(goalView(loaded)!.meanwhile!.done).toBe(true);
+    // Done. (The card's second line, a Lab for a Glint Well that only sells, does not apply here: this board has
+    // no such Well. So the first stays on the card, ticked.)
+    expect(goalView(loaded)!.meanwhile).toMatchObject({ done: true, step: 1, of: 2 });
     expect(lineAdvice(loaded)).toBeNull();
     expect(advice(loaded)).toBeNull(); // and now the adviser keeps quiet for a while, like in any game
     run(loaded, 300);

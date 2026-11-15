@@ -100,7 +100,9 @@ export interface Policy {
   name: string;
   describe: string;
   /** Which targets the run is judged against. */
-  judge: 'fast' | 'newcomer' | 'newcomer10' | 'cardonly' | 'slow';
+  judge: 'fast' | 'newcomer' | 'newcomer10' | 'cardonly' | 'nolines' | 'slow';
+  /** A card player who reads the cards' "while you wait" lines (the default). false: the hints and the tips only. */
+  lines?: boolean;
   /** Judged against the fast targets. */
   fast: boolean;
   /**
@@ -190,6 +192,11 @@ export const POLICIES: Record<string, Policy> = {
     describe: 'the newcomer who never follows a tip: only the goal card and its "while you wait" lines, one action per 6 s, claims 8–16 s late',
     firstActionDelay: 12, actionSeconds: hands([6, 6]),
   },
+  nolines: {
+    ...CARD, name: 'nolines', judge: 'nolines', lines: false,
+    describe: 'the newcomer who never reads a "while you wait" line: the hints and the tips only, one action per 6 s, claims 8–16 s late',
+    firstActionDelay: 12, actionSeconds: hands([6, 6]),
+  },
   slow: {
     name: 'slow', judge: 'slow', fast: false, card: false, tips: false, tipDelay: 15,
     describe: 'the old floor: one action per 8–10 s, claims late, ignores amber rings, never upgrades a Lab, expands only when asked',
@@ -201,7 +208,7 @@ export const POLICIES: Record<string, Policy> = {
 };
 
 /** The policies of the default table. */
-const DEFAULT_POLICIES = ['mainline', 'greedy', 'newcomer', 'newcomer10', 'cardonly'];
+const DEFAULT_POLICIES = ['mainline', 'greedy', 'newcomer', 'newcomer10', 'cardonly', 'nolines'];
 
 /** Things that do not depend on who is playing. */
 export const CFG = {
@@ -253,19 +260,21 @@ export const TARGETS = {
     /** An action available at least this often in the first two minutes. */
     earlyIdleMax: 10,
     glyph: [360, 480] as [number, number],
-    /** 16:00–19:00 in the plan; an expert Lens from 14:30 is accepted now that the Fabricator wait has its own limit. */
-    lens: [870, 1140] as [number, number],
+    /** 14:30–18:00. */
+    lens: [870, 1080] as [number, number],
     /** No more than this long on "Build a Fabricator". */
     fabricatorMax: 300,
     /** No dead stretch over 60 s before 10:00, none over 120 s before the first Lens. */
     deadBefore10: 60,
     deadBeforeLens: 120,
-    /** Content after the Lens (through Paradox) must last at least this long. */
+    /** Content after the Lens (through Paradox) must last at least this long... */
     contentUntil: 1440,
+    /** ...and the Paradox, the last free-play goal, comes within half an hour. */
+    paradoxBy: 1800,
   },
   newcomer: {
-    /** 18:30–23:00. */
-    lens: [1110, 1380] as [number, number],
+    /** 19:00–23:00. */
+    lens: [1140, 1380] as [number, number],
     /** Never more than this long on one goal of the demo... */
     goalMax: 240,
     /** ...and "Build a Fabricator" has the same limit by name. */
@@ -276,10 +285,20 @@ export const TARGETS = {
     lensBy: 1800,
     goalMax: 300,
   },
-  /** The newcomer who never follows a tip: the cards and their "while you wait" lines alone. */
+  /**
+   * The newcomer who never follows a tip: the cards and their "while you wait" lines alone. The demo's twenty
+   * minutes with something to do in them: no stretch of nothing to do (Bot.nothing) over a minute and a half,
+   * and nothing to do for no more than 40% of the time to the first Lens.
+   */
   cardonly: {
-    lensBy: 1920,
+    lens: [1200, 1380] as [number, number],
     goalMax: 360,
+    nothingStretch: 90,
+    nothingShare: 0.4,
+  },
+  /** The newcomer who reads no line, only the hints and the tips: slower, never stranded. */
+  nolines: {
+    lensBy: 1920,
   },
   /** The old floor, for --policy=slow. */
   slow: {
@@ -1186,7 +1205,7 @@ export class Bot {
 
   lineStep(): Want | null {
     const g = this.g;
-    const line = CFG.meanwhile ? meanwhileOf(g) : null;
+    const line = CFG.meanwhile && this.P.lines !== false ? meanwhileOf(g) : null;
     const goal = activeGoal(g);
     if (!line || !goal || line.done(g) || CFG.skipLines.includes(goal.id) || CFG.skipLines.includes(line.id)) return null;
     // --lineDelay: a person who reads the line late.
@@ -1210,7 +1229,7 @@ export class Bot {
     this.dawdling = false;
     this.tipOn = false;
     // Since when this goal's "while you wait" line has been on the card (for --lineDelay).
-    if (this.lineSeen?.goal !== g.goal.i && CFG.meanwhile && meanwhileOf(g)) this.lineSeen = { goal: g.goal.i, t: g.time };
+    if (this.lineSeen?.goal !== g.goal.i && CFG.meanwhile && this.P.lines !== false && meanwhileOf(g)) this.lineSeen = { goal: g.goal.i, t: g.time };
     if (g.goal.ready && g.time >= this.goalClaimAt) {
       const goal = activeGoal(g)!;
       return { cls: 'new', kind: 'claim', cost: 0, label: `claim goal ${g.goal.i + 1} "${goal.title}"`, run: () => claimGoal(g) };
@@ -1829,16 +1848,24 @@ function checks(r: Result): Check[] {
     fabricator(T.fabricatorMax);
     add('longest dead stretch before 10:00', `${Math.round(r.deadBefore10)}s`, `≤ ${T.deadBefore10}s`, r.deadBefore10 <= T.deadBefore10);
     add('longest dead stretch before the Lens', `${Math.round(r.deadBeforeLens)}s`, `≤ ${T.deadBeforeLens}s`, r.lens != null && r.deadBeforeLens <= T.deadBeforeLens);
-    add('content lasts (first Paradox)', r.paradox == null ? `not within ${r.minutes} min` : mmss(r.paradox), `not before ${mmss(T.contentUntil)}`, r.paradox == null || r.paradox >= T.contentUntil);
+    add('content lasts (first Paradox)', r.paradox == null ? `not within ${r.minutes} min` : mmss(r.paradox), `${mmss(T.contentUntil)}–${mmss(T.paradoxBy)}`, r.paradox != null && r.paradox >= T.contentUntil && r.paradox <= T.paradoxBy);
   } else if (judge === 'newcomer') {
     const T = TARGETS.newcomer;
     within('first Lens', r.lens, T.lens);
     goalMax(T.goalMax);
     fabricator(T.fabricatorMax);
-  } else if (judge === 'newcomer10' || judge === 'cardonly') {
-    const T = TARGETS[judge];
+  } else if (judge === 'newcomer10') {
+    const T = TARGETS.newcomer10;
     by('first Lens', r.lens, T.lensBy);
     goalMax(T.goalMax);
+  } else if (judge === 'cardonly') {
+    const T = TARGETS.cardonly;
+    within('first Lens', r.lens, T.lens);
+    goalMax(T.goalMax);
+    add('longest stretch with nothing to do', `${Math.round(r.nothing.longest)}s (${r.nothing.longestGoal})`, `≤ ${T.nothingStretch}s`, r.nothing.longest <= T.nothingStretch);
+    add('nothing to do, share of the time to the Lens', `${Math.round(r.nothing.share * 100)}%`, `≤ ${Math.round(T.nothingShare * 100)}%`, r.lens != null && r.nothing.share <= T.nothingShare);
+  } else if (judge === 'nolines') {
+    by('first Lens', r.lens, TARGETS.nolines.lensBy);
   } else {
     const T = TARGETS.slow;
     by('first Lens', r.lens, T.lensBy);
@@ -2072,14 +2099,17 @@ function summary(results: Result[]): string {
     const limits = (r: Result): { lensOk: boolean; goal: number; fab: number } => {
       const j = r.policy.judge;
       if (j === 'newcomer') return { lensOk: inW(r.lens, N.lens), goal: N.goalMax, fab: N.fabricatorMax };
-      const T = j === 'newcomer10' ? N10 : j === 'cardonly' ? C : S;
+      if (j === 'cardonly') return { lensOk: inW(r.lens, C.lens), goal: C.goalMax, fab: C.goalMax };
+      if (j === 'nolines') return { lensOk: r.lens != null && r.lens <= TARGETS.nolines.lensBy, goal: Infinity, fab: Infinity };
+      const T = j === 'newcomer10' ? N10 : S;
       return { lensOk: r.lens != null && r.lens <= T.lensBy, goal: T.goalMax, fab: T.goalMax };
     };
     P('== THE NEWCOMER (the card, its "while you wait" lines, and the tips): every run against the targets ("!" marks a miss) ==');
     P('policy      seed    Lens   longest goal                        Fabricator  free hands   tips: offered  followed  smallest  median  upgrade presses  sales+orders  Flow at unlock  first surplus');
     P(`newcomer         ${mmss(N.lens[0])}–${mmss(N.lens[1]).slice(0, 2)}  ≤${N.goalMax}s                               ≤${N.fabricatorMax}s                                                                                    ≥${Math.round(TARGETS.earnedShare * 100)}%`);
     P(`newcomer10       ≤${mmss(N10.lensBy)}   ≤${N10.goalMax}s                               (≤${N10.goalMax}s)`);
-    P(`cardonly         ≤${mmss(C.lensBy)}   ≤${C.goalMax}s                               (≤${C.goalMax}s)`);
+    P(`cardonly         ${mmss(C.lens[0])}–${mmss(C.lens[1]).slice(0, 2)}  ≤${C.goalMax}s                               (≤${C.goalMax}s)`);
+    P(`nolines          ≤${mmss(TARGETS.nolines.lensBy)}`);
     for (const r of card) {
       const L = limits(r);
       const flow = r.flowAtUnlock;
@@ -2251,12 +2281,14 @@ export function playOnce(policy: string, seed: number): {
   tips: { offered: number; followed: number };
   /** Seconds on "Hold 95% Flow", from the claim before it to its own (null if it was never claimed). */
   flowGoal: number | null;
+  /** "Nothing to do" up to the first Lens (Result.nothing). */
+  nothing: Result['nothing'];
 } {
   const p = POLICIES[policy];
   const bot = new Bot(p, seed, p.card ? CFG.minutesCard : p.fast ? CFG.minutesFast : CFG.minutesSlow);
   bot.run();
   const r = measure(bot);
-  return { lens: r.lens, checks: checks(r), tips: { offered: r.tipStats.offered, followed: r.tipStats.followed }, flowGoal: r.flowGoal?.seconds ?? null };
+  return { lens: r.lens, checks: checks(r), tips: { offered: r.tipStats.offered, followed: r.tipStats.followed }, flowGoal: r.flowGoal?.seconds ?? null, nothing: r.nothing };
 }
 
 // From the command line (npm run pacing) this file is the program; a test that imports it only wants the exports.

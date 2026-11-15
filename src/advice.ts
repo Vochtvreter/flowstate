@@ -289,7 +289,7 @@ function currentWait(g: Game): Wait | null {
   }
   const none: Purse = { credits: 0, a: 0, b: 0, g: 0 };
   if (goal.id === 'hold-flow') return { kind: 'flow', need: none, ...base };
-  if ((goal.id === 'first-order' || goal.id === 'three-orders') && g.ordersOn && g.order && !g.order.ready) return { kind: 'order', need: none, ...base };
+  if (goal.id === 'first-order' && g.ordersOn && g.order && !g.order.ready) return { kind: 'order', need: none, ...base };
   return null;
 }
 
@@ -496,16 +496,15 @@ export const SAY = {
   lineWell: (mat: string, cost: number) => `Place a Well on the free ${mat} deposit (${cents(cost)}), then build a Lab from its port.`,
   lineLab: (mat: string, cost: number) => `Build a Lab from the new ${mat} Well's port (${cents(cost)}): a Lab of its own is 1 α a second.`,
   lineExpand: (cost: number) => `Expand the board (${cents(cost)}): it brings new deposits for a Well and a Lab of its own.`,
-  // --- "Make your first Spark", second line: a Refiner for the Glint that is sold raw, and a Lab of its own ---
-  lineRefiner: (port: string, cost: number) => `Build a Refiner from ${port} (${cents(cost)}): two Glint sold raw are one Shard.`,
-  lineOwnLab: (port: string, cost: number) => `Build a Lab from ${port} (${cents(cost)}): a Lab of its own studies all of it.`,
+  // --- "Make your first Spark", second line: a Lab of its own for the Glint Well that only sells ---
+  lineOwnLab: (port: string, cost: number) => `Build a Lab from ${port} (${cents(cost)}): Glint is 1 α each in a Lab.`,
   // --- "Make your first Lens": what the Fabricator is not fed yet ---
   lineFeed: (port: string, to: string, n: string, mat: string) => `Wire ${port} to ${to}: a Lens takes ${n} ${mat}.`,
   // --- "Make your first Mist", second line: Speed on a Well with a Lab of its own, then on the Lab ---
   linePairWell: (well: string, cost: number) => `Buy Speed on ${well} (${cents(cost)}): its Lab of its own can then study more.`,
   linePairLab: (mat: string, cost: number) => `Buy Speed on the ${mat} Well's own Lab (${cents(cost)}): the pair then gives more α.`,
   // --- "Build a Fabricator", second line: the Wells with Labs of their own sell half of what they give ---
-  lineSell: (port: string, market: string, mat: string, value: number) => `Wire ${port} to ${market} too: half its ${mat} is sold, at ${value}¢ each.`,
+  lineSell: (port: string, market: string, mat: string) => `Wire ${port} to ${market} too: half its ${mat} is then sold, not studied.`,
 };
 
 // =====================================================================================
@@ -1475,12 +1474,13 @@ export function lineAdvice(g: Game): Advice | null {
  * nodes it is about). Looks at the board only: no copy of the game is run.
  *
  *  - ink-lab (goal 11):     the Ink Refiner's Ink port to the Lab (the one with the most room, if several).
- *  - shard-lab (goal 11):   a Refiner from the Glint Well that sells raw Glint, then a Lab from its port.
+ *  - glint-lab (goal 11):   a Lab from the port of the Glint Well that only sells.
  *  - well-labs (goal 15):   a Well that stands unwired gets a Lab from its port; else a free deposit gets a Well.
  *  - expand-labs (goal 15): the same on the deposits of the second expansion on, and the board is expanded first
  *                           when none of those is free.
  *  - flow-fix (goal 16):    a level of Speed on what feeds the short producer, or its port wired to the Market.
- *  - expand-murk (goal 18): the same as expand-labs on the deposits of the third expansion on.
+ *  - speed-pairs (goal 18): a level of Speed on a Well with a Lab of its own, then on that Lab.
+ *  - cut-glyph (goal 19 too) and sell-raw (goal 21): the Glyph sold, and the paired Wells wired to the Market too.
  *  - cut-glyph (goal 21):   the first wire that still takes Glyph to a Lab is cut.
  *  - prism-fab, glyph-fab (goal 22): the maker's port wired to the Fabricator.
  */
@@ -1506,25 +1506,9 @@ function lineStep(g: Game, any = false): Cand | null {
       const cost = nodeCost(g, 'lab');
       return afford({ act: { t: 'build', type: 'lab', from: w.id, port: 0 }, cost, hope: 0, show: w.id, brings: 'data', text: SAY.lineOwnLab(portName(g, { n: w, port: 0, mat: 'glint' }), cost) });
     }
-    case 'shard-lab': {
-      if (!has(g, NODE_DEFS.lab.tech) || !has(g, NODE_DEFS.refiner.tech)) return null;
-      // A Shard Refiner whose Shard reaches no Lab: a Lab of its own from its port. Else a Refiner on the Glint sold raw.
-      const bare = g.nodes.find((n) => n.recipe === 'shard' && !ports(g).some((p) => p.n === n && feedsLab(g, p)));
-      if (bare) {
-        const cost = nodeCost(g, 'lab');
-        return afford({ act: { t: 'build', type: 'lab', from: bare.id, port: 0 }, cost, hope: 0, show: bare.id, brings: 'data', text: SAY.lineOwnLab(portName(g, { n: bare, port: 0, mat: 'shard' }), cost) });
-      }
-      const w = rawGlintWell(g);
-      if (!w) return null;
-      const cost = nodeCost(g, 'refiner');
-      return afford({
-        act: { t: 'build', type: 'refiner', from: w.id, port: 0, recipe: 'shard' }, cost, hope: 0, show: w.id, brings: 'data',
-        text: SAY.lineRefiner(portName(g, { n: w, port: 0, mat: 'glint' }), cost),
-      });
-    }
-    case 'well-labs': case 'expand-labs': case 'expand-murk': {
-      // Which deposits the line is about: any (goal 15's first line), or those of the second (third) expansion on.
-      const from = at.line.id === 'well-labs' ? null : at.line.id === 'expand-labs' ? 1 : 2;
+    case 'well-labs': case 'expand-labs': {
+      // Which deposits the line is about: any (goal 15's first line), or those of the second expansion on.
+      const from = at.line.id === 'well-labs' ? null : 1;
       const later = from == null ? null : depositsFrom(g, from);
       const mine = (deposit: number | null | undefined) => deposit != null && (!later || later.has(deposit));
       if (!has(g, NODE_DEFS.lab.tech)) return null;
@@ -1584,7 +1568,7 @@ function lineStep(g: Game, any = false): Cand | null {
       const w = pairedWells(g).find((n) => !outs(g, n).some((x) => node(g, x.to)?.type === 'market'));
       if (!market || !w?.material) return null;
       const p: Port = { n: w, port: 0, mat: w.material };
-      return { ...wireCand(p, market, 0, SAY.lineSell(portName(g, p), the(g, market), MATERIALS[w.material].name, MATERIALS[w.material].value)), brings: 'credits' };
+      return { ...wireCand(p, market, 0, SAY.lineSell(portName(g, p), the(g, market), MATERIALS[w.material].name)), brings: 'credits' };
     }
     case 'cut-glyph': {
       const id = at.line.cuts?.(g)[0];

@@ -203,7 +203,7 @@ export const TECHS: Record<string, Tech> = Object.fromEntries([
   T('P4', 'Assembly', 'processing', 3, 0, { a: 1250 }, ['P3'], 'Machines with two inputs. Ink and Spark make Glyph, your first Tier 2 item and the source of β Data.', ['Assembler', 'Recipe: Ink + Spark → Glyph']),
   T('P5', 'Breeze Deposits', 'processing', 4, 0, { a: 1850 }, ['P4'], 'Extract Breeze, refine it into Mist, and combine Mist with Shard into Prism.', ['Breeze Wells', 'Recipe: 2 Breeze → Mist', 'Recipe: 2 Shard + Mist → Prism']),
   T('P7', 'Fabrication', 'processing', 5, 0, { a: 720, b: 100 }, ['P5'], 'Three-input machines. Prism and Glyph become Lens, the first Tier 3 item and the source of γ Data.', ['Fabricator', 'Recipe: Prism + 2 Glyph → Lens']),
-  T('P9', 'Paradox', 'processing', 6, 0, { a: 2500, b: 500, g: 450 }, ['P8'], 'The capstone. Lens, Dynamo and raw Breeze fold into a Paradox.', ['Recipe: Lens + Dynamo + 4 Breeze → Paradox']),
+  T('P9', 'Paradox', 'processing', 6, 0, { a: 2500, b: 250, g: 450 }, ['P8'], 'The capstone. Lens, Dynamo and raw Breeze fold into a Paradox.', ['Recipe: Lens + Dynamo + 4 Breeze → Paradox']),
   // (Behind Assembly, not just Refining: it is priced in β, and Assembly is what brings the first β. Researchable
   // from the first visit to the tree, it sat there for ten minutes with "no β yet".)
   T('U1', 'Efficiency Tuning', 'processing', 1, 1, { b: 40 }, ['P1', 'P4'], 'A new upgrade track for machines: some crafts consume no inputs.', ['Efficiency upgrades on machines']),

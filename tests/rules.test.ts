@@ -19,22 +19,24 @@ describe('numbers (2.6)', () => {
   it('Shard is lime; machine and tech prices are the ones tuned with the pacing bot', () => {
     expect(MATERIALS.shard.color).toBe('#B8F26B');
     expect(NODE_DEFS.assembler.base).toBe(600);
-    expect(NODE_DEFS.fabricator.base).toBe(7100);
+    expect(NODE_DEFS.fabricator.base).toBe(7250);
     // The second Assembler (Prism) is a purchase in its own right: 1,500¢, so that part of what the Fabricator
     // used to ask for is paid before the Fabricator goal begins. The other machines grow gently.
     expect([0, 1, 2].map((n) => nodeCostAt('assembler', n))).toEqual([600, 1500, 3750]);
-    expect([0, 1].map((n) => nodeCostAt('fabricator', n))).toEqual([7100, 8165]);
+    expect([0, 1].map((n) => nodeCostAt('fabricator', n))).toEqual([7250, 8338]);
     expect([0, 1, 2].map((n) => nodeCostAt('refiner', n))).toEqual([50, 57, 66]);
     // The Processing spine the goal chain asks for.
     expect(TECHS.P2.cost).toEqual({ a: 45 });
     expect(TECHS.P3.cost).toEqual({ a: 215 });
-    expect(TECHS.P4.cost).toEqual({ a: 1140 });
-    expect(TECHS.P5.cost).toEqual({ a: 1420 });
+    // (Assembly and Breeze Deposits went up when the cards' lines came to turn the credits a card player used to
+    // leave idle into α: the same twenty minutes, with something to do in them.)
+    expect(TECHS.P4.cost).toEqual({ a: 1250 });
+    expect(TECHS.P5.cost).toEqual({ a: 1850 });
     expect(TECHS.P7.cost).toEqual({ a: 720, b: 100 }); // lower than the curve: the card players' last wait is for credits, not for α
     // Free play needs all three kinds of Data, and Reclamation cannot be had before the first Lens.
     expect(TECHS.P6.cost).toEqual({ a: 300, g: 25 });
     expect(TECHS.P8.cost).toEqual({ a: 1200, b: 300, g: 100 });
-    expect(TECHS.P9.cost).toEqual({ a: 2500, b: 500, g: 450 });
+    expect(TECHS.P9.cost).toEqual({ a: 2500, b: 250, g: 450 }); // β is what free play has least of: at 500 it was a 37-minute wait
   });
 
   it('side techs are impulse buys: none costs more than a third of the spine tech it competes with', () => {
@@ -655,7 +657,7 @@ describe('demand with two prices (2.2)', () => {
   it('nothing a player can read before that moment names demand: goal cards, node blurbs, the techs in view', () => {
     const names = /demand|surplus|full price/i;
     for (const goal of GOALS) {
-      for (const text of [goal.title, goal.hint.mouse, goal.hint.touch, goal.meanwhile?.text.mouse ?? '', goal.meanwhile?.text.touch ?? '']) {
+      for (const text of [goal.title, goal.hint.mouse, goal.hint.touch, ...(goal.meanwhile ?? []).flatMap((l) => [l.text.mouse, l.text.touch])]) {
         expect(text, `${goal.id}: ${text}`).not.toMatch(names);
       }
     }

@@ -312,7 +312,8 @@ describe('Favour: the one-press Router preset', () => {
     run(g, 0.1);
     expect(g.goal.ready).toBe(false);
     expect(favour(g, router.id, toLab.id)).toBe(true);
-    run(g, 0.1);
+    // (Done once the Router's own wires show more going to the Lab: their rates take a few seconds to settle.)
+    run(g, 8);
     expect(g.goal.ready).toBe(true);
     const hint = goalById('route-lab')!.hint;
     expect(hint.mouse).toContain('press Favour on the Lab\'s wire');

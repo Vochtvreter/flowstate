@@ -20,11 +20,11 @@
 // player obeys, so the structural advice lives there and not in the adviser's tips (src/advice.ts), which
 // nobody is sure to follow. How the lines were chosen is in docs/CONTENT.md ("While you wait").
 import { EXPANSION_DEPOSITS, MATERIALS, MatId, NODE_DEFS, NodeType, RECIPES, RULES, TECHS } from './content';
-import { endDemo, expansionCost, grantTech, has, maxLevel, nodeCost, nodeCount, recipeOf, trackAvailable, upgradeCost } from './economy';
+import { cycleTime, endDemo, expansionCost, grantTech, has, maxLevel, nodeCost, nodeCount, recipeOf, trackAvailable, upgradeCost, wellRate } from './economy';
 import { countsForFlow, isFlowing, nearShare } from './flow';
 import { graph, isMachine, isPass } from './graph';
 import { startOrders } from './orders';
-import { Game, GNode, GoalReward, Wire, isLookahead } from './state';
+import { Game, GNode, GoalReward, Wire, isLookahead, nodeNoun } from './state';
 import { clearHistory } from './actions';
 import { lineFocus, waitKind } from './advice';
 
@@ -243,9 +243,6 @@ function reachesLab(g: Game, from: number, port: number, seen = new Set<number>(
   return false;
 }
 
-/** Shard Refiners whose Shard can reach a Lab ("Make your first Spark", second line: one more of them). */
-export const shardLabs = (g: Game) => g.nodes.filter((n) => n.recipe === 'shard' && reachesLab(g, n.id, 0)).length;
-
 /** A Glint Well that feeds no machine: one a Refiner could be built from. */
 export const rawGlintWell = (g: Game) =>
   g.nodes.find((n) => n.type === 'well' && n.material === 'glint' && !(graph(g).outs.get(n.id)?.[0] ?? []).some((w) => { const t = graph(g).byId.get(w.to); return !!t && isMachine(t); })) ?? null;
@@ -266,48 +263,51 @@ const betaToCome = (g: Game) => {
  */
 const sellGlyphNow = (g: Game) => (has(g, 'P7') || g.data.b + betaToCome(g) >= (TECHS.P7.cost.b ?? 0)) && count(g, 'fabricator') === 0 && g.credits < nodeCost(g, 'fabricator');
 
+/** This Router sends more to a Lab than to a Market by how it is set: a bigger ratio weight, or an earlier priority slot. */
+function routerFavours(g: Game, n: GNode): boolean {
+  const wires = graph(g).outs.get(n.id)?.[0] ?? [];
+  let lab = 0, market = 0, firstLab = -1, firstMarket = -1;
+  wires.forEach((w, i) => {
+    const type = graph(g).byId.get(w.to)?.type;
+    if (type === 'lab') {
+      lab += Math.max(0, w.weight);
+      if (firstLab < 0) firstLab = i;
+    } else if (type === 'market') {
+      market += Math.max(0, w.weight);
+      if (firstMarket < 0) firstMarket = i;
+    }
+  });
+  if (firstLab < 0 || firstMarket < 0) return false;
+  return (n.mode === 'ratio' && lab > market) || (n.mode === 'priority' && firstLab < firstMarket);
+}
+
 /** A Router in use that sends more to a Lab than to a Market: a bigger ratio weight, or an earlier priority slot. */
 export function routerFavoursLab(g: Game): boolean {
-  const c = graph(g);
-  for (const n of g.nodes) {
-    if (n.type !== 'router' || !inWires(g, n)) continue;
-    const wires = c.outs.get(n.id)?.[0] ?? [];
-    let lab = 0, market = 0, firstLab = -1, firstMarket = -1;
-    wires.forEach((w, i) => {
-      const type = c.byId.get(w.to)?.type;
-      if (type === 'lab') {
-        lab += Math.max(0, w.weight);
-        if (firstLab < 0) firstLab = i;
-      } else if (type === 'market') {
-        market += Math.max(0, w.weight);
-        if (firstMarket < 0) firstMarket = i;
-      }
-    });
-    if (firstLab < 0 || firstMarket < 0) continue;
-    if (n.mode === 'ratio' && lab > market) return true;
-    if (n.mode === 'priority' && firstLab < firstMarket) return true;
-  }
-  return false;
+  return g.nodes.some((n) => n.type === 'router' && inWires(g, n) > 0 && routerFavours(g, n));
 }
 
 /**
  * "Route more to a Lab than to the Market", judged by what the Router really sends: a Router that favours a
- * Lab (routerFavoursLab) and whose own wires into Labs carry more than its own wires into Markets. A Router
- * set toward a Lab that is full spills to the Market, and then the goal is not met (it said so falsely).
+ * Lab (routerFavoursLab) whose own wires into Markets do not carry more than its own wires into Labs. A Router
+ * set toward a Lab that is full spills to the Market, and then the goal is not met: it used to be, and the card
+ * said "more to a Lab" while more went to the Market. (A Router that nothing passes through yet, because the
+ * machines on the same port take it all, is judged by how it is set.)
  */
 export function routerSendsLab(g: Game): boolean {
   if (!routerFavoursLab(g)) return false;
   const c = graph(g);
   for (const n of g.nodes) {
     if (n.type !== 'router' || !inWires(g, n)) continue;
+    const wires = c.outs.get(n.id)?.[0] ?? [];
+    const to = (w: Wire) => c.byId.get(w.to)?.type;
+    if (!wires.some((w) => to(w) === 'lab') || !wires.some((w) => to(w) === 'market')) continue;
     let lab = 0;
     let market = 0;
-    for (const w of c.outs.get(n.id)?.[0] ?? []) {
-      const type = c.byId.get(w.to)?.type;
-      if (type === 'lab') lab += w.rate;
-      else if (type === 'market') market += w.rate;
+    for (const w of wires) {
+      if (to(w) === 'lab') lab += w.rate;
+      else if (to(w) === 'market') market += w.rate;
     }
-    if (lab > market + 1e-3) return true;
+    if (market <= lab + 1e-3 && routerFavours(g, n)) return true;
   }
   return false;
 }
@@ -320,6 +320,8 @@ export function routerSendsLab(g: Game): boolean {
  * line is then not shown, and the valve is there for that board.
  */
 export type FlowFix = { n: GNode; mat: MatId } & ({ speed: GNode } | { port: number; market: GNode });
+/** Seconds after a level of Speed is bought before the Flow line asks for another on the same kind of node: utilisation takes that long to show it. */
+const FLOW_SETTLE = 10;
 
 export function flowFix(g: Game): FlowFix | null {
   const c = graph(g);
@@ -346,6 +348,17 @@ export function flowFix(g: Game): FlowFix | null {
       if (!s || isPass(s)) continue;
       const gives = s.type === 'well' ? s.material : recipeOf(s)?.outputs[w.port]?.[0];
       if (gives !== m || s.util < RULES.flow.flowing || !trackAvailable(g, s, 'speed') || s.lv.speed >= maxLevel(g, 'speed')) continue;
+      // One level must be enough: what the maker gives with it, shared among the machines on that port, covers
+      // what this one takes. (Two Refiners on one Well need several levels: no single step fixes that board,
+      // and the valve is there for it.)
+      const qty = r.inputs.find((i) => i[0] === m)?.[1] ?? 1;
+      const takers = (c.outs.get(s.id)?.[w.port] ?? []).filter((x) => { const t = c.byId.get(x.to); return !!t && isMachine(t); }).length || 1;
+      const faster = { ...s, lv: { ...s.lv, speed: s.lv.speed + 1 } };
+      const sr = recipeOf(s);
+      const gives1 = s.type === 'well' ? wellRate(faster) : sr ? (sr.outputs[w.port]?.[1] ?? 1) / cycleTime(faster, sr) : 0;
+      if (gives1 / takers < RULES.flow.flowing * (qty / cycleTime(n, r))) continue;
+      // A level bought a moment ago has not shown yet: wait for it before asking for another.
+      if ((g.edits ?? []).some((e) => e.what === `upgrade:speed:${nodeNoun(s)}` && g.time - e.at < FLOW_SETTLE)) return null;
       return { n, mat: m, speed: s };
     }
   }
@@ -518,7 +531,7 @@ export const GOALS: Goal[] = [
   },
   {
     id: 'second-well', title: 'Place a second Well',
-    hint: hint('Pick the Well in the hotbar and click the free Glint deposit.', 'Tap Well in the bottom bar, then tap the free Glint deposit.'),
+    hint: hint('Pick the Well in the build bar and click the free Glint deposit.', 'Tap Well in the build bar, then tap the free Glint deposit.'),
     done: (g) => count(g, 'well') >= 2,
     ...buying((g) => price(nodeCost(g, 'well'), THE.well)),
     reward: { credits: 10 },
@@ -605,7 +618,7 @@ export const GOALS: Goal[] = [
     reward: { a: 20 },
   },
   {
-    id: 'make-spark', title: 'Sell your first Spark',
+    id: 'make-spark', title: 'Make your first Spark',
     hint: hint('Research Ember Deposits, then put a Well on the Ember deposit, build a Refiner from its port and sell the Spark.'),
     // Done on the first Spark sold, not made: the sale is the last gesture of the hint, and a card that is ready
     // shows Claim and no hint. Made, it completed with the sale still to do, and the first order (which asks for
@@ -709,8 +722,8 @@ export const GOALS: Goal[] = [
       {
         id: 'flow-fix',
         text: hint(
-          'Click the Flow ring, then give the machine it picks what it lacks: more input, or a Market.',
-          'Tap the Flow ring, then give the machine it picks what it lacks: more input, or a Market.',
+          'Click the Flow ring, then give the machine it picks what it lacks: input, or a Market.',
+          'Tap the Flow ring, then give the machine it picks what it lacks: input, or a Market.',
         ),
         done: (g) => { const f = flowCount(g); return f.of > 0 && f.running === f.of; },
         when: (g) => { const f = flowCount(g); return (f.of > 0 && f.running === f.of) || !!flowFix(g); },
@@ -729,9 +742,9 @@ export const GOALS: Goal[] = [
     reward: { a: 50 },
   },
   {
-    id: 'make-mist', title: 'Sell your first Mist',
+    id: 'make-mist', title: 'Make your first Mist',
     hint: hint('Research Breeze Deposits, then put a Well on a Breeze deposit, build a Refiner from its port and sell the Mist.'),
-    // On the first Mist sold, for the same reason as "Sell your first Spark".
+    // On the first Mist sold, for the same reason as "Make your first Spark".
     done: (g) => (g.sold.mist ?? 0) >= 1,
     ...buying((g) => rawLine(g, 'P5', 'breeze', 'mist')),
     // The dearest research so far, and the Assembler now takes most of the Ink and Spark the Lab was studying.

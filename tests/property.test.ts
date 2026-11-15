@@ -5,7 +5,7 @@
 // adviser for a tip and following it) with the simulation running in between, and after every single action
 // checks the books:
 //
-//     credits + what the board would refund + what was sunk into expansions − everything ever earned
+//     credits + what the board would refund (its expansions included) − everything ever earned
 //
 // must not move. It also checks that the board stays well-formed, that nothing goes negative or non-finite, and
 // that undo and redo never make a machine younger than it was (which would hide it from Flow).
@@ -17,7 +17,7 @@ import {
   undo, upgrade, upgradeAll, upgradeSaturatedWires, upgradeWire,
 } from '../src/actions';
 import { advice, applyAdvice, waitInfo } from '../src/advice';
-import { HOTBAR, MAT_IDS, MatId, NodeType, TECH_IDS, Track } from '../src/content';
+import { HOTBAR, MAT_IDS, MatId, NodeType, RULES, TECH_IDS, Track } from '../src/content';
 import { expansionCost, nodeCostAt, nodeUnlocked, research, upgradeValue } from '../src/economy';
 import { GOALS } from '../src/goals';
 import { orderView } from '../src/orders';
@@ -43,6 +43,8 @@ export function boardValue(g: Game): number {
   }
   for (const type of Object.keys(counts) as NodeType[]) for (let i = 0; i < counts[type]!; i++) v += nodeCostAt(type, i);
   for (const w of g.wires) v += w.paid;
+  // The board's expansions: undoable like the rest, refunded in full.
+  for (let i = 0; i < g.board.expansions; i++) v += Math.round(RULES.expansion.base * Math.pow(RULES.expansion.growth, i));
   return v;
 }
 
@@ -104,8 +106,7 @@ function play(seed: number, steps: number, credits: number) {
   g.techs = ['P1', 'R1', 'P2', 'P3', 'P4', 'P5', 'P7', 'L1', 'L2', 'L3', 'L4', 'L5', 'L6', 'U1'];
   g.ordersOn = true;
   g.flowOn = true;
-  let sunk = 0;
-  const books = () => g.credits + boardValue(g) + sunk - g.lifetime;
+  const books = () => g.credits + boardValue(g) - g.lifetime;
   const start = books();
   const stale: Snapshot[] = [];
   const done: Record<string, number> = {};
@@ -206,15 +207,14 @@ function play(seed: number, steps: number, credits: number) {
     splice: () => { const w = pick(g.wires); const n = pick(g.nodes); return w && n ? splice(g, w.id, n.id) : false; },
     expand: () => {
       if (g.board.expansions >= 4) return false;
-      const cost = expansionCost(g);
-      const ok = expandBoard(g);
-      if (ok) sunk += cost;
-      return ok;
+      return expandBoard(g);
     },
-    // Sell things and sink the refunds into an expansion, which cannot be undone: the sales can no longer all be taken back.
+    // Sell things and put the refunds into an expansion, then undo it all: the expansion is one undo step like
+    // any other (refunded in full, its deposits gone), so every sale can then be taken back, and nothing dips below zero.
     sellAndSink: () => {
       const cost = expansionCost(g);
       if (g.board.expansions >= 4 || g.credits >= cost) return false;
+      const before = { credits: g.credits, expansions: g.board.expansions, deposits: g.deposits.length, nodes: g.nodes.length };
       let sold = 0;
       while (g.credits < cost) {
         const n = pick(g.nodes.filter((x) => refundOf(g, x) > 0));
@@ -222,11 +222,14 @@ function play(seed: number, steps: number, credits: number) {
         sold++;
       }
       if (!expandBoard(g)) return false;
-      sunk += cost;
-      // Undo as far as it goes: it must stop at a sale it cannot pay for, never dip below zero.
       let undone = 0;
-      while (undone < sold && undo(g)) undone++;
-      must(undone < sold, () => `seed ${seed}: every sale was undone although ${cost}¢ of the refunds is gone`);
+      while (undone < sold + 1 && undo(g)) {
+        undone++;
+        must(g.credits >= -1e-6, () => `seed ${seed}: an undo pushed the credits below zero`);
+      }
+      must(undone === sold + 1, () => `seed ${seed}: ${undone} of ${sold + 1} steps undone`);
+      must(g.board.expansions === before.expansions && g.deposits.length === before.deposits && g.nodes.length === before.nodes, () => `seed ${seed}: the board is not as it was`);
+      must(Math.abs(g.credits - before.credits) < 1e-6, () => `seed ${seed}: undoing it all left ${g.credits - before.credits}¢`);
       return true;
     },
     undo: () => { let any = false; for (let i = 1 + int(3); i > 0; i--) any = undo(g) || any; return any; },
@@ -310,7 +313,7 @@ describe('credits are conserved by every sequence of edits, undo and redo', () =
     expect(total.followTip ?? 0, `a tip was followed only ${total.followTip ?? 0} times`).toBeGreaterThan(10);
   });
 
-  it('a player with almost no credits is never pushed below zero, and unaffordable undos are refused', () => {
+  it('a player with almost no credits is never pushed below zero, and selling to pay for an expansion can all be taken back', () => {
     let refused = 0;
     let lowest = Infinity;
     for (let seed = 101; seed <= 130; seed++) {
