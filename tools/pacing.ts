@@ -18,8 +18,11 @@
  *                --noTips              what-if: the newcomer never follows a tip. The policy `cardonly` is that
  *                                      player, with targets of its own
  *                --noMeanwhile         what-if: the card players ignore the cards' "while you wait" lines
- *                --skipLine=<goal ids> what-if: they ignore the line of these goals only (make-glyph,make-mist):
- *                                      against the plain run, that is what one line is worth
+ *                --skipLine=<ids>      what-if: they ignore these lines only, named by line (well-labs,speed-pairs)
+ *                                      or by goal (make-glyph: all of that goal's lines). Against the plain run,
+ *                                      the seconds on the goals a line stands on are what that line is worth
+ *                --lineReserve=0       what-if: a line's step does not keep back the credits for the card's own
+ *                                      next purchase (ADVICE.lineReserve)
  *                --lineDelay=<seconds> what-if: they get to a line only once it has been on the card that long
  *                --tipDelay=<seconds>  what-if: they follow a tip after this long on offer (15 otherwise)
  *                --tipEvery=<n>[,<k>]  what-if: they follow only every nth tip that comes due, starting with
@@ -53,18 +56,27 @@
  *
  * The newcomer is the player the build is tuned for. They do ONLY what the goal card says (cardStep below
  * reads each card the way tests/cardPlayer.ts does), one action every 6 s, and claim 8–16 s late. That is the
- * hint and, while a goal makes them wait, the card's "while you wait" line (Goal.meanwhile in src/goals.ts,
- * meanwhileStep below): the line is on the card, so it is followed like a hint, before any tip. When they
- * are waiting, the line is done and the adviser (src/advice.ts) has had a tip on offer for 15 s, they follow
- * it: one action. They never build a Router, upgrade or wire anything unprompted.
+ * hint and, while a goal makes them wait, the card's "while you wait" lines (Goal.meanwhile in src/goals.ts,
+ * meanwhileStep below), one line at a time as the card shows them, each step the one the card's "Show me"
+ * acts out (lineAdvice): the line is on the card, so it is followed like a hint, before any tip. When they
+ * are waiting, no line has a step for them and the adviser (src/advice.ts) has had a tip on offer for 15 s,
+ * they follow it: one action. They never build a Router, upgrade or wire anything unprompted.
  *   newcomer    6 s per action
  *   newcomer10  the same person at 10 s per action
- *   cardonly    the newcomer who never follows a tip, not even on the Flow goal: the cards and their lines
- *               alone. The cards have to carry the game by themselves, so this player has targets too. Their
- *               Flow goal is passed by its valve (RULES.flow.valveAfter): it opens at 90 s, its ten seconds
- *               are counted from there, and the Claim follows 8–16 s later, so about 110–116 s on the goal
+ *   cardonly    the newcomer who never follows a tip: the cards and their lines alone. The cards have to carry
+ *               the game by themselves, so this player has targets too, the "nothing to do" measure below among
+ *               them. The Flow goal's own line (the Flow ring picks a machine; give it what it lacks) gets them
+ *               through that goal in 30–40 s; without it the valve does (all but one producer at 90 s, all but
+ *               two at 180 s: RULES.flow.valveAfter, valveAfter2)
+ *   nolines     the newcomer who never reads a line: the hints and the tips only. Slower, never stranded
  * For these players the report also counts the tips: how many came on offer, how many were followed, and the
  * smallest and the median saving the followed ones promised.
+ *
+ * "Nothing to do" (Bot.nothing, the NOTHING TO DO table): up to the first Lens, the time in which the player's
+ * hands are free, the goal is not ready to claim, no order is, and the card's line has no step that can be done
+ * now (lineAdvice is null). A tip on offer does not count as something to do: the card is what has to carry
+ * the wait. A line the player leaves alone (--skipLine) still counts as something to do, so compare that
+ * measure only between runs that read the same lines.
  *
  *   slow        the old floor (one action per 8–10 s, wires and builds Routers unprompted, ignores amber,
  *               never upgrades a Lab). Not in the default table any more; --policy=slow still runs it.

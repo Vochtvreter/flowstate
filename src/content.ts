@@ -187,8 +187,9 @@ const T = (
  *  - Anything that only matters after the demo costs γ, which does not exist before the first Lens, and the
  *    late Processing techs need all three kinds of Data, so studying Tier 1 items never stops paying.
  * P1, R1, L1 and S1 are goal rewards (src/goals.ts) and cannot be bought. S1 (Bulk Upgrade) comes with
- * "Fill three orders", just before the save for the Fabricator, so nobody has to press Upgrade a hundred
- * times on a phone; upgrades are not balanced around dozens of tiny purchases.
+ * "Assemble your first Prism", and the next goal has the player press it once ("Upgrade all your Wells at
+ * once"), just before the save for the Fabricator, so nobody has to press Upgrade a hundred times on a phone;
+ * upgrades are not balanced around dozens of tiny purchases.
  *
  * The Commerce branch is about demand, and demand stays out of sight until it bites: selling over demand
  * did not happen before the first Lens in 60 scripted runs, so a price gauge handed out at minute 7 was a

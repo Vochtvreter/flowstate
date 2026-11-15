@@ -279,7 +279,7 @@ export function playByTheCard(opts: CardOptions = {}): CardRun {
   claim('hold-flow');
   wire(glyph, lab); // "Drag from the Assembler's port to a Lab"
   claim('study-glyph');
-  // 18–20: Mist, Prism, three orders.
+  // 18–20: Mist, Prism, Upgrade all.
   study('P5');
   const mist = from(buy('well', { depositId: 5 }), 'refiner');
   expect(mist.recipe).toBe('mist');

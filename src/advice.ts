@@ -1519,8 +1519,8 @@ export function lineAdvice(g: Game): Advice | null {
  *                           when none of those is free.
  *  - flow-fix (goal 16):    a level of Speed on what feeds the short producer, or its port wired to the Market.
  *  - speed-pairs (goal 18): a level of Speed on a Well with a Lab of its own, then on that Lab.
- *  - cut-glyph (goal 19 too) and sell-raw (goal 21): the Glyph sold, and the paired Wells wired to the Market too.
- *  - cut-glyph (goal 21):   the first wire that still takes Glyph to a Lab is cut.
+ *  - cut-glyph (goals 19 and 21): the first wire that still takes Glyph to a Lab is cut.
+ *  - sell-raw (goal 21):    a Well with a Lab of its own wired to the Market too.
  *  - prism-fab, glyph-fab (goal 22): the maker's port wired to the Fabricator.
  */
 function lineStep(g: Game, any = false): Cand | null {
