@@ -6,7 +6,7 @@
 // on by the tips alone (the rules verifier's v10), which stopped there for good with two steps.
 import { describe, expect, it } from 'vitest';
 import { claimGoal, claimOrder, clearHistory, connect, expandBoard, favour, placeNode } from '../src/actions';
-import { advice, applyAdvice, lineAdvice } from '../src/advice';
+import { advice, adviceTrials, applyAdvice, lineAdvice } from '../src/advice';
 import { RULES } from '../src/content';
 import { nodeCost } from '../src/economy';
 import { countsForFlow, isFlowing, worstProducer } from '../src/flow';
@@ -130,6 +130,11 @@ describe('Hold 95% Flow with a second Glyph Assembler built ahead', () => {
     // Its Show me is the same step, in the same words with the price: it selects that Ember Well and points at its
     // Speed button (src/ui/advice-show.ts).
     expect(step.text.mouse).toMatch(/^The Spark Refiner needs more Ember: buy Speed on its Ember Well \(\d+¢\)\.$/);
+    // The adviser's own Flow tip names that Well the same way: "its Ember Well" (it said "an Ember Well", which sent
+    // the player to either of the two).
+    const tips = adviceTrials(g)!.trials.map((x) => x.text).filter((x) => /needs more Ember: buy Speed on/.test(x));
+    expect(tips.length).toBeGreaterThan(0);
+    for (const t of tips) expect(t).toMatch(/needs more Ember: buy Speed on its Ember Well \(\d+¢\)\.$/);
     // Once everything flows, the line is done and reads its own words.
     applyAdvice(g, step);
     clearHistory();
