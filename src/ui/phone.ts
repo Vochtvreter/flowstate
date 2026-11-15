@@ -20,7 +20,7 @@
 import { MATERIALS, NODE_DEFS } from '../content';
 import { canUndo, undo } from '../actions';
 import {
-  armedPort, cancelArmed, cancelGesture, closeRadial, ensureVisible, fitView, gestureActive, refreshBoard, settleGesture,
+  armedPort, cancelArmed, cancelGesture, closeRadial, ensureVisible, fitView, gestureActive, refreshBoard, settleGesture, tidyBoard,
 } from './board';
 import { el, invalidateLayout, setAttr, setClass, setHTML, setHidden, setStyle } from './dom';
 import { PressWord } from './hud-words';
@@ -41,6 +41,7 @@ let thumb: HTMLElement;
 let hint: HTMLElement;
 let hintText: HTMLElement;
 let undoBtn: HTMLElement;
+let tidyBtn: HTMLElement;
 
 /** The phone layout: a narrow screen, or a short one held sideways. */
 const wantsPhone = () => window.innerWidth < 700 || (window.innerWidth > window.innerHeight && window.innerHeight < 500);
@@ -249,11 +250,13 @@ export function swipeToDismiss(sheet: HTMLElement, dismiss: () => void) {
 
 function buildChrome() {
   const fabs = el(`<div id="fabs">
+    <button class="fab" data-act="fab-tidy" data-testid="fab-tidy" aria-label="Tidy the board" hidden><svg class="ic" viewBox="0 0 24 24" width="20" height="20" aria-hidden="true"><path d="M3 4.5h6v5H3zM3 14.5h6v5H3zM15 9.5h6v5h-6zM9 7h3v5h3M9 17h3v-5"/></svg></button>
     <button class="fab" data-act="fab-fit" data-testid="fab-fit" aria-label="Show my supply line">${icon('fit', 20)}</button>
     <button class="fab" data-act="fab-undo" data-testid="fab-undo" aria-label="Undo">${icon('undo', 20)}</button>
   </div>`);
   // (The actions have their own names so that `[data-act="undo"]` still means the top bar's button.)
   undoBtn = fabs.querySelector<HTMLElement>('[data-act="fab-undo"]')!;
+  tidyBtn = fabs.querySelector<HTMLElement>('[data-act="fab-tidy"]')!;
   delegate(fabs, (a) => {
     if (a === 'fab-undo') {
       // Whatever the fingers were in the middle of is settled first, so the two cannot tangle.
@@ -261,6 +264,7 @@ function buildChrome() {
       cancelGesture();
       undo(ui.g);
     } else if (a === 'fab-fit') fitView(true);
+    else if (a === 'fab-tidy') tidyBoard();
     sync();
   });
 
@@ -313,6 +317,9 @@ function sync() {
   seenRev = g.rev;
   sizeSeen = sizeRev;
   setAttr(undoBtn, 'disabled', canUndo() ? null : '');
+  // Tidy is offered once there is something to tidy (the same count as the desktop button: see board.ts),
+  // and not while something is selected: it stands above the row, where the selected node may be.
+  setHidden(tidyBtn, g.nodes.length < 6 || !!ui.sel);
   const line = env.phone || env.touch ? hintLine() : '';
   setHidden(hint, !line);
   if (line) setHTML(hintText, line);

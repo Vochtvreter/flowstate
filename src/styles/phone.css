@@ -165,6 +165,8 @@ html[data-input='touch'] #app:not(.phone) #thumb-slot { display: flex; position:
 /* While the build menu is open they would only sit on top of the board the player is looking at. */
 #app.phone.building #fabs, #app.phone.building #thumb-slot { opacity: 0; visibility: hidden; pointer-events: none; }
 #app.phone.building #thumb-slot > * { pointer-events: none; }
+/* Tidy stands above Undo, so the row keeps its width (the Claim button and the hint line are seated beside it). */
+#app.phone #fabs [data-testid='fab-tidy'] { position: absolute; right: 0; bottom: 52px; }
 .fab { width: 44px; height: 44px; border-radius: 14px; border: 1px solid var(--border); background: rgba(18, 25, 41, 0.94); color: #dbe3f3; display: flex; align-items: center; justify-content: center; padding: 0; box-shadow: 0 8px 22px rgba(0, 0, 0, 0.45); }
 .fab:disabled { opacity: 0.38; }
 .fab:active:not(:disabled) { background: #1a2338; }
@@ -233,25 +235,25 @@ html[data-input='touch'] #app:not(.phone) #thumb-slot { display: flex; position:
 .bopt.locked .bn { color: #97a3bb; }
 .bopt.locked .bs .mono { color: #97a3bb; }
 
-/* ----- the board at phone size ----- */
-/* Type on the board shrinks with the zoom. Here it is set so that at the furthest zoom allowed
-   on a phone (0.74, see zoomMin in board.ts) everything that shows is still 11 px on screen:
-   15 px type throughout, and a 12 px second line that is only shown from 0.92 up. */
-#app.phone .nt { font-size: 15px; line-height: 18px; }
-#app.phone .ns { font-size: 12px; line-height: 15px; }
-#app.phone #board.lean .ns { display: none; }
-#app.phone .nr { font-family: Inter, system-ui, sans-serif; font-variant-numeric: tabular-nums; font-size: 15px; line-height: 19px; letter-spacing: -0.01em; }
-#app.phone .pill { font-size: 15px; line-height: 18px; top: -13px; padding: 2px 9px; }
-#app.phone .chip { display: none; }
-#app.phone .chip.on, #app.phone .chip.sat { display: flex; }
-#app.phone .chip i { font-size: 15px; line-height: 19px; padding: 2px 9px; }
-#app.phone .port-label { font-size: 15px; line-height: 18px; margin-top: -9px; }
-#app.phone .deposit { padding: 0 10px 0 12px; gap: 8px; }
-#app.phone .deposit .dn { font-size: 15px; line-height: 19px; white-space: nowrap; }
-#app.phone .deposit .ds { font-size: 15px; line-height: 19px; white-space: nowrap; }
-#app.phone #plot-label { font-size: 15px; top: -11px; }
-#app.phone #expand b { font-size: 16px; }
-#app.phone #expand small { font-size: 15px; }
+/* ----- the board in large type ----- */
+/* Type on the board shrinks with the zoom. In the phone layout, and elsewhere below 100% zoom, the
+   board carries the class `big` (board.ts) and cards are set so that everything that shows is still
+   10.5 px on screen at the floor of the detailed tier (0.7; 11 px at the phone's 0.74): 15 px type
+   throughout, and a 12 px second line that is only shown from 0.92 up (`lean` below that). Below the
+   floor is the overview, where there is no text at all (style.css). */
+#board.big .nt { font-size: 15px; line-height: 18px; }
+#board.big .ns { font-size: 12px; line-height: 15px; }
+#board.big.lean .ns { display: none; }
+#board.big .nr { font-family: Inter, system-ui, sans-serif; font-variant-numeric: tabular-nums; font-size: 15px; line-height: 19px; letter-spacing: -0.01em; }
+#board.big .pill { font-size: 15px; line-height: 18px; top: -13px; padding: 2px 9px; }
+#board.big .chip i { font-size: 15px; line-height: 19px; padding: 2px 9px; }
+#board.big .port-label { font-size: 15px; line-height: 18px; margin-top: -9px; }
+#board.big .deposit { padding: 0 10px 0 12px; gap: 8px; }
+#board.big .deposit .dn { font-size: 15px; line-height: 19px; white-space: nowrap; }
+#board.big .deposit .ds { font-size: 15px; line-height: 19px; white-space: nowrap; }
+#board.big #plot-label { font-size: 15px; top: -11px; }
+#board.big #expand b { font-size: 16px; }
+#board.big #expand small { font-size: 15px; }
 #app.phone #ghost { font-size: 15px; }
 #app.phone #ghost small, #app.phone #ghost .cap { font-size: 15px; }
 /* The caption under a deposit starts at the deposit's left edge: centred, it is wider than the
