@@ -5,7 +5,7 @@ import { clearHistory, connect, placeNode } from '../actions';
 import { GOALS } from '../goals';
 import { tick } from '../sim';
 import { Game, GNode, newGame } from '../state';
-import { ALERT_QUIET, alertPick, diagnose } from './status';
+import { ALERT_QUIET, alertPick, diagnose, starvedShort } from './status';
 
 const run = (g: Game, seconds: number) => {
   for (let i = 0; i < seconds * 20; i++) tick(g, 0.05);
@@ -91,6 +91,109 @@ describe('the alert names the node the goal is about first', () => {
     expect(alertPick(g, -1, says, [])).toBeNull();
     g.goalAt = { i: g.goal.i, t: g.time - ALERT_QUIET - 1 };
     expect([a.id, b.id]).toContain(alertPick(g, -1, says, [])?.n.id);
+  });
+});
+
+describe('starved means starved (final-desktop F5)', () => {
+  /** A Shard Refiner fed by the opening Glint Well; the simulation is not run: their states are set by hand. */
+  function refinerFedByWell(): { g: Game; well: GNode; ref: GNode } {
+    clearHistory();
+    const g = newGame();
+    g.credits = 1e9;
+    g.techs = ['P1', 'R1', 'P2', 'P3', 'P4'];
+    const well = g.nodes.find((n) => n.type === 'well')!;
+    const ref = placeNode(g, 'refiner', 600, 520, { recipe: 'shard' })!;
+    connect(g, well.id, 0, ref.id);
+    well.status = 'working';
+    ref.status = 'starved';
+    ref.missing = 'glint';
+    ref.grace = well.grace = 0;
+    return { g, well, ref };
+  }
+
+  it('a machine short of an input but at work 60% of its time or more is not a problem', () => {
+    const { g, ref } = refinerFedByWell();
+    ref.util = 0.8;
+    expect(diagnose(g, ref).problem).toBeNull();
+    expect(starvedShort(g, ref)).toBe(true);
+    // (Nothing for the alert to name either.)
+    expect(alertPick(g, -1, (n) => (diagnose(g, n).problem ? 'trouble' : null), [])).toBeNull();
+  });
+
+  it('under 60% it is starved, as before', () => {
+    const { g, ref } = refinerFedByWell();
+    ref.util = 0.3;
+    const dx = diagnose(g, ref);
+    expect(dx.problem).toBe('starved');
+    expect(dx.mat).toBe('glint');
+    expect(starvedShort(g, ref)).toBe(false);
+  });
+
+  it('is judged on the share averaged over a few seconds, and does not blink at the line', () => {
+    const { g, ref } = refinerFedByWell();
+    // Working in bursts about a mean of 80%: dips to 55% for a moment do not make it a problem.
+    ref.util = 0.8;
+    expect(diagnose(g, ref).problem).toBeNull();
+    for (let i = 0; i < 10; i++) {
+      g.time += 0.5;
+      ref.util = i % 2 ? 0.95 : 0.55;
+      expect(diagnose(g, ref).problem).toBeNull();
+    }
+    // Truly short of input for long enough: a problem.
+    for (let i = 0; i < 20; i++) {
+      g.time += 0.5;
+      ref.util = 0.3;
+      diagnose(g, ref);
+    }
+    expect(diagnose(g, ref).problem).toBe('starved');
+    // Back to 62%: still under the line it crossed (it is cleared at 65%), so it does not flip at once...
+    for (let i = 0; i < 30; i++) {
+      g.time += 0.5;
+      ref.util = 0.62;
+      diagnose(g, ref);
+    }
+    expect(diagnose(g, ref).problem).toBe('starved');
+    // ...and once it is clearly back over the line, it is no problem.
+    for (let i = 0; i < 30; i++) {
+      g.time += 0.5;
+      ref.util = 0.7;
+      diagnose(g, ref);
+    }
+    expect(diagnose(g, ref).problem).toBeNull();
+  });
+
+  it('a machine the card is about that is merely short keeps the alert slot empty (goal 16: the Flow line is about it)', () => {
+    const { g, well, ref } = refinerFedByWell();
+    g.goalAt = { i: g.goal.i, t: g.time - ALERT_QUIET - 1 };
+    ref.util = 0.8;
+    // Something else is in trouble (say, a Well with nowhere to send its output): not named while the card's own
+    // machine is short; named once the card is about something that runs.
+    const words = (n: GNode) => (n.id === well.id ? 'trouble' : null);
+    expect(alertPick(g, -1, words, [ref.id])).toBeNull();
+    ref.status = 'working';
+    expect(alertPick(g, -1, words, [ref.id])?.n.id).toBe(well.id);
+  });
+
+  it('a machine downstream of one that is merely short is starved itself, not a victim', () => {
+    const { g, ref } = refinerFedByWell();
+    ref.util = 0.8;
+    // (Glyph takes Ink and Spark; here only its Spark matters, and the Refiner is said to make it.)
+    const asm = placeNode(g, 'assembler', 900, 520, { recipe: 'glyph' })!;
+    ref.recipe = 'spark';
+    connect(g, ref.id, 0, asm.id);
+    asm.status = 'starved';
+    asm.missing = 'spark';
+    asm.util = 0.2;
+    asm.grace = 0;
+    const dx = diagnose(g, asm);
+    expect(dx.problem).toBe('starved');
+    expect(dx.victim).toBe(false);
+    expect(dx.culprit).toBe(ref.id);
+    // A supplier that is a problem itself makes it a victim, as before.
+    ref.util = 0.2;
+    g.time += 40;
+    diagnose(g, ref);
+    expect(diagnose(g, asm).victim).toBe(true);
   });
 });
 

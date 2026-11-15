@@ -28,7 +28,7 @@ import { logoMark } from './hud-screens';
 import { isTouch, withKey } from './hud-words';
 import { esc, icon, matGlyph, nodeIcon } from './icons';
 import { env } from './phone-env';
-import { diagnose, matName, victoryQuiet } from './status';
+import { diagnose, matName, starvedShort, victoryQuiet } from './status';
 import { metData, pricedInMet, readyCount, setCardWait, teasedSlot } from './tech';
 import { delegate, select, signal, toast, touch, ui } from './ui';
 
@@ -619,9 +619,41 @@ export function hotbarTypes(g: Game) {
 
 // ---------- inspector ----------
 
+/** What a machine receives of an input, and what it would take at full speed, per second. */
+function intake(g: Game, n: GNode, m: MatId | null): { got: number; need: number } {
+  const r = recipeOf(n);
+  if (!r || !m) return { got: 0, need: 0 };
+  const need = (r.inputs.find((i) => i[0] === m)?.[1] ?? 0) / cycleTime(n, r);
+  let got = 0;
+  for (const w of graph(g).ins.get(n.id) ?? []) if (w.mat === m) got += w.rate;
+  return { got, need };
+}
+
+/** "Upgrade source · 50¢": Speed on what supplies the input that runs short, when it is working and can take one. */
+function upgradeSourceBtn(g: Game, src: GNode | null | undefined): string {
+  if (!src || !trackAvailable(g, src, 'speed') || src.lv.speed >= maxLevel(g, 'speed') || src.status !== 'working') return '';
+  return buyBtn(`upgsrc:${src.id}`, upgradeCost(src, 'speed'), g.credits, 'Upgrade source · ', 'upg-source');
+}
+
+/**
+ * A machine that runs short of an input but still works most of its time (status.ts: starved means under 60%) is not a
+ * problem: no warning, no pill on the board, no alert. Its inspector says how short it is, in amber, and the quickest
+ * fix (the Flow ring sends the player here when it is the one holding Flow back).
+ */
+function shortNote(g: Game, n: GNode): string {
+  if (!starvedShort(g, n)) return '';
+  const r = recipeOf(n);
+  const mat = n.missing ?? r?.inputs[0][0] ?? null;
+  if (!r || !mat) return '';
+  const { got, need } = intake(g, n, mat);
+  const src = (graph(g).ins.get(n.id) ?? []).map((w) => (materialsAt(g, w.from, w.port).includes(mat) ? nodeById(g, w.from) : null)).find((x) => !!x);
+  const up = upgradeSourceBtn(g, src);
+  return `<div class="sec"><div class="shortbox" data-testid="shortfall"><p>${icon('warn', 14)}<span>Receiving <span class="mono">${fmtRate(got)}</span> of <span class="mono">${fmtRate(need)}</span> ${matName(mat)}/s</span></p>${up ? `<div class="st-actions">${up}</div>` : ''}</div></div>`;
+}
+
 function statusBlock(g: Game, n: GNode): string {
   const dx = diagnose(g, n);
-  if (!dx.problem) return '';
+  if (!dx.problem) return shortNote(g, n);
   const r = recipeOf(n);
   let title = '';
   let body = '';
@@ -631,17 +663,12 @@ function statusBlock(g: Game, n: GNode): string {
     title = n.recipe ? 'Idle: nothing connected' : 'Idle: no recipe';
     body = n.recipe ? (isTouch() ? 'Tap a source\'s port, then tap this machine.' : 'Drag a wire from a source into this machine.') : 'Connect an input and the recipe is picked for you, or choose one below.';
   } else if (dx.problem === 'starved' && r) {
-    const need = (r.inputs.find((i) => i[0] === dx.mat)?.[1] ?? 0) / cycleTime(n, r);
-    let got = 0;
-    for (const w of graph(g).ins.get(n.id) ?? []) if (w.mat === dx.mat) got += w.rate;
+    const { got, need } = intake(g, n, dx.mat);
     title = `Starved: not enough ${matName(dx.mat)}`;
     if (dx.culprit == null) body = `Nothing connected supplies ${matName(dx.mat)}.`;
     else {
       body = `Receiving <span class="mono">${fmtRate(got)}</span> of <span class="mono">${fmtRate(need)}</span> ${matName(dx.mat)}/s.`;
-      const src = nodeById(g, dx.culprit);
-      if (src && trackAvailable(g, src, 'speed') && src.lv.speed < maxLevel(g, 'speed') && src.status === 'working') {
-        actions += buyBtn(`upgsrc:${src.id}`, upgradeCost(src, 'speed'), g.credits, 'Upgrade source · ', 'upg-source');
-      }
+      actions += upgradeSourceBtn(g, nodeById(g, dx.culprit));
       actions += `<button class="ghostbtn" data-act="jump:${dx.culprit}">Jump to source</button>`;
     }
   } else if (dx.problem === 'blocked') {
@@ -676,12 +703,14 @@ function flowSection(g: Game, n: GNode): string {
   if (!r) return '';
   const T = cycleTime(n, r);
   const ins = graph(g).ins.get(n.id) ?? [];
+  // (The input that runs short: red where that is a problem, amber where the machine is merely short: see shortNote.)
+  const hard = n.status === 'starved' && diagnose(g, n).problem === 'starved';
   const rows = r.inputs.map(([m, q]) => {
     const need = q / T;
     let got = 0;
     for (const w of ins) if (w.mat === m) got += w.rate;
-    const lim = n.status === 'starved' && n.missing === m;
-    return `<div><div class="row sm"><span class="${lim ? 'bad' : ''}">In · ${MATERIALS[m].name}${lim ? ' · limiting' : ''}</span><span class="mono muted"><b>${fmtRate(got)}</b> / ${fmtRate(need)} /s</span></div>
+    const lim = n.status === 'starved' && n.missing === m && !victoryQuiet(g);
+    return `<div><div class="row sm"><span class="${lim ? (hard ? 'bad' : 'short') : ''}">In · ${MATERIALS[m].name}${lim ? ' · limiting' : ''}</span><span class="mono muted"><b>${fmtRate(got)}</b> / ${fmtRate(need)} /s</span></div>
       <div class="bar"><span style="width:${pct(got / need)}%;background:${MATERIALS[m].color}"></span></div></div>`;
   }).join('');
   const outs = r.outputs.map(([m, q]) => `<div class="row sm"><span>Out · ${MATERIALS[m].name}</span><span class="mono"><b>${fmtRate((n.util * q) / T)}</b>/s</span></div>`).join('');
@@ -897,8 +926,10 @@ function revealInInspector(opened: string, again = false) {
   const bulk = activeGoal(g)?.id === 'bulk-upgrade' && !g.goal.ready
     ? Array.from(box.querySelectorAll<HTMLElement>('[data-testid^="upgall-"]')).slice(0, 1) : [];
   const rows = Array.from(box.querySelectorAll<HTMLElement>('.rrow.hasfav'));
-  // (The warning is the status box statusBlock draws for a problem diagnose finds; it heads the scroller.)
-  const warn = Array.from(box.querySelectorAll<HTMLElement>('.statusbox')).slice(0, 1);
+  // (The warning is the status box statusBlock draws for a problem diagnose finds; it heads the scroller. A machine merely
+  // short of an input has its amber note there instead, with the fix that works: Speed on its source, not its own Speed,
+  // which would only leave it shorter. The Flow ring opens such a machine.)
+  const warn = Array.from(box.querySelectorAll<HTMLElement>('.statusbox, .shortbox')).slice(0, 1);
   const want = ringed.length ? ringed : bulk.length ? bulk : warn.length ? warn : rows.length ? rows
     : Array.from(box.querySelectorAll<HTMLElement>('.uprow .buy.ok')).slice(0, 1).map((b) => b.closest<HTMLElement>('.uprow') ?? b);
   if (!want.length) return;
@@ -952,11 +983,11 @@ function renderMini() {
     return;
   }
   const view = boardRect();
-  // Between the first Lens and free play no machine is in trouble in the picture (status.ts victoryQuiet): a starved or
-  // blocked one is drawn as working, as the board draws its ring then.
-  const quiet = victoryQuiet(g);
-  let key = `${g.board.w}x${g.board.h}|${Math.round(view.width)}x${Math.round(view.height)}${quiet ? '|quiet' : ''}`;
-  for (const n of g.nodes) key += `|${n.x},${n.y},${n.status[0]}`;
+  // A node is drawn in the colour the board's ring has: a starved or blocked one that diagnose finds no problem with (a
+  // machine merely short of an input; any machine between the first Lens and free play, status.ts) as working.
+  const states = g.nodes.map((n) => ((n.status === 'starved' || n.status === 'blocked') && !diagnose(g, n).problem ? 'working' : n.status));
+  let key = `${g.board.w}x${g.board.h}|${Math.round(view.width)}x${Math.round(view.height)}`;
+  g.nodes.forEach((n, i) => (key += `|${n.x},${n.y},${states[i][0]}`));
   const at = `${Math.round(ui.view.x)},${Math.round(ui.view.y)},${ui.view.k.toFixed(3)}`;
   const now = performance.now();
   if (key === miniKey && (at === miniView || now - miniAt < MINI_EVERY)) return;
@@ -973,12 +1004,11 @@ function renderMini() {
   ctx.setLineDash([3, 3]);
   ctx.strokeRect(ox, oy, g.board.w * s, g.board.h * s);
   ctx.setLineDash([]);
-  for (const n of g.nodes) {
+  g.nodes.forEach((n, i) => {
     const { w, h } = nodeSize(n);
-    const st = quiet && (n.status === 'starved' || n.status === 'blocked') ? 'working' : n.status;
-    ctx.fillStyle = n.type === 'market' ? '#FFC857' : n.type === 'lab' ? '#C4A1FF' : ST_COLORS[st];
+    ctx.fillStyle = n.type === 'market' ? '#FFC857' : n.type === 'lab' ? '#C4A1FF' : ST_COLORS[states[i]];
     ctx.fillRect(ox + n.x * s, oy + n.y * s, Math.max(3, w * s), Math.max(2, h * s));
-  }
+  });
   const r = view;
   ctx.strokeStyle = '#7AA2FF';
   ctx.lineWidth = 1.5;
