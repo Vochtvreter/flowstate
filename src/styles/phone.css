@@ -50,6 +50,11 @@ html[data-input='touch'] .port:hover { transform: none; }
 html[data-input='touch'] .port.armed:hover { transform: scale(1.5); }
 /* Keys mean nothing to a finger. */
 html[data-input='touch'] #insp .foot .kbd { display: none; }
+/* Nothing pressable is drawn crisp right against the inspector's Duplicate and Delete. For a finger the foot of the
+   scroller fades out over its last 20 px (SHEET_FADE in panels.ts), and its content ends with as much room, so the
+   last row can always be scrolled clear of the fade: a row cut by that edge reads as going on below, not as a button,
+   and a finger aimed at the sliver of a button there landed on Delete (fr-rules). */
+html[data-input='touch'] #insp .scroll { padding-bottom: 20px; -webkit-mask-image: linear-gradient(to bottom, #000 calc(100% - 20px), transparent); mask-image: linear-gradient(to bottom, #000 calc(100% - 20px), transparent); }
 
 /* ================= 2. the phone layout ================= */
 

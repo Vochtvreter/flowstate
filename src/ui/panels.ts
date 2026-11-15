@@ -14,6 +14,7 @@ import {
   TRACK_INFO, costText, cycleTime, dataYield, fmt, fmtInt, fmtRate, has, labRate, maxLevel, maxPipeTier,
   nodeCost, nodeUnlocked, recipeOf, techAvailable, trackAvailable, upgradeCost, wellRate,
 } from '../economy';
+import { activeGoal } from '../goals';
 import { graph, isMachine, passCap } from '../sim';
 import { Game, GNode, RouterMode, Wire } from '../state';
 import { isMuted, setMuted } from './audio';
@@ -841,7 +842,12 @@ function renderInspector(force: boolean) {
     const opened = sel ? `${sel.kind}${sel.id}` : '';
     if (opened !== inspOpenedFor) {
       inspOpenedFor = opened;
-      if (sel?.kind === 'node' && html) requestAnimationFrame(() => revealInInspector(opened));
+      if (sel?.kind === 'node' && html) {
+        requestAnimationFrame(() => revealInInspector(opened));
+        // (Looked at again once a phone's sheet has slid in and the strip above it has settled: the sheet's height
+        // follows the strip's, and what was revealed in a taller sheet could end up cut at its foot.)
+        window.setTimeout(() => revealInInspector(opened, true), REVEAL_AGAIN);
+      }
     }
   } else if (!inspEmpty) {
     inspOpenedFor = '';
@@ -858,20 +864,28 @@ let inspEmpty = 0;
 let inspOpenedFor = '';
 
 /**
- * Scroll the inspector, just opened, so what the player most likely came for is in view: on a Router the rows of
- * its wires with their Favour buttons, on anything else the first upgrade they can afford. Below the fold of a
- * phone's sheet those were missed (rev-phone F5, rev-wide F2). Nothing moves when it is in view already, nor
- * once a finger is on the panel.
+ * Scroll the inspector, just opened, so what the player most likely came for is in view: the "Upgrade all" the goal
+ * on the card asks for (goal 20, whether it can be afforded yet or not), on a Router the rows of its wires with their
+ * Favour buttons, on anything else the first upgrade they can afford. Below the fold of a phone's sheet those were
+ * missed, or showed a sliver over Duplicate and Delete (rev-phone F5, rev-wide F2, fr-rules). Nothing moves when it is
+ * in view already, nor once a finger is on the panel.
  */
-function revealInInspector(opened: string) {
+function revealInInspector(opened: string, again = false) {
   if (opened !== inspOpenedFor || inspPanel.busy()) return;
   const box = inspEl.querySelector<HTMLElement>('.scroll');
   if (!box) return;
-  // (The panel is patched in place: without this a node would open where the last one was scrolled to.)
-  box.scrollTop = 0;
+  // (The panel is patched in place: without this a node would open where the last one was scrolled to. The second
+  // look leaves a scroller the player has moved since the first alone.)
+  if (!again) box.scrollTop = 0;
+  else if (Math.abs(box.scrollTop - revealedAt) > 1) return;
+  revealedAt = box.scrollTop;
   if (box.scrollHeight <= box.clientHeight + 1) return;
+  const g = ui.g;
+  // (The button itself: its row, with its words, may be taller than a phone's sheet has room for.)
+  const bulk = activeGoal(g)?.id === 'bulk-upgrade' && !g.goal.ready
+    ? Array.from(box.querySelectorAll<HTMLElement>('[data-testid^="upgall-"]')).slice(0, 1) : [];
   const rows = Array.from(box.querySelectorAll<HTMLElement>('.rrow.hasfav'));
-  const want = rows.length ? rows : Array.from(box.querySelectorAll<HTMLElement>('.uprow .buy.ok')).slice(0, 1).map((b) => b.closest<HTMLElement>('.uprow') ?? b);
+  const want = bulk.length ? bulk : rows.length ? rows : Array.from(box.querySelectorAll<HTMLElement>('.uprow .buy.ok')).slice(0, 1).map((b) => b.closest<HTMLElement>('.uprow') ?? b);
   if (!want.length) return;
   // (Measured against the scroller itself: a sheet still sliding in has the same offset for both.)
   const b = box.getBoundingClientRect();
@@ -883,11 +897,20 @@ function revealInInspector(opened: string) {
     const open = rows.filter((r) => r.querySelector('button.fav'));
     if (open.length) ({ top, bottom } = span(open));
   }
-  if (top >= 0 && bottom <= room) return;
+  // (For a finger the scroller's foot fades out over SHEET_FADE px, phone.css: what is revealed stands clear of that.)
+  const foot = isTouch() ? SHEET_FADE : 0;
+  if (top >= 0 && bottom <= room - foot) return;
   // The whole of it where it fits, its top where it does not; 12 px clear of the edge.
-  const shift = bottom - top + 24 <= room ? bottom - room + 12 : top - 12;
+  const shift = bottom - top + 24 + foot <= room ? bottom - room + 12 + foot : top - 12;
   box.scrollTop = Math.max(0, Math.min(box.scrollHeight - room, box.scrollTop + shift));
+  revealedAt = box.scrollTop;
 }
+
+/** How far the foot of the inspector's scroller fades out for a finger (phone.css, "nothing pressable under the footer"). */
+const SHEET_FADE = 20;
+/** Where the reveal left the scroller; and when it looks again (ms), once a phone's sheet has slid in (0.22 s). */
+let revealedAt = 0;
+const REVEAL_AGAIN = 360;
 
 // ---------- minimap + zoom ----------
 
