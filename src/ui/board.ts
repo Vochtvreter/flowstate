@@ -3949,7 +3949,10 @@ function onUp(e: PointerEvent) {
 /**
  * The kind of node the card is asking the player to build right now, if any: the next step of the goal's
  * "while you wait" line when that is a build, or else what the goal's hint says to pick or to build
- * ("…and pick Lab", "Build a Router from…"). The build menu puts it first and preselects it.
+ * ("…and pick Lab", "Build a Router from…"), for as long as the goal still needs one built: while what it is
+ * buying next (Goal.step) is that kind. Once the Router of "Route more to a Lab…" stands, the card is about
+ * wiring it, and a menu opened from its own port must not offer a second Router first. The build menu puts it
+ * first and preselects it.
  */
 function wantedType(g: Game, from?: number): NodeType | null {
   const step = lineAdvice(g);
@@ -3961,9 +3964,12 @@ function wantedType(g: Game, from?: number): NodeType | null {
   const names = new Map<string, NodeType>();
   for (const t of Object.keys(NODE_DEFS) as NodeType[]) names.set(NODE_DEFS[t].name.toLowerCase(), t);
   const said = /\b(?:pick|build(?:\s+(?:a|an|another))?)\s+([A-Za-z]+)/gi;
+  // (A goal that keeps no account of what it buys goes by its words alone.)
+  const buying = goal.step ? goal.step(g) : undefined;
+  const named = buying === undefined ? null : buying === null ? '' : 'tech' in buying ? buying.thenWhat ?? '' : buying.what ?? '';
   for (const m of goal.hint.mouse.matchAll(said)) {
     const t = names.get(m[1].toLowerCase());
-    if (t) return t;
+    if (t) return named == null || named.includes(`the ${NODE_DEFS[t].name}`) ? t : null;
   }
   return null;
 }
