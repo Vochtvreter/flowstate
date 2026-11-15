@@ -66,6 +66,9 @@ html[data-input='touch'] #tech .tt.own, html[data-input='touch'] #tech .qbox { m
   #app:not(.phone) #hud-strip.over-tech { padding-right: 0; }
   #app:not(.phone):not(.insp-open).tech-seat #hud-strip.over-tech { padding-right: 196px; }
   #app:not(.phone) #hud-strip.over-tech .gc-title { white-space: normal; display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 2; line-height: 18px; }
+  /* Between the title and Back the bar is short of room: three reward chips ("Fill three orders" at 768 px)
+     left the title 18 px wide, cut to "F… t…". The chips wrap onto a second row instead. */
+  #app:not(.phone) #hud-strip.over-tech div.gc-rewards { flex: 0 1 auto; flex-wrap: wrap; min-width: min-content; row-gap: 4px; }
 }
 @media (max-width: 1000px) {
   #app:not(.phone).insp-open #hud-strip.over-tech div.gc-rewards { display: none; }
