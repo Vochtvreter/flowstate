@@ -132,8 +132,12 @@ export function pinchView(v0: View, m0: Pt, d0: number, m1: Pt, d1: number, clam
   return { x: m1.x - ((m0.x - v0.x) / v0.k) * k, y: m1.y - ((m0.y - v0.y) / v0.k) * k, k };
 }
 
-/** The zoom at which each view tier ends. Below `floor` cards are icons (the overview); `min` is as far out as the board ever goes. */
-export const ZOOM = { floor: 0.7, phoneFloor: 0.74, min: 0.25 };
+/**
+ * The zoom at which each view tier ends. Below `floor` cards are icons (the overview); `min` is as far out
+ * as the board goes for a factory that fits at it; `least` is as far out as it ever goes (a factory so wide
+ * that a phone could not show all of it otherwise).
+ */
+export const ZOOM = { floor: 0.7, phoneFloor: 0.74, min: 0.25, least: 0.15 };
 
 export interface Box { x0: number; y0: number; x1: number; y1: number }
 

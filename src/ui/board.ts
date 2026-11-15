@@ -21,7 +21,7 @@ import {
 } from '../economy';
 import { bagTotal, graph, isMachine, isSink, outPortCount } from '../sim';
 import { lineAdvice } from '../advice';
-import { GOALS, activeGoal } from '../goals';
+import { GOALS, activeGoal, goalFocus } from '../goals';
 import { GRID, Game, GNode, Wire, snap } from '../state';
 import { anchorPt, cachedRect, el, invalidateLayout, setAttr, setClass, setHTML, setHidden, setStyle, setText, svgEl } from './dom';
 import {
@@ -161,7 +161,7 @@ const EDGE_SPEED = 640;
  * at the phone's 0.74.
  *
  * Below the floor is the overview, where nothing is read. It goes as far out as it takes to show the
- * whole factory with a margin (see `zoomMin`), never past ZOOM.min. A factory that fits the screen at
+ * whole factory with a margin (see `zoomMin`), never past ZOOM.least. A factory that fits the screen at
  * the floor has no overview: the board stops at the floor, as it always did.
  */
 const zoomFloor = () => (env.phone ? ZOOM.phoneFloor : ZOOM.floor);
@@ -290,7 +290,7 @@ function applyView() {
   lean = big && k < LEAN_BELOW;
   // Icons and wires are a fixed size in board units, so they are drawn larger in steps as the camera
   // pulls back: an icon is never under 24 px on screen, a wire never under 1.4 px.
-  ovStep = !over ? 0 : k >= 0.55 ? 1 : k >= 0.4 ? 2 : 3;
+  ovStep = !over ? 0 : k >= 0.55 ? 1 : k >= 0.4 ? 2 : k >= 0.26 ? 3 : 4;
   if (over !== wasOver) boardEl.classList.toggle('ov', over);
   if (ovStep !== wasStep) {
     if (ovStep) boardEl.dataset.ov = String(ovStep);
@@ -323,14 +323,20 @@ function zoomMin(): number {
   const box = builtBox();
   if (!box || !renderedGame) return floor;
   const k = fitTarget(box).k;
-  return k >= floor ? floor : Math.max(ZOOM.min, k * 0.9);
+  // Outside the phone layout the whole plot, with the Expand button under it, can always be brought into
+  // view: its edge is where the board grows (a phone has a Fit button and the docked Expand for that).
+  const g = ui.g;
+  const r = rectOf();
+  const plot = env.phone ? Infinity : fitZoom({ x0: -20, y0: -20, x1: g.board.w + 20, y1: g.board.h + 18 + EXPAND_H + 20 }, { x0: 0, y0: 0, x1: r.width, y1: r.height }) * 0.95;
+  const need = Math.min(k * 0.9, plot);
+  return need >= floor ? floor : Math.max(ZOOM.least, need);
 }
 
 /**
  * (Never forces the camera in: a view that is already further out than the limit may stay where it is,
- * though nothing is ever further out than ZOOM.min.)
+ * though nothing is ever further out than ZOOM.least.)
  */
-const clampK = (k: number) => Math.max(ZOOM.min, Math.min(zoomMin(), ui.view.k), Math.min(zoomMax(), k));
+const clampK = (k: number) => Math.max(ZOOM.least, Math.min(zoomMin(), ui.view.k), Math.min(zoomMax(), k));
 
 /**
  * A camera move in progress: the view eases to `x`, `y`, `k`. With `from`, it is a timed move (`t` of
@@ -425,6 +431,68 @@ const inset = (b: Box, by: number): Box => {
   return { x0: b.x0 + Math.max(0, x), y0: b.y0 + Math.max(0, y), x1: b.x1 - Math.max(0, x), y1: b.y1 - Math.max(0, y) };
 };
 
+/** Clear space kept around the phone's floating buttons (Fit, Undo, Tidy) by the camera and by placement. */
+const FAB_CLEAR = 16;
+
+/** The stage-pixel box of an element on show, grown by `gap`, or null when it is not laid out. */
+function stageBoxOf(e: Element | null | undefined, gap = 0): Box | null {
+  if (!e) return null;
+  const b = e.getBoundingClientRect();
+  if (b.width < 2 || b.height < 2) return null;
+  const r = rectOf();
+  return { x0: b.left - r.left - gap, y0: b.top - r.top - gap, x1: b.right - r.left + gap, y1: b.bottom - r.top + gap };
+}
+
+/** The phone's floating buttons on show, each with FAB_CLEAR around it (stage pixels). */
+function fabBoxes(gap = FAB_CLEAR): Box[] {
+  const out: Box[] = [];
+  if (!env.phone) return out;
+  fabsEl ??= document.getElementById('fabs');
+  for (const b of fabsEl?.querySelectorAll('.fab:not([hidden])') ?? []) {
+    const s = stageBoxOf(b, gap);
+    if (s) out.push(s);
+  }
+  return out;
+}
+
+/**
+ * Everything that lies over the board where a card cannot be seen or reached, in stage pixels: the strip
+ * (the goal card with the order and the alert), an open sheet, the corner controls, the key hints, the
+ * "tap where…" line, and on a phone the floating buttons (with room around them) and a Claim button
+ * seated in the thumb row. Reads layout: for moments when the camera may move, not for every frame.
+ */
+function coverBoxes(): Box[] {
+  const out: Box[] = [];
+  const push = (b: Box | null) => void (b && out.push(b));
+  const r = rectOf();
+  if (env.phone) {
+    const c = env.cover();
+    if (c.top) out.push({ x0: -1e6, y0: -1e6, x1: 1e6, y1: c.top });
+    if (c.bottom) out.push({ x0: -1e6, y0: r.height - c.bottom, x1: 1e6, y1: 1e6 });
+    if (c.right) out.push({ x0: r.width - c.right, y0: -1e6, x1: 1e6, y1: 1e6 });
+    out.push(...fabBoxes());
+    push(stageBoxOf(document.querySelector('#hud [data-testid="claim"]'), 8));
+  } else {
+    const s = env.strip();
+    if (s) out.push({ x0: s.x0, y0: -1e6, x1: s.x1, y1: s.bottom });
+    const c = env.corner();
+    if (c) out.push({ x0: c.x0, y0: c.y0, x1: 1e6, y1: 1e6 });
+    push(stageBoxOf(hintsEl));
+  }
+  push(stageBoxOf(document.getElementById('tap-hint'), 4));
+  return out;
+}
+
+/** A world box as it lies on the stage from view `v`. */
+const onStage = (b: Box, v: View): Box => ({ x0: b.x0 * v.k + v.x, y0: b.y0 * v.k + v.y, x1: b.x1 * v.k + v.x, y1: b.y1 * v.k + v.y });
+
+/** A stage box lies wholly on the stage and under none of `covers`. */
+function inClear(sb: Box, covers: Box[]): boolean {
+  const r = rectOf();
+  if (sb.x0 < -1 || sb.y0 < -1 || sb.x1 > r.width + 1 || sb.y1 > r.height + 1) return false;
+  return !covers.some((o) => sb.x0 < o.x1 && sb.x1 > o.x0 && sb.y0 < o.y1 && sb.y1 > o.y0);
+}
+
 /** A card as a box, with room for the ports that stick out of its sides and the status pill on top. */
 function cardBox(n: GNode): Box {
   const { w, h } = nodeSize(n);
@@ -455,25 +523,31 @@ const ALERT_ROOM = 46;
  * detailed tier is shown in the overview instead, unless `detailed` is set: then the camera stays at
  * the floor, on the middle of the box.
  */
-function fitTarget(box: Box, detailed = false): View {
+function fitTarget(box: Box, detailed = false, kMax = 1): View {
   const floor = zoomFloor();
   const plot = ui.g.board;
   const settle = (area: Box, k: number) => {
-    const v = centreView(box, area, k >= floor ? k : detailed || k >= floor * NEAR_FIT ? floor : Math.max(ZOOM.min, k));
+    const v = centreView(box, area, k >= floor ? k : detailed || k >= floor * NEAR_FIT ? floor : Math.max(ZOOM.least, k));
     // No more empty ground past the plot's edge than there has to be: where the plot is larger than
-    // the space it fills it, and where it is smaller it sits in the middle. (What is built lies inside
-    // the plot, so this never pushes any of it out of view.)
-    const along = (at: number, size: number, a0: number, a1: number) =>
-      size * v.k <= a1 - a0 ? (a0 + a1 - size * v.k) / 2 : Math.min(a0, Math.max(a1 - size * v.k, at));
-    v.x = along(v.x, plot.w, area.x0, area.x1);
-    v.y = along(v.y, plot.h, area.y0, area.y1);
+    // the space it fills it, and where it is smaller it sits in the middle. (The plot is taken together
+    // with the box, so nothing built is ever pushed out of view: a card from an old save may stand
+    // past the plot's edge.)
+    const along = (at: number, lo: number, hi: number, a0: number, a1: number) => {
+      const size = (hi - lo) * v.k;
+      return size <= a1 - a0 ? (a0 + a1 - size) / 2 - lo * v.k : Math.min(a0 - lo * v.k, Math.max(a1 - hi * v.k, at));
+    };
+    v.x = along(v.x, Math.min(0, box.x0), Math.max(plot.w, box.x1), area.x0, area.x1);
+    v.y = along(v.y, Math.min(0, box.y0), Math.max(plot.h, box.y1), area.y0, area.y1);
     return v;
   };
   if (env.phone) {
-    // Clear of the floating controls when that leaves room at a readable zoom; otherwise behind them
-    // (they sit in the corners), with thinner margins. The overview keeps clear of them again.
-    const clear = inset(freeArea(true), 14), behind = inset(freeArea(), 6);
-    const k1 = fitZoom(box, clear), k2 = fitZoom(box, behind);
+    // Clear of the row of floating controls when that leaves room at a readable zoom, 16 px in from each
+    // side; otherwise down into that row, but left of the floating buttons and FAB_CLEAR from them. The
+    // overview keeps clear of the whole row again.
+    const clear = inset(freeArea(true), 16), all = inset(freeArea(), 6);
+    const fabs = fabBoxes();
+    const behind = fabs.length ? { ...all, x1: Math.max(all.x0 + 80, Math.min(all.x1, ...fabs.map((b) => b.x0))) } : all;
+    const k1 = fitZoom(box, clear, kMax), k2 = fitZoom(box, behind, kMax);
     if (k1 >= floor * NEAR_FIT || k2 < floor * NEAR_FIT) return settle(clear, k1);
     return settle(behind, k2);
   }
@@ -489,13 +563,13 @@ function fitTarget(box: Box, detailed = false): View {
   let area = full;
   const c = env.corner();
   if (c) {
-    const v = settle(full, fitZoom(box, full));
+    const v = settle(full, fitZoom(box, full, kMax));
     if (box.x1 * v.k + v.x > c.x0 - STRIP_GAP && box.y1 * v.k + v.y > c.y0 - STRIP_GAP) {
       const left: Box = { ...full, x1: Math.max(full.x0 + 100, c.x0 - STRIP_GAP) }, above: Box = { ...full, y1: Math.max(full.y0 + 100, c.y0 - STRIP_GAP) };
-      area = fitZoom(box, left) >= fitZoom(box, above) ? left : above;
+      area = fitZoom(box, left, kMax) >= fitZoom(box, above, kMax) ? left : above;
     }
   }
-  return settle(area, fitZoom(box, area));
+  return settle(area, fitZoom(box, area, kMax));
 }
 
 /** How long Fit, a tap on a card in the overview, and a camera move that follows a build take, in ms. */
@@ -525,13 +599,57 @@ export function fitView(smooth = false) {
     moveView(back.x, back.y, back.k, animate, FIT_MS);
     return;
   }
-  const opening = !renderedGame || renderedGame !== g || performance.now() < openingUntil;
-  const t = fitTarget(builtBox() ?? { x0: 0, y0: 0, x1: g.board.w, y1: g.board.h }, opening);
+  if (!renderedGame || renderedGame !== g || performance.now() < openingUntil) {
+    openView();
+    return;
+  }
+  const t = fitTarget(builtBox() ?? { x0: 0, y0: 0, x1: g.board.w, y1: g.board.h });
   if (t.k < zoomFloor()) {
     if (!fitBack || !over) fitBack = { ...now };
     fitAt = t;
   } else fitBack = fitAt = null;
   moveView(t.x, t.y, t.k, animate, FIT_MS);
+}
+
+/**
+ * The view a game opens on (a save loaded, a new game, the layout changed under it). The view the layout
+ * had before, when the board is coming back to it. Otherwise the whole factory, when it can be read at
+ * once. When it is too big for that: what the player is in the middle of (a port armed for a wire, when a
+ * phone is turned) or what the goal is about (goalFocus), at a readable zoom; with nothing named, the
+ * middle of the factory at a readable zoom on a phone, and elsewhere all of it in the overview, so that no
+ * card opens cut in half at the stage's edges.
+ */
+function openView() {
+  const g = ui.g;
+  const r = rectOf();
+  kindSeen ??= layoutKind();
+  fitBack = fitAt = null;
+  if (r.width < 2 || r.height < 2) {
+    openPending = true;
+    return;
+  }
+  openPending = false;
+  const back = switchedTo ? layoutViews.get(switchedTo) : undefined;
+  switchedTo = null;
+  if (back) {
+    standOn(back);
+    return;
+  }
+  const floor = zoomFloor();
+  const box = builtBox() ?? { x0: 0, y0: 0, x1: g.board.w, y1: g.board.h };
+  const t = fitTarget(box);
+  const go = (v: View) => moveView(v.x, v.y, v.k, false);
+  if (t.k >= floor) return go(t);
+  const armed = tapWire ? [tapWire.from] : [];
+  const named = (armed.length ? armed : goalFocus(g)).map((id) => nodeById(g, id)).filter((n): n is GNode => !!n);
+  if (named.length) {
+    let fb: Box | null = null;
+    for (const n of named) fb = boxUnion(fb, cardBox(n));
+    // (An armed port is shown with as much of the factory around it as can be read; a goal's nodes as large as fits.)
+    return go(fitTarget(fb!, true, armed.length ? floor : 1));
+  }
+  if (env.phone) return go(fitTarget(box, true));
+  go(t);
 }
 
 /** The view that puts a node in the middle of what the player can see, at zoom `k`. */
@@ -607,14 +725,16 @@ function reveal(bx: number, by: number, bw: number, bh: number) {
   moveView(x, y, k, true);
 }
 
-/** Pan just enough that a node is fully on screen (e.g. after the inspector opens over it). */
+/**
+ * The selected node may have just been covered: the inspector opened beside the board (which narrows the
+ * stage from the right, so everything else stays where it was on screen), a sheet came up, the strip grew.
+ * If it is no longer in view and uncovered, the least move brings it back; otherwise nothing moves.
+ */
 export function ensureVisible(id: number) {
-  const n = nodeById(ui.g, id);
-  if (!n) return;
-  const { w, h } = nodeSize(n);
-  // On a phone the ports and the status pill count as part of the card.
-  if (env.phone) reveal(n.x - 10, n.y - 14, w + 20, h + 18);
-  else reveal(n.x, n.y, w, h);
+  if (!nodeById(ui.g, id)) return;
+  // (Called straight after a panel opened or closed: the stage's size is read afresh.)
+  invalidateLayout();
+  frameNodes([id]);
 }
 
 /**
@@ -627,18 +747,40 @@ export function ensureVisible(id: number) {
  * to point at ports, which the overview does not show): then the camera comes back in among the cards.
  */
 export function frameNodes(ids: number[], readable = false): void {
-  const g = ui.g;
+  const boxes: Box[] = [];
+  for (const id of ids) {
+    const n = nodeById(ui.g, id);
+    if (n) boxes.push(cardBox(n));
+  }
+  frameBoxes(boxes, readable);
+}
+
+/** True when a node can be seen whole, under nothing (see `coverBoxes`). For scripts, and for the camera's own rules. */
+export function nodeInClear(id: number, v: View = viewAhead()): boolean {
+  const n = nodeById(ui.g, id);
+  return !!n && inClear(onStage(cardBox(n), v), coverBoxes());
+}
+
+/**
+ * The same for world boxes (cards, deposits): nothing moves when every one of them is already in view and
+ * uncovered; otherwise the least move that brings them, or the last one named, into the free part of the stage.
+ */
+function frameBoxes(boxes: Box[], readable = false): void {
   let box: Box | null = null;
   let last: Box | null = null;
-  for (const id of ids) {
-    const n = nodeById(g, id);
-    if (!n) continue;
-    last = cardBox(n);
-    box = boxUnion(box, last);
+  for (const b of boxes) {
+    last = b;
+    box = boxUnion(box, b);
   }
   if (!box || !last) return;
   const floor = zoomFloor();
   const now = viewAhead();
+  // Already in view and under nothing: the camera holds still. (From the overview a caller that wants
+  // ports to point at still comes back in among the cards.)
+  if (!(readable && now.k < floor)) {
+    const covers = coverBoxes();
+    if (boxes.every((b) => inClear(onStage(b, now), covers))) return;
+  }
   // (Coming in from the overview: start from 100% on the middle of the nodes, and pull back from there as needed.)
   const cur = readable && now.k < floor ? centreView(box, { x0: 0, y0: 0, x1: rectOf().width, y1: rectOf().height }, READ_ZOOM) : now;
   // The areas the nodes may be shown in, in order of preference (roomy margins first, then thin ones),
@@ -656,7 +798,11 @@ export function frameNodes(ids: number[], readable = false): void {
       tiers.push(corner ? [a, { ...a, x1: Math.min(a.x1, corner.x0) }, { ...a, y1: Math.min(a.y1, corner.y0) }] : [a]);
     }
     if (corner) blocks.push({ x0: corner.x0, y0: corner.y0, x1: Infinity, y1: free.y1 });
-    // Behind the floating controls only when the room clear of them is too small for one card.
+    // Never under a floating button, nor nearer to one than FAB_CLEAR; nor under the "tap where…" line.
+    blocks.push(...fabBoxes());
+    const tap = stageBoxOf(document.getElementById('tap-hint'), 4);
+    if (tap) blocks.push(tap);
+    // Behind the row of floating controls only when the room clear of them is too small for one card.
     if (free.y1 - free.y0 - 8 < (last.y1 - last.y0) * Math.min(cur.k, floor)) tiers.push([inset(freeArea(), 4)]);
   } else {
     const r = rectOf();
@@ -675,6 +821,10 @@ export function frameNodes(ids: number[], readable = false): void {
     }
     if (c) blocks.push({ x0: c.x0 - STRIP_GAP, y0: c.y0 - STRIP_GAP, x1: Infinity, y1: Infinity });
     if (s) blocks.push({ x0: s.x0 - STRIP_GAP, y0: -Infinity, x1: s.x1 + STRIP_GAP, y1: s.bottom + STRIP_GAP });
+    for (const e of [hintsEl, document.getElementById('tap-hint')]) {
+      const b = stageBoxOf(e, 6);
+      if (b) blocks.push(b);
+    }
   }
   const tryBox = (b: Box): View | null => {
     for (const areas of tiers) {
@@ -738,10 +888,88 @@ export function refreshBoard() {
   depositsHtml = '';
   openingUntil = performance.now() + 800;
   fitBack = fitAt = null;
-  if (radial) closeRadial();
-  if (tapWire) disarm();
+  // Between the phone layout and the wide one, the view each had is kept, so that going back (a window
+  // dragged narrow and wide again) finds the board where it was. A phone turned on its side is framed afresh.
+  const kind = layoutKind();
+  if (kindSeen && kind !== kindSeen) {
+    layoutViews.set(kindSeen, resizeAnchorNow());
+    switchedTo = kind;
+  } else switchedTo = null;
+  kindSeen = kind;
+  // The build menu changes shape (a fan or a sheet): it closes, and its port is armed again so that one
+  // tap opens it in the new shape. An armed port and a wire being dragged carry on as they were.
+  if (radial) {
+    const r = radial;
+    closeRadial();
+    if (r.dir === 'consume' && !drag) armPort(r.from, r.port);
+  }
   if (ui.view.k !== clampK(ui.view.k)) zoomBy(1);
   else applyView();
+}
+
+// ---------- the stage changes size ----------
+// A panel opening or closing beside the board (the inspector) narrows or widens the stage from the right:
+// what is on screen stays where it is, and only a selected node that ends up covered is brought back
+// (ensureVisible). The window changing size keeps the middle of the board in the middle, measured from
+// where the camera stood before the resizing began, so a window dragged narrow and back again leaves the
+// view as it was. Switching between the phone layout and the wide one, each keeps the view it had.
+
+type LayoutKind = 'phone' | 'wide';
+const layoutKind = (): LayoutKind => (env.phone ? 'phone' : 'wide');
+let kindSeen: LayoutKind | null = null;
+/** The layout the board has just switched to (until the opening view has been chosen for it). */
+let switchedTo: LayoutKind | null = null;
+/** A view to come back to: the world point in the middle of the stage, and the zoom. */
+interface Anchor { wx: number; wy: number; k: number }
+const layoutViews = new Map<LayoutKind, Anchor>();
+/** Stage and window sizes as last seen, the view a resize was measured from, and the view it left. */
+const stageSeen = { w: 0, h: 0 }, winSeen = { w: 0, h: 0 };
+let resizeAnchor: Anchor | null = null;
+let resizeLeft: View | null = null;
+/** The opening view is waiting for the stage to have a size (it opened behind a full-screen panel). */
+let openPending = false;
+
+const anchorOf = (v: View, w: number, h: number): Anchor => ({ wx: (w / 2 - v.x) / v.k, wy: (h / 2 - v.y) / v.k, k: v.k });
+
+/** The view as an anchor: the one the resizing started from while it is still the view, else the view now. */
+function resizeAnchorNow(): Anchor {
+  const v = viewAhead();
+  if (resizeAnchor && resizeLeft && sameView(v, resizeLeft)) return resizeAnchor;
+  return anchorOf(v, stageSeen.w || rectOf().width, stageSeen.h || rectOf().height);
+}
+
+/** Put the camera on an anchor in the stage as it is now. */
+function standOn(a: Anchor) {
+  const r = rectOf();
+  glide = null;
+  ui.view.k = a.k;
+  ui.view.x = r.width / 2 - a.wx * a.k;
+  ui.view.y = r.height / 2 - a.wy * a.k;
+  applyView();
+  resizeAnchor = a;
+  resizeLeft = { ...ui.view };
+}
+
+/** The stage has a new size (from its ResizeObserver). */
+function stageResized() {
+  const r = rectOf();
+  const w = r.width, h = r.height;
+  const before = { ...stageSeen };
+  const winChanged = window.innerWidth !== winSeen.w || window.innerHeight !== winSeen.h;
+  stageSeen.w = w;
+  stageSeen.h = h;
+  winSeen.w = window.innerWidth;
+  winSeen.h = window.innerHeight;
+  if (w < 2 || h < 2 || !renderedGame) return;
+  // A layout that had no size when it opened (behind a full-screen panel) gets its opening view now.
+  if (openPending) {
+    openPending = false;
+    openView();
+    return;
+  }
+  if (before.w < 2 || before.h < 2 || (before.w === w && before.h === h) || !winChanged) return;
+  const v = viewAhead();
+  standOn(resizeAnchor && resizeLeft && sameView(v, resizeLeft) ? resizeAnchor : anchorOf(v, before.w, before.h));
 }
 
 // ---------- the Expand button ----------
@@ -763,7 +991,7 @@ const EXPAND_W = 260, EXPAND_H = 64;
  * How much larger than life the button is drawn in its natural place at each step of the overview, so
  * that it can still be found and pressed there: 64 px tall, it is never under 44 px on screen.
  */
-const OV_SCALE = [1, 1.5, 1.9, 2.8];
+const OV_SCALE = [1, 1.5, 1.9, 2.8, 3.6];
 /** Docked, the button keeps this far from the edge of what the player can see, and from every control. */
 const DOCK_EDGE = 10, DOCK_GAP = 10;
 /** In its natural place it may come this close to the edge of the stage and to a control before it docks. */
@@ -1093,10 +1321,21 @@ export function initBoard(root: HTMLElement) {
     new ResizeObserver(() => {
       invalidateLayout();
       ex.stale = true;
+      stageResized();
       touch();
     }).observe(boardEl);
   }
   applyView();
+  // For scripts: `flowstate.board.inClear(id)` (main.ts builds window.flowstate after the modules have started).
+  const attach = () => {
+    const hook = (window as unknown as { flowstate?: Record<string, unknown> }).flowstate;
+    if (!hook) return false;
+    hook.board ??= { inClear: (id: number) => nodeInClear(id) };
+    return true;
+  };
+  queueMicrotask(() => {
+    if (!attach()) setTimeout(attach, 0);
+  });
 }
 
 // ---------- expanding the board ----------
@@ -2225,19 +2464,30 @@ export function startPlacing(type: NodeType, recipe?: string | null) {
 /** The first goal that needs the inspector ("Upgrade a Well"). */
 const INSPECT_FROM = GOALS.findIndex((x) => x.id === 'upgrade-well');
 
+/** A stage this wide (with the inspector's room counted in) has space for the inspector beside the board. */
+const INSPECT_WIDE = 1200;
+
 /**
- * A node has just been built. On a desktop it is selected, which opens the inspector beside the
- * board: but not before the first goal that needs the inspector, because a panel that opens after
- * every build makes the board jump just as a newcomer is finding their feet. On a phone the inspector
- * would cover half the board just as the player wants to wire the new node up, so it is never opened
- * there. Either way the camera makes sure the node can be seen, together with the node its wire comes
- * from (`from`) when there is one.
+ * A node has just been built. With a mouse on a wide stage it is selected, which opens the inspector
+ * beside the board: but not before the first goal that needs the inspector, because a panel that opens
+ * after every build makes the board jump just as a newcomer is finding their feet. Under a finger, or on
+ * a stage narrower than INSPECT_WIDE, the inspector would cover the part of the board the player is
+ * working on (half of it on a phone), so nothing is selected; on a phone the selection is dropped.
+ * The camera moves only if the new node cannot be seen whole, and then as little as it can.
  */
-function built(id: number, from?: number) {
+function built(id: number) {
   if (env.phone) {
     if (ui.sel) select(null);
-  } else if (ui.g.goal.i >= INSPECT_FROM) select({ kind: 'node', id });
-  frameNodes(from == null ? [id] : [from, id]);
+  } else if (ui.g.goal.i >= INSPECT_FROM && roomToInspect()) select({ kind: 'node', id });
+  frameNodes([id]);
+}
+
+/** A mouse, and a stage wide enough for the inspector beside it (see INSPECT_WIDE). */
+function roomToInspect(): boolean {
+  if (isTouch() || env.phone) return false;
+  const insp = document.getElementById('insp');
+  const open = insp?.classList.contains('open') ? insp.offsetWidth : 0;
+  return boardEl.offsetWidth + open >= INSPECT_WIDE;
 }
 
 /** Distance from a point to a wire's path. */
@@ -2575,8 +2825,8 @@ function makeWire(from: number, port: number, target: number, tp: Pt): boolean {
   if (!connect(g, from, port, target)) return false;
   flashQueue.push(target);
   signal('connect', { from, to: target, at: toClient(tp) });
-  // If either end is out of view or under the HUD, the camera brings both in.
-  frameNodes([from, target]);
+  // The camera moves only if the wire's far end cannot be seen whole, and then as little as it can.
+  frameNodes([target]);
   return true;
 }
 
@@ -3475,7 +3725,7 @@ export function pickRadial(i: number) {
   });
   closeRadial();
   if (made) {
-    built((made as GNode).id, r.dir === 'consume' ? r.from : r.to);
+    built((made as GNode).id);
     signal('place', { id: (made as GNode).id, type: o.type });
   }
 }

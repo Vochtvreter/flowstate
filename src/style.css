@@ -252,6 +252,7 @@ g.wire.dim:hover .base { stroke-opacity: 0.6; }
 #board[data-ov='1'] { --ovs: 1.5; --ovw: 3px; --ovx: 1.5; }
 #board[data-ov='2'] { --ovs: 1.9; --ovw: 4px; --ovx: 1.9; }
 #board[data-ov='3'] { --ovs: 2.4; --ovw: 5.5px; --ovx: 2.8; }
+#board[data-ov='4'] { --ovs: 3.2; --ovw: 7px; --ovx: 3.6; }
 /* Going in and out of the overview, the icon slides to the middle of its card and grows while the text fades. */
 .node .ring { transition: transform 0.2s cubic-bezier(0.2, 0.8, 0.2, 1); }
 .node .txt { transition: opacity 0.12s; }
