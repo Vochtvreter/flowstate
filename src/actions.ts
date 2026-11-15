@@ -2,13 +2,15 @@
 // claiming a goal or an order (re-exported below) is not undoable.
 import { EXPANSION_DEPOSITS, MATERIALS, MatId, NODE_DEFS, NodeType, PIPES, RECIPES, RULES, Recipe, Track } from './content';
 import {
-  buyBackPrice, cycleTime, expansionCost, has, matUnlocked, maxLevel, maxPipeTier, nodeCost, nodeCount, nodeUnlocked, recipeOf,
-  recipeUnlocked, trackAvailable, upgradeCost, upgradeValue,
+  buyBackPrice, cycleTime, expansionCost, has, materialsAt, matUnlocked, maxLevel, maxPipeTier, nodeCost, nodeCount, nodeUnlocked, pickRecipe,
+  recipeOf, recipeUnlocked, trackAvailable, upgradeCost, upgradeValue,
 } from './economy';
 import { graph, isMachine, isPass, isSink, outPortCount } from './sim';
 import { Game, GNode, RouterMode, Snapshot, Wire, isLookahead, makeNode, makeWire, nodeNoun, noteEdit, restore, shelve, snap, snapshot } from './state';
 
 export { claimGoal } from './goals';
+export { materialsAt, pickRecipe, recipesFor } from './economy';
+import { GOALS } from './goals';
 export { claimOrder } from './orders';
 
 // ---------- undo ----------
@@ -56,6 +58,7 @@ export function act(g: Game, fn: () => number | false): boolean {
 /** Same nodes and wires, give or take positions? Used to accept a "node moved" undo step. */
 function sameStructure(g: Game, before: Snapshot): boolean {
   if (before.nodes.length !== g.nodes.length || before.wires.length !== g.wires.length) return false;
+  if ((before.deposits && before.deposits.length !== g.deposits.length) || (before.board && before.board.expansions !== g.board.expansions)) return false;
   const nodes = new Map(g.nodes.map((n) => [n.id, n]));
   for (const b of before.nodes) {
     const n = nodes.get(b.id);
@@ -97,7 +100,17 @@ export function undo(g: Game): boolean {
   restore(g, e.state);
   g.credits += e.spent;
   noteEdit(g, 'edit');
+  unready(g);
   return true;
+}
+
+/**
+ * A goal waiting for its Claim whose condition an undo has just taken away is not ready any more: the reward
+ * is for what is on the board. (Goals counted by events, a Lens made or seconds of Flow held, keep theirs.)
+ */
+function unready(g: Game) {
+  const goal = GOALS[g.goal.i];
+  if (g.goal.ready && goal && !goal.done(g)) g.goal.ready = false;
 }
 
 export function redo(g: Game): boolean {
@@ -124,35 +137,6 @@ export function clearHistory() {
 
 export const nodeById = (g: Game, id: number) => graph(g).byId.get(id) ?? null;
 
-/** Materials that can come out of a node's output port, following pass-through nodes upstream. */
-export function materialsAt(g: Game, id: number, port = 0, seen = new Set<number>()): MatId[] {
-  const n = nodeById(g, id);
-  if (!n || seen.has(id)) return [];
-  seen.add(id);
-  if (n.type === 'well') return n.material ? [n.material] : [];
-  if (isMachine(n)) {
-    const m = recipeOf(n)?.outputs[port]?.[0];
-    return m ? [m] : [];
-  }
-  if (isPass(n)) {
-    const out = new Set<MatId>();
-    for (const w of graph(g).ins.get(id) ?? []) for (const m of materialsAt(g, w.from, w.port, seen)) out.add(m);
-    return [...out];
-  }
-  return [];
-}
-
-export function recipesFor(g: Game, type: NodeType): Recipe[] {
-  return Object.values(RECIPES).filter((r) => r.machine === type && recipeUnlocked(g, r));
-}
-
-/** Best unlocked recipe for a machine type that uses any of the given materials. */
-export function pickRecipe(g: Game, type: NodeType, mats: MatId[]): Recipe | null {
-  const fits = recipesFor(g, type).filter((r) => r.inputs.some((i) => mats.includes(i[0])));
-  fits.sort((a, b) => MATERIALS[b.outputs[0][0]].value - MATERIALS[a.outputs[0][0]].value);
-  return fits[0] ?? null;
-}
-
 export function freeDeposits(g: Game) {
   const used = new Set(g.nodes.map((n) => n.depositId).filter((d) => d != null));
   return g.deposits.filter((d) => !used.has(d.id) && matUnlocked(g, d.mat));
@@ -166,10 +150,13 @@ export function canDelete(g: Game, n: GNode): boolean {
 /**
  * Credits returned for deleting a node: what it would cost to buy it back, plus its upgrades and the
  * upgrades on its wires. Deleting and re-placing always nets to zero. 0 for a node that cannot be deleted.
+ * A node from a save of the public version, which charged less, never refunds more than it cost there and
+ * since (GNode.legacyPaid): otherwise deleting it paid four to ten times its price.
  */
 export function refundOf(g: Game, n: GNode): number {
   if (!canDelete(g, n)) return 0;
   let r = buyBackPrice(g, n.type) + upgradeValue(n);
+  if (n.legacyPaid != null) r = Math.min(r, n.legacyPaid);
   for (const w of g.wires) if (w.from === n.id || w.to === n.id) r += w.paid;
   return r;
 }
@@ -245,6 +232,7 @@ export function upgrade(g: Game, id: number, track: Track): boolean {
   const ok = act(g, () => {
     n.lv[track]++;
     n.paid += cost;
+    if (n.legacyPaid != null) n.legacyPaid += cost;
     g.credits -= cost;
     return cost;
   });
@@ -260,7 +248,10 @@ export function upgradeAll(g: Game, type: NodeType, track: Track): number {
     for (const n of nodes) if (upgrade(g, n.id, track)) count++;
     return count ? 0 : false;
   });
-  if (count) noteEdit(g, upgradeAllNote(type, track));
+  if (count) {
+    noteEdit(g, upgradeAllNote(type, track));
+    g.bulkAt = g.time;
+  }
   return count;
 }
 
@@ -529,9 +520,20 @@ function rng(seed: number) {
   };
 }
 
+/**
+ * Buy the board's next plot and its deposits. One undo step, refunded in full: the plot and its deposits go
+ * again, as long as nothing placed since stands in the way (those steps are undone first, being later ones).
+ */
 export function expandBoard(g: Game): boolean {
   const cost = expansionCost(g);
   if (cost > g.credits + 1e-6) return false;
+  return act(g, () => {
+    grow(g, cost);
+    return cost;
+  });
+}
+
+function grow(g: Game, cost: number) {
   g.credits -= cost;
   const n = g.board.expansions;
   const mats = EXPANSION_DEPOSITS[n % EXPANSION_DEPOSITS.length];
@@ -556,7 +558,6 @@ export function expandBoard(g: Game): boolean {
   g.board.expansions++;
   g.rev++;
   noteEdit(g, 'edit');
-  return true;
 }
 
 export const defOf = (n: GNode) => NODE_DEFS[n.type];

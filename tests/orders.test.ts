@@ -433,7 +433,7 @@ describe('orders (2.5)', () => {
     expect(claimOrder(g)).toBe(false);
   });
 
-  it('quietly swaps an order nobody delivers to for two minutes, for a different material', () => {
+  it('quietly swaps an order nobody delivers to, for a different material: as soon as it is out of reach, at the latest after two minutes', () => {
     const g = factory();
     unlock(g);
     take(g, 'order-new');
@@ -442,7 +442,10 @@ describe('orders (2.5)', () => {
     const source = g.nodes.find((n) => n.recipe === first.mat)!;
     cutWire(g, g.wires.find((w) => w.from === source.id && w.port === 0)!.id);
     connect(g, source.id, 0, placeNode(g, 'void', 900, 300)!.id);
-    run(g, RULES.orders.staleSeconds - 5);
+    // Nothing reaches a Market: at this rate it would never fill. It is given `after` seconds (a new order's
+    // material may only just be starting to sell) and `hold` more, and then swapped.
+    const R = RULES.orders.retire;
+    run(g, R.after + R.hold - 5);
     expect(g.order).toBe(first);
     expect(take(g, 'order-new').length).toBe(0);
     run(g, 10);
@@ -453,15 +456,43 @@ describe('orders (2.5)', () => {
     expect(g.order!.mat).not.toBe(first.mat);
     expect(g.stats.ordersFilled).toBe(0);
     expect(take(g, 'order-claimed').length).toBe(0);
+    expect(R.after + R.hold).toBeLessThan(RULES.orders.staleSeconds);
   });
 
-  it('an order with steady deliveries is never swapped, however long it takes', () => {
+  it('an order with steady deliveries that keep it within five minutes of filling is never swapped, however long it takes', () => {
     const g = factory();
     unlock(g);
     const o = g.order!;
-    o.need = 100000;
-    run(g, RULES.orders.staleSeconds * 3);
+    run(g, 20);
+    // About four minutes of what is sold now, then a little more each time it gets near.
+    const rate = g.soldRate[o.mat] ?? 0;
+    expect(rate).toBeGreaterThan(0);
+    o.need = Math.round(o.got + rate * 240);
+    for (let i = 0; i < 6; i++) {
+      run(g, RULES.orders.staleSeconds / 2);
+      expect(g.order).toBe(o);
+      o.need = Math.round(o.got + (g.soldRate[o.mat] ?? 0) * 240);
+    }
+  });
+
+  it('an order whose material stops reaching the Markets in quantity (a new machine takes it first) is replaced once it would take over five minutes', () => {
+    const g = factory();
+    g.stats.ordersFilled = 1; // (not a first order, which fills in half a minute)
+    unlock(g);
+    take(g, 'order-new');
+    const o = g.order!;
+    o.need = 10000;
+    run(g, RULES.orders.retire.after + 1);
     expect(g.order).toBe(o);
+    // A trickle: deliveries go on, but at this rate the order would take far more than five minutes.
+    o.need = Math.round(o.got + (g.soldRate[o.mat] ?? 0) * 900);
+    expect((o.need - o.got) / (g.soldRate[o.mat] ?? 1)).toBeGreaterThan(RULES.orders.retire.eta);
+    run(g, RULES.orders.retire.hold + 2);
+    expect(g.order).not.toBe(o);
+    const swapped = take(g, 'order-new');
+    expect(swapped.length).toBe(1);
+    expect(swapped[0].quiet).toBe(true);
+    expect(g.stats.ordersFilled).toBe(1); // (paid nothing: the count is where it was)
   });
 
   it('is deterministic: the same play gives the same orders, and never calls Math.random', () => {

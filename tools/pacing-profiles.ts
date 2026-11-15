@@ -104,7 +104,7 @@ export const PROFILES: Record<string, Profile> = {
       for (const id of [
         'wire-market', 'second-well', 'wire-all-wells', 'build-refiner', 'sell-shard', 'upgrade-well', 'feed-lab', 'research-murk',
         'make-ink', 'silt-exit', 'make-spark', 'first-order', 'route-lab', 'expand', 'make-glyph', 'hold-flow', 'study-glyph',
-        'make-mist', 'make-prism', 'three-orders', 'build-fabricator', 'make-lens',
+        'make-mist', 'make-prism', 'bulk-upgrade', 'build-fabricator', 'make-lens',
       ]) reward(id, { credits: 0, a: 0, b: 0, g: 0 });
     },
   },
