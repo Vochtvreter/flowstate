@@ -14,8 +14,11 @@ describe('pacing: every target holds on order seeds 0 to 3', () => {
   for (const policy of ['mainline', 'greedy', 'newcomer', 'newcomer10', 'cardonly']) {
     it(`${policy}: ${POLICIES[policy].describe}`, () => {
       for (const seed of [0, 1, 2, 3]) {
-        const { lens, checks } = playOnce(policy, seed);
+        const { lens, checks, tips } = playOnce(policy, seed);
         expect(lens, `seed ${seed}: the first Lens was made`).not.toBeNull();
+        // "Never a tip" is meant literally: not on the Flow goal either, which its valve passes without one.
+        if (policy === 'cardonly') expect(tips, `seed ${seed}`).toEqual({ offered: 0, followed: 0 });
+        if (policy === 'newcomer') expect(tips.followed, `seed ${seed}: the newcomer does follow the few tips there are`).toBeGreaterThanOrEqual(1);
         const missed = checks.filter((c) => !c.ok).map((c) => `seed ${seed}: ${c.label}: ${c.value} (target ${c.target})`);
         expect(missed, missed.join('; ')).toEqual([]);
         expect(checks.length).toBeGreaterThanOrEqual(3);

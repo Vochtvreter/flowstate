@@ -15,9 +15,8 @@
  *                                      they still spend on other things while saving for a new toy
  *                                      (0 = bank everything, 1 = no limit); --patience=<seconds> likewise
  *                --noBulk              what-if: the fast players never press "Upgrade all"
- *                --noTips              what-if: the newcomer never follows a tip (except on the Flow goal, whose card
- *                                      sends them to the Flow ring: the fix it leads to is the adviser's). The
- *                                      policy `cardonly` is that player, with targets of its own
+ *                --noTips              what-if: the newcomer never follows a tip. The policy `cardonly` is that
+ *                                      player, with targets of its own
  *                --noMeanwhile         what-if: the card players ignore the cards' "while you wait" lines
  *                --trials              with --policy=newcomer: for every wait that begins with no tip on offer,
  *                                      list what the adviser weighed and how each candidate did
@@ -52,9 +51,9 @@
  * it: one action. They never build a Router, upgrade or wire anything unprompted.
  *   newcomer    6 s per action
  *   newcomer10  the same person at 10 s per action
- *   cardonly    the newcomer who never follows a tip: the cards and their lines alone. The cards have to
- *               carry the game by themselves, so this player has targets too (on the Flow goal, whose card
- *               sends them to the Flow ring, they still take the fix the ring leads to)
+ *   cardonly    the newcomer who never follows a tip, not even on the Flow goal: the cards and their lines
+ *               alone. The cards have to carry the game by themselves, so this player has targets too. Their
+ *               Flow goal is passed by its valve (RULES.flow.valveAfter), in about 100 s
  * For these players the report also counts the tips: how many came on offer, how many were followed, and the
  * smallest and the median saving the followed ones promised.
  *
@@ -1199,8 +1198,8 @@ class Bot {
     const goal = activeGoal(g);
     const kind = waitKind(g);
     this.idleWhy = `${step ? `saving for "${step.label}" ${fmt(step.cost)}¢ (have ${fmt(g.credits)}¢, +${f1(g.creditRate)}¢/s)` : kind ? `waiting (${kind})` : 'waiting for the game'}; goal ${g.goal.i + 1} "${goal?.title ?? '—'}"`;
-    // A player who takes no tips: the Flow goal's card sends them to the Flow ring, so what the adviser names there is still followed.
-    const tip = ((CFG.tips && this.P.tips) || kind === 'flow') && goal && !goal.free ? advice(g) : null;
+    // A player who takes no tips takes none: on the Flow goal too, which its valve passes without one.
+    const tip = CFG.tips && this.P.tips && goal && !goal.free ? advice(g) : null;
     if (!tip) {
       this.tipSince = null;
       this.tipShown = '';
@@ -2130,12 +2129,17 @@ function main() {
 }
 
 /** One run and its verdict against the targets, for tests/pacing.test.ts. */
-export function playOnce(policy: string, seed: number): { lens: number | null; checks: { label: string; value: string; target: string; ok: boolean }[] } {
+export function playOnce(policy: string, seed: number): {
+  lens: number | null;
+  checks: { label: string; value: string; target: string; ok: boolean }[];
+  /** Tips that came on offer and tips followed (card players; both 0 for a player who takes none). */
+  tips: { offered: number; followed: number };
+} {
   const p = POLICIES[policy];
   const bot = new Bot(p, seed, p.card ? CFG.minutesCard : p.fast ? CFG.minutesFast : CFG.minutesSlow);
   bot.run();
   const r = measure(bot);
-  return { lens: r.lens, checks: checks(r) };
+  return { lens: r.lens, checks: checks(r), tips: { offered: r.tipStats.offered, followed: r.tipStats.followed } };
 }
 
 // From the command line (npm run pacing) this file is the program; a test that imports it only wants the exports.

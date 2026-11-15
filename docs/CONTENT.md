@@ -116,7 +116,7 @@ Wells and machines count once they are at least 20 s old and some path of wires 
 
 **The Flow goal asks for 95% for 10 seconds** (`RULES.flow.holdShare`, `holdSeconds`). On a board of fewer than nineteen producers that is every one of them. It has to be earned: when the meter unlocks, a card player usually has one or two producers short. The Spark Refiner is short of Ember (an Ember Well makes 0.8/s, the Refiner wants 1), and on most seeds the Ink Refiner is short of Murk. Each is one fix, named by the adviser ("The Spark Refiner needs more Ember: buy Speed on the Ember Well (50¢)."). The first Flow State arrives with the goal. At the old 75% the goal completed with no action in every run; at 90% it still did for a newcomer with ten producers. A fast player has usually fixed everything already and passes in a quarter of a minute.
 
-**The valve.** Once the goal has been on the card for 90 s (`RULES.flow.valveAfter`; `goalAge(g)`, from the saved `Game.goalAt`), all but one producer flowing, held for the same 10 s, also completes it. The bar itself does not move. The valve is for the board with one producer nobody can honestly fix: a machine fed through a Router that favours a Lab (goal 13's card asked for that Router, and no tip turns it back) dips under 90% however its Wells are upgraded. The adviser says nothing about such a board, because a Flow tip has to get the producer it names flowing and keep it so; the valve passes it at 90 s (tested in `tests/advice.test.ts` and `tests/goals.test.ts`).
+**The valve.** Once the goal has been on the card for 90 s (`RULES.flow.valveAfter`; `goalAge(g)`, from the saved `Game.goalAt`), all but one producer flowing, held for the same 10 s, also completes it. The bar itself does not move. The valve is for the board with one producer nobody can honestly fix: a machine fed through a Router that favours a Lab (goal 13's card asked for that Router, and no tip turns it back) dips under 90% however its Wells are upgraded. The adviser says nothing about such a board, because a Flow tip has to get the producer it names flowing and keep it so; the valve passes it at 90 s (tested in `tests/advice.test.ts` and `tests/goals.test.ts`). It is also what carries a player who never follows a tip: the pacing tool's card-only player has nine of ten producers flowing when the meter unlocks and spends 98–108 s on the goal.
 
 **What the card can show.** `goalView(g).flow` is `{ pct, running, of, need }` while the Flow goal is active: the smoothed Flow, how many producers are flowing out of how many counted, and the share needed right now (0.95, or "all but one" once the valve is open).
 
@@ -265,7 +265,7 @@ Nothing before the first Lens. After it: 50% of the live rate, measured on a cop
 - **mainline, greedy:** fast players who know the game: one action per 3–4 s. From the moment a new machine cannot be paid for they bank half of what comes in and may spend the other half on upgrades; once they own Bulk Upgrade, nodes of a kind that want the same upgrade get one press of "Upgrade all" when they are at least half of that kind.
 - **newcomer:** does only what the goal card says, hint and "while you wait" line, one action per 6 s, claims 8–16 s late, and follows a tip once it has been on offer for 15 s of a wait. Never builds a Router, upgrades or wires anything unprompted.
 - **newcomer10:** the same person at 10 s per action.
-- **cardonly:** the newcomer who never follows a tip. The cards have to carry the game alone, so this player has targets too. (On the Flow goal the card sends them to the Flow ring, and they take the fix it leads to.)
+- **cardonly:** the newcomer who never follows a tip, not even on the Flow goal. The cards have to carry the game alone, so this player has targets too. Their Flow goal is passed by its valve.
 
 Every target holds on all fifteen seeds. Measured (seeds 0–3, then the range over seeds 4–14):
 
@@ -292,23 +292,24 @@ Every target holds on all fifteen seeds. Measured (seeds 0–3, then the range o
 | credits from sales and orders at the Lens | 77% | 77–78% | 65% |
 | **newcomer10:** first Lens | 21:53–22:23 | 21:56–22:43 | by 30:00 |
 | longest time on any one goal | 217–241 s | 218–242 s | 300 s |
-| **cardonly:** first Lens | 20:28–20:52 | 20:28–21:25 | by 32:00 |
-| longest time on any one goal | 217–230 s (Glyph, Mist on one seed) | 216–227 s | 360 s |
-| time on "Build a Fabricator" | 146–168 s | 142–174 s | (360 s) |
-| longest stretch with free hands | 90–94 s | 89–95 s | — |
+| **cardonly:** first Lens | 20:22–21:22 | 20:49–22:13 | by 32:00 |
+| longest time on any one goal | 208–230 s (Glyph) | 212–226 s | 360 s |
+| time on "Build a Fabricator" | 141–192 s | 146–201 s | (360 s) |
+| time on the Flow goal (no tip: the valve) | 98–106 s | 99–108 s | (360 s) |
+| longest stretch with free hands | 90–118 s | 89–146 s | — |
 
 Where the time goes (seed 0, seconds on each goal):
 
 | | goals 1–10 | Spark | first order | Router | expand | Glyph | Flow | β | Mist | Prism | three orders | Fabricator | Lens |
 |---|---|---|---|---|---|---|---|---|---|---|---|---|---|
 | newcomer | 3:49 | 111 | 56 | 35 | 16 | 213 | 54 | 96 | 158 | 38 | 9 | 137 | 38 |
-| cardonly | 3:49 | 130 | 56 | 36 | 16 | 230 | 52 | 70 | 197 | 32 | 13 | 168 | 36 |
+| cardonly | 3:49 | 130 | 56 | 36 | 16 | 230 | 106 | 68 | 149 | 38 | 9 | 192 | 38 |
 
 The newcomer's two tips on seed 0: "Wire a Glint Well's port to the Lab: Glint is 1 α each in a Lab." during the Spark wait (16 s promised) and "The Spark Refiner needs more Ember: buy Speed on the Ember Well (50¢)." on the Flow goal.
 
 Things to know before changing a number:
 
-- **The cards carry the game.** With hints alone (no "while you wait" lines, no tips) the tests' card player reaches the Lens at 46:40; with the lines at 19:48; with lines and tips at 18:35–18:55 (`tests/playthrough.test.ts`, which claims after one action instead of 8–16 s late; `npm run baseline`). `npm run pacing -- --noMeanwhile` measures the cards without their lines.
+- **The cards carry the game.** With hints alone (no "while you wait" lines, no tips) the tests' card player reaches the Lens at 46:40; with the lines at 19:48; with lines and tips at 18:35–18:55 (`tests/playthrough.test.ts`, which claims after one action instead of 8–16 s late; `npm run baseline`). That player still takes the one fix the Flow ring leads to even when it follows no other tip; the pacing tool's `cardonly` takes none at all. `npm run pacing -- --noMeanwhile` measures the cards without their lines.
 - **The window is narrow by construction.** A fast player may not be kept from the first Glyph past 8:00 (which caps Ember Deposits and Assembly) nor reach the Lens before 14:30 (which keeps Assembly, Breeze Deposits and the Fabricator's price where they are), and no goal may take the newcomer four minutes. The Glyph wait is the newcomer's longest, 194–220 s, with both card lines followed.
 - **Free hands are normal now.** The target of never more than 60 s without a tip is gone with the small tips. The longest stretch in which the card asks nothing and no tip is on offer is 69–131 s for the newcomer, at the end of the Mist wait or of the Glyph wait; the cards' lines are done by then and nothing the adviser can honestly offer saves 15 s.
 - **The fast players' free hands before the Lens** were at 120–157 s on a few seeds once Commerce was hidden (they used to research Wider Demand on impulse while saving for the Fabricator, and the order generator then asked for things sold at a trickle). `RULES.orders.marketRate` is what brought it back under 92 s.
