@@ -496,7 +496,9 @@ html[data-input='mouse'] #hud-strip.tight .claim.sm { height: 32px; }
   /* The pips ride in the head row, after the step: no line of their own where every line counts. */
   #app.phone .gc-main { gap: 0; }
   #app.phone .gc-pips { position: absolute; left: 104px; top: 4px; margin: 0; }
-  #app.phone .gc-body { display: grid; grid-template-columns: minmax(0, 1fr) auto; grid-template-areas: 'head head' 'title prog' 'hint hint' 'line line' 'tip tip'; align-items: center; gap: 1px 12px; }
+  #app.phone .gc-body { display: grid; grid-template-columns: minmax(40%, 1fr) auto; grid-template-areas: 'head head' 'title prog' 'hint hint' 'line line' 'tip tip'; align-items: center; gap: 1px 12px; }
+  /* The Flow goal's progress (bar and mark, the count, the seconds to hold, the word about the valve) is a row of its own. */
+  #app.phone .gc-body:has(.gc-prog.flow) { grid-template-areas: 'head head' 'title title' 'prog prog' 'hint hint' 'line line' 'tip tip'; }
   #app.phone .gc-head { grid-area: head; min-height: 16px; }
   #app.phone .gc-head .rw { height: 16px; line-height: 16px; }
   #app.phone .gc-title { grid-area: title; }

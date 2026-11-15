@@ -278,10 +278,14 @@ function tendTip(g: Game, now: number, changed: boolean, sameGoal: boolean, narr
     else {
       const act = actOf(tip);
       if (shown && act === shownAct) {
-        // The same suggestion, worked out afresh.
+        // The same suggestion, worked out afresh. The saving the row quotes follows only when the measured
+        // one has moved well away from it; and once it is a number it stays a number: near the end of what
+        // the adviser can look ahead, the same tip comes back as "five minutes" and as "would never end" by
+        // turns, and the row must not say both every fifteen seconds.
         shown = tip;
-        const was = quoted ?? 0, is = tip.saves ?? 0;
-        if ((quoted == null) !== (tip.saves == null) || isFinite(was) !== isFinite(is) || Math.abs(is - was) > 0.3 * Math.max(was, TIP.minSaves)) quoted = tip.saves;
+        const is = tip.saves;
+        if (quoted == null || !isFinite(quoted)) quoted = is ?? quoted;
+        else if (is != null && isFinite(is) && Math.abs(is - quoted) > 0.3 * Math.max(quoted, TIP.minSaves)) quoted = is;
       } else if (!covered && g.time - changedAt >= TIP.swap && g.time < a.time + a.life) {
         // (Only an answer the adviser still stands by puts something new on the card: one that is due to be
         // asked again may be about to change, and the row would show a tip only to take it away.)

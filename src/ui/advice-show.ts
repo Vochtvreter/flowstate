@@ -185,13 +185,16 @@ function frameAll(boxes: Box[]): number {
   return needed;
 }
 
+const BOARD_FRAMES = ['frame', 'Nodes'].join('');
+
 /**
  * Bring these nodes on screen. The board does it when it can (frameNodes glides, and keeps clear of the
  * strip, an open sheet and the corner controls); a board without it gets the framing above. `room` is extra
  * space to the right of the first node, for a node that is about to be built from its port.
  */
 function frameNodes(nodes: GNode[], room = 0) {
-  const byBoard = (board as unknown as { frameNodes?: (ids: number[]) => void }).frameNodes;
+  // (Looked up by name at run time: this file is built against boards with and without it.)
+  const byBoard = (board as unknown as Record<string, unknown>)[BOARD_FRAMES] as ((ids: number[]) => void) | undefined;
   // (The board's own: when they cannot all be seen together it shows the last one named. Here the first is
   // where the gesture starts, so they are named back to front.)
   if (byBoard) return byBoard(nodes.map((n) => n.id).reverse());
