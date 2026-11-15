@@ -1,4 +1,4 @@
-import { MATERIALS, MatId } from '../content';
+import { MATERIALS, MatId, NodeType, RECIPES } from '../content';
 import { materialsAt, nodeById } from '../actions';
 import { recipeOf } from '../economy';
 import { isMachine, isSink } from '../sim';
@@ -14,6 +14,23 @@ export function nodeSize(n: GNode): { w: number; h: number } {
   }
   if (n.type === 'router' || n.type === 'merger' || n.type === 'void') return { w: 136, h: 60 };
   return { w: NODE_W, h: 72 };
+}
+
+const tallest: Partial<Record<NodeType, number>> = {};
+
+/**
+ * Height to keep clear for a card of this type. A machine's card grows when it is given a recipe
+ * with more ports (an Assembler on its first wire, a Refiner switched to Ink), so the tallest it can
+ * become is kept free from the start and it can never grow into the card below.
+ */
+export function roomFor(type: NodeType, h: number): number {
+  let max = tallest[type];
+  if (max == null) {
+    max = 0;
+    for (const r of Object.values(RECIPES)) if (r.machine === type) max = Math.max(max, nodeSize({ type, recipe: r.id } as GNode).h);
+    tallest[type] = max;
+  }
+  return Math.max(h, max);
 }
 
 export interface Port { x: number; y: number; mat: MatId | null; index: number }

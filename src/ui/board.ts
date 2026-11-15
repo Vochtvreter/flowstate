@@ -22,16 +22,18 @@ import {
 import { bagTotal, graph, isMachine, isSink, outPortCount } from '../sim';
 import { GOALS } from '../goals';
 import { GRID, Game, GNode, Wire, snap } from '../state';
-import { anchorPt, cachedRect, el, invalidateLayout, pulseAnchor, setClass, setHTML, setStyle, setText, svgEl } from './dom';
+import { anchorPt, cachedRect, el, invalidateLayout, pulseAnchor, setAttr, setClass, setHTML, setHidden, setStyle, setText, svgEl } from './dom';
 import {
   Beacon, Flow, floater, flowPoint, fly, frameFx, invalidateFx, makeFlow, setBeacons, setFlowPath, setFlows,
 } from './fx';
 import {
   Box, CARD_GAP, Card, NODE_W, Port, Pt, View, ZOOM, bezierAt, boxUnion, centreView, fadeColor, fitBox, fitZoom, frameBox,
-  freeSpot as nearestSpot, inPorts, matColor, nodeSize, outPorts, pathD, pinchView, segmentsCross, separate, wireEnds,
+  freeSpot as nearestSpot, inPorts, matColor, nodeSize, outPorts, pathD, pinchView, roomFor, segmentsCross, separate, wireEnds,
 } from './geom';
-import { isTouch, pressWord } from './hud-words';
+import { screenOpen } from './hud-screens';
+import { isTouch, pressWord, withKey } from './hud-words';
 import { esc, icon, matGlyph, matShape, nodeIcon } from './icons';
+import { tidy, tidyInput } from './layout';
 import { env } from './phone-env';
 import { diagnose } from './status';
 import { delegate, onPress, select, signal, toast, touch, ui } from './ui';
@@ -692,6 +694,7 @@ let hintsEl: HTMLElement | null = null;
 let fabsEl: HTMLElement | null = null;
 const hintsRect = cachedRect(() => hintsEl);
 const fabsRect = cachedRect(() => fabsEl);
+const tidyFabRect = cachedRect(() => fabsEl?.querySelector('[data-testid="fab-tidy"]:not([hidden])') ?? null);
 const EXPAND_W = 260, EXPAND_H = 64;
 /** How much larger than life the button is drawn at each step of the overview, so it can still be found and pressed. */
 const OV_SCALE = [1, 1.5, 1.9, 2.4];
@@ -713,7 +716,11 @@ function placeExpand() {
     if (b.width > 1 && b.height > 1) over.push({ x0: b.left - r.left - gap, y0: b.top - r.top - gap, x1: b.right - r.left + gap, y1: b.bottom - r.top + gap });
   };
   if (hintsEl) add(hintsRect());
-  if (fabsEl && env.phone) add(fabsRect());
+  if (fabsEl && env.phone) {
+    add(fabsRect());
+    // (Tidy stands above the row, outside the row's own box.)
+    add(tidyFabRect());
+  }
   const c = env.corner();
   if (c) over.push({ x0: c.x0 - gap, y0: c.y0 - gap, x1: r.width + 1e6, y1: r.height + 1e6 });
   // The stretches of the x axis that are taken at the button's height; it goes to the nearest free place.
@@ -791,6 +798,7 @@ export function initBoard(root: HTMLElement) {
     zoomBy(Math.exp(-e.deltaY * 0.0015), e.clientX, e.clientY);
   }, { passive: false });
   boardEl.addEventListener('contextmenu', (e) => e.preventDefault());
+  window.addEventListener('keydown', onTidyKey);
   onPress(expandEl, expand);
   delegate(radialEl, (a, args) => {
     if (a === 'pick') pickRadial(Number(args[0]));
@@ -856,6 +864,88 @@ function expand() {
     fitAt = t;
   }
   moveView(t.x, t.y, t.k, true, 600);
+}
+
+// ---------- Tidy ----------
+
+/** How long the cards take to glide to their new places, in ms. */
+const TIDY_MS = 400;
+/** Tidy is offered once there is this much on the board to tidy. */
+const TIDY_FROM = 6;
+let tidyBtn: HTMLButtonElement | null = null;
+
+/**
+ * Lay the board out again so that wires are short, cross as little as possible, and nothing overlaps
+ * (the layout itself is `tidy` in layout.ts). Wells stay on their deposits. The cards glide to their
+ * new places and the camera pulls back to show the result; one undo puts every card back. Returns
+ * false when the board cannot be bettered.
+ */
+export function tidyBoard(): boolean {
+  const g = ui.g;
+  if (!g || !renderedGame) return false;
+  // Whatever the pointer was in the middle of ends first.
+  settleGesture();
+  cancelGesture();
+  const moves = tidy(tidyInput(g, GRID));
+  const from = new Map<number, Pt>();
+  for (const [id] of moves) {
+    const n = nodeById(g, id);
+    if (n && n.type !== 'well') from.set(id, { x: n.x, y: n.y });
+  }
+  if (!from.size) {
+    toast('Already tidy.', 'info');
+    return false;
+  }
+  act(g, () => {
+    for (const [id] of from) {
+      const n = nodeById(g, id)!;
+      const to = moves.get(id)!;
+      n.x = to.x;
+      n.y = to.y;
+    }
+    return 0;
+  });
+  for (const [id, was] of from) {
+    const to = moves.get(id)!;
+    settleFrom(id, was.x - to.x, was.y - to.y, TIDY_MS);
+  }
+  // Show what it did: the whole factory, as Fit would (and Fit, pressed next, goes back to where the player was).
+  const now = viewAhead();
+  const t = fitTarget(builtBox() ?? { x0: 0, y0: 0, x1: g.board.w, y1: g.board.h });
+  if (t.k < zoomFloor()) {
+    if (!fitBack || !over) fitBack = { ...now };
+    fitAt = t;
+  } else fitBack = fitAt = null;
+  moveView(t.x, t.y, t.k, true, TIDY_MS);
+  toast(`Tidied. <b>${isTouch() ? 'Undo' : 'Ctrl Z'}</b> puts it back.`, 'good');
+  return true;
+}
+
+/**
+ * The Tidy button, in the zoom cluster (which the panels build after the board starts, so it is added
+ * when the board first draws). It shows once there is something to tidy.
+ */
+function syncTidyControl() {
+  if (!tidyBtn) {
+    const zoom = document.getElementById('zoom');
+    if (!zoom || !zoom.firstElementChild) return;
+    tidyBtn = el<HTMLButtonElement>(`<button class="ibtn" data-testid="tidy"><svg class="ic" viewBox="0 0 24 24" width="14" height="14" aria-hidden="true"><path d="M3 4.5h6v5H3zM3 14.5h6v5H3zM15 9.5h6v5h-6zM9 7h3v5h3M9 17h3v-5"/></svg></button>`);
+    zoom.appendChild(tidyBtn);
+    onPress(tidyBtn, () => void tidyBoard());
+  }
+  setHidden(tidyBtn, ui.g.nodes.length < TIDY_FROM);
+  const label = withKey('Tidy the board', 'T');
+  setAttr(tidyBtn, 'aria-label', label);
+  setAttr(tidyBtn, 'title', label);
+}
+
+/** T tidies, wherever the board's other keys work (main.ts has those): not in a text field, the tech tree or a full-screen card. */
+function onTidyKey(e: KeyboardEvent) {
+  if (e.key.toLowerCase() !== 't' || e.ctrlKey || e.metaKey || e.altKey || e.repeat) return;
+  const t = e.target as HTMLElement | null;
+  if (t && (t.tagName === 'INPUT' || t.tagName === 'TEXTAREA')) return;
+  if (screenOpen() || ui.techOpen || !ui.g || ui.g.nodes.length < TIDY_FROM) return;
+  tidyBoard();
 }
 
 // ---------- structure: nodes ----------
@@ -1315,6 +1405,7 @@ function syncStructure() {
   setStyle(plotEl, 'height', g.board.h + 'px');
   setText(plotLabel, `Board · ${g.board.expansions + 1} plot${g.board.expansions ? 's' : ''}`);
   fabsEl ??= document.getElementById('fabs');
+  syncTidyControl();
   placeExpand();
   if (fresh) {
     tapWire = null;
@@ -1694,23 +1785,6 @@ function untangle(g: Game) {
       n.y = at.y;
     }
   }
-}
-
-const tallest: Partial<Record<NodeType, number>> = {};
-
-/**
- * Height to keep clear for a card of this type. A machine's card grows when it is given a recipe
- * with more ports (an Assembler on its first wire, a Refiner switched to Ink), so the tallest it can
- * become is kept free from the start and it can never grow into the card below.
- */
-function roomFor(type: NodeType, h: number): number {
-  let max = tallest[type];
-  if (max == null) {
-    max = 0;
-    for (const r of Object.values(RECIPES)) if (r.machine === type) max = Math.max(max, sizeFor(type, r.id).h);
-    tallest[type] = max;
-  }
-  return Math.max(h, max);
 }
 
 /** Size a node of this type and recipe will have once placed. */

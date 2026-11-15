@@ -253,6 +253,11 @@ g.wire.dim:hover .base { stroke-opacity: 0.6; }
 .deposit.pop { animation: deposit-pop 0.42s cubic-bezier(0.2, 1.5, 0.4, 1) backwards; }
 @keyframes deposit-pop { from { transform: scale(0.4); opacity: 0; } 60% { opacity: 1; } }
 
+/* The zoom cluster carries a fifth button, Tidy (added by board.ts once there is something to tidy):
+   it grows to the left by the button's width, and stays the width of the minimap without it. */
+#zoom:has([data-testid='tidy']:not([hidden])) { width: 196px; }
+html[data-input='touch'] #zoom:has([data-testid='tidy']:not([hidden])) { width: 244px; }
+
 /* Keys mean nothing to a finger: the hint row is for mouse and keyboard. */
 html[data-input='touch'] #hints { display: none; }
 

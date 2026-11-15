@@ -165,6 +165,8 @@ html[data-input='touch'] #app:not(.phone) #thumb-slot { display: flex; position:
 /* While the build menu is open they would only sit on top of the board the player is looking at. */
 #app.phone.building #fabs, #app.phone.building #thumb-slot { opacity: 0; visibility: hidden; pointer-events: none; }
 #app.phone.building #thumb-slot > * { pointer-events: none; }
+/* Tidy stands above Undo, so the row keeps its width (the Claim button and the hint line are seated beside it). */
+#app.phone #fabs [data-testid='fab-tidy'] { position: absolute; right: 0; bottom: 52px; }
 .fab { width: 44px; height: 44px; border-radius: 14px; border: 1px solid var(--border); background: rgba(18, 25, 41, 0.94); color: #dbe3f3; display: flex; align-items: center; justify-content: center; padding: 0; box-shadow: 0 8px 22px rgba(0, 0, 0, 0.45); }
 .fab:disabled { opacity: 0.38; }
 .fab:active:not(:disabled) { background: #1a2338; }
