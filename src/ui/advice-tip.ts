@@ -36,7 +36,7 @@
 // line is done or leaves (or its step can no longer be done). `at` is the middle of the button.
 import { Advice, lineAdvice } from '../advice';
 import { RULES } from '../content';
-import { GoalView, activeGoal } from '../goals';
+import { GoalView, Meanwhile, activeGoal, meanwhileOf } from '../goals';
 import { Game } from '../state';
 import { adviserAnswer, boardKey, builtRev } from './advice-client';
 import { Offered, carriedOut, clearMark, doable, offeredAt, showAdvice } from './advice-show';
@@ -346,9 +346,9 @@ export function tipHtml(g: Game): string {
       // (Where the lead runs in before the sentence, hud.css, the tip's own first words keep their place unseen,
       // so that the row is exactly as tall as it was.)
       tipInner = `<div class="gc-tipbody"><span class="gc-tiplead"><b class="gc-tipbadge ok">${icon('check', 11)}</b><strong data-testid="tip-bought">${esc(lead || 'Done')}</strong></span><span class="gc-tipwas" aria-hidden="true"><b class="gc-tipbadge">Tip</b><strong>${esc(after.was)}</strong></span><span class="gc-tiptxt">${esc(after.text)}</span></div>${GONE}`;
-      return `<div class="gc-tip gc-row done" data-testid="advice-done"><div class="gc-in">${tipInner}</div></div>`;
+      return `<div class="gc-tip gc-row done" data-key="tip" data-testid="advice-done"><div class="gc-in">${tipInner}</div></div>`;
     }
-    return tipOut ? `<div class="gc-tip gc-row out" aria-hidden="true"><div class="gc-in">${tipOut.html}</div></div>` : '';
+    return tipOut ? `<div class="gc-tip gc-row out" data-key="tip-out" aria-hidden="true"><div class="gc-in">${tipOut.html}</div></div>` : '';
   }
   const { text, price } = priced(a);
   // The class names alternate so that the entrance and the reminder play again each time (the row itself is patched in place, never rebuilt).
@@ -356,7 +356,9 @@ export function tipHtml(g: Game): string {
     price ? ` <span class="gc-tipcost mono">${price}</span>` : ''}</span>${
     fading ? `<span class="gc-tipold" aria-hidden="true">${esc(fading.text)}</span>` : ''}</div>
     <button class="gc-show" data-act="show" data-testid="advice-show">Show me</button>`;
-  return `<div class="gc-tip gc-row${opened ? ' open' : ''} in${turn % 2}${nag ? ` nag${nag % 2}` : ''}" data-kind="${a.kind}" data-testid="advice-tip"><div class="gc-in">${tipInner}</div></div>`;
+  // ("open" only while the row is opening, as for the line.)
+  const opening = opened && performance.now() - openedAt < TIP.row + 200;
+  return `<div class="gc-tip gc-row${opening ? ' open' : ''} in${turn % 2}${nag ? ` nag${nag % 2}` : ''}" data-key="tip" data-kind="${a.kind}" data-testid="advice-tip"><div class="gc-in">${tipInner}</div></div>`;
 }
 
 /**
@@ -376,9 +378,24 @@ export function showTip(g: Game, render: () => void) {
 }
 
 // ---------- the "while you wait" line ----------
+//
+// A goal may carry several lines, shown one at a time in order (goalView(g).meanwhile: the first not yet done
+// that applies, with its `step` of `of`; meanwhileOf(g) is that same line). The row reads "While you wait · 2 of
+// 3" where the goal has more than one. When the line on the card is done, the card's view has already moved on
+// to the next one; the row ticks the line it was showing all the same (its box pops, and it says what that bought)
+// and the next line takes the row LINE_NEXT seconds later, its own Show me with it: the old row closes as the new
+// one opens beneath it, so the card grows or shrinks by the difference and never jumps. After the last line, the
+// row stays as it always has (see lineOn).
+
+/** Game seconds the row says what a line bought before the goal's next line takes its place. */
+const LINE_NEXT = 3;
 
 interface Line {
   goal: number;
+  /** The goal's line this is (meanwhileOf), its 1-based place among the goal's lines, and how many there are. */
+  obj: Meanwhile | null;
+  step: number;
+  of: number;
   text: string;
   done: boolean;
   /** It came up in the middle of a goal (not together with the card): its row opens. Real time. */
@@ -388,6 +405,8 @@ interface Line {
   until: number;
   /** Real time of the tick: the box pops. */
   popAt: number;
+  /** Game time at which the goal's next line takes the row (0: none is waiting). */
+  nextAt: number;
 }
 
 let line: Line | null = null;
@@ -462,6 +481,40 @@ function closeLine() {
   lineOut = lineInner && !calmMotion() ? { html: inert(lineInner), until: performance.now() + TIP.row } : null;
 }
 
+/** The card's view of the goal's line, as a Line: a row that opens (`openedAt`, real time) or one that came with the card (0). */
+function newLine(g: Game, mw: NonNullable<GoalView['meanwhile']>, openedAt: number): Line {
+  return { goal: g.goal.i, obj: meanwhileOf(g), step: mw.step ?? 1, of: mw.of ?? 1, text: mw.text, done: mw.done, openedAt, tickedAt: 0, until: 0, popAt: 0, nextAt: 0 };
+}
+
+/** The line is ticked before the player's eyes: its box pops, and for a while it says what that bought. */
+function tick(l: Line, g: Game, now: number) {
+  l.done = true;
+  l.tickedAt = g.time;
+  l.until = g.time + RULES.tips.quiet;
+  l.popAt = now;
+}
+
+const freshGain = () => ({ sum: 0, ends: false, open: null, known: true });
+
+/**
+ * Another of the goal's lines takes the row: the old row closes as the new one opens beneath it (so the card
+ * grows or shrinks by the difference and never jumps), and the new line brings its own Show me.
+ */
+function swapLine(g: Game, mw: NonNullable<GoalView['meanwhile']>, now: number) {
+  const old = line;
+  if (lineWasOn) closeLine();
+  lineGone();
+  line = newLine(g, mw, now);
+  // (A line that was done by the same move as the one before it is shown done, and leaves a narrow card when that one would have.)
+  if (line.done && old?.tickedAt) {
+    line.tickedAt = old.tickedAt;
+    line.until = old.until;
+  }
+  gain = freshGain();
+  step = null;
+  stepKey = '';
+}
+
 function tendLine(g: Game, v: GoalView | null, now: number, changed: boolean, sameGoal: boolean, narrow: boolean) {
   if (lineOut && now >= lineOut.until) lineOut = null;
   // The time left on the wait, whenever the adviser has looked at the board as it is: a gesture of the line
@@ -494,20 +547,24 @@ function tendLine(g: Game, v: GoalView | null, now: number, changed: boolean, sa
   }
   if (!line || line.goal !== g.goal.i) {
     lineGone();
-    line = { goal: g.goal.i, text: mw.text, done: mw.done, openedAt: cardGoal === g.goal.i ? now : 0, tickedAt: 0, until: 0, popAt: 0 };
-    gain = { sum: 0, ends: false, open: null, known: true };
+    line = newLine(g, mw, cardGoal === g.goal.i ? now : 0);
+    gain = freshGain();
     step = null;
     stepKey = '';
     lineOut = null;
   }
-  line.text = mw.text;
+  // The card's view has moved to another of the goal's lines: on to the next when the one on the card was done
+  // (or stopped applying), back to an earlier one when the player took something back.
+  const moved = (mw.step ?? 1) !== line.step;
+  // Is the line on the card done? Once the view has moved on, the line itself is asked.
+  const doneNow = moved ? !!line.obj?.done(g) : mw.done;
   const key = `${builtRev(g)}|${g.goal.i}`;
   if (changed && sameGoal && !line.done) {
     // The board changed while the line stood undone. Was that one of its gestures? It was if the line is now
     // done, if the step it had on offer has been carried out, or if its next step is another one now.
     const was = step;
-    const next = mw.done ? null : lineStepNow(g);
-    const did = mw.done || (!!was && !!carriedOut(g, was, stepMark)) || (!!was && !!next && actOf(was) !== actOf(next));
+    const next = doneNow || moved ? null : lineStepNow(g);
+    const did = doneNow || (!!was && !!carriedOut(g, was, stepMark)) || (!!was && !!next && actOf(was) !== actOf(next));
     if (did && !gain.open) {
       if (etaSeen && etaSeen.built === seenBuilt && etaSeen.goal === g.goal.i) gain.open = { eta: etaSeen.eta, at: etaSeen.at };
       else gain.known = false;
@@ -520,19 +577,28 @@ function tendLine(g: Game, v: GoalView | null, now: number, changed: boolean, sa
     if (lineUp) lineStaleAt = g.time + TIP.stale;
     clearMark();
   }
-  if (mw.done && !line.done) {
-    line.done = true;
-    line.tickedAt = g.time;
-    line.until = g.time + RULES.tips.quiet;
-    line.popAt = now;
-  } else if (!mw.done && line.done) {
-    // Undone again (the player took it back): the line is an open step once more.
-    line.done = false;
-    line.tickedAt = 0;
-    gain = { sum: 0, ends: false, open: null, known: true };
-    stepKey = '';
+  if (moved) {
+    if (!line.done && doneNow && (mw.step ?? 1) > line.step) {
+      // Done: the row ticks the line it shows and says what that bought, and the next line follows in a moment.
+      tick(line, g, now);
+      line.nextAt = g.time + LINE_NEXT;
+    }
+    if (!line.done || g.time >= line.nextAt) swapLine(g, mw, now);
+  } else {
+    line.text = mw.text;
+    line.obj = meanwhileOf(g);
+    if (mw.done && !line.done) tick(line, g, now);
+    else if (!mw.done && line.done) {
+      // Undone again (the player took it back): the line is an open step once more.
+      line.done = false;
+      line.tickedAt = 0;
+      line.nextAt = 0;
+      gain = freshGain();
+      stepKey = '';
+    }
   }
-  if (line.done) step = null;
+  const cur = line!;
+  if (cur.done) step = null;
   else if (key !== stepKey || now - stepAsked >= TIP.step) {
     // lineAdvice only looks at the board (no copy of the game is run): cheap enough for the page, once a second.
     const next = lineStepNow(g);
@@ -547,7 +613,7 @@ function tendLine(g: Game, v: GoalView | null, now: number, changed: boolean, sa
   lineWasOn = on;
   // The Show me button, and the signals about it.
   const covered = ui.techOpen || screenOpen();
-  const up = on && !line.done && !!step;
+  const up = on && !cur.done && !!step;
   if (up && !lineUp) {
     lineUp = true;
     lineSaid = false;
@@ -572,19 +638,24 @@ function lineBought(g: Game): string {
 
 /** The line's row, or '' when the card has none. `narrow`: the card has room for one row of guidance. */
 export function lineHtml(g: Game, narrow: boolean): string {
-  if (!line || !lineOn(g, narrow)) {
-    return lineOut ? `<div class="gc-line gc-row out" aria-hidden="true"><div class="gc-in">${lineOut.html}</div></div>` : '';
-  }
+  // (A row on its way out lies under the one that takes its place: the card is patched in place by position, and
+  // the row that stays keeps its element this way.)
+  const out = lineOut ? `<div class="gc-line gc-row out" data-key="line-out" aria-hidden="true"><div class="gc-in">${lineOut.html}</div></div>` : '';
+  if (!line || !lineOn(g, narrow)) return out;
   const now = performance.now();
   const bought = lineBought(g);
   const title = step ? ` title="${esc(sentence(step))}"` : '';
+  // "While you wait · 2 of 3" where the goal has more than one line.
+  const label = `While you wait${line.of > 1 ? `<span class="gc-of" data-testid="line-count"> · ${line.step} of ${line.of}</span>` : ''}`;
   // The tick, then the label over the sentence (or run in before it, where every line counts: hud.css), then the button.
   lineInner = `<span class="gc-tick" role="img" aria-label="${line.done ? 'Done' : 'Not done yet'}">${icon('check', 12)}</span>
-    <div class="gc-linebody"><span class="gc-linehead"><span class="gc-lbl">While you wait</span>${bought ? `<span class="gc-bought" data-testid="line-bought">${esc(bought)}</span>` : ''}</span>
+    <div class="gc-linebody"><span class="gc-linehead"><span class="gc-lbl">${label}</span>${bought ? `<span class="gc-bought" data-testid="line-bought">${esc(bought)}</span>` : ''}</span>
     <span class="gc-linetxt">${esc(line.text)}</span></div>${
     step && !line.done ? `<button class="gc-show" data-act="show-line" data-testid="line-show"${title}>Show me</button>` : line.tickedAt ? GONE : ''}`;
-  const cls = `${line.openedAt ? ' open' : ''}${line.done ? ' done' : ''}${bought ? ' said' : ''}${line.done && now - line.popAt < 700 ? ' pop' : ''}${lineNag ? ` nag${lineNag % 2}` : ''}`;
-  return `<div class="gc-line gc-row${cls}" data-done="${line.done ? 1 : 0}" data-testid="goal-line"><div class="gc-in">${lineInner}</div></div>`;
+  // ("open" only while the row is opening: a row that is rebuilt later, when the card around it changes, does not open again.)
+  const opening = line.openedAt && now - line.openedAt < TIP.row + 200;
+  const cls = `${opening ? ' open' : ''}${line.done ? ' done' : ''}${bought ? ' said' : ''}${line.done && now - line.popAt < 700 ? ' pop' : ''}${lineNag ? ` nag${lineNag % 2}` : ''}`;
+  return `<div class="gc-line gc-row${cls}" data-key="line" data-done="${line.done ? 1 : 0}" data-step="${line.step}" data-of="${line.of}" data-testid="goal-line"><div class="gc-in">${lineInner}</div></div>${out}`;
 }
 
 /** Show me was pressed on the line: take the player to its next gesture, exactly as for a tip. */
@@ -603,8 +674,13 @@ export function showLine(g: Game, render: () => void) {
   render();
 }
 
-/** For scripts: the line on the card, its next gesture and what it says it bought. */
-export const lineShown = () => (line ? { text: line.text, done: line.done, step, bought: lineBought(ui.g), up: lineUp } : null);
+/**
+ * For scripts: the line on the card, its next gesture (`step`), what it says it bought, whether its Show me is up,
+ * its place among the goal's lines (`place` of `of`) and, while it says what it bought, when the next line takes over.
+ */
+export const lineShown = () => (line
+  ? { text: line.text, done: line.done, step, bought: lineBought(ui.g), up: lineUp, place: line.step, of: line.of, nextAt: line.nextAt || null }
+  : null);
 
 // ---------- both rows ----------
 
