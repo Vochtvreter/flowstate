@@ -24,7 +24,8 @@
 
 /* ---------- mute button ---------- */
 [data-testid='mute'].off { color: var(--dim); }
-#app.phone [data-testid='mute'] { width: 44px; height: 44px; }
+/* A finger gets a full-size target, in the phone layout and on a tablet (desktop layout, touch input). */
+#app.phone [data-testid='mute'], html[data-input='touch'] [data-testid='mute'] { width: 44px; height: 44px; }
 
 /* ---------- board polish ---------- */
 /* A new node drops in, squashes as it lands and settles. (board.ts adds .pop once, for 320 ms.) */
@@ -70,7 +71,7 @@ g.wire.sat .base { stroke-opacity: 0.58; }
 .cel-wash.k-flow { --peak: 0.4; animation-name: cel-wash-breathe; animation-timing-function: ease-in-out; }
 @keyframes cel-wash { 0% { opacity: 0; } 8% { opacity: var(--peak); } 40% { opacity: calc(var(--peak) * 0.65); } 100% { opacity: 0; } }
 /* The Glyph's flash waits for the two streams to meet. */
-@keyframes cel-wash-late { 0% { opacity: 0; } 12% { opacity: calc(var(--peak) * 0.3); } 22% { opacity: var(--peak); } 55% { opacity: calc(var(--peak) * 0.5); } 100% { opacity: 0; } }
+@keyframes cel-wash-late { 0% { opacity: 0; } 14% { opacity: calc(var(--peak) * 0.3); } 28% { opacity: var(--peak); } 58% { opacity: calc(var(--peak) * 0.5); } 100% { opacity: 0; } }
 @keyframes cel-wash-breathe { 0% { opacity: 0; } 24% { opacity: var(--peak); } 50% { opacity: calc(var(--peak) * 0.45); } 74% { opacity: var(--peak); } 100% { opacity: 0; } }
 
 .cel { position: absolute; inset: 0; z-index: 55; display: flex; align-items: center; justify-content: center; padding: 16px; pointer-events: none; }
