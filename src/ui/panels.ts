@@ -893,16 +893,35 @@ function revealInInspector(opened: string) {
 
 const ST_COLORS: Record<string, string> = { working: '#4ADE80', blocked: '#FBBF24', starved: '#F87171', idle: '#64748B' };
 
+/** What the minimap last drew: the board (its size, the stage's, every node's place and state), and the camera. */
 let miniKey = '';
+let miniView = '';
+/** When it was last drawn (ms). */
+let miniAt = -1e9;
+/** While only the camera moves, the minimap is redrawn at most this often (ms). */
+const MINI_EVERY = 100;
 
+/**
+ * The minimap, redrawn when what it shows has changed: at once when the board has (a node placed, moved or changing
+ * state), and while only the camera moves at most every MINI_EVERY ms (the panels may be refreshed every frame of a
+ * pan; the next refresh draws where the camera came to rest). Not on a phone, which does not show it.
+ */
 function renderMini() {
   const g = ui.g;
-  // Redrawn only when something it shows has changed.
+  if (env.phone) {
+    // (Drawn afresh if the layout comes back to one that shows it.)
+    miniKey = '';
+    return;
+  }
   const view = boardRect();
-  let key = `${g.board.w}x${g.board.h}|${Math.round(ui.view.x)},${Math.round(ui.view.y)},${ui.view.k.toFixed(3)}|${Math.round(view.width)}x${Math.round(view.height)}`;
+  let key = `${g.board.w}x${g.board.h}|${Math.round(view.width)}x${Math.round(view.height)}`;
   for (const n of g.nodes) key += `|${n.x},${n.y},${n.status[0]}`;
-  if (key === miniKey) return;
+  const at = `${Math.round(ui.view.x)},${Math.round(ui.view.y)},${ui.view.k.toFixed(3)}`;
+  const now = performance.now();
+  if (key === miniKey && (at === miniView || now - miniAt < MINI_EVERY)) return;
   miniKey = key;
+  miniView = at;
+  miniAt = now;
   const ctx = mini.getContext('2d');
   if (!ctx) return;
   const W = mini.width, H = mini.height;
