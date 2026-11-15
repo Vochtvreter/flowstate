@@ -20,7 +20,7 @@
 // player obeys, so the structural advice lives there and not in the adviser's tips (src/advice.ts), which
 // nobody is sure to follow. How the lines were chosen is in docs/CONTENT.md ("While you wait").
 import { EXPANSION_DEPOSITS, MATERIALS, MatId, NODE_DEFS, NodeType, RECIPES, RULES, TECHS } from './content';
-import { cycleTime, endDemo, expansionCost, grantTech, has, maxLevel, nodeCost, nodeCount, recipeOf, trackAvailable, upgradeCost, wellRate } from './economy';
+import { cycleTime, endDemo, expansionCost, grantTech, has, labRate, maxLevel, nodeCost, nodeCount, recipeOf, trackAvailable, upgradeCost, wellRate } from './economy';
 import { countsForFlow, isFlowing, nearShare } from './flow';
 import { graph, isMachine, isPass } from './graph';
 import { startOrders } from './orders';
@@ -419,18 +419,26 @@ export function pairedWells(g: Game): GNode[] {
   return g.nodes.filter((n) => out.has(n.id));
 }
 /**
- * Labs fed by Wells alone with a level of Speed or more, fed by at least one Well with a level of Speed or more:
- * pairs that "Buy Speed on each Well that has a Lab of its own, and then on that Lab" has done.
+ * The pairs of "a Well and a Lab of its own" in the strict sense: a Lab fed by Wells alone, whose Wells send
+ * nothing anywhere else. For each: its Wells, its Lab, what the pair studies a second now and at no Speed at
+ * all, and whether a level of Speed has raised it (`sped`). "Buy Speed on each Well with a Lab of its own,
+ * and on that Lab when it is full" is done when every pair is sped.
  */
-export function fastPairs(g: Game): number {
+export function ownPairs(g: Game): { lab: GNode; wells: GNode[]; rate: number; base: number; sped: boolean }[] {
   const c = graph(g);
-  let n = 0;
+  const out: { lab: GNode; wells: GNode[]; rate: number; base: number; sped: boolean }[] = [];
   for (const lab of g.nodes) {
     const fed = lab.type === 'lab' ? c.ins.get(lab.id) ?? [] : [];
-    if (!fed.length || !fed.every((w) => c.byId.get(w.from)?.type === 'well')) continue;
-    if (lab.lv.speed >= 1 && fed.some((w) => (c.byId.get(w.from)?.lv.speed ?? 0) >= 1)) n++;
+    const wells = fed.map((w) => c.byId.get(w.from)!).filter((n) => n?.type === 'well');
+    if (!fed.length || wells.length !== fed.length) continue;
+    if (!wells.every((w) => (c.outs.get(w.id) ?? []).flat().every((x) => x.to === lab.id))) continue;
+    const give = (lv: number | null) => wells.reduce((s, w) => s + wellRate(lv == null ? w : { ...w, lv: { ...w.lv, speed: lv } }), 0);
+    const take = (lv: number | null) => labRate(g, lv == null ? lab : { ...lab, lv: { ...lab.lv, speed: lv } });
+    const rate = Math.min(give(null), take(null));
+    const base = Math.min(give(0), take(0));
+    out.push({ lab, wells, rate, base, sped: rate > base + 1e-6 });
   }
-  return n;
+  return out;
 }
 /** Of those, the ones not wired to a Market. */
 const wellsToSell = (g: Game) => pairedWells(g).filter((n) => !(graph(g).outs.get(n.id)?.[0] ?? []).some((w) => graph(g).byId.get(w.to)?.type === 'market')).length;
@@ -753,13 +761,14 @@ export const GOALS: Goal[] = [
       // (A third expansion here was tried: its Murk deposit needs a Lab of 400¢ more, the research often came
       // first, and the line's 1,250¢ then bought a plot that nothing stood on.)
       EXPAND_LABS,
-      // Then a level of Speed on each Well with a Lab of its own and on that Lab: the pair studies a quarter more.
-      // By hand, a press each: the card after next hands over the button that does a kind at once.
+      // Then a level of Speed on each Well with a Lab of its own, and on that Lab where the Lab is what holds the
+      // pair back: the pair studies a quarter more. By hand, a press each: the card after next hands over the
+      // button that does a kind at once.
       {
         id: 'speed-pairs',
-        text: hint('Buy Speed on each Well that has a Lab of its own, and then on that Lab.'),
-        done: (g) => fastPairs(g) >= Math.min(4, wellLabs(g)),
-        when: (g) => wellLabs(g) >= 2,
+        text: hint('Buy Speed on each Well with a Lab of its own, and on that Lab when it is full.'),
+        done: (g) => { const p = ownPairs(g); return p.length > 0 && p.every((x) => x.sped); },
+        when: (g) => ownPairs(g).length >= 2,
       },
     ],
     reward: { a: 50 },
@@ -1106,9 +1115,21 @@ function repairChain(g: Game) {
   unlocksChecked.set(g, g.goal.i);
 }
 
+/** Games whose ready goal has been checked against the goal as this version words it. */
+const readyChecked = new WeakSet<Game>();
+
 /** Check the active goal. Called every tick; cheap. */
 export function tickGoal(g: Game) {
   repairChain(g);
+  if (g.goal.ready && !readyChecked.has(g)) {
+    // A save says the goal is ready: once, check it by this version's rule where the goal at that place in the
+    // chain is a new one. (A save from the version whose goal 20 was "Fill three orders" came back ready on
+    // "Upgrade all your Wells at once".) Any other ready goal stays ready, whatever was taken apart since.
+    readyChecked.add(g);
+    const goal = GOALS[g.goal.i];
+    if (goal && goal.id === 'bulk-upgrade' && !goal.done(g)) g.goal.ready = false;
+  }
+  readyChecked.add(g);
   if (g.goal.ready) return;
   const goal = GOALS[g.goal.i];
   if (!goal || !goal.done(g)) return;

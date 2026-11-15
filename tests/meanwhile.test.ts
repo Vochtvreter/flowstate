@@ -46,7 +46,7 @@ const TEXT: Record<string, { mouse: string; touch: string }> = {
     mouse: 'Click the Flow ring, then give the machine it picks what it lacks: input, or a Market.',
     touch: 'Tap the Flow ring, then give the machine it picks what it lacks: input, or a Market.',
   },
-  'speed-pairs': { mouse: 'Buy Speed on each Well that has a Lab of its own, and then on that Lab.', touch: '' },
+  'speed-pairs': { mouse: 'Buy Speed on each Well with a Lab of its own, and on that Lab when it is full.', touch: '' },
   'cut-glyph': { mouse: 'You have the β you need: cut the wire from the Glyph Assembler to the Lab.', touch: '' },
   'sell-raw': { mouse: 'Fabrication is researched: wire each Well with a Lab of its own to the Market too.', touch: '' },
   'prism-fab': { mouse: 'Wire the Prism Assembler\'s port to the Fabricator: a Lens takes one Prism.', touch: '' },
@@ -180,7 +180,8 @@ describe('"while you wait": the lines', () => {
     expect(goalView(g)!.meanwhile).toEqual({ text: TEXT['speed-pairs'].mouse, done: false, step: 2, of: 2 });
     let presses = 0;
     while (followMeanwhile(g)) presses++;
-    expect(presses).toBe(8); // four pairs, a Well and then its Lab each
+    // Four pairs: a Well and then its Lab each, but the Ember Well alone (0.8 a second: its Lab had room).
+    expect(presses).toBe(7);
     expect(goalView(g)!.meanwhile).toEqual({ text: TEXT['speed-pairs'].mouse, done: true, step: 2, of: 2 });
     clearHistory();
   });
@@ -655,7 +656,7 @@ describe('lineAdvice: the next step of the card\'s line, for its "Show me"', () 
     expect(meanwhileOf(h)!.id).toBe('speed-pairs');
     a = lineAdvice(h)!;
     expect(a).toMatchObject({ upgrade: 'speed', node: placed.id });
-    expect(a.text.mouse).toMatch(/^Buy Speed on (the|a) Glint Well \(50¢\): its Lab of its own can then study more\.$/);
+    expect(a.text.mouse).toMatch(/^Buy Speed on (the|a) Glint Well \(50¢\): its Lab of its own then gets more to study\.$/);
     expect(applyAdvice(h, a)).toBe(true);
     a = lineAdvice(h)!;
     expect(a).toMatchObject({ upgrade: 'speed', node: own.id });
@@ -875,17 +876,21 @@ describe('goalFocus: the nodes the card is about', () => {
           const n = g.nodes.find((x) => x.id === id)!;
           return n.recipe ? `${n.type}:${n.recipe}` : n.material ? `${n.type}:${n.material}` : n.type;
         }).join(' ');
-        (seen[goal.id] ??= []).includes(kinds) || seen[goal.id].push(kinds);
+        // Keyed by the line on the card, if one is up and not done (the focus is then the line's).
+        const line = meanwhileOf(g);
+        const key = `${goal.id}${line && !line.done(g) ? '/' + line.id : ''}`;
+        if (!(seen[key] ??= []).includes(kinds)) seen[key].push(kinds);
       },
     });
     clearHistory();
     console.info(`goalFocus on the card player's boards:\n  ${Object.entries(seen).map(([id, k]) => `${id}: ${k.join(' | ')}`).join('\n  ')}`);
     // What each card names, among what it showed while the player waited.
-    expect(seen['make-spark']).toContain('refiner:ink lab'); // the Ink Refiner's Ink port to the Lab
-    expect(seen['make-spark']).toContain('well:glint'); // a Lab from the port of the Glint Well that only sells
-    expect(seen['make-glyph'].some((k) => /^well:(glint|murk|ember)$/.test(k))).toBe(true); // a Lab from the new Well's port
-    expect(seen['hold-flow'] ?? ['refiner:spark well:ember']).toContain('refiner:spark well:ember');
-    expect(seen['make-prism']).toContain('assembler:glyph lab'); // cut the wire from the Glyph Assembler to the Lab
+    expect(seen['make-spark/ink-lab']).toContain('refiner:ink lab'); // the Ink Refiner's Ink port to the Lab
+    expect(seen['make-spark/glint-lab']).toContain('well:glint'); // a Lab from the port of the Glint Well that only sells
+    expect(seen['make-glyph/well-labs'].some((k) => /^well:(glint|murk|ember)$/.test(k) || k === '')).toBe(true); // a Lab from the new Well's port
+    if (seen['hold-flow/flow-fix']) expect(seen['hold-flow/flow-fix']).toContain('refiner:spark well:ember');
+    for (const key of ['make-prism/cut-glyph', 'build-fabricator/cut-glyph']) if (seen[key]) expect(seen[key]).toContain('assembler:glyph lab');
+    expect(seen['make-prism/cut-glyph'] ?? seen['build-fabricator/cut-glyph'], 'the cut came up on one of the two').toBeDefined();
   });
 
   it('the hints, by goal: the port the card names, and where it goes', () => {

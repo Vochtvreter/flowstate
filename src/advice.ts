@@ -52,7 +52,7 @@ import {
 } from './economy';
 import { countsForFlow, isFlowing } from './flow';
 import { Forecast, forecast, lookahead } from './forecast';
-import { activeGoal, depositsFrom, flowFix, goalAge, lensMaker, meanwhileAt, meanwhileOf, pairedWells, rawGlintWell } from './goals';
+import { activeGoal, depositsFrom, flowFix, goalAge, lensMaker, meanwhileAt, meanwhileOf, ownPairs, pairedWells, rawGlintWell } from './goals';
 import { graph, isMachine, isPass } from './graph';
 import { claimOrder, orderReachesMarket, ordersWorth } from './orders';
 import { tick } from './sim';
@@ -540,7 +540,7 @@ export const SAY = {
   // --- "Make your first Lens": what the Fabricator is not fed yet ---
   lineFeed: (port: string, to: string, n: string, mat: string) => `Wire ${port} to ${to}: a Lens takes ${n} ${mat}.`,
   // --- "Make your first Mist", second line: Speed on a Well with a Lab of its own, then on the Lab ---
-  linePairWell: (well: string, cost: number) => `Buy Speed on ${well} (${cents(cost)}): its Lab of its own can then study more.`,
+  linePairWell: (well: string, cost: number) => `Buy Speed on ${well} (${cents(cost)}): its Lab of its own then gets more to study.`,
   linePairLab: (mat: string, cost: number) => `Buy Speed on the ${mat} Well's own Lab (${cents(cost)}): the pair then gives more α.`,
   // --- "Build a Fabricator", second line: the Wells with Labs of their own sell half of what they give ---
   lineSell: (port: string, market: string, mat: string) => `Wire ${port} to ${market} too: half its ${mat} is then sold, not studied.`,
@@ -1582,23 +1582,21 @@ function lineStep(g: Game, any = false): Cand | null {
       return { ...wireCand(p, f.market, 0, say(Who, MATERIALS[f.mat].name, portName(g, p, true), the(g, f.market))), culprit: f.n.id };
     }
     case 'speed-pairs': {
-      // The first pair with a level still to buy: its Well first (with the Lab still at its old pace the Well
-      // only backs up), then its Lab.
-      const c = graph(g);
-      for (const lab of g.nodes) {
-        const fed = lab.type === 'lab' ? ins(g, lab) : [];
-        if (!fed.length || !fed.every((w) => node(g, w.from)?.type === 'well')) continue;
-        const wells = fed.map((w) => c.byId.get(w.from)!).sort((a, b) => a.lv.speed - b.lv.speed);
-        const well = wells.find((w) => w.lv.speed >= 1) ? null : wells[0];
-        if (well && trackAvailable(g, well, 'speed') && well.lv.speed < maxLevel(g, 'speed')) {
-          const cost = upgradeCost(well, 'speed');
-          return afford({ act: { t: 'upgrade', node: well.id, track: 'speed', all: false }, cost, hope: 0, show: well.id, brings: 'data', text: SAY.linePairWell(the(g, well), cost) });
-        }
-        if (lab.lv.speed < 1 && lab.lv.speed < maxLevel(g, 'speed')) {
-          const cost = upgradeCost(lab, 'speed');
-          const mat = wells[0].material ? MATERIALS[wells[0].material].name : 'raw';
-          return afford({ act: { t: 'upgrade', node: lab.id, track: 'speed', all: false }, cost, hope: 0, show: lab.id, brings: 'data', text: SAY.linePairLab(mat, cost) });
-        }
+      // The first pair still at its old pace: a level on whichever side holds it back (the Well, or the Lab when
+      // the Well already gives it all it can study).
+      for (const p of ownPairs(g)) {
+        if (p.sped) continue;
+        const gives = p.wells.reduce((s, w) => s + wellRate(w), 0);
+        const lab = p.lab;
+        const well = [...p.wells].sort((a, b) => upgradeCost(a, 'speed') - upgradeCost(b, 'speed'))[0];
+        const n = gives <= labRate(g, lab) + 1e-6 ? well : lab;
+        if (n.lv.speed >= maxLevel(g, 'speed')) continue;
+        const cost = upgradeCost(n, 'speed');
+        const mat = well.material ? MATERIALS[well.material].name : 'raw';
+        return afford({
+          act: { t: 'upgrade', node: n.id, track: 'speed', all: false }, cost, hope: 0, show: n.id, brings: 'data',
+          text: n === well ? SAY.linePairWell(the(g, well), cost) : SAY.linePairLab(mat, cost),
+        });
       }
       return null;
     }
