@@ -3272,7 +3272,7 @@ function tapEmpty(p: Pt) {
   disarm();
   // Right beside the port there is no room to build: that tap only cancels.
   if (Math.hypot(p.x - t.a.x, p.y - t.a.y) > 36 && !nodeAt(p)) {
-    openRadial({ at: p, dir: 'consume', from: t.from, port: t.port, to: 0, mat: t.mats[0] ?? null, a: t.a, opts: consumeOptions(g, t.mats) });
+    openRadial({ at: p, dir: 'consume', from: t.from, port: t.port, to: 0, mat: t.mats[0] ?? null, a: t.a, opts: consumeOptions(g, t.mats, t.from) });
   }
 }
 
@@ -3878,7 +3878,7 @@ function onUp(e: PointerEvent) {
           if (why) toast(why, 'bad');
         } else if (Math.hypot(p.x - d.a.x, p.y - d.a.y) > 36) {
           endDrag();
-          openRadial({ at: p, dir: 'consume', from: d.from, port: d.port, to: 0, mat: d.mats[0] ?? null, a: d.a, opts: consumeOptions(g, d.mats) });
+          openRadial({ at: p, dir: 'consume', from: d.from, port: d.port, to: 0, mat: d.mats[0] ?? null, a: d.a, opts: consumeOptions(g, d.mats, d.from) });
           return;
         }
       }
@@ -3942,9 +3942,11 @@ function onUp(e: PointerEvent) {
  * "while you wait" line when that is a build, or else what the goal's hint says to pick or to build
  * ("…and pick Lab", "Build a Router from…"). The build menu puts it first and preselects it.
  */
-function wantedType(g: Game): NodeType | null {
+function wantedType(g: Game, from?: number): NodeType | null {
   const step = lineAdvice(g);
-  if (step?.build && step.build in NODE_DEFS) return step.build as NodeType;
+  // The line's next build counts from the port it names (its node); from any other port the goal's own words do
+  // (at goal 15 the line's "a Lab from the new Well's port" must not put Lab first on the Ink port the goal names).
+  if (step?.build && step.build in NODE_DEFS && (step.node == null || step.node === from)) return step.build as NodeType;
   const goal = activeGoal(g);
   if (!goal || g.goal.ready) return null;
   const names = new Map<string, NodeType>();
@@ -3958,14 +3960,14 @@ function wantedType(g: Game): NodeType | null {
 }
 
 /** The option the card asks for goes first (where it is preselected); the rest keep their order. */
-function wantedFirst(g: Game, opts: RadialOpt[]): RadialOpt[] {
-  const want = wantedType(g);
+function wantedFirst(g: Game, opts: RadialOpt[], from?: number): RadialOpt[] {
+  const want = wantedType(g, from);
   const i = want ? opts.findIndex((o) => o.type === want && !o.locked) : -1;
   if (i <= 0) return opts;
   return [opts[i], ...opts.slice(0, i), ...opts.slice(i + 1)];
 }
 
-function consumeOptions(g: Game, mats: MatId[]): RadialOpt[] {
+function consumeOptions(g: Game, mats: MatId[], from?: number): RadialOpt[] {
   const opts: RadialOpt[] = [];
   const uses = (r: Recipe) => r.inputs.some((i) => mats.includes(i[0]));
   const recipes = Object.values(RECIPES).filter(uses);
@@ -3993,7 +3995,7 @@ function consumeOptions(g: Game, mats: MatId[]): RadialOpt[] {
   if (locked && opts.length < 8) {
     opts.push({ type: locked.machine, recipe: locked.id, label: `${NODE_DEFS[locked.machine].name} → ${locked.name}`, sub: '', cost: 0, locked: locked.tech, glyph: matGlyph(locked.outputs[0][0], 24) });
   }
-  return wantedFirst(g, opts.slice(0, 8));
+  return wantedFirst(g, opts.slice(0, 8), from);
 }
 
 function produceOptions(g: Game, m: MatId): RadialOpt[] {
