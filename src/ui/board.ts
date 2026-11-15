@@ -2367,6 +2367,9 @@ function updateNodes(g: Game) {
     }
     const dx = diagnose(g, n);
     let st: string = n.status;
+    // The ring and the border say what diagnose says: a node it finds nothing wrong with (the Lens-only
+    // Fabricator between the first Lens and free play, status.ts `resting`) is drawn as working, not amber or red.
+    if (!dx.problem && (n.status === 'blocked' || n.status === 'starved')) st = 'working';
     let pill = '';
     // Wells never get a pill: their ring colour says enough.
     if (n.type !== 'well') {
