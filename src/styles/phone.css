@@ -155,7 +155,15 @@ html.phone body { position: fixed; inset: 0; width: 100%; }
    just under the strip (--strip-b, measured in phone.ts): the foot of the board belongs to toasts. */
 html[data-input='touch'] #app:not(.phone) #thumb-slot { display: flex; position: absolute; left: 50%; top: calc(var(--strip-b, 0px) + 10px); z-index: 12; transform: translateX(-50%); max-width: calc(100% - 32px); pointer-events: none; }
 #tap-hint { display: flex; align-items: center; gap: 4px; min-height: 44px; padding: 0 0 0 14px; border-radius: 22px; background: #17213a; border: 1px solid #34467a; color: #dbe6ff; font-size: 13px; line-height: 17px; box-shadow: 0 10px 30px rgba(0, 0, 0, 0.5); }
-#tap-hint button { flex: none; width: 44px; height: 44px; border: 0; border-radius: 50%; background: transparent; color: #9db8ff; display: flex; align-items: center; justify-content: center; padding: 0; }
+/* The line asks the player to tap the board, so a tap on the line goes through to the board under it. Only
+   Cancel answers, and only to a press that came down inside its circle: a finger beside it, which the browser
+   would hand to the nearest button, does nothing (phone.ts). */
+#thumb-slot > #tap-hint { pointer-events: none; }
+#tap-hint button { flex: none; width: 44px; height: 44px; border: 0; border-radius: 50%; background: transparent; color: #9db8ff; display: flex; align-items: center; justify-content: center; padding: 0; pointer-events: auto; }
+/* Its other place, when its usual one lies over what it asks the player to tap (phone.ts, placeHint): on a
+   phone just under the strip, on a wider touch screen at the foot of the board. */
+#app.phone #thumb-slot.alt { bottom: auto; top: calc(var(--strip-h, 0px) + 8px); transform: none; }
+html[data-input='touch'] #app:not(.phone) #thumb-slot.alt { top: auto; bottom: 16px; }
 #app.phone #fabs {
   display: flex; flex-direction: row; gap: 8px;
   position: absolute; right: var(--edge-r); bottom: 8px; z-index: 12;

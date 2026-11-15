@@ -761,7 +761,14 @@ function renderInspector(force: boolean) {
     clearTimeout(inspEmpty);
     inspEmpty = 0;
     inspPanel.render(html, force);
+    // A node has just been opened: its panel shows the part the player most likely came for.
+    const opened = sel ? `${sel.kind}${sel.id}` : '';
+    if (opened !== inspOpenedFor) {
+      inspOpenedFor = opened;
+      if (sel?.kind === 'node' && html) requestAnimationFrame(() => revealInInspector(opened));
+    }
   } else if (!inspEmpty) {
+    inspOpenedFor = '';
     // The sheet slides away with its contents still in it; they are cleared once it is out of sight.
     inspEmpty = window.setTimeout(() => {
       inspEmpty = 0;
@@ -771,6 +778,40 @@ function renderInspector(force: boolean) {
 }
 
 let inspEmpty = 0;
+/** The selection the inspector was last opened for ('' = closed). */
+let inspOpenedFor = '';
+
+/**
+ * Scroll the inspector, just opened, so what the player most likely came for is in view: on a Router the rows of
+ * its wires with their Favour buttons, on anything else the first upgrade they can afford. Below the fold of a
+ * phone's sheet those were missed (rev-phone F5, rev-wide F2). Nothing moves when it is in view already, nor
+ * once a finger is on the panel.
+ */
+function revealInInspector(opened: string) {
+  if (opened !== inspOpenedFor || inspPanel.busy()) return;
+  const box = inspEl.querySelector<HTMLElement>('.scroll');
+  if (!box) return;
+  // (The panel is patched in place: without this a node would open where the last one was scrolled to.)
+  box.scrollTop = 0;
+  if (box.scrollHeight <= box.clientHeight + 1) return;
+  const rows = Array.from(box.querySelectorAll<HTMLElement>('.rrow.hasfav'));
+  const want = rows.length ? rows : Array.from(box.querySelectorAll<HTMLElement>('.uprow .buy.ok')).slice(0, 1).map((b) => b.closest<HTMLElement>('.uprow') ?? b);
+  if (!want.length) return;
+  // (Measured against the scroller itself: a sheet still sliding in has the same offset for both.)
+  const b = box.getBoundingClientRect();
+  const room = box.clientHeight;
+  const span = (els: HTMLElement[]) => ({ top: els[0].getBoundingClientRect().top - b.top, bottom: els[els.length - 1].getBoundingClientRect().bottom - b.top });
+  let { top, bottom } = span(want);
+  // Where all the rows do not fit (a phone held sideways), the ones that can still be favoured come first.
+  if (bottom - top + 24 > room && rows.length) {
+    const open = rows.filter((r) => r.querySelector('button.fav'));
+    if (open.length) ({ top, bottom } = span(open));
+  }
+  if (top >= 0 && bottom <= room) return;
+  // The whole of it where it fits, its top where it does not; 12 px clear of the edge.
+  const shift = bottom - top + 24 <= room ? bottom - room + 12 : top - 12;
+  box.scrollTop = Math.max(0, Math.min(box.scrollHeight - room, box.scrollTop + shift));
+}
 
 // ---------- minimap + zoom ----------
 

@@ -25,10 +25,12 @@
 //   - For scripts: `flowstate.phone.cover()`, `.strip()` and `.corner()` return what the camera is told.
 import { MATERIALS, NODE_DEFS } from '../content';
 import { canUndo, undo } from '../actions';
+import { matUnlocked } from '../economy';
 import {
   armedPort, cancelArmed, cancelGesture, closeRadial, ensureVisible, fitView, gestureActive, refreshBoard, settleGesture, tidyBoard,
 } from './board';
 import { el, invalidateLayout, setAttr, setClass, setHTML, setHidden, setStyle } from './dom';
+import { nodeSize } from './geom';
 import { PressWord } from './hud-words';
 import { icon } from './icons';
 import { Insets, StripBox, env } from './phone-env';
@@ -102,9 +104,14 @@ let cornerNow: { x0: number; y0: number } | null = null;
 /** Bumped whenever the strip, a sheet or the stage changed size (see the ResizeObserver in initPhone). */
 let sizeRev = 0;
 let sizeSeen = 0;
-/** Height of the stage, and of the goal card's hint when it was last on show (it folds away: see `sync`). */
+/** Size of the stage, and height of the goal card's hint when it was last on show (it folds away: see `sync`). */
 let stageH = 0;
+let stageW = 0;
 let hintH = 0;
+/** The room the floating buttons take beside the thumb row, gap included (0 until measured). */
+let fabsW = 0;
+/** What the summary covers, as last measured. */
+let sumNow = { bottom: 0, right: 0 };
 /** The share of the stage the strip may take on an upright phone before the card folds its hint. */
 const STRIP_SHARE = 0.45;
 const shortLandscape = typeof matchMedia === 'function' ? matchMedia('(orientation: landscape) and (max-height: 520px)') : null;
@@ -149,8 +156,13 @@ function summaryCover(): { bottom: number; right: number } {
  */
 function measure() {
   const g = ui.g;
+  // Only what can change a size or a place without the ResizeObserver hearing of it is in the key: a sheet
+  // opening (it is laid out at full size while hidden, so it does not resize), carrying, Claim, the summary.
+  // Everything else (the strip growing a line, a sheet's contents, the stage) bumps sizeRev. Reading layout
+  // forces the browser to lay the page out there and then, so it is done only when something may have moved,
+  // never on every refresh while a sheet slides in.
   const key = env.phone
-    ? `p|${ui.uiRev}|${g?.rev}|${sizeRev}|${isOpen(insp) ? 1 : 0}${isOpen(build) ? 1 : 0}${carrying() ? 1 : 0}${g?.goal.ready ? 1 : 0}${summaryEl && !summaryEl.hidden ? 1 : 0}`
+    ? `p|${sizeRev}|${isOpen(insp) ? 1 : 0}${isOpen(build) ? 1 : 0}${carrying() ? 1 : 0}${g?.goal.ready ? 1 : 0}${summaryEl && !summaryEl.hidden ? 1 : 0}`
     : `d|${sizeRev}`;
   if (key === measuredKey) return;
   measuredKey = key;
@@ -166,6 +178,8 @@ function measure() {
     if (e === goalEl) goalBottom = foot;
   }
   stripNow = bottom > 0 ? { x0, x1, bottom, goalBottom } : null;
+  stageH = stage.offsetHeight;
+  stageW = stage.offsetWidth;
   if (!env.phone) {
     coverNow = NONE;
     // The zoom buttons over the minimap, in the stage's bottom right corner.
@@ -179,11 +193,12 @@ function measure() {
     return;
   }
   cornerNow = null;
-  stageH = stage.offsetHeight;
   const hintEl = goalEl?.querySelector<HTMLElement>('.gc-hint');
   if (hintEl?.offsetHeight) hintH = hintEl.offsetHeight + 2;
+  if (fabsEl.offsetWidth) fabsW = fabsEl.offsetWidth + 8;
   sheetNow = sheetSize();
   const sum = summaryCover();
+  sumNow = sum;
   // (Under the summary the thumb row is out of reach and out of sight: nothing is kept clear of it.)
   const row = sum.bottom ? 12 : (g?.goal.ready ? CLAIM_ROW : THUMB_ROW) + 16;
   coverNow = { top: bottom, right: Math.max(sheetNow.shift, sum.right), bottom: Math.max(sheetNow.lift, sum.bottom), left: 0, row };
@@ -296,11 +311,27 @@ function buildChrome() {
     sync();
   });
 
-  thumb = el(`<div id="thumb-slot"><div id="tap-hint" hidden><span class="th"></span><button data-act="hint-cancel" aria-label="Cancel">${icon('close', 18)}</button></div></div>`);
+  // The line itself lets a press through to the board under it (phone.css): only its Cancel answers.
+  thumb = el(`<div id="thumb-slot"><div id="tap-hint" hidden><span class="th"></span><button data-act="hint-cancel" data-testid="hint-cancel" aria-label="Cancel">${icon('close', 18)}</button></div></div>`);
   hint = thumb.querySelector<HTMLElement>('#tap-hint')!;
   hintText = hint.querySelector<HTMLElement>('.th')!;
-  delegate(thumb, (a) => {
+  const cancelBtn = hint.querySelector<HTMLElement>('button')!;
+  // A browser gives a finger's tap to the nearest button its contact area touches, so a tap aimed at the board
+  // just beside Cancel arrives as a press on Cancel. Cancel counts only a press whose point came down inside
+  // its circle (a pointer event keeps the finger's own point): one beside it is a dead zone that does nothing
+  // at all, and one further off goes to the board. A key press on it counts.
+  let downOnCancel = -1e9;
+  thumb.addEventListener('pointerdown', (e) => {
+    downOnCancel = -1e9;
+    if (!cancelBtn.contains(e.target as Node)) return;
+    const r = cancelBtn.getBoundingClientRect();
+    if (Math.hypot(e.clientX - (r.left + r.width / 2), e.clientY - (r.top + r.height / 2)) <= r.width / 2 + 1) downOnCancel = performance.now();
+  }, { capture: true, passive: true });
+  delegate(thumb, (a, _args, _el, ev) => {
     if (a !== 'hint-cancel') return;
+    const byKey = ev.type === 'click' && (ev as MouseEvent).detail === 0;
+    if (!byKey && performance.now() - downOnCancel > 1500) return;
+    downOnCancel = -1e9;
     if (!cancelArmed() && ui.placing) {
       ui.placing = null;
       touch();
@@ -309,6 +340,103 @@ function buildChrome() {
   });
   stage.append(thumb, fabs);
   fabsEl = fabs;
+}
+
+// ---------- the "tap where…" line keeps off what it asks the player to tap ----------
+
+interface Box { x0: number; y0: number; x1: number; y1: number }
+/** The line's size, measured when its words change. */
+let hintSize = { w: 0, h: 0, text: '' };
+/** The line stands at its other place (class `alt` on #thumb-slot): under the strip on a phone, at the foot elsewhere. */
+let hintAlt = false;
+/** The camera and the targets as they were when the line's place was last decided. */
+let placeKey = '';
+
+/** In stage pixels, the boxes of what the line asks for: free deposits for a Well, nodes for an armed wire. */
+function hintTargets(): Box[] {
+  const g = ui.g;
+  const { x, y, k } = ui.view;
+  const out: Box[] = [];
+  const add = (wx: number, wy: number, w: number, h: number) => out.push({ x0: x + wx * k, y0: y + wy * k, x1: x + (wx + w) * k, y1: y + (wy + h) * k });
+  const armed = armedPort();
+  if (armed) {
+    for (const n of g.nodes) {
+      if (n.id === armed.from) continue;
+      const s = nodeSize(n);
+      add(n.x, n.y, s.w, s.h);
+    }
+  } else if (ui.placing?.type === 'well') {
+    const used = new Set(g.nodes.map((n) => n.depositId));
+    for (const d of g.deposits) if (!used.has(d.id) && matUnlocked(g, d.mat)) add(d.x, d.y, 172, 72);
+  }
+  return out;
+}
+
+/** Where the line would stand at either of its places, in stage pixels. */
+function hintBoxes(): { home: Box; alt: Box } {
+  const { w, h } = hintSize;
+  if (env.phone) {
+    const side = !!shortLandscape?.matches;
+    const left = 8, right = stageW - 8 - (fabsW || 104) - (side ? sheetNow.shift : 0);
+    const x0 = left + Math.max(0, (right - left - w) / 2);
+    const homeY = stageH - (side ? 6 : 8 + sheetNow.lift) - h;
+    const altY = coverNow.top + 8;
+    return { home: { x0, y0: homeY, x1: x0 + w, y1: homeY + h }, alt: { x0, y0: altY, x1: x0 + w, y1: altY + h } };
+  }
+  const x0 = (stageW - w) / 2;
+  const homeY = (stripNow?.bottom ?? 0) + 10;
+  const altY = stageH - 16 - h;
+  return { home: { x0, y0: homeY, x1: x0 + w, y1: homeY + h }, alt: { x0, y0: altY, x1: x0 + w, y1: altY + h } };
+}
+
+/** How much of `b` the targets cover (in px²), with a margin round the line: a target just beside it is crowded too. */
+function covered(b: Box, targets: Box[]): number {
+  let area = 0;
+  const m = 6;
+  for (const t of targets) {
+    const w = Math.min(b.x1 + m, t.x1) - Math.max(b.x0 - m, t.x0);
+    const h = Math.min(b.y1 + m, t.y1) - Math.max(b.y0 - m, t.y0);
+    if (w > 0 && h > 0) area += w * h;
+  }
+  return area;
+}
+
+/**
+ * Put the line where it hides none of what it asks the player to tap: its usual place, or its other one when
+ * the usual one lies over a free deposit (placing a Well) or a node (a wire waiting for its end) and the other
+ * does not, or less. Decided again when the camera or the board has moved, not while a finger is moving it.
+ */
+function placeHint(line: string, force = false) {
+  if (!line) {
+    if (setClass(thumb, 'alt', false)) hintAlt = false;
+    return;
+  }
+  const v = ui.view;
+  const key = `${line}|${Math.round(v.x)},${Math.round(v.y)},${v.k.toFixed(3)}|${ui.g.rev}|${sizeRev}|${sheetNow.lift}|${coverNow.top}`;
+  if (key === placeKey && !force) return;
+  if (gestureActive()) return;
+  placeKey = key;
+  if (hintSize.text !== line || !hintSize.w) {
+    // (Measured where it stands now: the place does not change its size.)
+    hintSize = { w: hint.offsetWidth, h: hint.offsetHeight, text: line };
+  }
+  const targets = hintTargets();
+  const { home, alt } = hintBoxes();
+  const onHome = covered(home, targets);
+  const onAlt = covered(alt, targets);
+  // (Stays where it is unless the other place is clearly better: no flip-flopping on a near tie.)
+  const want = hintAlt ? !(onHome <= onAlt * 0.5 || onHome === 0) : onHome > 0 && onAlt < onHome * 0.5;
+  hintAlt = want;
+  setClass(thumb, 'alt', want);
+}
+
+/**
+ * Fold the goal card's hint away, as a press on the board does (where the card folds it at all: a phone held
+ * sideways, or a strip that would take too much of an upright one). For the HUD's "Show me", which takes the
+ * player to the board. Also at env.foldHint.
+ */
+export function foldHint() {
+  if (env.phone && fold && hintOpen) setHintOpen(false);
 }
 
 /**
@@ -326,6 +454,8 @@ function hintLine(): string {
 
 let seenUi = -1;
 let seenRev = -1;
+/** The "tap where…" line on show ('' when none). */
+let hintNow = '';
 /** The goal whose hint was last opened by itself, and whether the hint is open. */
 let hintGoal = -1;
 let hintOpen = false;
@@ -354,6 +484,7 @@ function sync() {
   const line = env.phone || env.touch ? hintLine() : '';
   setHidden(hint, !line);
   if (line) setHTML(hintText, line);
+  hintNow = line;
   // Where the goal card folds its hint away, a new goal starts with the hint open.
   if (g.goal.i !== hintGoal) {
     hintGoal = g.goal.i;
@@ -373,12 +504,12 @@ function sync() {
   // (--strip-b is the same on every layout: where the strip ends, for whatever wants to sit under it.)
   setStyle(app, '--strip-b', (stripNow?.bottom ?? 0) + 'px');
   // (How much room the floating buttons take beside the thumb row: 104 px for two of them.)
-  if (env.phone && fabsEl.offsetWidth && setStyle(app, '--fabs-w', fabsEl.offsetWidth + 8 + 'px')) moved = true;
+  if (env.phone && fabsW && setStyle(app, '--fabs-w', fabsW + 'px')) moved = true;
   if (setStyle(app, '--lift', sheetNow.lift + 'px')) moved = true;
   if (setStyle(app, '--shift', sheetNow.shift + 'px')) moved = true;
   // The summary has come up over the foot (or the side) of the board, or has gone again: the whole
   // factory is framed in what is left, with a glide, once the layout has settled.
-  const sum = summaryCover();
+  const sum = env.phone ? sumNow : { bottom: 0, right: 0 };
   const sumKey = `${sum.bottom}|${sum.right}`;
   if (sumKey !== summarySeen) {
     summarySeen = sumKey;
@@ -397,6 +528,7 @@ function sync() {
     coverSeen = now;
     if (ui.sel?.kind === 'node' && !gestureActive()) ensureVisible(ui.sel.id);
   }
+  placeHint(hintNow);
 }
 
 // ---------- init ----------
@@ -424,6 +556,7 @@ export function initPhone() {
   motion?.addEventListener?.('change', () => (env.calm = motion.matches));
 
   buildChrome();
+  env.foldHint = foldHint;
   env.cover = cover;
   env.strip = strip;
   env.corner = corner;
@@ -460,12 +593,14 @@ export function initPhone() {
   // contents. The notice is only recorded here; the next frame measures and writes.
   if (typeof ResizeObserver !== 'undefined') {
     const ro = new ResizeObserver(() => void sizeRev++);
-    for (const e of [stage, goalEl, orderEl, alertEl, insp, build, summaryEl]) if (e) ro.observe(e);
+    for (const e of [stage, goalEl, orderEl, alertEl, insp, build, summaryEl, fabsEl]) if (e) ro.observe(e);
   } else onBeat(() => void sizeRev++);
 
   onFrame(() => {
     const g = ui.g;
     if (ui.uiRev !== seenUi || g.rev !== seenRev || sizeRev !== sizeSeen) sync();
+    // (The camera moving does not touch the game: the line's place is looked at again by itself.)
+    else if (hintNow) placeHint(hintNow);
     // (On every layout: the first framing happens before the goal card has any text in it.)
     if (refit && --refit === 0) {
       fitView(refitSmooth);
