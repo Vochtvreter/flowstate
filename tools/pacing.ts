@@ -60,7 +60,8 @@
  *   newcomer10  the same person at 10 s per action
  *   cardonly    the newcomer who never follows a tip, not even on the Flow goal: the cards and their lines
  *               alone. The cards have to carry the game by themselves, so this player has targets too. Their
- *               Flow goal is passed by its valve (RULES.flow.valveAfter), in about 100 s
+ *               Flow goal is passed by its valve (RULES.flow.valveAfter): it opens at 90 s, its ten seconds
+ *               are counted from there, and the Claim follows 8–16 s later, so about 110–116 s on the goal
  * For these players the report also counts the tips: how many came on offer, how many were followed, and the
  * smallest and the median saving the followed ones promised.
  *
@@ -2212,12 +2213,14 @@ export function playOnce(policy: string, seed: number): {
   checks: { label: string; value: string; target: string; ok: boolean }[];
   /** Tips that came on offer and tips followed (card players; both 0 for a player who takes none). */
   tips: { offered: number; followed: number };
+  /** Seconds on "Hold 95% Flow", from the claim before it to its own (null if it was never claimed). */
+  flowGoal: number | null;
 } {
   const p = POLICIES[policy];
   const bot = new Bot(p, seed, p.card ? CFG.minutesCard : p.fast ? CFG.minutesFast : CFG.minutesSlow);
   bot.run();
   const r = measure(bot);
-  return { lens: r.lens, checks: checks(r), tips: { offered: r.tipStats.offered, followed: r.tipStats.followed } };
+  return { lens: r.lens, checks: checks(r), tips: { offered: r.tipStats.offered, followed: r.tipStats.followed }, flowGoal: r.flowGoal?.seconds ?? null };
 }
 
 // From the command line (npm run pacing) this file is the program; a test that imports it only wants the exports.
