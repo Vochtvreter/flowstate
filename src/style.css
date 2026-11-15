@@ -339,6 +339,8 @@ html[data-input='touch'] #hints { display: none; }
 .slot { position: absolute; transform: translate(-50%, -50%); width: 96px; height: 96px; border-radius: 22px; background: #151c2d; border: 1px solid #2e3a56; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 3px; padding: 0 5px; box-shadow: 0 12px 30px rgba(0, 0, 0, 0.5); transition: transform 0.08s; }
 .slot:hover:not(:disabled) { background: #1a2440; border-color: var(--sel); transform: translate(-50%, -50%) scale(1.06); }
 .slot.best { border: 2px solid var(--sel); background: #1a2440; box-shadow: 0 0 0 6px rgba(122, 162, 255, 0.14), 0 12px 30px rgba(0, 0, 0, 0.5); }
+/* The suggested option is also the focused one (Enter builds it: board.ts openRadial); its highlight says so already. */
+.slot.best:focus-visible { outline: none; }
 .slot .sn { font-size: 11px; font-weight: 600; text-align: center; line-height: 13px; }
 .slot .ss { font-size: 10px; color: #a3aec4; text-align: center; }
 .slot .key { position: absolute; right: 8px; top: 6px; font-size: 10px; color: var(--dim); }

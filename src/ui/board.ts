@@ -224,7 +224,8 @@ const marked = new Set<number>();
 let markedFor: { from: number; port: number; quiet: boolean } | null = null;
 
 interface RadialOpt { type: NodeType; recipe?: string; label: string; sub: string; cost: number; locked?: string; glyph: string }
-interface RadialState { at: Pt; opts: RadialOpt[]; dir: 'consume' | 'produce'; from: number; port: number; to: number; mat: MatId | null; a: Pt }
+/** `best`: the option the card asks for, highlighted and preselected (-1: none; see `suggest`). */
+interface RadialState { at: Pt; opts: RadialOpt[]; dir: 'consume' | 'produce'; from: number; port: number; to: number; mat: MatId | null; a: Pt; best?: number }
 let radial: RadialState | null = null;
 
 // ----- the build menu takes no press from the gesture that opened it -----
@@ -3401,7 +3402,7 @@ function namedEnd(g: Game, from: number, port: number): GNode | null {
 /** The card asks for something to be built from this port, and the build menu from it offers that: see `wantedType`. */
 function buildsFrom(g: Game, from: number, port: number): boolean {
   const want = wantedType(g, from);
-  return !!want && consumeOptions(g, materialsAt(g, from, port), from).some((o) => o.type === want && !o.locked);
+  return !!want && consumeOptions(g, materialsAt(g, from, port)).some((o) => o.type === want && !o.locked);
 }
 
 /** A port has just been armed by a tap: bring its wire's far end into view, when the player could not tap it otherwise (see above). */
@@ -3527,7 +3528,7 @@ function tapEmpty(p: Pt) {
   disarm();
   // Right beside the port there is no room to build: that tap only cancels.
   if (Math.hypot(p.x - t.a.x, p.y - t.a.y) > 36 && !nodeAt(p)) {
-    openRadial({ at: p, dir: 'consume', from: t.from, port: t.port, to: 0, mat: t.mats[0] ?? null, a: t.a, opts: consumeOptions(g, t.mats, t.from) });
+    openRadial({ at: p, dir: 'consume', from: t.from, port: t.port, to: 0, mat: t.mats[0] ?? null, a: t.a, opts: consumeOptions(g, t.mats) });
   }
 }
 
@@ -4202,7 +4203,7 @@ function onUp(e: PointerEvent) {
           if (why) toast(why, 'bad');
         } else if (Math.hypot(p.x - d.a.x, p.y - d.a.y) > 36) {
           endDrag();
-          openRadial({ at: p, dir: 'consume', from: d.from, port: d.port, to: 0, mat: d.mats[0] ?? null, a: d.a, opts: consumeOptions(g, d.mats, d.from) });
+          openRadial({ at: p, dir: 'consume', from: d.from, port: d.port, to: 0, mat: d.mats[0] ?? null, a: d.a, opts: consumeOptions(g, d.mats) });
           return;
         }
       }
@@ -4293,15 +4294,24 @@ function wantedType(g: Game, from?: number): NodeType | null {
   return null;
 }
 
-/** The option the card asks for goes first (where it is preselected); the rest keep their order. */
-function wantedFirst(g: Game, opts: RadialOpt[], from?: number): RadialOpt[] {
-  const want = wantedType(g, from);
-  const i = want ? opts.findIndex((o) => o.type === want && !o.locked) : -1;
-  if (i <= 0) return opts;
-  return [opts[i], ...opts.slice(0, i), ...opts.slice(i + 1)];
+/**
+ * The option the card asks for (see `wantedType`): it is highlighted and preselected. Where the menu shows keys (a
+ * mouse and keyboard), every option keeps the place the port's kind of material gives it, so that a key learned
+ * once builds the same machine every time; a finger has no keys to learn, and there the suggested option comes
+ * first, where it is seen first. Sets `state.best`, and reorders `state.opts` for a finger.
+ */
+function suggest(g: Game, state: RadialState) {
+  const want = wantedType(g, state.dir === 'consume' ? state.from : undefined);
+  let i = want ? state.opts.findIndex((o) => o.type === want && !o.locked) : -1;
+  if (i > 0 && isTouch()) {
+    state.opts = [state.opts[i], ...state.opts.slice(0, i), ...state.opts.slice(i + 1)];
+    i = 0;
+  }
+  // (With nothing asked for, the first option is the one on offer, as it always was.)
+  state.best = i >= 0 ? i : 0;
 }
 
-function consumeOptions(g: Game, mats: MatId[], from?: number): RadialOpt[] {
+function consumeOptions(g: Game, mats: MatId[]): RadialOpt[] {
   const opts: RadialOpt[] = [];
   const uses = (r: Recipe) => r.inputs.some((i) => mats.includes(i[0]));
   const recipes = Object.values(RECIPES).filter(uses);
@@ -4329,13 +4339,13 @@ function consumeOptions(g: Game, mats: MatId[], from?: number): RadialOpt[] {
   if (locked && opts.length < 8) {
     opts.push({ type: locked.machine, recipe: locked.id, label: `${NODE_DEFS[locked.machine].name} → ${locked.name}`, sub: '', cost: 0, locked: locked.tech, glyph: matGlyph(locked.outputs[0][0], 24) });
   }
-  return wantedFirst(g, opts.slice(0, 8), from);
+  return opts.slice(0, 8);
 }
 
 function produceOptions(g: Game, m: MatId): RadialOpt[] {
-  return wantedFirst(g, Object.values(RECIPES)
+  return Object.values(RECIPES)
     .filter((r) => r.outputs.some((o) => o[0] === m) && recipeUnlocked(g, r))
-    .map((r) => ({ type: r.machine, recipe: r.id, label: `${NODE_DEFS[r.machine].name} → ${r.name}`, sub: 'make', cost: nodeCost(g, r.machine), glyph: matGlyph(r.outputs[0][0], 26) })));
+    .map((r) => ({ type: r.machine, recipe: r.id, label: `${NODE_DEFS[r.machine].name} → ${r.name}`, sub: 'make', cost: nodeCost(g, r.machine), glyph: matGlyph(r.outputs[0][0], 26) }));
 }
 
 /**
@@ -4372,7 +4382,7 @@ function openBuildSheet(state: RadialState) {
       const afford = !o.locked && o.cost <= g.credits + 1e-6;
       const cls = o.locked ? 'locked' : afford ? '' : 'poor';
       const does = o.recipe ? `makes ${esc(RECIPES[o.recipe]?.name ?? '')}` : o.sub;
-      return `<button class="bopt ${cls}${i === 0 && afford ? ' best' : ''}" data-act="pick:${i}" data-testid="radial-${o.type}${o.recipe ? '-' + o.recipe : ''}" ${o.locked ? 'disabled' : ''}>
+      return `<button class="bopt ${cls}${i === state.best && afford ? ' best' : ''}" data-act="pick:${i}" data-testid="radial-${o.type}${o.recipe ? '-' + o.recipe : ''}" ${o.locked ? 'disabled' : ''}>
         <span class="bg">${o.glyph}</span><span class="bn">${o.locked ? icon('lock', 13) : ''}${esc(NODE_DEFS[o.type].name)}</span>
         <span class="bs">${o.locked ? '' : does ? does + ' · ' : ''}<span class="mono">${optPrice(o)}</span></span>
       </button>`;
@@ -4410,7 +4420,7 @@ const SHEET_ROOM = 120;
  * only for the new node, and the floating controls step aside while it is open), up to the strip less
  * SHEET_ROOM. When even that cannot show every option, the list is cut halfway through a row, never at a
  * sliver, and fades at its foot: the rest is plainly there to be scrolled to. (The option the goal asks for
- * comes first: see `wantedFirst`.)
+ * comes first: see `suggest`.)
  */
 function fitBuildSheet() {
   const list = buildEl.querySelector<HTMLElement>('.bopts');
@@ -4465,7 +4475,7 @@ function refreshBuildSheet() {
     if (!b || o.locked) return;
     const afford = o.cost <= credits + 1e-6;
     setClass(b, 'poor', !afford);
-    if (i === 0) setClass(b, 'best', afford);
+    if (i === r.best) setClass(b, 'best', afford);
   });
 }
 
@@ -4473,6 +4483,7 @@ function openRadial(state: RadialState) {
   radial = state;
   menuOpenedAt = performance.now();
   menuPressAt = -Infinity;
+  suggest(ui.g, state);
   if (env.phone) {
     openBuildSheet(state);
     return;
@@ -4481,9 +4492,11 @@ function openRadial(state: RadialState) {
   const n = state.opts.length;
   // Wide enough that neighbouring slots never overlap, however the fan is turned.
   const R = n >= 8 ? 180 : n === 7 ? 158 : n >= 6 ? 142 : 122;
-  // Keep the whole menu on screen; the node is built wherever the menu ends up.
+  // Keep the whole menu on screen; the node is built where the wire was let go (see `pickRadial`).
   const rect = rectOf();
   let raw = toScreen(state.at);
+  // (Where the pointer is, on the stage: the menu may have to stand elsewhere, but no option may lie under it.)
+  const pointer = { ...raw };
   const m = R + 58;
   const mx = Math.min(m, rect.width / 2), my = Math.min(m, rect.height / 2);
   const c = { x: Math.max(mx, Math.min(rect.width - mx, raw.x)), y: Math.max(my, Math.min(rect.height - my, raw.y)) };
@@ -4504,12 +4517,26 @@ function openRadial(state: RadialState) {
       c.y = Math.max(my, Math.min(rect.height - my, Math.max(top, raw.y)));
     }
   }
-  state.at = { x: (c.x - ui.view.x) / ui.view.k, y: (c.y - ui.view.y) / ui.view.k };
   const a = toScreen(state.a);
   hideTemp();
   const back = Math.atan2(a.y - c.y, a.x - c.x); // direction the wire comes from
-  const fwd = back + Math.PI;
   const step = radialStep(n);
+  // Near an edge the menu stands off the pointer, and an option could come to lie under it (a second click from
+  // a double-click habit would build it): the fan is turned, as little as it takes, until none does.
+  const under = (turn: number) => state.opts.some((_, i) => {
+    const ang = back + Math.PI + turn + step * radialOffset(i, n);
+    return Math.abs(c.x + Math.cos(ang) * R - pointer.x) < 48 + 10 && Math.abs(c.y + Math.sin(ang) * R - pointer.y) < 48 + 10;
+  });
+  let turn = 0;
+  if (under(0)) {
+    for (let d = 5; d <= 180; d += 5) {
+      const t = (d * Math.PI) / 180;
+      if (!under(t)) { turn = t; break; }
+      if (!under(-t)) { turn = -t; break; }
+    }
+  }
+  const fwd = back + Math.PI + turn;
+  const best = state.best ?? 0;
   const slots = state.opts
     .map((o, i) => {
       const ang = fwd + step * radialOffset(i, n);
@@ -4517,7 +4544,7 @@ function openRadial(state: RadialState) {
       const afford = !o.locked && o.cost <= g.credits + 1e-6;
       const cls = o.locked ? 'locked' : afford ? '' : 'poor';
       const price = optPrice(o);
-      return `<button class="slot ${cls}${i === 0 && afford ? ' best' : ''}" data-act="pick:${i}" data-i="${i}" data-testid="radial-${o.type}${o.recipe ? '-' + o.recipe : ''}" style="left:${x.toFixed(1)}px;top:${y.toFixed(1)}px" ${o.locked ? 'disabled' : ''}>
+      return `<button class="slot ${cls}${i === best && afford ? ' best' : ''}" data-act="pick:${i}" data-i="${i}" data-testid="radial-${o.type}${o.recipe ? '-' + o.recipe : ''}" style="left:${x.toFixed(1)}px;top:${y.toFixed(1)}px" ${o.locked ? 'disabled' : ''}>
         <span class="key mono">${i + 1}</span>${o.locked ? icon('lock', 14) : ''}${o.glyph}
         <span class="sn">${esc(o.label)}</span><span class="ss">${o.sub ? o.sub + ' · ' : ''}<span class="mono">${price}</span></span>
       </button>`;
@@ -4532,6 +4559,8 @@ function openRadial(state: RadialState) {
   radialEl.style.left = c.x + 'px';
   radialEl.style.top = c.y + 'px';
   radialEl.style.display = 'block';
+  // Preselected: Enter (or Space) builds the suggested option, for a player at the keyboard. (Not for a finger.)
+  if (!isTouch()) radialEl.querySelector<HTMLButtonElement>(`.slot[data-i="${best}"]:not(:disabled)`)?.focus({ preventScroll: true });
 }
 
 export function closeRadial() {
