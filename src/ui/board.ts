@@ -778,7 +778,8 @@ const ex = {
  */
 function expandAsked(g: Game): boolean {
   const goal = activeGoal(g);
-  if (!goal) return false;
+  // (A goal that is done and waiting to be claimed asks for nothing more.)
+  if (!goal || g.goal.ready) return false;
   return goal.id === 'expand' || (!!goal.meanwhile && !!lineAdvice(g)?.expand);
 }
 
