@@ -2,7 +2,7 @@
 //
 // Goals are deliberately silent here: the goal card shows 'goal-ready', and the celebration covers
 // 'goal-claimed', 'flow-state' and 'demo-end'.
-import { DATA_COLORS, DATA_NAMES, DataTier, MATERIALS, TECHS } from '../content';
+import { DATA_COLORS, DATA_NAMES, DataTier, MATERIALS, RULES, TECHS } from '../content';
 import { fmt } from '../economy';
 import { GameEvent, Order, Reward } from '../state';
 import { PressWord } from './hud-words';
@@ -27,10 +27,14 @@ let announced: Order | null = null;
 export function toastFor(ev: GameEvent) {
   switch (ev.kind) {
     case 'milestone':
+      // A by-product nobody wants (Silt) is not an achievement: no toast for junk.
+      if (MATERIALS[ev.mat].value < RULES.orders.junkValue) break;
       toast(`${matGlyph(ev.mat, 18)}<span><b>First ${MATERIALS[ev.mat].name}!</b></span>`, 'good', 3500);
       break;
     case 'tech': {
       const t = TECHS[ev.id];
+      // Researched in the open tech tree: the tree shows it there and then, and a toast would only be in its way.
+      if (ui.techOpen) break;
       if (t) toast(`${icon('tree', 16)}<span><b>${esc(t.name)}</b> unlocked: ${esc(t.unlocks.join(', '))}</span>`, 'good', 5000);
       break;
     }
@@ -62,6 +66,10 @@ export function toastFor(ev: GameEvent) {
       toast(`<span><b>Order delivered:</b> ${payHtml(ev.reward)}${announced ? `<span class="muted"> · next: ${orderWords(announced)}</span>` : ''}</span>`, 'good', 4500);
       break;
     }
+    case 'surplus':
+      // The first time anything sells over its demand. From here on the Market inspector shows its gauges.
+      toast(`${matGlyph(ev.mat, 18)}<span>${esc(ev.text)} Select a Market to see how much it wants.</span>`, 'info', 8000);
+      break;
     default:
       break;
   }

@@ -7,22 +7,25 @@
 //    a second after a claim it is still the place where Claim was pressed); 'order' is the order
 //    chip (null while hidden); 'flow' is the Flow ring (null until it is unlocked).
 //  - #goal carries data-goal="<id>" and data-ready="0|1"; the buttons are data-testid="claim",
-//    "advice-show" and "order-claim".
+//    "advice-show" and "order-claim". The tip row is data-testid="advice-tip".
+//  - The adviser never runs here: its answers come from a Web Worker (advice-client.ts), and what the
+//    card does with them is in advice-tip.ts.
 //  - The whole strip is patched in place (makePanel), so a press never lands on a rebuilt element
 //    and the pulse on the Claim button runs on across several claims in a row.
-import { Advice, advice } from '../advice';
-import { nodeById } from '../actions';
-import { DATA_COLORS, DATA_NAMES, DataTier, MATERIALS, NODE_DEFS, NodeType, RECIPES, TECHS } from '../content';
+import { materialsAt, nodeById } from '../actions';
+import { DATA_COLORS, DATA_NAMES, DataTier, MATERIALS, MatId, NODE_DEFS, RECIPES, TECHS } from '../content';
 import { fmt } from '../economy';
 import { GoalProgress, GoalView, claimGoal, goalView } from '../goals';
 import { claimOrder, orderView } from '../orders';
+import { graph } from '../sim';
 import { Game, GNode, GoalReward, Reward } from '../state';
+import { initAdviser, pollAdviser } from './advice-client';
+import { WaitLine, announceTips, resetTips, showTip, tendTips, tipHtml, tipShown, waitLine } from './advice-tip';
 import { jumpTo } from './board';
 import { Panel, anchorPt, makePanel, setAnchor, setAttr, setClass, setHidden } from './dom';
-import { ring } from './fx';
 import { initFlowRing, updateFlowRing } from './hud-flow';
 import { toastFor } from './hud-toasts';
-import { calmMotion, isTouch, waitText } from './hud-words';
+import { aboutTime, calmMotion, isTouch } from './hud-words';
 import { esc, icon, matGlyph } from './icons';
 import { onPanels, renderPanels } from './panels';
 import { diagnose, matName } from './status';
@@ -32,6 +35,7 @@ let stripEl: HTMLElement;
 let goalEl: HTMLElement;
 let orderEl: HTMLElement;
 let alertEl: HTMLElement;
+let toastsEl: HTMLElement;
 let goalPanel: Panel;
 let orderPanel: Panel;
 let alertPanel: Panel;
@@ -41,20 +45,26 @@ export function initHud() {
   goalEl = document.getElementById('goal')!;
   orderEl = document.getElementById('order')!;
   alertEl = document.getElementById('hud-alert')!;
+  toastsEl = document.getElementById('toasts')!;
   goalPanel = makePanel(goalEl);
   orderPanel = makePanel(orderEl);
   alertPanel = makePanel(alertEl);
   initFlowRing();
+  initAdviser();
 
   // Every handler ends with a forced refresh: the press must be answered at once, although the
   // pointer is still down inside the strip.
-  delegate(stripEl, (a, args) => {
+  delegate(stripEl, (a, args, _el, ev) => {
     const g = ui.g;
+    // While the tech tree is open the keyboard belongs to it (Enter researches): a Claim button that
+    // happens to hold the focus must not answer Enter or Space as well. A pointer still claims.
+    const byKey = ev.type === 'click' && (ev as MouseEvent).detail === 0;
+    if (ui.techOpen && byKey && (a === 'claim' || a === 'claim-order')) return;
     if (a === 'claim') {
       const pressed = goalEl.querySelector('[data-testid="claim"]')?.getBoundingClientRect();
       if (claimGoal(g) && pressed) holdGoalAnchor(pressed);
     } else if (a === 'claim-order') claimOrder(g);
-    else if (a === 'show') showAdvice();
+    else if (a === 'show') return showTip(g, () => renderPanels(true));
     else if (a === 'jump') jumpTo(Number(args[0]));
     renderPanels(true);
   });
@@ -68,8 +78,7 @@ export function initHud() {
     }
   });
   onNewGame(() => {
-    tipKey = '';
-    tip = null;
+    resetTips();
     anchorKey = '';
     standUntil = 0;
     alertNode = -1;
@@ -124,14 +133,20 @@ function progressHtml(p: GoalProgress): string {
   return `${bar(share, '#7AA2FF')}<span class="gc-num"><b class="mono">${fmt(Math.floor(cur))} / ${fmt(target)}</b> ${esc(unit)}</span>`;
 }
 
-function tipHtml(a: Advice): string {
-  const wait = waitText(a.eta);
-  const canShow = a.node != null || !!a.build;
-  return `<div class="gc-tip" data-kind="${a.kind}"><span class="gc-tiptxt"><b>Tip</b>${esc(isTouch() ? a.text.touch : a.text.mouse)}${wait ? `<i>${wait} at this rate</i>` : ''}</span>${
-    canShow ? `<button class="gc-show" data-act="show" data-testid="advice-show">Show me</button>` : ''}</div>`;
+/**
+ * The progress line during a wait, as the adviser sees the wait: what is really being saved for (which can
+ * be the credits for a machine while the goal's own count is still the Data for its research) and how long
+ * that takes at the current income: "Saving 320 / 1,140α · about 2 min". When nothing is coming in it
+ * says so, instead of a time that would never come.
+ */
+function waitHtml(w: WaitLine): string {
+  const tier = DATA_OF[w.unit];
+  const color = tier ? DATA_COLORS[tier] : '#FFC857';
+  const left = isFinite(w.eta) ? aboutTime(w.eta) : tier ? `nothing is bringing in ${w.unit} yet` : 'nothing is being sold yet';
+  return `${bar(w.need > 0 ? w.have / w.need : 0, color)}<span class="gc-num">Saving <b class="mono"${tier ? ` style="color:${color}"` : ''}>${fmt(Math.floor(w.have))} / ${fmt(w.need)}${w.unit}</b></span><span class="gc-eta${isFinite(w.eta) ? '' : ' never'}" data-testid="goal-eta">${left}</span>`;
 }
 
-function goalHtml(v: GoalView, a: Advice | null): string {
+function goalHtml(g: Game, v: GoalView): string {
   const step = `${v.free ? 'Free play' : 'Goal'} ${v.number} / ${v.total}`;
   if (v.ready) {
     return `<div class="gc-main"><div class="gc-head"><span class="gc-step">${step}</span><span class="gc-done">${icon('check', 12)}Done</span></div>
@@ -139,53 +154,12 @@ function goalHtml(v: GoalView, a: Advice | null): string {
       <div class="gc-rewards"><span class="gc-lbl">Reward</span>${rewardChips(v.reward)}</div></div>
       <button class="claim" data-act="claim" data-testid="claim">Claim</button>`;
   }
+  const wait = waitLine(g, v.progress);
   return `<div class="gc-main"><div class="gc-head"><span class="gc-step">${step}</span><span class="gc-rewards">${rewardChips(v.reward)}</span></div>
       <h3 class="gc-title">${esc(v.goal.title)}</h3>
       <p class="gc-hint">${esc(v.hint)}</p>
-      ${v.progress ? `<div class="gc-prog">${progressHtml(v.progress)}</div>` : ''}
-      ${a ? tipHtml(a) : ''}</div>`;
-}
-
-// The adviser is asked once a second at most, and at once when the goal changes: a tip that
-// flickered between two answers four times a second would be unreadable.
-let tip: Advice | null = null;
-let tipKey = '';
-let tipAt = 0;
-
-function currentTip(g: Game, key: string): Advice | null {
-  const now = performance.now();
-  if (key === tipKey && now - tipAt < 1000) return tip;
-  tipKey = key;
-  tipAt = now;
-  try {
-    tip = advice(g);
-  } catch (err) {
-    console.error(err);
-    tip = null;
-  }
-  return tip;
-}
-
-function showAdvice() {
-  const a = tip;
-  if (!a) return;
-  if (a.node != null && nodeById(ui.g, a.node)) {
-    jumpTo(a.node);
-    return;
-  }
-  if (a.build) pulseHotbar(a.build as NodeType);
-}
-
-/** Draw the eye to a hotbar button: it swells three times and a ring opens around it. */
-function pulseHotbar(type: NodeType) {
-  const b = document.querySelector<HTMLElement>(`[data-testid="hot-${type}"]`);
-  if (!b) return;
-  const r = b.getBoundingClientRect();
-  if (!r.width) return;
-  ring({ x: r.left + r.width / 2, y: r.top + r.height / 2 }, '#7AA2FF');
-  if (!calmMotion() && b.animate) {
-    b.animate([{ transform: 'scale(1)' }, { transform: 'scale(1.16)' }, { transform: 'scale(1)' }], { duration: 420, iterations: 3, easing: 'ease-in-out' });
-  }
+      ${wait ? `<div class="gc-prog">${waitHtml(wait)}</div>` : v.progress ? `<div class="gc-prog">${progressHtml(v.progress)}</div>` : ''}
+      ${tipHtml()}</div>`;
 }
 
 function renderGoal(g: Game, force: boolean) {
@@ -193,28 +167,50 @@ function renderGoal(g: Game, force: boolean) {
   setAttr(goalEl, 'data-goal', v ? v.goal.id : 'none');
   setAttr(goalEl, 'data-ready', v?.ready ? '1' : '0');
   setClass(goalEl, 'done', !v);
+  // The adviser is asked (in its worker) whenever its last answer no longer holds, and the tip row follows.
+  pollAdviser(g);
+  tendTips(g);
   if (!v) {
-    tip = null;
     goalPanel.render(`<div class="gc-free">${icon('check', 13)}<span><b>Free play</b> · every goal is done. The line is yours.</span></div>`, force);
     return;
   }
-  if (v.ready) tip = null;
-  const a = v.ready ? null : currentTip(g, v.goal.id);
-  goalPanel.render(goalHtml(v, a), force);
+  goalPanel.render(goalHtml(g, v), force);
+  announceTips(goalEl);
 }
 
 // ---------- order chip ----------
+
+/** Is any port that gives this material wired, directly or through Routers and the like, into a Market? */
+function wiredToMarket(g: Game, mat: MatId): boolean {
+  const c = graph(g);
+  for (const n of g.nodes) {
+    if (n.type !== 'market') continue;
+    for (const w of c.ins.get(n.id) ?? []) if (materialsAt(g, w.from, w.port).includes(mat)) return true;
+  }
+  return false;
+}
 
 function renderOrder(g: Game, force: boolean) {
   const o = orderView(g);
   setHidden(orderEl, !o);
   if (!o) return;
+  // An order only counts what is sold. When none of it is, a bar that never moves would be a lie by
+  // omission: the chip says so, and what to do about it.
+  const stuck = !o.ready && !o.reachesMarket;
   setAttr(orderEl, 'data-ready', o.ready ? '1' : '0');
   setAttr(orderEl, 'data-mat', o.order.mat);
+  setAttr(orderEl, 'data-stuck', stuck ? '1' : '0');
   const color = MATERIALS[o.order.mat].color;
+  const name = esc(o.name);
+  const left = !o.ready && !stuck && isFinite(o.eta) ? `<span class="oc-eta" data-testid="order-eta">${aboutTime(o.eta)}</span>` : '';
+  const state = stuck
+    ? `<div class="oc-warn" data-testid="order-stuck">${wiredToMarket(g, o.order.mat)
+      ? `No ${name} is getting to a Market yet. Make more of it.`
+      : `No Market is getting ${name} yet. Wire some to a Market.`}</div>`
+    : bar(o.need > 0 ? o.got / o.need : 0, color);
   orderPanel.render(`<div class="oc-ico">${matGlyph(o.order.mat, 20)}</div>
-    <div class="oc-main"><span class="oc-lbl">Order</span><div class="oc-line">Deliver <b class="mono">${o.got} / ${o.need}</b> ${esc(o.name)}</div>
-      ${bar(o.need > 0 ? o.got / o.need : 0, color)}
+    <div class="oc-main"><div class="oc-top"><span class="oc-lbl">Order</span>${left}</div><div class="oc-line">Deliver <b class="mono">${o.got} / ${o.need}</b> ${name}</div>
+      ${state}
       <div class="oc-pay"><span class="gc-lbl">${o.ready ? 'Filled' : 'Pays'}</span>${rewardChips(o.reward)}</div></div>
     ${o.ready ? `<button class="claim sm" data-act="claim-order" data-testid="order-claim">Claim</button>` : ''}`, force);
 }
@@ -298,10 +294,15 @@ function renderHud(force: boolean) {
   updateFlowRing(g);
   // While the tech tree covers the board, a goal that is ready lifts above it as a slim bar, so Claim is never hidden.
   setClass(stripEl, 'over-tech', ui.techOpen && g.goal.ready);
+  // Toasts raised while it is open keep clear of its Research button (hud.css).
+  setClass(toastsEl, 'over-tech', ui.techOpen);
+  // The keyboard belongs to the tree while it is open (Enter researches there, unless a button holds the
+  // focus): nothing in the strip keeps the focus under it.
+  if (ui.techOpen && stripEl.contains(document.activeElement)) (document.activeElement as HTMLElement).blur();
   // The anchors are pointed at what is on screen whenever the layout of the strip may have changed.
   const claim = goalEl.querySelector('[data-testid="claim"]');
   const held = !claim && !!stand && performance.now() < standUntil;
-  const key = `${g.goal.i}|${claim ? 1 : 0}|${g.order ? 1 : 0}${g.order?.ready ? 1 : 0}|${alertEl.hasAttribute('hidden') ? 0 : 1}|${ui.techOpen ? 1 : 0}|${tip ? 1 : 0}|${held ? 1 : 0}`;
+  const key = `${g.goal.i}|${claim ? 1 : 0}|${g.order ? 1 : 0}${g.order?.ready ? 1 : 0}|${alertEl.hasAttribute('hidden') ? 0 : 1}|${ui.techOpen ? 1 : 0}|${tipShown() ? 1 : 0}|${held ? 1 : 0}`;
   if (key !== anchorKey) {
     anchorKey = key;
     setAnchor('goal', claim ?? (held ? stand! : goalEl));
