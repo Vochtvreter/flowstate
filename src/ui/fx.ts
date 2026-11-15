@@ -128,6 +128,8 @@ interface Surface {
   /** Canvas pixels per CSS pixel. */
   ratio: number;
   blank: boolean;
+  /** It is on screen (it is hidden while there is nothing on it). */
+  shown: boolean;
 }
 /** Layer numbers. A particle is on one of them, or on AUTO: wherever it happens to be this frame. */
 const BOARD = 0, TOP = 1, BAR = 2, AUTO = -1;
@@ -202,7 +204,7 @@ function makeSurface(id: string, z: number): Surface {
   // Inline, so the layer can never take input or push the layout about even if a stylesheet is missing.
   c.style.cssText = `position:absolute;left:0;top:0;pointer-events:none;z-index:${z}`;
   appEl!.appendChild(c);
-  return { canvas: c, ctx: c.getContext('2d'), x: 0, y: 0, w: 0, h: 0, ratio: 1, blank: true };
+  return { canvas: c, ctx: c.getContext('2d'), x: 0, y: 0, w: 0, h: 0, ratio: 1, blank: true, shown: true };
 }
 
 export function initFx(c: HTMLCanvasElement) {
@@ -1244,7 +1246,16 @@ function frameSurface(s: Surface, parts: number, list: Overlay[] | null, layer: 
       c.clearRect(0, 0, s.canvas.width, s.canvas.height);
       s.blank = true;
     }
+    // (Out of sight while empty, like the board layer: an empty canvas on screen is still blended on every frame.)
+    if (s.shown) {
+      s.shown = false;
+      s.canvas.style.visibility = 'hidden';
+    }
     return;
+  }
+  if (!s.shown) {
+    s.shown = true;
+    s.canvas.style.visibility = '';
   }
   s.blank = false;
   c.setTransform(s.ratio, 0, 0, s.ratio, -s.x * s.ratio, -s.y * s.ratio);
