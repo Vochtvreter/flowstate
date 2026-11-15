@@ -824,7 +824,7 @@ export function nodeInClear(id: number, v: View = viewAhead()): boolean {
  * The same for world boxes (cards, deposits): nothing moves when every one of them is already in view and
  * uncovered; otherwise the least move that brings them, or the last one named, into the free part of the stage.
  */
-function frameBoxes(boxes: Box[], readable = false): void {
+export function frameBoxes(boxes: Box[], readable = false): void {
   let box: Box | null = null;
   let last: Box | null = null;
   for (const b of boxes) {

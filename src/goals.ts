@@ -964,8 +964,17 @@ export interface GoalView {
    * the goal's lines and `of` how many the goal has, so the card can read "While you wait · 2 of 3". Both are
    * absent (read as 1 of 1) for a goal with a single line. lineAdvice(g) in src/advice.ts always gives the next
    * step of the line shown here.
+   *
+   * `required`: the line is the goal's own requirement, not something to do while waiting (goal 22's wires into
+   * the Fabricator): the card labels it "Next step", with no count. `held`: the line's next step is being saved
+   * for (the credits the card's own next purchase needs are kept back), so it has no Show me yet; the card says
+   * what it is saving and about how long ("Saving for this · 1,100¢ · about 40 s"). `eta` is in game seconds.
    */
-  meanwhile?: { text: string; done: boolean; step?: number; of?: number };
+  meanwhile?: {
+    text: string; done: boolean; step?: number; of?: number;
+    required?: boolean;
+    held?: { cost: number; sym: '¢' | 'α' | 'β' | 'γ'; eta: number };
+  };
   /**
    * Only on "Make your first Lens", once there is a Fabricator: each input a Lens takes and whether it is wired
    * into that Fabricator, so the card can say "Prism ✓ · Glyph ✗" (the progress counts the same as "1 / 2 inputs wired").
