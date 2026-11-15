@@ -4092,15 +4092,22 @@ function fitBuildSheet() {
   // Cut the list in the middle of the first row that does not fit.
   const top = list.getBoundingClientRect().top;
   const avail = room - head;
-  let cut = avail;
+  let cut = -1;
+  let prevMid = -1;
   for (const o of list.querySelectorAll<HTMLElement>('.bopt')) {
     const r = o.getBoundingClientRect();
     const y0 = r.top - top + list.scrollTop, y1 = y0 + r.height;
     if (y1 > avail) {
-      cut = Math.min(avail, Math.max(y0 - 8 + r.height * 0.5, 60));
+      // Halfway into this row when that much of it fits; otherwise halfway into the row before it (the list would
+      // end at a row's edge and look complete).
+      const half = y0 - 8 + r.height * 0.5;
+      cut = Math.max(half <= avail ? half : prevMid >= 0 ? prevMid : avail, 60);
       break;
     }
+    prevMid = y0 + r.height * 0.5;
   }
+  // (Every option fits, and only the list's own padding does not: nothing more to scroll to, and no fade.)
+  if (cut < 0) return;
   list.style.maxHeight = Math.round(cut) + 'px';
   list.classList.add('more');
   buildEl.style.maxHeight = Math.round(head + cut) + 'px';
