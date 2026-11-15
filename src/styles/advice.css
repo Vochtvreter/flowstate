@@ -16,11 +16,17 @@
 .gc-row.open > .gc-in { animation: row-clip 0.24s cubic-bezier(0.2, 0.8, 0.2, 1); }
 .gc-row.out { animation: row-out 0.24s ease-in forwards; pointer-events: none; }
 .gc-row.out > .gc-in { clip-path: inset(0 -8px); animation: row-unpad 0.24s ease-in forwards; }
-/* A row that gives way to another opening in its place closes on the opening row's curve: the two heights add up
-   to a steady glide from the one to the other, with no bump in between. */
+/* A line that gives way to the next one (advice-tip.ts, swapLine) first fades out where it is, keeping its height
+   (`leaving`); only then does the next line's row open in its place, while this one, unseen by then, closes on the
+   opening row's curve: the two heights add up to a steady glide from the one to the other, with no bump in between,
+   and two lines are never drawn at once. */
+.gc-row.leaving { animation: row-fade 0.16s ease-out forwards; pointer-events: none; }
+.gc-row.out.swap { opacity: 0; animation-name: row-shut; }
 .gc-row.out.swap, .gc-row.out.swap > .gc-in { animation-timing-function: cubic-bezier(0.2, 0.8, 0.2, 1); }
 @keyframes row-in { from { grid-template-rows: 0fr; opacity: 0; margin-top: calc(-1 * var(--gc-gap, 5px)); } }
 @keyframes row-out { to { grid-template-rows: 0fr; opacity: 0; margin-top: calc(-1 * var(--gc-gap, 5px)); } }
+@keyframes row-shut { to { grid-template-rows: 0fr; margin-top: calc(-1 * var(--gc-gap, 5px)); } }
+@keyframes row-fade { to { opacity: 0; } }
 @keyframes row-clip { from { clip-path: inset(0 -8px); padding-top: 0; margin-top: 0; border-top-width: 0; } to { clip-path: inset(0 -8px); } }
 @keyframes row-unpad { to { padding-top: 0; margin-top: 0; border-top-width: 0; } }
 
@@ -51,8 +57,18 @@
 .gc-line.done .gc-linetxt { color: #7d8aa6; }
 .gc-line.pop .gc-tick { animation: tick-pop 0.42s cubic-bezier(0.3, 1.5, 0.5, 1); }
 @keyframes tick-pop { 0% { transform: scale(0.5); } 55% { transform: scale(1.35); } 100% { transform: scale(1); } }
-/* What the line bought, beside its label, for as long as the adviser stays quiet after it. */
-.gc-bought { font-size: 11.5px; font-weight: 600; color: #4ade80; animation: tip-in 0.35s ease-out; }
+/* What the line bought, beside its label, for as long as the adviser stays quiet after it. Where the label and those
+   words do not fit on one line, the words go on under it: they never run out of the card (final-wide F5). */
+.gc-linehead { flex-wrap: wrap; column-gap: 8px; height: auto; min-height: 16px; }
+.gc-linehead .gc-lbl { white-space: nowrap; }
+.gc-bought { font-size: 11.5px; font-weight: 600; color: #4ade80; white-space: normal; animation: tip-in 0.35s ease-out; }
+/* "Next step": the goal's own requirement (goal 22's wires), not something to do while waiting. */
+.gc-line.req .gc-linehead .gc-lbl { color: #c4d4ff; }
+/* Where a step is being saved for (no Show me yet): what for and about how long, where the button would be. */
+.gc-held { flex: none; align-self: center; display: flex; flex-direction: column; align-items: flex-end; max-width: 46%; margin-left: auto; font-size: 11.5px; line-height: 15px; color: var(--muted); text-align: right; animation: tip-in 0.3s ease-out; }
+.gc-held .gh-a { white-space: nowrap; color: #aab6cf; }
+.gc-held .gh-b { white-space: nowrap; }
+.gc-held b { font-weight: 600; color: var(--credits); }
 
 /* ---------- the tip row ----------
    One suggestion from the adviser: what it buys first ("About 1 min sooner"), then the sentence, then
@@ -107,6 +123,9 @@
 @media (prefers-reduced-motion: reduce) {
   .gc-row.open { animation: tip-in 0.3s ease-out; }
   .gc-row.open > .gc-in, .gc-row.out, .gc-row.out > .gc-in, .gc-line.pop .gc-tick { animation: none; }
+  /* (No row closes here at all: advice-tip.ts swaps at once. These are the backstop: a fade, no change of height.) */
+  .gc-row.leaving { animation: row-fade 0.16s linear forwards; }
+  .gc-held { animation: tip-in 0.3s linear; }
   .gc-tick, .gc-linetxt { transition: none; }
   .gc-tip .gc-tiptxt, .gc-tip .gc-tiplead strong, .gc-tip .gc-tipbadge, .gc-show::before, #insp .hl, #expand.hl { animation: none !important; }
   .gc-tipold { display: none; }

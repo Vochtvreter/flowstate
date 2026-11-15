@@ -441,12 +441,23 @@ const endingHeld = (g: Game) => endingShown(g);
 /** The card showed the ending at the last refresh: when it gives way to free play, the new card rises. */
 let heldBefore = false;
 
+/**
+ * For scripts: fields laid over the goal's line as the rules give it (GoalView.meanwhile: `required`, `held`), until
+ * cleared with null. The rules set both themselves; this lets the card's side of them be seen before they do.
+ */
+let lineFields: Partial<NonNullable<GoalView['meanwhile']>> | null = null;
+export function setLineFields(f: Partial<NonNullable<GoalView['meanwhile']>> | null) {
+  lineFields = f;
+  renderPanels(true);
+}
+
 function renderGoal(g: Game, force: boolean) {
   const held = endingHeld(g);
   // (Free play arrives as a claimed goal's next card does: it rises into place.)
   if (heldBefore && !held && g.ended) rises++;
   heldBefore = held;
-  const v = held ? null : goalView(g, isTouch());
+  const seen = held ? null : goalView(g, isTouch());
+  const v = seen?.meanwhile && lineFields ? { ...seen, meanwhile: { ...seen.meanwhile, ...lineFields } } : seen;
   const narrow = isNarrow();
   setAttr(goalEl, 'data-goal', held ? GOALS[MAIN_GOALS - 1].id : v ? v.goal.id : 'none');
   setAttr(goalEl, 'data-ready', v?.ready ? '1' : '0');

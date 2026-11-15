@@ -522,13 +522,14 @@ html[data-input='touch'] .claim-ghost { animation-name: claim-sink-touch; }
 }
 
 /* The line's label run in before its sentence (a squeezed desktop stage, a phone held sideways): one line
-   of the card less. While the line says what it bought, those words lie where the sentence starts and the
-   sentence, which has been done, is out of sight: nothing in the row moves when the box is ticked. */
+   of the card less. While the line says what it bought, those words lie over the label and the sentence, which has
+   been done and is out of sight with its label: nothing in the row moves when the box is ticked. They wrap inside the
+   row, as the sentence did (on a tablet they ran 45 px out of the card on one line: final-wide F5). */
 #hud-strip.tight .gc-linehead { display: inline; height: auto; white-space: normal; }
 #hud-strip.tight .gc-linehead .gc-lbl { margin-right: 7px; }
 #hud-strip.tight .gc-linetxt { display: inline; }
-#hud-strip.tight .gc-bought { position: absolute; white-space: nowrap; font-size: 12px; }
-#hud-strip.tight .gc-line.said .gc-linetxt { visibility: hidden; }
+#hud-strip.tight .gc-bought { position: absolute; left: 0; top: 0; right: 0; white-space: normal; font-size: 12px; line-height: 17px; }
+#hud-strip.tight .gc-line.said .gc-linetxt, #hud-strip.tight .gc-line.said .gc-lbl { visibility: hidden; }
 #hud-strip.tight .gc-tick { margin-top: 1px; }
 
 /* The order as one row (a squeezed desktop stage, and the phone): what to deliver, how long that takes, what

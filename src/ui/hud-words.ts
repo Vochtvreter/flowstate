@@ -54,6 +54,26 @@ export function valveWords(slack: number, short: number): string {
   return `All but ${countWord(slack)} running is enough now`;
 }
 
+/**
+ * The goal's line, as its label says it: "Next step" when it is the goal's own requirement (goal 22's wires into the
+ * Fabricator: GoalView.meanwhile.required), with no count; otherwise "While you wait", with "· 2 of 3" where the goal has
+ * more than one line. Plain text (the card sets the count in a span of its own).
+ */
+export function lineLabel(step: number, of: number, required: boolean): { label: string; count: string } {
+  if (required) return { label: 'Next step', count: '' };
+  return { label: 'While you wait', count: of > 1 ? ` · ${step} of ${of}` : '' };
+}
+
+/**
+ * What a line's held step is saving for (GoalView.meanwhile.held), said where its Show me would be: "Saving for this ·
+ * 1,100¢ · about 40 s". The time is left out when nothing is coming in. `amount` is the price as the card writes it.
+ */
+export function heldWords(amount: string, eta: number): { head: string; tail: string; all: string } {
+  const when = aboutTime(eta);
+  const tail = when ? `${amount} · ${when}` : amount;
+  return { head: 'Saving for this', tail, all: `Saving for this · ${tail}` };
+}
+
 /** The same string with a capital first letter: names from the rules come as "the Fabricator". */
 export const capFirst = (s: string) => s.charAt(0).toUpperCase() + s.slice(1);
 
