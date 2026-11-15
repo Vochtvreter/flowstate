@@ -195,7 +195,15 @@ function step(now: number) {
     seenUi = ui.uiRev;
     seenRev = g.rev;
     renderPanels();
-    if (selKey !== seenSel && ui.sel?.kind === 'node') ensureVisible(ui.sel.id);
+    // A node just selected is brought into view, once the frame that opened its inspector has been laid out: the
+    // strip and the stage settle around the inspector only then, and a look taken now would see them mid-change
+    // (a needless 24 px camera step at 1024x768). Not if the selection has moved on meanwhile.
+    if (selKey !== seenSel && ui.sel?.kind === 'node') {
+      const id = ui.sel.id;
+      requestAnimationFrame(() => {
+        if (ui.sel?.kind === 'node' && ui.sel.id === id) ensureVisible(id);
+      });
+    }
     seenSel = selKey;
   }
   updateBoard(dt);
