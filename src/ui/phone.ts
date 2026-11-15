@@ -8,14 +8,20 @@
 //   - `#app.phone` (and `html.phone`) is set here; `html[data-input]` is 'touch' or 'mouse'.
 //   - CSS variables on `#app`: --strip-h (how far the strip reaches down the stage; 0 outside the
 //     phone layout), --strip-b (the same, on every layout), --lift (height of an open bottom
-//     sheet), --shift (width of a sheet docked at the side, on short landscape screens). phone.css
-//     adds --top-h and --hot-h (the two bars).
+//     sheet), --shift (width of a sheet docked at the side, on short landscape screens), --fabs-w (the room
+//     the floating buttons take at the right of the thumb row, gap included). phone.css adds --top-h
+//     and --hot-h (the two bars).
 //   - The strip is the HUD's: #goal, #order and #hud-alert inside #hud-strip. It is measured, never
 //     moved, here; its phone layout and the place of the Claim button are CSS (hud.css, "phone seating").
 //   - `#app.carrying` while a node is being moved, `#app.building` while the build sheet is open,
 //     `#app.hint-open` while the goal card shows its hint on a phone held sideways (where it folds).
 //   - `#thumb-slot` holds the one-line "tap where…" hint, for touch input on any screen.
 //   - `swipeToDismiss()` below works for any sheet.
+//   - The end-of-demo summary is a sheet over the foot of the screen on a phone (hud-screens.ts, hud.css).
+//     It counts as covering the board, so the camera frames the factory in what is left above it
+//     (beside it, on a phone held sideways), but it does not lift the thumb row: --lift and --shift
+//     are for the sheets the player works in.
+//   - The inspector sheet closes when a goal is claimed: the next goal starts with the whole board.
 //   - For scripts: `flowstate.phone.cover()`, `.strip()` and `.corner()` return what the camera is told.
 import { MATERIALS, NODE_DEFS } from '../content';
 import { canUndo, undo } from '../actions';
@@ -26,7 +32,7 @@ import { el, invalidateLayout, setAttr, setClass, setHTML, setHidden, setStyle }
 import { PressWord } from './hud-words';
 import { icon } from './icons';
 import { Insets, StripBox, env } from './phone-env';
-import { delegate, onBeat, onFrame, onNewGame, select, touch, ui } from './ui';
+import { delegate, onBeat, onFrame, onGame, onNewGame, select, touch, ui } from './ui';
 
 let app: HTMLElement;
 let stage: HTMLElement;
@@ -37,7 +43,9 @@ let orderEl: HTMLElement | null;
 let alertEl: HTMLElement | null;
 let zoomEl: HTMLElement | null;
 let miniEl: HTMLElement | null;
+let summaryEl: HTMLElement | null;
 let thumb: HTMLElement;
+let fabsEl: HTMLElement;
 let hint: HTMLElement;
 let hintText: HTMLElement;
 let undoBtn: HTMLElement;
@@ -48,6 +56,8 @@ const wantsPhone = () => window.innerWidth < 700 || (window.innerWidth > window.
 let lastWidth = 0;
 /** Frames until the board is framed again (the panels must draw first: their height decides where the free space is). */
 let refit = 0;
+/** That framing glides (the summary coming up) instead of jumping (a new layout). */
+let refitSmooth = false;
 
 function applyLayout(first = false) {
   const phone = wantsPhone();
@@ -60,6 +70,7 @@ function applyLayout(first = false) {
   measuredKey = '';
   invalidateLayout();
   refit = 2;
+  refitSmooth = false;
   if (first) return;
   // The stage has a different size and the build menu a different shape: start both afresh.
   refreshBoard();
@@ -83,6 +94,8 @@ const THUMB_ROW = 44;
 const CLAIM_ROW = 54;
 let measuredKey = '';
 let coverNow: Insets = NONE;
+/** The sheets the player works in (inspector, build menu): what --lift and --shift are set from. */
+let sheetNow = { lift: 0, shift: 0 };
 let stripNow: StripBox | null = null;
 let cornerNow: { x0: number; y0: number } | null = null;
 /** Bumped whenever the strip, a sheet or the stage changed size (see the ResizeObserver in initPhone). */
@@ -114,6 +127,18 @@ function sheetSize(): { lift: number; shift: number } {
 }
 
 /**
+ * How much of the stage the end-of-demo summary covers while it is up: from the bottom when it is a sheet
+ * across the screen, from the right when it stands at the side. (It is laid out against #app, so it also
+ * covers the build bar under the stage; only what it takes of the stage counts here.)
+ */
+function summaryCover(): { bottom: number; right: number } {
+  const card = summaryEl && !summaryEl.hidden ? summaryEl.querySelector<HTMLElement>('.sum-card') : null;
+  if (!card || !env.phone) return { bottom: 0, right: 0 };
+  if (card.offsetWidth >= stage.offsetWidth * 0.7) return { bottom: Math.max(0, stage.offsetTop + stage.offsetHeight - card.offsetTop), right: 0 };
+  return { bottom: 0, right: Math.max(0, stage.offsetLeft + stage.offsetWidth - card.offsetLeft + 8) };
+}
+
+/**
  * Measure what lies over the board. The strip is the HUD's goal card, order chip and alert chip
  * (toasts come and go; the camera does not move for them). On a phone the strip spans the stage, so
  * it hides the top of it; an open sheet hides the bottom (or the side, on a short landscape screen),
@@ -124,7 +149,7 @@ function sheetSize(): { lift: number; shift: number } {
 function measure() {
   const g = ui.g;
   const key = env.phone
-    ? `p|${ui.uiRev}|${g?.rev}|${sizeRev}|${isOpen(insp) ? 1 : 0}${isOpen(build) ? 1 : 0}${carrying() ? 1 : 0}${g?.goal.ready ? 1 : 0}`
+    ? `p|${ui.uiRev}|${g?.rev}|${sizeRev}|${isOpen(insp) ? 1 : 0}${isOpen(build) ? 1 : 0}${carrying() ? 1 : 0}${g?.goal.ready ? 1 : 0}${summaryEl && !summaryEl.hidden ? 1 : 0}`
     : `d|${sizeRev}`;
   if (key === measuredKey) return;
   measuredKey = key;
@@ -156,8 +181,11 @@ function measure() {
   stageH = stage.offsetHeight;
   const hintEl = goalEl?.querySelector<HTMLElement>('.gc-hint');
   if (hintEl?.offsetHeight) hintH = hintEl.offsetHeight + 2;
-  const { lift, shift } = sheetSize();
-  coverNow = { top: bottom, right: shift, bottom: lift, left: 0, row: (g?.goal.ready ? CLAIM_ROW : THUMB_ROW) + 16 };
+  sheetNow = sheetSize();
+  const sum = summaryCover();
+  // (Under the summary the thumb row is out of reach and out of sight: nothing is kept clear of it.)
+  const row = sum.bottom ? 12 : (g?.goal.ready ? CLAIM_ROW : THUMB_ROW) + 16;
+  coverNow = { top: bottom, right: Math.max(sheetNow.shift, sum.right), bottom: Math.max(sheetNow.lift, sum.bottom), left: 0, row };
 }
 
 function cover(): Insets {
@@ -276,6 +304,7 @@ function buildChrome() {
     sync();
   });
   stage.append(thumb, fabs);
+  fabsEl = fabs;
 }
 
 /**
@@ -299,6 +328,8 @@ let hintOpen = false;
 /** The card folds its hint behind a tap (`#app.fold`): see below. */
 let fold = false;
 let coverSeen = '';
+/** How much the summary covered when last looked at: a change means the factory is framed again. */
+let summarySeen = '0|0';
 
 function setHintOpen(on: boolean) {
   hintOpen = on;
@@ -334,8 +365,19 @@ function sync() {
   let moved = setStyle(app, '--strip-h', c.top + 'px');
   // (--strip-b is the same on every layout: where the strip ends, for whatever wants to sit under it.)
   setStyle(app, '--strip-b', (stripNow?.bottom ?? 0) + 'px');
-  if (setStyle(app, '--lift', c.bottom + 'px')) moved = true;
-  if (setStyle(app, '--shift', c.right + 'px')) moved = true;
+  // (How much room the floating buttons take beside the thumb row: 104 px for two of them.)
+  if (env.phone && fabsEl.offsetWidth && setStyle(app, '--fabs-w', fabsEl.offsetWidth + 8 + 'px')) moved = true;
+  if (setStyle(app, '--lift', sheetNow.lift + 'px')) moved = true;
+  if (setStyle(app, '--shift', sheetNow.shift + 'px')) moved = true;
+  // The summary has come up over the foot (or the side) of the board, or has gone again: the whole
+  // factory is framed in what is left, with a glide, once the layout has settled.
+  const sum = summaryCover();
+  const sumKey = `${sum.bottom}|${sum.right}`;
+  if (sumKey !== summarySeen) {
+    summarySeen = sumKey;
+    refit = 2;
+    refitSmooth = true;
+  }
   // While the build menu is up the player is choosing from it: the floating controls step aside.
   setClass(app, 'building', isOpen(build));
   // The thumb row (and the Claim button in it) has moved: whatever cached its place measures again.
@@ -362,6 +404,7 @@ export function initPhone() {
   alertEl = document.getElementById('hud-alert');
   zoomEl = document.getElementById('zoom');
   miniEl = document.getElementById('mini');
+  summaryEl = document.getElementById('summary');
 
   // Wording follows the pointer in use. Until the first press, a device whose only pointer is a
   // finger is taken to be touch, so the very first hint already says "tap".
@@ -410,7 +453,7 @@ export function initPhone() {
   // contents. The notice is only recorded here; the next frame measures and writes.
   if (typeof ResizeObserver !== 'undefined') {
     const ro = new ResizeObserver(() => void sizeRev++);
-    for (const e of [stage, goalEl, orderEl, alertEl, insp, build]) if (e) ro.observe(e);
+    for (const e of [stage, goalEl, orderEl, alertEl, insp, build, summaryEl]) if (e) ro.observe(e);
   } else onBeat(() => void sizeRev++);
 
   onFrame(() => {
@@ -418,7 +461,8 @@ export function initPhone() {
     if (ui.uiRev !== seenUi || g.rev !== seenRev || sizeRev !== sizeSeen) sync();
     // (On every layout: the first framing happens before the goal card has any text in it.)
     if (refit && --refit === 0) {
-      fitView();
+      fitView(refitSmooth);
+      refitSmooth = false;
       // (Framing everything may have put the selected node under a sheet or the strip.)
       if (ui.sel?.kind === 'node') ensureVisible(ui.sel.id);
     }
@@ -427,7 +471,13 @@ export function initPhone() {
     measuredKey = '';
     hintGoal = -1;
     refit = 2;
+    refitSmooth = false;
     sync();
+  });
+  // A claimed goal closes the inspector sheet: it covers half the board, and the next goal is usually
+  // about some other part of it. (Beside the stage, as on a desktop, the inspector is in nobody's way.)
+  onGame((ev) => {
+    if (ev.kind === 'goal-claimed' && env.phone && isOpen(insp)) select(null);
   });
 
   // main.ts builds window.flowstate after the modules have started, so this joins it a moment later.
