@@ -1705,22 +1705,29 @@ export function tidyBoard(): boolean {
   settleGesture();
   cancelGesture();
   if (tidyJob && tidyJob.g === g) return true;
-  // What the player is looking at now: the cards whose middle is in view.
+  // What the player is looking at now: the cards whose middle is in view, and the one nearest the middle of it.
   const v = viewAhead();
   const f = freeArea();
+  const mx = (f.x0 + f.x1) / 2, my = (f.y0 + f.y1) / 2;
+  let centre = -1, near = Infinity;
   const seen = g.nodes.filter((n) => {
     const b = cardBox(n);
     const x = ((b.x0 + b.x1) / 2) * v.k + v.x, y = ((b.y0 + b.y1) / 2) * v.k + v.y;
+    const d = (x - mx) ** 2 + (y - my) ** 2;
+    if (d < near) {
+      near = d;
+      centre = n.id;
+    }
     return x > f.x0 && x < f.x1 && y > f.y0 && y < f.y1;
   }).map((n) => n.id);
-  tidyJob = { id: ++tidySeq, g, rev: g.rev, tries: 0, seen };
+  tidyJob = { id: ++tidySeq, g, rev: g.rev, tries: 0, seen, centre };
   setTidyBusy(true);
   askTidy(tidyJob);
   return true;
 }
 
 /** The layout being worked out, and the board it is for (`rev`: as it was when asked). */
-interface TidyJob { id: number; g: Game; rev: number; tries: number; seen: number[] }
+interface TidyJob { id: number; g: Game; rev: number; tries: number; seen: number[]; centre: number }
 let tidyJob: TidyJob | null = null;
 let tidySeq = 0;
 /** The Worker that lays boards out: made on first use; null where one cannot be made (then the page does it). */
@@ -1806,6 +1813,16 @@ function tidyAnswer(id: number, moves: Map<number, Pt>) {
   if (!box) return;
   const now = viewAhead();
   const t = fitTarget(box, true, now.k >= zoomFloor() ? Math.max(zoomFloor(), Math.min(1, now.k)) : 1);
+  // Where they have spread too far apart to be seen together at that zoom (a phone, a big board: the two cards
+  // in view went to opposite ends, and the camera on the middle of them showed neither), the card the view was
+  // centred on stays in view: the least move from there that brings it in, clear of what covers the board.
+  const mid = nodeById(g, job.centre);
+  if (mid) {
+    const b = cardBox(mid), a = inset(freeArea(), 12);
+    const x0 = b.x0 * t.k + t.x, x1 = b.x1 * t.k + t.x, y0 = b.y0 * t.k + t.y, y1 = b.y1 * t.k + t.y;
+    if (x1 - x0 <= a.x1 - a.x0) t.x += x0 < a.x0 ? a.x0 - x0 : x1 > a.x1 ? a.x1 - x1 : 0;
+    if (y1 - y0 <= a.y1 - a.y0) t.y += y0 < a.y0 ? a.y0 - y0 : y1 > a.y1 ? a.y1 - y1 : 0;
+  }
   fitBack = fitAt = null;
   moveView(t.x, t.y, t.k, true, TIDY_MS);
   toast(`Tidied. <b>${isTouch() ? 'Undo' : 'Ctrl Z'}</b> puts it back.`, 'good');
