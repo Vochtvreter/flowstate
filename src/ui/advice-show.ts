@@ -11,9 +11,10 @@ import { NodeType, TECHS } from '../content';
 import { expansionCost, has, nodeUnlocked } from '../economy';
 import { goalFocus } from '../goals';
 import { Game, GNode } from '../state';
-import { armedPort, boardRect, frameNodes as boardFrames, gestureActive, radialOpen, toClient, toWorld, zoomBy } from './board';
-import { ring } from './fx';
-import { nodeSize, outPorts } from './geom';
+import { armedPort, boardRect, fitView, frameNodes as boardFrames, gestureActive, radialOpen, toClient, toWorld, zoomBy } from './board';
+import { celebrating } from './celebrate';
+import { Overlay, addOverlay } from './fx';
+import { Pt, nodeSize, outPorts } from './geom';
 import { isStarted, screenOpen } from './hud-screens';
 import { env } from './phone-env';
 import { closeTech, openTech } from './tech';
@@ -196,37 +197,89 @@ function frameNodes(nodes: GNode[]) {
   boardFrames(nodes.map((n) => n.id).reverse(), true);
 }
 
+// ---------- a still mark, where the player asked for less motion ----------
+// There the guiding hand does not act the step out, and nothing may open, grow or travel: a ring stands on each spot
+// of the board the step is about (the port to start from, the card to wire to, the deposit), fades in, holds, and
+// fades out where it stands. Opacity only. (It follows the board if the camera moves under it.)
+
+interface Still { at: () => Pt | null; color: string; t0: number }
+const stills: Still[] = [];
+/** Seconds a still mark takes to fade in, stays, and takes to fade out. Its radius on screen (px). */
+const STILL_IN = 0.25, STILL_HOLD = 3.4, STILL_OUT = 0.6, STILL_R = 19;
+let stillsDrawn = false;
+
+const stillOverlay: Overlay = {
+  active: () => stills.length > 0,
+  draw(c) {
+    const now = performance.now() / 1000;
+    for (let i = stills.length - 1; i >= 0; i--) {
+      const s = stills[i];
+      const t = now - s.t0;
+      if (t > STILL_IN + STILL_HOLD + STILL_OUT) {
+        stills.splice(i, 1);
+        continue;
+      }
+      const p = s.at();
+      if (!p) continue;
+      const q = toClient(p);
+      const a = t < STILL_IN ? t / STILL_IN : t > STILL_IN + STILL_HOLD ? Math.max(0, 1 - (t - STILL_IN - STILL_HOLD) / STILL_OUT) : 1;
+      c.beginPath();
+      c.arc(q.x, q.y, STILL_R, 0, Math.PI * 2);
+      c.globalAlpha = 0.16 * a;
+      c.fillStyle = s.color;
+      c.fill();
+      c.globalAlpha = 0.95 * a;
+      c.strokeStyle = s.color;
+      c.lineWidth = 2.5;
+      c.stroke();
+    }
+    c.globalAlpha = 1;
+  },
+};
+
 /**
- * Three rings opening on a spot of the board (a world point, followed as the camera settles): "here".
- * Only where the player asked for less motion: everywhere else the guiding hand acts the step out on the
- * board (it listens to 'showme'), and where it does not move, this marks the spot instead.
+ * Mark a spot of the board (a world point, followed as the camera settles): "here". Only where the player asked for
+ * less motion: everywhere else the guiding hand acts the step out on the board (it listens to 'showme'), and where it
+ * does not move, this marks the spot instead, still (see above).
  */
-function beacon(at: () => { x: number; y: number } | null, color = '#7AA2FF') {
+function beacon(at: () => Pt | null, color = '#7AA2FF') {
   if (!env.calm) return;
-  const once = () => {
-    const p = at();
-    if (p) ring(toClient(p), color, { size: 34, life: 0.6 });
-  };
-  once();
-  setTimeout(once, 450);
-  setTimeout(once, 900);
+  if (!stillsDrawn) {
+    addOverlay(stillOverlay);
+    stillsDrawn = true;
+  }
+  stills.push({ at, color, t0: performance.now() / 1000 });
 }
+
+/** For scripts: the still marks on show: where each is on screen, and how long it has stood (s). */
+export const stillMarks = () => stills.map((s) => {
+  const p = s.at();
+  const q = p ? toClient(p) : null;
+  return { x: q ? Math.round(q.x) : null, y: q ? Math.round(q.y) : null, age: Math.round((performance.now() / 1000 - s.t0) * 100) / 100 };
+});
 
 const centre = (n: GNode) => {
   const { w, h } = nodeSize(n);
   return { x: n.x + w / 2, y: n.y + h / 2 };
 };
 
-/** Scroll the inspector so that the control with the ring can be seen. */
+/**
+ * Scroll the inspector so that the control with the ring can be seen: 8 px clear of the scroller's edges, and for a
+ * finger clear of its faded foot too (phone.css, "nothing pressable under the footer").
+ */
 function revealMark() {
   if (!mark) return;
   const el = document.querySelector<HTMLElement>(`#insp [data-testid="${mark.testid}"]`);
   const scroller = el?.closest<HTMLElement>('.scroll');
   if (!el || !scroller) return;
   const e = el.getBoundingClientRect(), s = scroller.getBoundingClientRect();
+  const foot = 8 + (env.touch ? SCROLL_FADE : 0);
   if (e.top < s.top + 8) scroller.scrollTop -= s.top + 8 - e.top;
-  else if (e.bottom > s.bottom - 8) scroller.scrollTop += e.bottom - (s.bottom - 8);
+  else if (e.bottom > s.bottom - foot) scroller.scrollTop += Math.min(e.top - (s.top + 8), e.bottom - (s.bottom - foot));
 }
+
+/** How far the foot of the inspector's scroller fades out for a finger (phone.css; SHEET_FADE in panels.ts). */
+const SCROLL_FADE = 20;
 
 // ---------- Show me ----------
 
@@ -238,6 +291,8 @@ function revealMark() {
 export function showAdvice(g: Game, a: Advice, render: () => void): boolean {
   if (!doable(g, a)) return false;
   unmark();
+  // (A Show me pressed again marks afresh: what an earlier one marked goes.)
+  stills.length = 0;
   const press = (testid: string): Signals['showme'] => {
     setMark(testid);
     return { press: testid };
@@ -256,9 +311,13 @@ export function showAdvice(g: Game, a: Advice, render: () => void): boolean {
       after = () => {
         const b = expandButton();
         if (!b) return;
+        // Not on show at all (hidden, or waiting off the board: a phone held sideways has no free place for it while
+        // cards lie all along the thumb row): the whole board is framed (Fit), which gives it a place again; the
+        // ring is on it when it comes, and the hand waits for it.
+        if (b.hidden || !b.getClientRects().length) fitView(true);
         // Docked (class `dock`, board.ts), it stands fixed in the free part of the stage, where it can always be
         // pressed: moving the camera would not bring it any nearer, so the board stays where the player left it.
-        if (!b.classList.contains('dock')) {
+        else if (!b.classList.contains('dock')) {
           const r = b.getBoundingClientRect();
           const p = toWorld(r.left, r.top), k = ui.view.k || 1;
           frame([{ x: p.x - 16, y: p.y - 16, w: r.width / k + 32, h: r.height / k + 32 }]);
@@ -313,17 +372,34 @@ export function showAdvice(g: Game, a: Advice, render: () => void): boolean {
   render();
   after?.();
   revealMark();
+  // On a phone the inspector is a sheet that slides in: the ringed control is brought into its scroller again once it
+  // is up, so the ring is never left below the part of the sheet that shows (fr-feel: the scroller ended at 705 px,
+  // the ringed Speed button began at 711).
+  if (env.phone && mark && mark.testid !== EXPAND) {
+    const ringed = mark;
+    window.setTimeout(() => {
+      if (mark === ringed) revealMark();
+    }, SHEET_IN);
+  }
   signal('showme', detail);
   return true;
 }
+
+/** Real milliseconds a phone's sheet takes to slide in (0.22 s in phone.css), with a frame or two to spare. */
+const SHEET_IN = 320;
 
 // ---------- the nodes the goal is about, brought into view ----------
 //
 // When a goal comes up, and after a sheet or the tech tree has closed, the nodes its hint or line is about
 // (goalFocus in src/goals.ts) are brought into view if any of them is off screen or covered: through the board's
 // frameNodes, which moves the camera as little as it can. Never while the player is in the middle of something
-// on the board (a drag, a pinch, an armed port, a node being placed, the build menu), and never behind the start
-// screen or the summary. Nothing happens when they are all in view already, or when the goal names no node.
+// on the board (a drag, a pinch, an armed port, a node being placed, the build menu), never behind the start
+// screen or the summary, and not while a celebration card is up (a research's, a claim's): the look waits until it
+// has gone, so the board never glides under it, where a press made to put the card away would land on whatever the
+// glide had brought under the finger. Nothing happens when they are all in view already, or when the goal names no
+// node. A goal coming up brings its nodes in among the cards from the overview (it shows no ports); after a sheet or
+// the tree, an overview the player chose (zoomed out to by hand, or within by hand) is theirs: it counts as in view,
+// and only nodes off screen or covered are brought in, at the overview's zoom.
 
 /**
  * Real milliseconds after a goal comes up, or after a sheet or the tree has gone, before the nodes are looked for:
@@ -339,6 +415,47 @@ let sheetSeen = false;
 let treeSeen = false;
 /** Real time at which to look (0: nothing to do). */
 let focusDue = 0;
+/** What the look is for: a goal that came up (the overview is no view of its ports), or a sheet or the tree that closed. */
+let focusFor: 'goal' | 'sheet' = 'goal';
+/** When the player last changed the zoom by hand: the wheel, a pinch, the zoom or Fit buttons, a key (ms). */
+let zoomedAt = -1e9;
+/**
+ * The board is in the overview because the player took it there, or zoomed within it, by hand: theirs. (One the game
+ * opened in, for a big factory on a tablet, or a celebration's, is not.) Looked at every frame in tendFocus.
+ */
+let ownOverview = false;
+let listening = false;
+
+/** Hear the player's own zooming: the board's handlers do the zooming, this only notes when it happened. */
+function listenForZoom() {
+  if (listening) return;
+  listening = true;
+  const hand = () => void (zoomedAt = performance.now());
+  const stage = document.getElementById('stage');
+  stage?.addEventListener('wheel', hand, { capture: true, passive: true });
+  // (Two fingers on the board are a pinch.)
+  const fingers = new Set<number>();
+  stage?.addEventListener('pointerdown', (e) => {
+    if (e.pointerType !== 'touch') return;
+    fingers.add(e.pointerId);
+    if (fingers.size >= 2) hand();
+  }, { capture: true, passive: true });
+  stage?.addEventListener('pointermove', (e) => {
+    if (fingers.size >= 2 && fingers.has(e.pointerId)) hand();
+  }, { capture: true, passive: true });
+  const lift = (e: PointerEvent) => void fingers.delete(e.pointerId);
+  window.addEventListener('pointerup', lift, { capture: true, passive: true });
+  window.addEventListener('pointercancel', lift, { capture: true, passive: true });
+  document.addEventListener('click', (e) => {
+    if ((e.target as Element | null)?.closest?.('#zoom [data-act], [data-testid="fab-fit"]')) hand();
+  }, { capture: true, passive: true });
+  window.addEventListener('keydown', (e) => {
+    if (!e.ctrlKey && !e.metaKey && !e.altKey && /^[f+=-]$/i.test(e.key)) hand();
+  }, { capture: true, passive: true });
+}
+
+/** How long after the player's zooming the board may still be getting there (a Fit glides for 0.6 s). */
+const ZOOM_SETTLES = 1200;
 /** For scripts: what the last look found and did. */
 let focusLast: { at: number; goal: number; ids: number[]; inView: boolean; framed: boolean; why?: string } | null = null;
 
@@ -354,11 +471,12 @@ function sheetUp(): boolean {
 
 /**
  * Are these nodes on screen, with their ports, in the part of the board nothing covers (the strip, a sheet,
- * the floating controls, the corner controls)? Not in the overview, which draws no ports.
+ * the floating controls, the corner controls)? Not in the overview, which draws no ports, unless `overview` says an
+ * overview will do (the player's own: then on screen and uncovered is enough).
  */
-export function focusInView(ids: number[]): boolean {
+export function focusInView(ids: number[], overview = false): boolean {
   const boardEl = document.getElementById('board');
-  if (!boardEl || boardEl.classList.contains('ov')) return false;
+  if (!boardEl || (!overview && boardEl.classList.contains('ov'))) return false;
   const b = boardEl.getBoundingClientRect();
   const c = env.cover();
   const left = b.left + c.left, top = b.top + c.top, right = b.right - c.right, bottom = b.bottom - c.bottom - c.row;
@@ -380,6 +498,10 @@ export function focusInView(ids: number[]): boolean {
 /** Call once a frame. */
 export function tendFocus(g: Game) {
   const now = performance.now();
+  listenForZoom();
+  const ov = !!document.getElementById('board')?.classList.contains('ov');
+  if (!ov) ownOverview = false;
+  else if (now - zoomedAt < ZOOM_SETTLES) ownOverview = true;
   if (g !== focusGame) {
     focusGame = g;
     focusGoal = -1;
@@ -396,11 +518,18 @@ export function tendFocus(g: Game) {
   if (g.goal.i !== focusGoal) {
     focusGoal = g.goal.i;
     focusDue = now + AFTER_GOAL;
+    focusFor = 'goal';
   }
-  if ((sheetSeen && !sheet) || (treeSeen && !tree)) focusDue = Math.max(focusDue, now + AFTER_SHEET);
+  if ((sheetSeen && !sheet) || (treeSeen && !tree)) {
+    // (A goal's own look, still to come, stays a goal's.)
+    if (!focusDue) focusFor = 'sheet';
+    focusDue = Math.max(focusDue, now + AFTER_SHEET);
+  }
   sheetSeen = sheet;
   treeSeen = tree;
   if (!focusDue || now < focusDue) return;
+  // (Still due: looked at once the card has gone.)
+  if (celebrating()) return;
   focusDue = 0;
   const ids = goalFocus(g);
   const busy = sheet ? 'a sheet is up' : radialOpen() ? 'the build menu is up' : tree ? 'the tree is open' : gestureActive() ? 'a gesture'
@@ -409,10 +538,13 @@ export function tendFocus(g: Game) {
     focusLast = { at: g.time, goal: g.goal.i, ids, inView: false, framed: false, why: busy || 'no nodes' };
     return;
   }
-  const inView = focusInView(ids);
-  // (The board's frameNodes keeps the camera still when they are in view; it is not even asked then.)
-  if (!inView) boardFrames([...ids].reverse(), true);
-  focusLast = { at: g.time, goal: g.goal.i, ids, inView, framed: !inView };
+  // After a sheet or the tree, an overview the player chose is theirs: it counts as a view of the nodes.
+  const theirs = focusFor === 'sheet' && ov && ownOverview;
+  const inView = focusInView(ids, theirs);
+  // (The board's frameNodes keeps the camera still when they are in view; it is not even asked then. From the player's
+  // overview it brings them in at the same zoom; otherwise in among the cards, where the ports are.)
+  if (!inView) boardFrames([...ids].reverse(), !theirs);
+  focusLast = { at: g.time, goal: g.goal.i, ids, inView, framed: !inView, ...(theirs ? { why: 'overview' } : {}) };
 }
 
 /** For scripts: the last look at the goal's nodes. */

@@ -19,7 +19,7 @@ import { closeTech, initTech, openTech, renderTech } from './ui/tech';
 import { initFeel } from './ui/feel';
 import { adviserStats, boardKey, holdAdviser } from './ui/advice-client';
 import { TIP, lineShown, offerTip, tipBought, tipShown } from './ui/advice-tip';
-import { focusSeen, markedControl } from './ui/advice-show';
+import { focusSeen, markedControl, stillMarks } from './ui/advice-show';
 import { alertState, hudAnchors, initHud, setElsewhere } from './ui/hud';
 import { backToStart, initScreens, isStarted, screenOpen, screensApi, showStart } from './ui/hud-screens';
 import { initPhone } from './ui/phone';
@@ -128,11 +128,12 @@ function boot() {
     ui, tick, fx, view: { fit: fitView, zoomBy, jumpTo, frame: frameNodes, tidy: tidyBoard }, onSignal,
     // (The HUD: the screens, where effects start from, what the alert slot says, and the last look at the goal's nodes.)
     hud: { ...screensApi, anchors: hudAnchors, alert: alertState, focus: focusSeen },
-    // The adviser: how it is run and what it cost; the tip on the card and its timing; the control "Show me" ringed;
-    // the goal card's "while you wait" line with its next step; what the tip row says a followed tip bought.
+    // The adviser: how it is run and what it cost; the tip on the card and its timing; the control "Show me" ringed,
+    // and the still marks it stood on the board under reduced motion; the goal card's "while you wait" line with its
+    // next step; what the tip row says a followed tip bought.
     adviser: {
       stats: adviserStats, hold: holdAdviser, key: () => boardKey(ui.g), tip: tipShown, offer: (a: Parameters<typeof offerTip>[1]) => { offerTip(ui.g, a); renderPanels(true); },
-      marked: markedControl, TIP, line: lineShown, bought: tipBought,
+      marked: markedControl, stills: stillMarks, TIP, line: lineShown, bought: tipBought,
     },
   };
   requestAnimationFrame(frame);
@@ -195,7 +196,15 @@ function step(now: number) {
     seenUi = ui.uiRev;
     seenRev = g.rev;
     renderPanels();
-    if (selKey !== seenSel && ui.sel?.kind === 'node') ensureVisible(ui.sel.id);
+    // A node just selected is brought into view, once the frame that opened its inspector has been laid out: the
+    // strip and the stage settle around the inspector only then, and a look taken now would see them mid-change
+    // (a needless 24 px camera step at 1024x768). Not if the selection has moved on meanwhile.
+    if (selKey !== seenSel && ui.sel?.kind === 'node') {
+      const id = ui.sel.id;
+      requestAnimationFrame(() => {
+        if (ui.sel?.kind === 'node' && ui.sel.id === id) ensureVisible(id);
+      });
+    }
     seenSel = selKey;
   }
   updateBoard(dt);
@@ -228,8 +237,15 @@ function onKey(e: KeyboardEvent) {
   if (screenOpen()) return;
   const mod = e.ctrlKey || e.metaKey;
   const k = e.key.toLowerCase();
+  const edit = mod && (k === 'z' || k === 'y' || k === 'd');
+  // While the tech tree is open the board behind it is out of reach: undo, redo and duplicate wait until it closes
+  // (the top bar's Undo and Redo are disabled meanwhile, panels.ts).
+  if (edit && ui.techOpen) {
+    e.preventDefault();
+    return;
+  }
   // Before a key changes the board, a node still being dragged is dropped, so the two cannot tangle.
-  if ((mod && (k === 'z' || k === 'y' || k === 'd')) || k === 'delete' || k === 'backspace') settleGesture();
+  if (edit || k === 'delete' || k === 'backspace') settleGesture();
   if (mod && k === 'z') {
     e.preventDefault();
     if (e.shiftKey) redo(g);

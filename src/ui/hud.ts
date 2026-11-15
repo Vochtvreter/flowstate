@@ -24,12 +24,12 @@
 //  - Outside the phone layout the strip is laid out in the same box whether the inspector is open or not
 //    (hud.css, "the strip and the inspector"): the card and its Claim do not move when it opens or closes.
 //  - The alert slot (#hud-alert) says, in this order: that the game is open in another tab (setElsewhere),
-//    that the game is paused (a pill that resumes it), or the board's worst problem. The problem is left out
-//    while the card's hint, line or tip is about the same node, and a press on it puts it away until the
-//    problem is another one.
-//  - #hud-strip carries `has-order`, `has-alert`, `stuck` (an order none of which is sold) and `aiming` (a
-//    port armed, a wire being drawn, a node being placed): classes for the stylesheet, which would otherwise
-//    need has() selectors.
+//    that the game is paused (a pill that resumes it), or a problem on the board: the one the goal on the card
+//    meets first, else the worst off (alertPick in status.ts). The problem is left out while the card's hint,
+//    line or tip is about the same node, and a press on it puts it away until the problem is another one.
+//  - #hud-strip carries `has-order`, `has-alert`, `stuck` (an order none of which is sold), `paused` (the alert
+//    slot holds the Paused pill) and `aiming` (a port armed, a wire being drawn, a node being placed): classes for
+//    the stylesheet, which would otherwise need has() selectors.
 import { materialsAt, nodeById } from '../actions';
 import type { Advice } from '../advice';
 import { DATA_COLORS, DATA_NAMES, DataTier, MATERIALS, MatId, NODE_DEFS, RECIPES, TECHS } from '../content';
@@ -46,10 +46,11 @@ import { Panel, anchorPt, makePanel, setAnchor, setAttr, setClass, setHidden, se
 import { initFlowRing, updateFlowRing } from './hud-flow';
 import { isStarted } from './hud-screens';
 import { toastFor } from './hud-toasts';
-import { aboutTime, calmMotion, isTouch } from './hud-words';
+import { aboutTime, calmMotion, isTouch, valveWords } from './hud-words';
 import { esc, icon, matGlyph } from './icons';
 import { onPanels, renderPanels } from './panels';
-import { diagnose, matName } from './status';
+import { setClaimer } from './tech';
+import { alertPick, diagnose, matName } from './status';
 import { env } from './phone-env';
 import { delegate, onFrame, onGame, onNewGame, touch, ui } from './ui';
 
@@ -83,20 +84,8 @@ export function initHud() {
     // button only when the player has put the focus on that button (the slim bar over the tree).
     if (ui.techOpen && byKey && (a === 'claim' || a === 'claim-order') && document.activeElement !== el) return;
     if (a === 'claim') {
-      // One press, one goal: a double click, two quick taps or a key held down would otherwise claim the next
-      // goal as well when it is met already, and its card would never be seen.
-      const now = performance.now();
-      if (now - lastClaim < CLAIM_GAP) return;
-      const pressed = goalEl.querySelector('[data-testid="claim"]')?.getBoundingClientRect();
-      const body = goalEl.querySelector<HTMLElement>('.gc-body:not(.gc-ghost)');
-      const old = body ? { html: body.innerHTML, top: body.offsetTop, width: body.offsetWidth } : null;
-      const index = g.goal.i;
-      if (claimGoal(g)) {
-        lastClaim = now;
-        if (pressed) holdGoalAnchor(pressed);
-        claimed(index, old, pressed ?? null);
-        if (byKey) focusAfter = true;
-      }
+      const pressed = goalEl.querySelector('[data-testid="claim"]')?.getBoundingClientRect() ?? null;
+      if (claimFromCard(pressed) && byKey) focusAfter = true;
     } else if (a === 'claim-order') {
       const now = performance.now();
       if (now - lastOrderClaim < CLAIM_GAP) return;
@@ -160,6 +149,8 @@ export function initHud() {
   }
 
   onPanels(renderHud);
+  // (The phone tree's Claim claims as the card does.)
+  setClaimer(claimFromCard);
   onGame(toastFor);
   onGame((ev) => {
     // A new order slides in (one that quietly replaced a stale order does not).
@@ -193,6 +184,27 @@ export function initHud() {
 
 /** Milliseconds after a claim during which another press of a Claim button is ignored. */
 export const CLAIM_GAP = 500;
+
+/**
+ * Claim the goal as the card's Claim does: one press, one goal (a double click, two quick taps or a key held down would
+ * otherwise claim the next goal as well when it is met already, and its card would never be seen); the pressed button
+ * gives and fades where it stood (`pressed`: its screen box), the old card lifts away and the new one rises, and the
+ * claim's coins leave from where it was pressed. Also the phone tree's own Claim (tech.ts). True when it claimed.
+ */
+function claimFromCard(pressed: DOMRect | null): boolean {
+  const g = ui.g;
+  const now = performance.now();
+  if (now - lastClaim < CLAIM_GAP) return false;
+  const body = goalEl.querySelector<HTMLElement>('.gc-body:not(.gc-ghost)');
+  const old = body ? { html: body.innerHTML, top: body.offsetTop, width: body.offsetWidth } : null;
+  const index = g.goal.i;
+  if (!claimGoal(g)) return false;
+  lastClaim = now;
+  if (pressed) holdGoalAnchor(pressed);
+  claimed(index, old, pressed);
+  renderPanels(true);
+  return true;
+}
 let lastClaim = -1e9;
 let lastOrderClaim = -1e9;
 /** A claim was made from the keyboard: the focus goes to the new card once it is drawn. */
@@ -202,18 +214,9 @@ let inspW = 320;
 
 /**
  * On a phone, where the card folds its hint behind a tap (phone.ts: #app.fold, #app.hint-open; and during a
- * wait, #goal.wait here), an open hint is folded away, as it is at a press on the board. The board's shell does
- * it where it folds the hint itself (env.foldHint); where only the card folds it (a wait on an upright phone), a
- * tap on the card that is not on a button does it: phone.ts turns the hint over at such a tap (the event does
- * not bubble, so nothing else hears it).
+ * wait, #goal.wait here), an open hint is folded away, as it is at a press on the board (phone.ts does it).
  */
-function foldHint() {
-  const app = document.getElementById('app');
-  if (!env.phone || !app) return;
-  (env as { foldHint?: () => void }).foldHint?.();
-  const folds = app.classList.contains('fold') || goalEl.classList.contains('wait');
-  if (folds && app.classList.contains('hint-open')) goalEl.dispatchEvent(new MouseEvent('click'));
-}
+const foldHint = () => env.foldHint();
 
 // ---------- how much room the strip has ----------
 
@@ -305,14 +308,11 @@ function flowHtml(f: FlowGoalView, p: GoalProgress | null): string {
   const count = f.of > 0 ? `${f.running} of ${f.of} running` : 'nothing wired up counts yet';
   const holding = !!p && p[2] === 's' && p[0] > 0;
   const left = p ? Math.max(0, Math.ceil(p[1] - p[0] - 1e-6)) : 0;
-  // How many may be short and the goal still counts: 1 once the valve has opened, 2 once it has opened further.
-  const slack = Math.max(0, Math.min(f.of - 1, f.slack ?? (f.valve ? 1 : 0)));
+  // How many may be short and the goal still counts: 1 once the valve has opened, more each time it opens further
+  // (any whole number up to the producers' count minus one; hud-words.ts words it).
+  const slack = Math.max(0, Math.min(f.of - 1, Math.floor(f.slack ?? (f.valve ? 1 : 0))));
   const short = f.of - f.running;
-  const word = (k: number) => (k === 1 ? 'one' : k === 2 ? 'two' : String(k));
-  let valve = '';
-  if (slack > 0 && short > 0) {
-    valve = short <= slack ? `Close enough: all but ${word(short)} ${short === 1 ? 'is' : 'are'} running` : `All but ${word(slack)} running is enough now`;
-  }
+  const valve = valveWords(slack, short);
   return `<div class="fl-bar${slack > 0 ? ' valve' : ''}" data-slack="${slack}">${bar(f.pct, '#5ce1ff')}<i class="fl-mark" style="left:${need}%"></i></div>
     <span class="gc-num" data-testid="goal-flow">Flow <b class="mono">${pct}%</b><span class="fl-count"> · ${count}</span></span>${
     holding ? `<span class="gc-eta gc-hold" data-testid="goal-hold"><b class="mono">${left}s</b> to go</span>` : ''}${
@@ -567,28 +567,21 @@ const problemKey = (g: Game, n: GNode) => {
 };
 
 /**
- * The single worst root-cause problem on the board, or null. Nothing is flagged before the first wire. `skip`: a
- * problem the player has put away (problemKey), which is passed over for the others.
+ * The problem the chip names, or null: the one the goal on the card meets first, else the one named last while it
+ * lasts, else the worst off (alertPick in status.ts, which names nothing at all while the card's own machine stands
+ * idle, is settling after a change, or is in trouble in a goal's first seconds: the card is speaking of it). Nothing
+ * is flagged before the first wire. A problem the player has put away (alertPut) is passed over for the others.
  */
-function worstProblem(g: Game, skip = ''): { n: GNode; text: string } | null {
-  if (!g.wires.length && g.stats.wiresMade === 0) return null;
-  // Two machines that are about as badly off would otherwise swap places four times a second.
-  const held = alertNode >= 0 ? nodeById(g, alertNode) : null;
-  const heldText = held ? problemText(g, held) : null;
-  if (held && heldText && (!skip || problemKey(g, held) !== skip)) return { n: held, text: heldText };
-  let worst: { n: GNode; text: string } | null = null;
-  for (const n of g.nodes) {
-    if (worst && worst.n.util <= n.util) continue;
-    const text = problemText(g, n);
-    if (text && (!skip || problemKey(g, n) !== skip)) worst = { n, text };
-  }
+function pickProblem(g: Game, focus: number[]): { n: GNode; text: string } | null {
+  const worst = !g.wires.length && g.stats.wiresMade === 0 ? null
+    : alertPick(g, alertNode, (n) => (alertPut && problemKey(g, n) === alertPut ? null : problemText(g, n)), focus);
   alertNode = worst ? worst.n.id : -1;
   return worst;
 }
 
 // ---------- the alert slot ----------
-// One chip under the card, saying one thing: that the game is open in another tab, that it is paused, or the
-// board's worst problem, in that order.
+// One chip under the card, saying one thing: that the game is open in another tab, that it is paused, or a
+// problem on the board (pickProblem), in that order.
 
 /** Another tab has written the save: this one no longer saves (main.ts), and the slot says so for good. */
 let elsewhere = false;
@@ -624,11 +617,11 @@ function adviceNodes(g: Game, a: Advice | null | undefined): number[] {
  * offer or the line's next step is about the node or about where its trouble comes from (a starved machine's
  * supplier: "buy Speed on the Ember Well" says what "Refiner (Spark) needs more Ember" says).
  */
-function cardSays(g: Game, n: GNode): boolean {
+function cardSays(g: Game, n: GNode, focus: number[]): boolean {
   const about = new Set<number>([n.id]);
   const culprit = diagnose(g, n).culprit;
   if (culprit != null) about.add(culprit);
-  const named = [...goalFocus(g), ...adviceNodes(g, tipShown()), ...adviceNodes(g, lineShown()?.step)];
+  const named = [...focus, ...adviceNodes(g, tipShown()), ...adviceNodes(g, lineShown()?.step)];
   return named.some((id) => about.has(id));
 }
 
@@ -655,10 +648,12 @@ function renderAlert(g: Game, force: boolean) {
       else if (putGone < 0) putGone = g.time;
       else if (g.time - putGone > ALERT_CALM) alertPut = '';
     }
-    const worst = worstProblem(g, alertPut);
+    // (What the goal is about, looked up once for both: it asks the adviser's line.)
+    const focus = goalFocus(g);
+    const worst = pickProblem(g, focus);
     const key = worst ? problemKey(g, worst.n) : '';
     alertKey = key;
-    const left = !worst ? undefined : cardSays(g, worst.n) ? 'card' : undefined;
+    const left = !worst ? undefined : cardSays(g, worst.n, focus) ? 'card' : undefined;
     alertSaid = { kind: worst && !left ? 'problem' : '', key, left };
     if (worst && !left) {
       kind = 'problem';
@@ -718,6 +713,8 @@ function renderHud(force: boolean) {
   const order = !orderEl.hasAttribute('hidden'), alert = !alertEl.hasAttribute('hidden');
   setClass(stripEl, 'has-order', order);
   setClass(stripEl, 'has-alert', alert);
+  // (The Paused pill stays in sight where the alert slot would otherwise wait out of sight: a phone on its side with a sheet open.)
+  setClass(stripEl, 'paused', alert && alertEl.dataset.kind === 'paused');
   setClass(stripEl, 'stuck', order && orderEl.dataset.stuck === '1');
   // The keyboard belongs to the tree while it is open (Enter researches there): nothing in the strip keeps the
   // focus under it. The slim bar over the tree is not under it: its Claim may hold the focus and answer a key.

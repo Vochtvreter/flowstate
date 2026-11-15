@@ -14,6 +14,7 @@ import {
   TRACK_INFO, costText, cycleTime, dataYield, fmt, fmtInt, fmtRate, has, labRate, maxLevel, maxPipeTier,
   nodeCost, nodeUnlocked, recipeOf, techAvailable, trackAvailable, upgradeCost, wellRate,
 } from '../economy';
+import { activeGoal } from '../goals';
 import { graph, isMachine, passCap } from '../sim';
 import { Game, GNode, RouterMode, Wire } from '../state';
 import { isMuted, setMuted } from './audio';
@@ -27,7 +28,7 @@ import { logoMark } from './hud-screens';
 import { isTouch, withKey } from './hud-words';
 import { esc, icon, matGlyph, nodeIcon } from './icons';
 import { env } from './phone-env';
-import { diagnose, matName } from './status';
+import { diagnose, matName, victoryQuiet } from './status';
 import { metData, pricedInMet, readyCount, setCardWait, teasedSlot } from './tech';
 import { delegate, select, signal, toast, touch, ui } from './ui';
 
@@ -62,6 +63,14 @@ export function initPanels(refs: {
   // is patched. The frame is never rebuilt, so the sheet can be dragged while its contents refresh.
   inspEl.innerHTML = `<div class="sheet-grab" aria-hidden="true"></div><div class="insp-body"></div>`;
   inspPanel = makePanel(inspEl.querySelector<HTMLElement>('.insp-body')!);
+  // A phone's sheet is as tall as the strip above it leaves room for: when the strip grows a row after the sheet has
+  // opened (a tip coming in, seconds later), what was revealed there could end up cut at its foot. It is revealed
+  // again, unless the player has moved the scroller meanwhile (revealInInspector).
+  if (typeof ResizeObserver !== 'undefined') {
+    new ResizeObserver(() => {
+      if (inspOpenedFor) revealInInspector(inspOpenedFor, true);
+    }).observe(inspEl);
+  }
   buildTop();
   zoomEl.innerHTML = `<button class="ibtn" data-act="out" aria-label="Zoom out">${icon('minus', 14)}</button><span class="mono zl"></span><button class="ibtn" data-act="in" aria-label="Zoom in">${icon('plus', 14)}</button><button class="ibtn" data-act="fit" aria-label="Fit board (F)" title="Fit board (F)">${icon('fit', 14)}</button>`;
   zoomLabel = zoomEl.querySelector('.zl')!;
@@ -72,8 +81,8 @@ export function initPanels(refs: {
     const g = ui.g;
     // Whatever is chosen from the gear menu, the menu closes behind it.
     if (a !== 'menu' && ui.menuOpen && el.closest('.menu')) { ui.menuOpen = false; touch(); }
-    if (a === 'undo') undo(g);
-    else if (a === 'redo') redo(g);
+    if (a === 'undo') { if (!ui.techOpen) undo(g); }
+    else if (a === 'redo') { if (!ui.techOpen) redo(g); }
     else if (a === 'pause') { g.paused = !g.paused; touch(); }
     else if (a === 'sound') setMuted(!isMuted());
     // The Tech button opens the tree, and closes it again: on a desktop the top bar stays in view above it.
@@ -376,11 +385,13 @@ function buildTop() {
     setAttr(b, 'aria-label', full);
     setAttr(b, 'title', full);
   };
+  // (While the tech tree is open the board behind it is out of reach: Undo and Redo wait until it closes, as their
+  // keys do in main.ts.)
   const undoBtn = el(`<button class="ibtn t-undo" data-act="undo">${icon('undo')}</button>`);
   addTopItem('actions', {
     el: undoBtn,
     update() {
-      setAttr(undoBtn, 'disabled', canUndo() ? null : '');
+      setAttr(undoBtn, 'disabled', canUndo() && !ui.techOpen ? null : '');
       label(undoBtn, 'Undo', 'Ctrl+Z');
     },
   });
@@ -388,7 +399,7 @@ function buildTop() {
   addTopItem('actions', {
     el: redoBtn,
     update() {
-      setAttr(redoBtn, 'disabled', canRedo() ? null : '');
+      setAttr(redoBtn, 'disabled', canRedo() && !ui.techOpen ? null : '');
       label(redoBtn, 'Redo', 'Ctrl+Shift+Z');
     },
   });
@@ -399,6 +410,8 @@ function buildTop() {
       setClass(pauseBtn, 'on', g.paused);
       label(pauseBtn, g.paused ? 'Resume' : 'Pause', 'P');
       setHTML(pauseBtn, icon(g.paused ? 'play' : 'pause'));
+      // (Nothing comes in while paused: the bar's "+x/s" rates are dimmed, hud.css.)
+      setClass(topEl, 'paused', g.paused);
     },
   });
   addTopItem('actions', { el: el(`<span class="sep t-sep"></span>`), update() {} });
@@ -455,8 +468,8 @@ function buildTop() {
       say(mSound, 'Sound', muted ? 'Off' : 'On');
       setAttr(mSound, 'aria-checked', muted ? 'false' : 'true');
       setClass(mSound, 'off', muted);
-      setAttr(mUndo, 'disabled', canUndo() ? null : '');
-      setAttr(mRedo, 'disabled', canRedo() ? null : '');
+      setAttr(mUndo, 'disabled', canUndo() && !ui.techOpen ? null : '');
+      setAttr(mRedo, 'disabled', canRedo() && !ui.techOpen ? null : '');
     },
   });
 }
@@ -837,7 +850,12 @@ function renderInspector(force: boolean) {
     const opened = sel ? `${sel.kind}${sel.id}` : '';
     if (opened !== inspOpenedFor) {
       inspOpenedFor = opened;
-      if (sel?.kind === 'node' && html) requestAnimationFrame(() => revealInInspector(opened));
+      if (sel?.kind === 'node' && html) {
+        requestAnimationFrame(() => revealInInspector(opened));
+        // (Looked at again once a phone's sheet has slid in and the strip above it has settled: the sheet's height
+        // follows the strip's, and what was revealed in a taller sheet could end up cut at its foot.)
+        window.setTimeout(() => revealInInspector(opened, true), REVEAL_AGAIN);
+      }
     }
   } else if (!inspEmpty) {
     inspOpenedFor = '';
@@ -854,20 +872,31 @@ let inspEmpty = 0;
 let inspOpenedFor = '';
 
 /**
- * Scroll the inspector, just opened, so what the player most likely came for is in view: on a Router the rows of
- * its wires with their Favour buttons, on anything else the first upgrade they can afford. Below the fold of a
- * phone's sheet those were missed (rev-phone F5, rev-wide F2). Nothing moves when it is in view already, nor
- * once a finger is on the panel.
+ * Scroll the inspector, just opened, so what the player most likely came for is in view: the control "Show me" has
+ * ringed, the "Upgrade all" the goal on the card asks for (goal 20, whether it can be afforded yet or not), on a
+ * Router the rows of its wires with their Favour buttons, on anything else the first upgrade they can afford. Below
+ * the fold of a phone's sheet those were missed, or showed a sliver over Duplicate and Delete (rev-phone F5, rev-wide
+ * F2, fr-rules). Nothing moves when it is in view already, nor once a finger is on the panel.
  */
-function revealInInspector(opened: string) {
+function revealInInspector(opened: string, again = false) {
   if (opened !== inspOpenedFor || inspPanel.busy()) return;
   const box = inspEl.querySelector<HTMLElement>('.scroll');
   if (!box) return;
-  // (The panel is patched in place: without this a node would open where the last one was scrolled to.)
-  box.scrollTop = 0;
+  // (The panel is patched in place: without this a node would open where the last one was scrolled to. The second
+  // look leaves a scroller the player has moved since the first alone.)
+  if (!again) box.scrollTop = 0;
+  else if (Math.abs(box.scrollTop - revealedAt) > 1) return;
+  revealedAt = box.scrollTop;
   if (box.scrollHeight <= box.clientHeight + 1) return;
+  const g = ui.g;
+  // (A control "Show me" has put its ring on comes first: the player was sent here for it.)
+  const ringed = Array.from(box.querySelectorAll<HTMLElement>('.hl')).slice(0, 1);
+  // (The button itself: its row, with its words, may be taller than a phone's sheet has room for.)
+  const bulk = activeGoal(g)?.id === 'bulk-upgrade' && !g.goal.ready
+    ? Array.from(box.querySelectorAll<HTMLElement>('[data-testid^="upgall-"]')).slice(0, 1) : [];
   const rows = Array.from(box.querySelectorAll<HTMLElement>('.rrow.hasfav'));
-  const want = rows.length ? rows : Array.from(box.querySelectorAll<HTMLElement>('.uprow .buy.ok')).slice(0, 1).map((b) => b.closest<HTMLElement>('.uprow') ?? b);
+  const want = ringed.length ? ringed : bulk.length ? bulk : rows.length ? rows
+    : Array.from(box.querySelectorAll<HTMLElement>('.uprow .buy.ok')).slice(0, 1).map((b) => b.closest<HTMLElement>('.uprow') ?? b);
   if (!want.length) return;
   // (Measured against the scroller itself: a sheet still sliding in has the same offset for both.)
   const b = box.getBoundingClientRect();
@@ -875,30 +904,61 @@ function revealInInspector(opened: string) {
   const span = (els: HTMLElement[]) => ({ top: els[0].getBoundingClientRect().top - b.top, bottom: els[els.length - 1].getBoundingClientRect().bottom - b.top });
   let { top, bottom } = span(want);
   // Where all the rows do not fit (a phone held sideways), the ones that can still be favoured come first.
-  if (bottom - top + 24 > room && rows.length) {
+  if (bottom - top + 24 > room && rows.length && want === rows) {
     const open = rows.filter((r) => r.querySelector('button.fav'));
     if (open.length) ({ top, bottom } = span(open));
   }
-  if (top >= 0 && bottom <= room) return;
+  // (For a finger the scroller's foot fades out over SHEET_FADE px, phone.css: what is revealed stands clear of that.)
+  const foot = isTouch() ? SHEET_FADE : 0;
+  if (top >= 0 && bottom <= room - foot) return;
   // The whole of it where it fits, its top where it does not; 12 px clear of the edge.
-  const shift = bottom - top + 24 <= room ? bottom - room + 12 : top - 12;
+  const shift = bottom - top + 24 + foot <= room ? bottom - room + 12 + foot : top - 12;
   box.scrollTop = Math.max(0, Math.min(box.scrollHeight - room, box.scrollTop + shift));
+  revealedAt = box.scrollTop;
 }
+
+/** How far the foot of the inspector's scroller fades out for a finger (phone.css, "nothing pressable under the footer"). */
+const SHEET_FADE = 20;
+/** Where the reveal left the scroller; and when it looks again (ms), once a phone's sheet has slid in (0.22 s). */
+let revealedAt = 0;
+const REVEAL_AGAIN = 360;
 
 // ---------- minimap + zoom ----------
 
 const ST_COLORS: Record<string, string> = { working: '#4ADE80', blocked: '#FBBF24', starved: '#F87171', idle: '#64748B' };
 
+/** What the minimap last drew: the board (its size, the stage's, every node's place and state), and the camera. */
 let miniKey = '';
+let miniView = '';
+/** When it was last drawn (ms). */
+let miniAt = -1e9;
+/** While only the camera moves, the minimap is redrawn at most this often (ms). */
+const MINI_EVERY = 100;
 
+/**
+ * The minimap, redrawn when what it shows has changed: at once when the board has (a node placed, moved or changing
+ * state), and while only the camera moves at most every MINI_EVERY ms (the panels may be refreshed every frame of a
+ * pan; the next refresh draws where the camera came to rest). Not on a phone, which does not show it.
+ */
 function renderMini() {
   const g = ui.g;
-  // Redrawn only when something it shows has changed.
+  if (env.phone) {
+    // (Drawn afresh if the layout comes back to one that shows it.)
+    miniKey = '';
+    return;
+  }
   const view = boardRect();
-  let key = `${g.board.w}x${g.board.h}|${Math.round(ui.view.x)},${Math.round(ui.view.y)},${ui.view.k.toFixed(3)}|${Math.round(view.width)}x${Math.round(view.height)}`;
+  // Between the first Lens and free play no machine is in trouble in the picture (status.ts victoryQuiet): a starved or
+  // blocked one is drawn as working, as the board draws its ring then.
+  const quiet = victoryQuiet(g);
+  let key = `${g.board.w}x${g.board.h}|${Math.round(view.width)}x${Math.round(view.height)}${quiet ? '|quiet' : ''}`;
   for (const n of g.nodes) key += `|${n.x},${n.y},${n.status[0]}`;
-  if (key === miniKey) return;
+  const at = `${Math.round(ui.view.x)},${Math.round(ui.view.y)},${ui.view.k.toFixed(3)}`;
+  const now = performance.now();
+  if (key === miniKey && (at === miniView || now - miniAt < MINI_EVERY)) return;
   miniKey = key;
+  miniView = at;
+  miniAt = now;
   const ctx = mini.getContext('2d');
   if (!ctx) return;
   const W = mini.width, H = mini.height;
@@ -911,7 +971,8 @@ function renderMini() {
   ctx.setLineDash([]);
   for (const n of g.nodes) {
     const { w, h } = nodeSize(n);
-    ctx.fillStyle = n.type === 'market' ? '#FFC857' : n.type === 'lab' ? '#C4A1FF' : ST_COLORS[n.status];
+    const st = quiet && (n.status === 'starved' || n.status === 'blocked') ? 'working' : n.status;
+    ctx.fillStyle = n.type === 'market' ? '#FFC857' : n.type === 'lab' ? '#C4A1FF' : ST_COLORS[st];
     ctx.fillRect(ox + n.x * s, oy + n.y * s, Math.max(3, w * s), Math.max(2, h * s));
   }
   const r = view;

@@ -101,8 +101,36 @@ export function initCelebrate(hooks: { record: typeof record; payout: typeof pay
     else c.timers.push(window.setTimeout(() => current === c && leave(), wait));
   };
   window.addEventListener('pointerdown', dismiss, { capture: true, passive: true });
+  // Over the open tech tree, Enter and Space would research the tree's selection as well (they do that in the tree,
+  // and the research card that has just come up there is what invites the press): while a card is up over the tree,
+  // they only put it away. Nothing past the window hears them, nor does the focused button (Space presses one as the
+  // key comes up, so that is held back too). A key held down goes on repeating after the card has gone: its repeats
+  // are held back as well, until it comes up (a held Enter on the focused Research button researched the next tech).
+  let ate = '';
   window.addEventListener('keydown', (e) => {
-    if (e.key === 'Escape' || e.key === 'Enter' || e.key === ' ') dismiss();
+    if (e.key !== 'Escape' && e.key !== 'Enter' && e.key !== ' ') return;
+    if (e.repeat && e.key === ate) {
+      e.preventDefault();
+      e.stopPropagation();
+      return;
+    }
+    const eat = e.key !== 'Escape' && ui.techOpen && !!current;
+    dismiss();
+    if (!eat) {
+      // (A key whose coming up was missed, the window having lost the focus meanwhile, is not held back for ever.)
+      if (e.key === ate) ate = '';
+      return;
+    }
+    e.preventDefault();
+    e.stopPropagation();
+    ate = e.key;
+  }, true);
+  window.addEventListener('keyup', (e) => {
+    if (!ate || e.key !== ate) return;
+    ate = '';
+    if (e.key !== ' ') return;
+    e.preventDefault();
+    e.stopPropagation();
   }, true);
   // The summary screen is never shared with a celebration for long. The Lens card is waiting for it: it
   // leaves as the summary fades in over it (the two take about the same 0.3 s). Anything else still up

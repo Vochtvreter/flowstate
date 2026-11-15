@@ -586,14 +586,26 @@ function doResearch(id: string) {
 }
 
 /**
+ * How a goal is claimed: the goal card's own claim (hud.ts hands it in: its press state, the old card lifting away and
+ * the new one rising, and one claim per press), given the screen box of the button pressed. Not imported here, as the
+ * card's module brings the board with it; until it is handed in, the goal is simply claimed.
+ */
+let claimer: (pressed: DOMRect | null) => boolean = () => claimGoal(ui.g);
+export function setClaimer(fn: (pressed: DOMRect | null) => boolean) {
+  claimer = fn;
+}
+
+/**
  * The tree's own "Goal complete" bar, on a phone: one press claims the goal and goes back to the board, where
- * the claim is celebrated. (Elsewhere the HUD's slim Claim bar lies over the tree and is the way to claim.)
+ * the claim is celebrated, the card lifting away as it does at its own Claim. (Elsewhere the HUD's slim Claim bar
+ * lies over the tree and is the way to claim.)
  */
 function claimFromTree(pressed: boolean) {
   const g = ui.g;
   if (!g.goal.ready) return closeTech(pressed);
+  const button = host.querySelector('[data-testid="tree-claim"]')?.getBoundingClientRect() ?? null;
   closeTech(pressed);
-  claimGoal(g);
+  claimer(button);
   touch();
 }
 

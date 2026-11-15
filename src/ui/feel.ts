@@ -20,6 +20,7 @@ import { anchorPt, el, setAttr, setClass, setHTML } from './dom';
 import { FlyOpts, Overlay, addOverlay, burst, clearParticles, fly, pop, ring, setMood, textWidth } from './fx';
 import { Pt, bezierAt, matColor, nodeSize, outPorts, wireEnds } from './geom';
 import { actOut, handState, initHand, tipSignal } from './hand';
+import { setResearchCard } from './hud-toasts';
 import { addTopItem, renderPanels } from './panels';
 import { onBeat, onFrame, onGame, onNewGame, onPress, onSignal, signal, ui } from './ui';
 
@@ -755,6 +756,8 @@ export function initFeel() {
   initAudio(record);
   initCelebrate({ record, payout });
   initHand({ record, busy: celebrating });
+  // The research card says what a toast would: the toasts are told which research it covers.
+  setResearchCard(researchCardTech);
   addOverlay(racerOverlay);
   addOverlay(edgeOverlay);
   addOverlay(worldRingOverlay);

@@ -129,6 +129,8 @@ div.gc-rewards { justify-content: flex-start; margin-top: 2px; }
 .alertchip.paused b { font-weight: 700; letter-spacing: 0.02em; }
 .pz-ico { flex: none; display: flex; align-items: center; justify-content: center; width: 26px; height: 26px; border-radius: 50%; background: #fcd34d; color: #2a2412; }
 .alertchip.paused .al-go { gap: 5px; border-color: #7a6324; background: #3a3014; color: #fde9b0; }
+/* Nothing comes in while the game is paused (panels.ts sets #top.paused): the top bar's "+x/s" rates are dimmed. */
+#top.paused .res .nums i { opacity: 0.4; }
 /* The game is open in another tab: this one has stopped saving. */
 .alertchip.notice { border-color: #5a4718; }
 .alertchip.notice .dot { background: #fcd34d; }
@@ -340,6 +342,10 @@ button.fav:hover { background: #263252; }
    A finger gets 44px targets, and is never shown a key. */
 html[data-input='touch'] #hints, html[data-input='touch'] .kbd { display: none; }
 html[data-input='touch'] .alertchip { min-height: 44px; }
+/* (Where the squeezed strip draws it 40 px tall, a tablet held upright, it reaches 3 px into the gap above and the
+   board below: 46 px to press. Measured from inside the chip's 1 px border, hence 4 px.) */
+html[data-input='touch'] #hud-strip.tight .alertchip { position: relative; }
+html[data-input='touch'] #hud-strip.tight .alertchip::after { content: ''; position: absolute; inset: -4px 0; }
 html[data-input='touch'] .gc-show { height: 36px; padding: 0 14px; }
 html[data-input='touch'] .gc-show::after { content: ''; position: absolute; inset: -4px 0; }
 html[data-input='touch'] .menu button { height: 44px; }
@@ -354,8 +360,12 @@ html[data-input='touch'] #insp .step::after, html[data-input='touch'] #insp .fil
 html[data-input='touch'] #insp .link::after { content: ''; position: absolute; inset: -15px -8px; }
 
 /* (The phone layout of the strip and where Claim sits on a phone are at the end of this file, under "phone seating".) */
-#app.phone #toasts { position: static; transform: none; align-self: center; margin-top: 6px; max-width: 100%; }
+/* On a phone the toasts stand under the strip, docked by hud-toasts.ts clear of what lies over the board there: from
+   --toast-top down, between --toast-x0 and --toast-x1 (from the stage's edges); an older one waiting out of sight
+   while there is room for the newest only is `crowd`. */
+#app.phone #toasts { position: absolute; top: var(--toast-top, 0px); left: var(--toast-x0, 8px); right: var(--toast-x1, 8px); bottom: auto; transform: none; margin: 0; max-width: none; align-items: center; }
 #app.phone .toast { max-width: 100%; }
+#toasts .toast.crowd { display: none; }
 
 /* ---------- inspector under touch: what the rules above leave short of 44 px ----------
    The Router's mode buttons were 40 px tall, and the reach around its small steppers and filter chips came
@@ -365,14 +375,15 @@ html[data-input='touch'] #insp .step::after, html[data-input='touch'] #insp .fil
 
 /* ---------- toasts ----------
    Outside the phone layout toasts dock at the bottom left of the stage, above the row of key hints, and keep
-   their hands off every control: the zoom buttons and the minimap have the bottom right corner (192 px
-   with its margins, 228 px with a finger's bigger buttons), the inspector is beside the stage, and while the
+   their hands off every control: the zoom buttons and the minimap have the bottom right corner (as wide as they
+   really are there, --toast-r from hud-toasts.ts; 192 px, or 228 px for a finger, until that has been measured),
+   the inspector is beside the stage, and while the
    tech tree is open tech.css keeps them out of its detail column (#app.insp-open and #app.tech-open are set
    in script: tech.css says why these are classes). --toast-up is set from hud-toasts.ts when
    the board's Expand button lies where they are: they step up above it. At most three show at once (two on
    a phone); hud-toasts.ts takes the oldest away, and the rules here are only the backstop. */
-#app:not(.phone) #hud #toasts { left: 16px; right: 192px; bottom: calc(44px + var(--toast-up, 0px)); align-items: flex-start; }
-html[data-input='touch'] #app:not(.phone) #hud #toasts { right: 228px; bottom: calc(16px + var(--toast-up, 0px)); }
+#app:not(.phone) #hud #toasts { left: 16px; right: var(--toast-r, 192px); bottom: calc(44px + var(--toast-up, 0px)); align-items: flex-start; }
+html[data-input='touch'] #app:not(.phone) #hud #toasts { right: var(--toast-r, 228px); bottom: calc(16px + var(--toast-up, 0px)); }
 #app:not(.phone) .toast { text-align: left; }
 #toasts .toast:nth-last-child(n + 4) { display: none; }
 /* The one-off "Best played upright" line on a phone held sideways (hud-screens.ts): it can be dismissed. */
@@ -584,6 +595,14 @@ html[data-input='mouse'] #hud-strip.tight .claim.sm { height: 32px; }
 #app.phone .gc-valve { line-height: 14px; }
 #app.phone div.gc-rewards { margin-top: 1px; }
 #app.phone [data-ready='1'] .rw { height: 22px; padding: 0 8px; font-size: 12.5px; line-height: 22px; }
+/* The narrowest phones (360 px) have the least stage under the strip: a few pixels less padding round the card's rows
+   and in a ready order keep the busiest strip (goal 19: the hint, the line and a ready order) inside 40% of it. */
+@media (max-width: 370px) {
+  #app.phone #goal { padding-top: 4px; padding-bottom: 4px; }
+  #app.phone .gc-prog { margin-top: 0; }
+  #app.phone .gc-line > .gc-in, #app.phone .gc-tip > .gc-in { margin-top: 0; padding-top: 2px; }
+  #app.phone #order[data-ready='1'] { padding-top: 0; padding-bottom: 0; }
+}
 /* The two rows of guidance (a phone shows one at a time: the line while it is not done, the tip otherwise).
    Show me answers a 44 px press: 36 px to look at, and its ::after reaches the rest. */
 #app.phone .gc-show { height: 36px; padding: 0 12px; }
@@ -647,7 +666,11 @@ html[data-input='mouse'] #hud-strip.tight .claim.sm { height: 32px; }
   #app.phone #hud-strip:not(.has-order):not(.has-alert) { grid-template-columns: minmax(0, 1fr); grid-template-areas: 'goal'; }
   #app.phone #hud-row { display: contents; }
   #app.phone.insp-open #hud-strip, #app.phone.building #hud-strip { grid-template-columns: minmax(0, 1fr); grid-template-areas: 'goal'; }
-  #app.phone.insp-open #order, #app.phone.insp-open #hud-alert, #app.phone.building #order, #app.phone.building #hud-alert { display: none; }
+  #app.phone.insp-open #order, #app.phone.insp-open #hud-alert:not([data-kind='paused']), #app.phone.building #order, #app.phone.building #hud-alert:not([data-kind='paused']) { display: none; }
+  /* Paused is said even then (#hud-strip.paused, hud.ts): under the card, as small as it goes, one press from going on. */
+  #app.phone.insp-open #hud-strip.paused, #app.phone.building #hud-strip.paused { grid-template-areas: 'goal' 'alert'; grid-template-rows: auto auto; }
+  #app.phone.insp-open #hud-strip.paused #hud-alert, #app.phone.building #hud-strip.paused #hud-alert { justify-self: start; }
+  #app.phone.insp-open #hud-strip.paused .alertchip, #app.phone.building #hud-strip.paused .alertchip { width: auto; }
   #app.phone #goal { grid-area: goal; padding: 4px 10px 5px 12px; }
   #app.phone #goal.done { justify-self: center; }
   #app.phone #order { grid-area: order; }
