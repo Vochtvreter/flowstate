@@ -19,13 +19,15 @@ import { Game, GNode, RouterMode, Wire } from '../state';
 import { isMuted, setMuted } from './audio';
 import { boardRect, jumpTo, startPlacing, fitView, zoomBy } from './board';
 import { marked, pressedMark, tendMark } from './advice-show';
-import { Panel, el, invalidateLayout, makePanel, setAnchor, setAttr, setClass, setHTML, setHidden, setText } from './dom';
+import { Panel, cachedRect, el, invalidateLayout, makePanel, setAnchor, setAttr, setClass, setHTML, setHidden, setText } from './dom';
 import { nodeSize } from './geom';
 import { marketSection } from './hud-market';
+import { logoMark } from './hud-screens';
 import { isTouch, withKey } from './hud-words';
 import { esc, icon, matGlyph, nodeIcon } from './icons';
 import { env } from './phone-env';
 import { diagnose, matName } from './status';
+import { teasedSlot } from './tech';
 import { delegate, select, signal, toast, touch, ui } from './ui';
 
 let topEl: HTMLElement;
@@ -294,6 +296,11 @@ function everHad(g: Game, k: DataTier): boolean {
   return !!seen[k];
 }
 
+/** A tech the player can research now and whose price is in kinds of Data they have met: worth pointing at. */
+function techInSight(g: Game, t: Tech | undefined): boolean {
+  return !!t && techAvailable(g, t) && (['a', 'b', 'g'] as DataTier[]).every((k) => !t.cost[k] || everHad(g, k));
+}
+
 const DATA_ABOUT: Record<DataTier, string> = {
   a: 'α Data: Labs make it from raw and Tier 1 items. Spend it in the Tech tree.',
   b: 'β Data: Labs make it from Tier 2 items such as Glyph. Spend it in the Tech tree.',
@@ -336,7 +343,7 @@ function dataItem(k: DataTier): TopItem {
 // "Tech", and `menu-open` while the menu is down.)
 function buildTop() {
   topEl.innerHTML = `
-    <div class="logo"><svg viewBox="0 0 28 28" width="26" height="26" aria-hidden="true"><circle cx="6" cy="8" r="4" fill="#FFD84D"/><circle cx="22" cy="20" r="4" fill="#5CE1FF"/><path d="M10 8c8 0 4 12 8 12" class="ic" style="color:#9DB8FF"/></svg><span>flowstate</span></div>
+    <div class="logo">${logoMark(26)}<span>flowstate</span></div>
     <div class="resrow"></div>
     <div class="grow"></div>
     <div class="acts"></div>`;
@@ -458,6 +465,11 @@ const outOfReach = new Map<NodeType, boolean>();
 const affordUntil = new Map<NodeType, number>();
 let hotGame: Game | null = null;
 
+/** One hotbar slot's height with the gap under it, and the bar's own padding (style.css): for "is there room for the Delete tip". */
+const HOT_SLOT = 68;
+const HOT_PAD = 16;
+const hotRect = cachedRect(() => hotEl);
+
 function renderHot(force: boolean) {
   const g = ui.g;
   if (g !== hotGame) {
@@ -469,19 +481,23 @@ function renderHot(force: boolean) {
   const now = performance.now();
   const became: NodeType[] = [];
   const touchy = isTouch();
+  const tease = teasedSlot(g);
   let key = 0;
-  let shownLocked = 0;
+  let slots = 0;
   const items = HOTBAR.map((type) => {
     const def = NODE_DEFS[type];
     if (!nodeUnlocked(g, type)) {
-      // Tease only the next couple of locked nodes, to keep the bar calm.
-      if (!has(g, 'R1') || shownLocked >= 2) return '';
-      shownLocked++;
-      const t = TECHS[def.tech!];
-      if (!t) return '';
-      return `<button class="hb locked" data-act="locked:${t.id}" title="${def.name}: research ${t.name}" aria-label="${def.name}, locked. Research ${t.name}">${nodeIcon(type)}<span class="n">${def.name}</span><span class="p">${costText(t) || 'locked'}</span></button>`;
+      if (tease?.type !== type) return '';
+      slots++;
+      // A silhouette: the icon and the name dimmed, and under them what unlocks it (never a price: it would
+      // be in a kind of Data the player may not have met). With the tree at hand it opens there.
+      const t = tease.tech;
+      const body = `${nodeIcon(type)}<span class="n">${def.name}</span><span class="p">${esc(t.name)}</span>`;
+      if (tease.goal || !has(g, 'R1')) return `<div class="hb locked" data-testid="hot-locked" data-type="${type}" title="${def.name}: comes with this goal" aria-label="${def.name}, locked. It comes with this goal">${body}</div>`;
+      return `<button class="hb locked" data-act="locked:${t.id}" data-testid="hot-locked" data-type="${type}" title="${def.name}: research ${esc(t.name)}" aria-label="${def.name}, locked. Research ${esc(t.name)}">${body}</button>`;
     }
     key++;
+    slots++;
     const cost = nodeCost(g, type);
     const ok = g.credits + 1e-6 >= cost;
     // The moment an item comes within reach it pulses once, and anyone listening is told.
@@ -499,7 +515,9 @@ function renderHot(force: boolean) {
       ${ok ? '' : `<span class="fill" style="height:${pct(g.credits / Math.max(1, cost))}%"></span>`}${touchy ? '' : `<span class="k mono">${k}</span>`}${nodeIcon(type)}<span class="n">${def.name}</span><span class="p mono">${price}</span></button>`;
   }).join('');
   // The Delete key is for keyboards: with a finger, Delete is a button in the inspector, which shows the refund.
-  const tip = touchy ? '' : `<div class="grow"></div><div class="hb tip" title="Select a node and press Delete. Everything is refunded in full.">${icon('trash')}<span class="p">Del = refund</span></div>`;
+  // (And only where the rail has room for it under the slots: on a short window a full bar takes it all.)
+  const room = env.phone || hotRect().height >= slots * HOT_SLOT + HOT_PAD + HOT_SLOT;
+  const tip = touchy || !room ? '' : `<div class="grow"></div><div class="hb tip" title="Select a node and press Delete. Everything is refunded in full.">${icon('trash')}<span class="p">Del = refund</span></div>`;
   hotPanel.render(items + tip, force);
   for (const type of became) {
     const btn = hotEl.querySelector<HTMLElement>(`[data-testid="hot-${type}"]`);
@@ -614,9 +632,12 @@ function routerSection(g: Game, n: GNode): string {
   const modes: { id: RouterMode; name: string; tech?: string }[] = [
     { id: 'even', name: 'Even' }, { id: 'ratio', name: 'Ratio' }, { id: 'priority', name: 'Priority', tech: 'L4' }, { id: 'filter', name: 'Filter', tech: 'L6' },
   ];
-  const seg = modes.map((m) => has(g, m.tech)
+  // A mode that still has to be researched is offered (locked, leading to the tree) only once that research
+  // is in sight: it can be done now, and the player has met the kind of Data it costs. Priority Routing can be
+  // researched from the moment the Router arrives, but it costs β, and β does not exist until the first Glyph.
+  const seg = modes.filter((m) => has(g, m.tech) || techInSight(g, TECHS[m.tech ?? ''])).map((m) => has(g, m.tech)
     ? `<button data-act="mode:${m.id}" class="${n.mode === m.id ? 'on' : ''}" data-testid="mode-${m.id}">${m.name}</button>`
-    : `<button data-act="tech:${m.tech}" class="lockedseg">${icon('lock', 11)}${m.name}</button>`).join('');
+    : `<button data-act="tech:${m.tech}" class="lockedseg" data-testid="mode-${m.id}-locked">${icon('lock', 11)}${m.name}</button>`).join('');
   const total = wires.reduce((s, w) => s + w.rate, 0) || 1;
   const favoured = favouredWire(g, n.id);
   const rows = wires.map((w, i) => {
@@ -657,10 +678,15 @@ function labSection(g: Game, n: GNode): string {
     const y = dataYield(g, m);
     return `<div class="row sm"><span>${matGlyph(m, 12)} ${MATERIALS[m].name}</span><span class="mono" style="color:${DATA_COLORS[y.tier]}">${fmt(y.amount)}${DATA_NAMES[y.tier]} each</span></div>`;
   }).join('');
+  // What each tier of item gives, as far as the player has got: β and γ are named once Tier 2 and Tier 3
+  // items can be made (or that kind of Data has been in hand), not before.
+  let kinds = 'Raw and Tier 1 items give α.';
+  if (has(g, 'P4') || everHad(g, 'b')) kinds += ' Tier 2 items give β.';
+  if (has(g, 'P7') || everHad(g, 'g')) kinds += ' Tier 3 items give γ.';
   return `<div class="sec flow"><span class="lbl">Studying</span>${rows || '<div class="note">Wire any item into the Lab.</div>'}
     <div class="row sm"><span>Throughput</span><span class="mono"><b>${fmtRate(n.rate)}</b> / ${fmtRate(labRate(g, n))} /s</span></div>
     <div class="bar"><span style="width:${pct(n.rate / labRate(g, n))}%;background:#C4A1FF"></span></div>
-    <div class="note">Raw and T1 items give α. T2 gives β. T3 gives γ.</div></div>`;
+    <div class="note">${kinds}</div></div>`;
 }
 
 function nodeInspector(g: Game, n: GNode): string {
@@ -681,10 +707,8 @@ function nodeInspector(g: Game, n: GNode): string {
   body += upgradeSection(g, n);
   const refund = refundOf(g, n);
   const fixed = n.type === 'well';
-  // Demand is not mentioned before it has ever mattered (g.seenSurplus): the Market's line stops at its first sentence.
-  const blurb = n.type === 'market' && !g.seenSurplus ? def.blurb.split('. ')[0].replace(/\.?$/, '.') : def.blurb;
   return `<div class="sec head"><div class="hicon">${n.type === 'well' && n.material ? matGlyph(n.material, 22) : isMachine(n) && n.recipe ? matGlyph(RECIPES[n.recipe].outputs[0][0], 22) : nodeIcon(n.type, 22)}</div>
-      <div class="htxt"><h2>${esc(title)}</h2><p>${esc(blurb)}</p></div>
+      <div class="htxt"><h2>${esc(title)}</h2><p>${esc(def.blurb)}</p></div>
       <button class="ibtn bare" data-act="close" aria-label="Close inspector">${icon('close', 16)}</button></div>
     <div class="scroll">${body}</div>
     <div class="foot"><button class="fbtn" data-act="dup" ${fixed ? 'disabled' : ''}>Duplicate <span class="kbd">Ctrl D</span></button>
@@ -730,6 +754,9 @@ function renderInspector(force: boolean) {
   // Opening or closing changes the width of the stage, so cached screen positions are thrown away.
   // (As a bottom sheet on a phone it lies over the stage instead, and nothing moves.)
   if (setClass(inspEl, 'open', !!html)) invalidateLayout();
+  // (The same as a class on #app, for the stylesheets: far cheaper to match than a has() selector on #app.)
+  const appEl = inspEl.parentElement;
+  if (appEl) setClass(appEl, 'insp-open', !!html);
   if (html || !env.phone) {
     clearTimeout(inspEmpty);
     inspEmpty = 0;
@@ -780,8 +807,17 @@ function renderMini() {
   ctx.strokeRect(ox + (-ui.view.x / ui.view.k) * s, oy + (-ui.view.y / ui.view.k) * s, (r.width / ui.view.k) * s, (r.height / ui.view.k) * s);
 }
 
+let fitBtn: HTMLElement | null | undefined;
+
 function renderZoom() {
   setText(zoomLabel, `${Math.round(ui.view.k * 100)}%`);
+  // The Fit button names its key only to someone with a keyboard.
+  fitBtn ??= zoomEl.querySelector<HTMLElement>('[data-act="fit"]');
+  if (fitBtn) {
+    const label = withKey('Fit board', 'F');
+    setAttr(fitBtn, 'aria-label', label);
+    setAttr(fitBtn, 'title', label);
+  }
 }
 
 /**

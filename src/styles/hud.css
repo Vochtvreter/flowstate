@@ -194,52 +194,125 @@ button.fav:hover { background: #263252; }
 .start-card p { margin: 8px 0 26px; font-size: 15px; color: #c9d3e8; }
 .start-go { min-width: 230px; height: 58px; padding: 0 28px; border: 0; border-radius: 15px; background: var(--sel); color: #0b1430; font-family: var(--disp); font-size: 20px; font-weight: 700; box-shadow: 0 8px 26px rgba(122, 162, 255, 0.35); }
 .start-go:hover { background: #93b4ff; }
-.start-new { min-height: 44px; margin-top: 6px; padding: 0 16px; border: 0; background: none; color: var(--muted); font-size: 13px; text-decoration: underline; text-underline-offset: 3px; }
+/* One quiet line under the button: how long this takes, and that it has sound. */
+.start-card .start-note { margin: 12px 0 0; font-size: 12.5px; line-height: 16px; color: var(--muted); }
+.start-new { min-height: 44px; margin-top: 4px; padding: 0 16px; border: 0; background: none; color: var(--muted); font-size: 13px; text-decoration: underline; text-underline-offset: 3px; }
 .start-new:hover { color: var(--text); }
+/* The logo moves: three dots run along its wire, from one node to the other (the nodes are drawn over the
+   ends, so a dot leaves one and enters the other). Where the browser cannot move something along a path
+   there are no dots; where the player asked for less motion they stand still on the wire. */
+.lg-dot { fill: #fff; offset-path: path('M10 8c8 0 4 12 8 12'); offset-rotate: 0deg; animation: lg-run 1.8s linear infinite; }
+.lg-dot.d2 { animation-delay: -0.6s; }
+.lg-dot.d3 { animation-delay: -1.2s; }
+@keyframes lg-run { from { offset-distance: 0%; } to { offset-distance: 100%; } }
+@supports not (offset-path: path('M0 0L1 1')) {
+  .lg-dot { display: none; }
+}
+@media (prefers-reduced-motion: reduce) {
+  .lg-dot { animation: none; offset-distance: 50%; }
+  .lg-dot.d1 { offset-distance: 24%; }
+  .lg-dot.d3 { offset-distance: 76%; }
+}
 
-/* ---------- end-of-demo summary ---------- */
-#summary { position: absolute; inset: 0; z-index: 70; display: flex; padding: 16px; overflow-y: auto; background: rgba(5, 8, 14, 0.76); }
-.sum-card { width: min(620px, 100%); margin: auto; padding: 28px 28px 22px; border-radius: 24px; background: #101827; border: 1px solid #2a3550; box-shadow: 0 30px 80px rgba(0, 0, 0, 0.6); text-align: center; animation: sum-in 0.35s cubic-bezier(0.2, 0.9, 0.3, 1); }
-@keyframes sum-in { from { transform: translateY(16px) scale(0.97); opacity: 0; } }
-.sum-ico { width: 64px; height: 64px; margin: 0 auto; border-radius: 50%; display: flex; align-items: center; justify-content: center; color: #fff; background: radial-gradient(circle, #2a3963 0%, #17203a 70%); border: 1px solid #3a4a70; }
-.sum-top h2 { margin: 12px 0 4px; font-family: var(--disp); font-size: 34px; font-weight: 700; line-height: 1.1; letter-spacing: -0.01em; }
-.sum-top p { margin: 0; font-size: 14px; color: #c9d3e8; }
-.sum-grid { display: grid; grid-template-columns: repeat(12, minmax(0, 1fr)); gap: 10px; margin: 22px 0; }
-.sum-stat { grid-column: span 3; display: flex; flex-direction: column; gap: 4px; padding: 12px 6px 11px; border-radius: 14px; background: #151d30; border: 1px solid var(--line); }
-.sum-stat.big { grid-column: span 4; padding: 16px 6px 14px; }
-.sum-stat b { font-size: 20px; font-weight: 600; line-height: 1.1; }
-.sum-stat.big b { font-size: 28px; color: var(--credits); }
-.sum-stat span { font-size: 11.5px; color: var(--muted); }
-.sum-actions { display: flex; flex-direction: column; align-items: center; }
-.sum-go { min-width: 230px; height: 56px; padding: 0 28px; border: 0; border-radius: 15px; background: #4ade80; color: #04240f; font-family: var(--disp); font-size: 19px; font-weight: 700; box-shadow: 0 8px 26px rgba(74, 222, 128, 0.3); }
+/* ---------- end-of-demo summary ----------
+   A small card at the foot of the screen. The closing celebration has framed the whole factory by the time
+   it opens, and the factory stays on show: the backdrop is light at the top and only darkens toward the card.
+   On a phone it is a bottom sheet (a sheet at the side when the phone is held sideways); phone.ts counts it
+   as covering the board, so the camera frames the factory in what is left. */
+#summary { position: absolute; inset: 0; z-index: 70; display: flex; padding: 16px 16px 26px; overflow-y: auto; background: linear-gradient(to bottom, rgba(5, 8, 14, 0.2) 0%, rgba(5, 8, 14, 0.34) 45%, rgba(5, 8, 14, 0.82) 100%); animation: sum-fade 0.3s ease-out; }
+@keyframes sum-fade { from { opacity: 0; } }
+.sum-card { position: relative; display: flex; flex-direction: column; gap: 12px; width: min(600px, 100%); margin: auto auto 0; padding: 16px 20px 12px; border-radius: 20px; background: #101827; border: 1px solid #2a3550; box-shadow: 0 24px 70px rgba(0, 0, 0, 0.65); animation: sum-in 0.35s cubic-bezier(0.2, 0.9, 0.3, 1); }
+@keyframes sum-in { from { transform: translateY(24px); } }
+.sum-top { display: flex; align-items: center; gap: 12px; text-align: left; }
+.sum-ico { flex: none; width: 46px; height: 46px; border-radius: 50%; display: flex; align-items: center; justify-content: center; color: #fff; background: radial-gradient(circle, #2a3963 0%, #17203a 70%); border: 1px solid #3a4a70; }
+.sum-head { min-width: 0; display: flex; flex-direction: column; gap: 2px; }
+.sum-kicker { font-size: 10.5px; font-weight: 700; letter-spacing: 0.09em; line-height: 13px; text-transform: uppercase; color: #4ade80; }
+/* The headline is how long the first Lens took. */
+.sum-head h2 { margin: 0; font-family: var(--disp); font-size: 26px; font-weight: 700; line-height: 1.12; letter-spacing: -0.01em; }
+.sum-head h2 b { font-weight: 600; color: var(--credits); }
+.sum-grid { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 8px; }
+.sum-stat { display: flex; flex-direction: column; gap: 2px; padding: 8px 4px 7px; border-radius: 12px; background: #151d30; border: 1px solid var(--line); text-align: center; }
+.sum-stat b { font-size: 17px; font-weight: 600; line-height: 1.15; }
+.sum-stat span { font-size: 11px; line-height: 13px; color: var(--muted); }
+/* What comes next: the four things free play has the player make, as locked silhouettes with their names
+   (ticked instead when one has been made already), and one line about demand for a player who has not met it. */
+.sum-next { display: grid; grid-template-columns: auto minmax(0, 1fr); align-items: center; gap: 8px 12px; text-align: left; }
+.sum-lbl { font-size: 10.5px; font-weight: 700; letter-spacing: 0.09em; text-transform: uppercase; color: #9db8ff; }
+.sum-nexts { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 8px; }
+.sum-nx { position: relative; display: flex; align-items: center; justify-content: center; gap: 7px; min-height: 34px; padding: 0 20px 0 8px; border-radius: 10px; border: 1px dashed #2f3b58; background: #0e1422; color: #8f9bb5; font-size: 12px; font-weight: 600; }
+.sum-nx i { font-style: normal; min-width: 0; }
+.sum-nx > svg:first-child { flex: none; filter: grayscale(1) brightness(0.8); opacity: 0.6; }
+.sum-nx > svg:last-child { position: absolute; right: 6px; top: 50%; margin-top: -6px; color: #5d6880; }
+.sum-nx.made { border-style: solid; color: var(--text); }
+.sum-nx.made > svg:first-child { filter: none; opacity: 1; }
+.sum-nx.made > svg:last-child { color: #4ade80; }
+.sum-more { grid-column: 1 / -1; margin: 0; font-size: 12.5px; line-height: 17px; color: #c9d3e8; }
+/* Keep playing first and largest, Copy result beside it, Start over as the quiet one. */
+.sum-actions { display: flex; align-items: center; gap: 8px; }
+.sum-go { flex: 1 1 auto; min-width: 0; height: 50px; padding: 0 20px; border: 0; border-radius: 14px; background: #4ade80; color: #04240f; font-family: var(--disp); font-size: 18px; font-weight: 700; box-shadow: 0 8px 26px rgba(74, 222, 128, 0.3); }
 .sum-go:hover { background: #6cf09a; }
-.sum-over { min-height: 44px; margin-top: 4px; padding: 0 16px; border: 0; background: none; color: var(--muted); font-size: 13px; text-decoration: underline; text-underline-offset: 3px; }
+.sum-copy { flex: none; min-width: 136px; height: 50px; padding: 0 14px; border-radius: 14px; border: 1px solid #3a4a70; background: #151d30; color: var(--text); font-size: 14px; font-weight: 600; white-space: nowrap; }
+.sum-copy:hover { background: #1a2338; }
+.sum-copy .lab { display: inline-flex; align-items: center; justify-content: center; gap: 6px; }
+.sum-copy.done { border-color: #2f8f58; background: #0f2219; color: #4ade80; }
+.sum-over { flex: none; min-height: 44px; padding: 0 10px; border: 0; background: none; color: var(--muted); font-size: 13px; text-decoration: underline; text-underline-offset: 3px; white-space: nowrap; }
 .sum-over:hover { color: var(--text); }
+/* The clipboard was refused: the two lines as text the player can select (the one place in the HUD where they can). */
+.sum-fallback { display: flex; flex-direction: column; gap: 6px; font-size: 12px; line-height: 16px; color: var(--muted); text-align: left; }
+.sum-fallback textarea { display: block; width: 100%; resize: none; padding: 8px 10px; border-radius: 10px; border: 1px solid #3a4a70; background: #0b0f17; color: var(--text); font: 12.5px/18px var(--mono); user-select: text; -webkit-user-select: text; -webkit-touch-callout: default; touch-action: auto; }
+.sum-said { position: absolute; width: 1px; height: 1px; overflow: hidden; clip-path: inset(50%); white-space: nowrap; }
+/* The strip behind still shows its Claim buttons, which cannot be pressed from here ("Keep playing" claims the
+   goal on the way out). (A class set with the card, not a has() selector on #app: tech.css says why.) */
+#app.summary-open #hud-strip .claim { visibility: hidden; }
+
+/* A phone: a sheet across the bottom, over the lower part of the stage. */
+#app.phone #summary { padding: 0; }
+#app.phone .sum-card { width: 100%; margin: auto 0 0; gap: 10px; padding: 12px 14px calc(8px + env(safe-area-inset-bottom, 0px)); border-width: 1px 0 0; border-radius: 18px 18px 0 0; box-shadow: 0 -14px 40px rgba(0, 0, 0, 0.55); }
+#app.phone .sum-ico { width: 42px; height: 42px; }
+#app.phone .sum-head h2 { font-size: 22px; }
+#app.phone .sum-grid, #app.phone .sum-nexts { gap: 6px; }
+#app.phone .sum-next { grid-template-columns: minmax(0, 1fr); gap: 5px; }
+#app.phone .sum-nx { flex-direction: column; gap: 2px; min-height: 48px; padding: 6px 2px 5px; font-size: 11.5px; line-height: 14px; }
+#app.phone .sum-nx > svg:last-child { right: 5px; top: 5px; margin-top: 0; }
+#app.phone .sum-more { font-size: 12px; line-height: 16px; }
+#app.phone .sum-actions { flex-wrap: wrap; gap: 4px 8px; }
+#app.phone .sum-go { flex: 1 0 100%; height: 52px; margin-bottom: 4px; }
+#app.phone .sum-copy { flex: 1 1 0; height: 44px; }
+#app.phone .sum-over { flex: 1 1 0; }
+/* (Both lines of the result fit a 360 px screen without wrapping at this size.) */
+#app.phone .sum-fallback textarea { padding: 7px 8px; font-size: 11.5px; line-height: 17px; }
+#app.phone .start-go { min-width: 0; width: 100%; }
 @media (max-width: 560px) {
-  .sum-card { padding: 22px 16px 16px; }
-  .sum-top h2 { font-size: 28px; }
-  .sum-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 8px; margin: 16px 0; }
-  .sum-stat, .sum-stat.big { grid-column: span 1; padding: 11px 6px 10px; }
-  .sum-stat.big:first-child { grid-column: span 2; }
-  .sum-stat.big b { font-size: 24px; }
   .start-card { padding: 28px 24px 20px; }
   .start-card h1 { font-size: 40px; }
 }
-
-/* A short screen (a phone on its side): the whole summary fits without scrolling, buttons included. */
-@media (max-height: 520px) {
-  #summary { padding: 10px; }
-  .sum-card { padding: 14px 20px 10px; border-radius: 18px; }
-  .sum-ico { display: none; }
-  .sum-top h2 { margin-top: 0; font-size: 24px; }
-  .sum-top p { font-size: 13px; }
-  .sum-grid { gap: 6px; margin: 10px 0 8px; }
-  .sum-stat, .sum-stat.big { gap: 2px; padding: 7px 4px 6px; border-radius: 10px; }
-  .sum-stat b { font-size: 17px; }
-  .sum-stat.big b { font-size: 21px; }
-  .sum-actions { flex-direction: row; justify-content: center; gap: 6px; }
-  .sum-go { min-width: 200px; height: 48px; font-size: 17px; }
-  .sum-over { margin-top: 0; }
+/* A phone on its side: there is no height for a sheet across the bottom, so it stands at the right, as the
+   inspector does there, with everything on fewer lines. */
+@media (orientation: landscape) and (max-height: 520px) {
+  #app.phone #summary { padding: 6px max(8px, env(safe-area-inset-right, 0px)) 6px 8px; background: linear-gradient(to right, rgba(5, 8, 14, 0.2) 0%, rgba(5, 8, 14, 0.34) 45%, rgba(5, 8, 14, 0.82) 100%); }
+  #app.phone .sum-card { width: min(400px, 50%); margin: auto 0 auto auto; gap: 8px; padding: 10px 12px 8px; border-width: 1px; border-radius: 16px; }
+  #app.phone .sum-ico { width: 36px; height: 36px; }
+  #app.phone .sum-head h2 { font-size: 20px; }
+  #app.phone .sum-stat { padding: 5px 2px; }
+  #app.phone .sum-stat b { font-size: 15px; }
+  #app.phone .sum-stat span { font-size: 10.5px; line-height: 12px; }
+  #app.phone .sum-nx { min-height: 42px; padding: 4px 2px 3px; }
+  #app.phone .sum-actions { flex-wrap: nowrap; gap: 6px; }
+  #app.phone .sum-go { flex: 1 1 auto; height: 46px; margin: 0; padding: 0 10px; font-size: 16px; }
+  #app.phone .sum-copy { flex: none; min-width: 112px; height: 46px; padding: 0 8px; font-size: 13px; }
+  #app.phone .sum-over { flex: none; padding: 0 4px; }
+  /* The start screen is short of height too. */
+  .start-card { padding: 16px 40px 12px; }
+  .start-card h1 { margin-top: 6px; font-size: 34px; }
+  .start-card p { margin: 4px 0 14px; }
+  .start-card .logo-mark { width: 48px; height: 48px; }
+  .start-go { height: 50px; }
+  .start-card .start-note { margin-top: 8px; }
+  .start-new { margin-top: 0; }
+}
+@media (prefers-reduced-motion: reduce) {
+  /* Nothing slides: the card and its backdrop fade in together. */
+  #summary { animation-duration: 0.2s; }
 }
 
 /* ---------- time-away card ---------- */
@@ -268,7 +341,35 @@ html[data-input='touch'] #insp .link::after { content: ''; position: absolute; i
 /* (The phone layout of the strip and where Claim sits on a phone are at the end of this file, under "phone seating".) */
 #app.phone #toasts { position: static; transform: none; align-self: center; margin-top: 6px; max-width: 100%; }
 #app.phone .toast { max-width: 100%; }
-#app.phone .start-go, #app.phone .sum-go { min-width: 0; width: 100%; }
+
+/* ---------- inspector under touch: what the rules above leave short of 44 px ----------
+   The Router's mode buttons were 40 px tall, and the reach around its small steppers and filter chips came
+   out as 42 px: it is measured from inside their 1 px border. */
+html[data-input='touch'] #insp .seg button { height: 44px; }
+html[data-input='touch'] #insp .step::after, html[data-input='touch'] #insp .filt::after { inset: -7px; }
+
+/* ---------- toasts ----------
+   Outside the phone layout toasts dock at the bottom left of the stage, above the row of key hints, and keep
+   their hands off every control: the zoom buttons and the minimap have the bottom right corner (192 px
+   with its margins, 228 px with a finger's bigger buttons), the inspector is beside the stage, and while the
+   tech tree is open tech.css keeps them out of its detail column (#app.insp-open and #app.tech-open are set
+   in script: tech.css says why these are classes). --toast-up is set from hud-toasts.ts when
+   the board's Expand button lies where they are: they step up above it. At most three show at once (two on
+   a phone); hud-toasts.ts takes the oldest away, and the rules here are only the backstop. */
+#app:not(.phone) #hud #toasts { left: 16px; right: 192px; bottom: calc(44px + var(--toast-up, 0px)); align-items: flex-start; }
+html[data-input='touch'] #app:not(.phone) #hud #toasts { right: 228px; bottom: calc(16px + var(--toast-up, 0px)); }
+#app:not(.phone) .toast { text-align: left; }
+#toasts .toast:nth-last-child(n + 4) { display: none; }
+@media (max-width: 900px) {
+  /* (No key hints at this width.) */
+  #app:not(.phone) #hud #toasts { bottom: calc(16px + var(--toast-up, 0px)); }
+  /* With the inspector open the stage is too narrow to share its foot with the zoom buttons: the toasts go above them. */
+  #app:not(.phone).insp-open #hud #toasts, html[data-input='touch'] #app:not(.phone).insp-open #hud #toasts { right: 16px; bottom: calc(190px + var(--toast-up, 0px)); }
+}
+@media (prefers-reduced-motion: reduce) {
+  .toast { animation-name: toast-fade; }
+}
+@keyframes toast-fade { from { opacity: 0; } }
 
 @media (prefers-reduced-motion: reduce) {
   .claim::before, .claim::after, .sum-card { animation: none !important; }
