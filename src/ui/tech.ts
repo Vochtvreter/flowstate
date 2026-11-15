@@ -232,8 +232,20 @@ let scrollTo: 'top' | 'show' | null = null;
 let idleAt = -1e9;
 const MIN_GAP_MS = 450;
 
+const app = () => (appEl ??= document.getElementById('app'));
 /** The phone layout is in use (the phone module sets the class). */
-const isPhone = () => !!(appEl ??= document.getElementById('app'))?.classList.contains('phone');
+const isPhone = () => !!app()?.classList.contains('phone');
+/**
+ * What the stylesheets need to know about the tree, as classes on #app: `tech-open` while it is open, and
+ * `tech-seat` while it is open with a goal ready (outside the phone layout the HUD's slim Claim bar then
+ * lies over the top of the tree, and the tree's own bar is the seat for it: see tech.css).
+ */
+function markApp(open: boolean, goalReady: boolean) {
+  const el = app();
+  if (!el) return;
+  setClass(el, 'tech-open', open);
+  setClass(el, 'tech-seat', open && goalReady);
+}
 
 export function initTech(el: HTMLElement) {
   host = el;
@@ -396,6 +408,7 @@ export function openTech(id?: string) {
   fresh.clear();
   scrollTo = 'top';
   setClass(host, 'open', true);
+  markApp(true, g.goal.ready);
   renderTech(true);
   touch();
 }
@@ -404,6 +417,7 @@ export function closeTech() {
   ui.techOpen = false;
   ringed = null;
   setClass(host, 'open', false);
+  markApp(false, false);
   touch();
 }
 
@@ -577,6 +591,7 @@ export function renderTech(force = false) {
     + `<aside class="tdetail" aria-label="Selected tech">${detailHtml(g, sel, want)}</aside>`;
 
   setClass(host, 'sheet', sheet);
+  markApp(true, !!waiting);
   if (panel.render(html, force)) {
     for (const f of fresh.values()) if (!f.until) f.until = now + FRESH_MS;
   }

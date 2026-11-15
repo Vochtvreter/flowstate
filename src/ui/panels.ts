@@ -749,6 +749,9 @@ function renderInspector(force: boolean) {
   // Opening or closing changes the width of the stage, so cached screen positions are thrown away.
   // (As a bottom sheet on a phone it lies over the stage instead, and nothing moves.)
   if (setClass(inspEl, 'open', !!html)) invalidateLayout();
+  // (The same as a class on #app, for the stylesheets: far cheaper to match than a has() selector on #app.)
+  const appEl = inspEl.parentElement;
+  if (appEl) setClass(appEl, 'insp-open', !!html);
   if (html || !env.phone) {
     clearTimeout(inspEmpty);
     inspEmpty = 0;

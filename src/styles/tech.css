@@ -46,10 +46,14 @@ html[data-input='touch'] #tech .tt.own, html[data-input='touch'] #tech .qbox { m
    (#hud-strip.over-tech, z-index 45, 14 px from the top of the stage). That bar is the one way to claim
    there; this element is then no banner of its own but the seat the bar lands on: an empty band across
    the very top of the tree, so the bar covers nothing.
-   (Should the HUD stop doing that, the rules no longer match and this is the tree's own bar again.) */
-#app:not(.phone):has(#hud-strip.over-tech) #tech { grid-template-areas: 'goal goal' 'head head' 'tree detail'; grid-template-rows: auto auto minmax(0, 1fr); }
-#app:not(.phone):has(#hud-strip.over-tech) #tech .tgoal { min-height: 86px; pointer-events: none; animation: none; background: transparent; border-bottom-color: var(--line); }
-#app:not(.phone):has(#hud-strip.over-tech) #tech .tgoal > * { display: none; }
+   tech.ts sets `#app.tech-seat` for as long as that is so (the tree open with a goal ready), and
+   `#app.tech-open` while the tree is open; panels.ts sets `#app.insp-open`. They are classes on purpose:
+   written with a has() selector on #app, these rules were looked up again for every element whose
+   style changed, each time searching the whole board, and took more of a frame than everything else in
+   the stylesheets together. */
+#app:not(.phone).tech-seat #tech { grid-template-areas: 'goal goal' 'head head' 'tree detail'; grid-template-rows: auto auto minmax(0, 1fr); }
+#app:not(.phone).tech-seat #tech .tgoal { min-height: 86px; pointer-events: none; animation: none; background: transparent; border-bottom-color: var(--line); }
+#app:not(.phone).tech-seat #tech .tgoal .gt, #app:not(.phone).tech-seat #tech .tgoal .go, #app:not(.phone).tech-seat #tech .tgoal > svg { display: none; }
 /* The seat runs the whole width of the tree, so on a narrow window the bar may too, instead of keeping to
    the tree's left column (at 768 px that left 179 px for a 286 px title). Where even that is short (the
    inspector open beside a narrow stage) the title takes two lines and the reward chips step aside. */
@@ -58,15 +62,16 @@ html[data-input='touch'] #tech .tt.own, html[data-input='touch'] #tech .qbox { m
   #app:not(.phone) #hud-strip.over-tech .gc-title { white-space: normal; display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 2; line-height: 18px; }
 }
 @media (max-width: 1000px) {
-  #app:not(.phone):has(#insp.open) #hud-strip.over-tech div.gc-rewards { display: none; }
+  #app:not(.phone).insp-open #hud-strip.over-tech div.gc-rewards { display: none; }
 }
 
 /* Toasts are drawn above the tree (50 over 40), docked at the bottom left of the stage (hud.css). While the
    tree is open they keep to its list, clear of the detail column and the Research button at its foot: the
    column is --tech-side wide from the window's right edge, and the stage ends there too unless the inspector
-   (320 px) is open beside it. (These outrank the docking rules in hud.css, narrow windows included.) */
-#app:not(.phone):has(#tech.open) #hud #toasts, html[data-input='touch'] #app:not(.phone):has(#tech.open) #hud #toasts { right: calc(var(--tech-side) + 12px); bottom: calc(16px + var(--toast-up, 0px)); }
-#app:not(.phone):has(#tech.open):has(#insp.open) #hud #toasts, html[data-input='touch'] #app:not(.phone):has(#tech.open):has(#insp.open) #hud #toasts { right: calc(var(--tech-side) - 320px + 12px); bottom: calc(16px + var(--toast-up, 0px)); }
+   (320 px) is open beside it. (Written to outrank the docking rules in hud.css, which comes later: the ones
+   for a finger and for a narrow window with the inspector open included.) */
+#app:not(.phone).tech-open #hud #toasts, html[data-input='touch'] #app:not(.phone).tech-open #hud #toasts { right: calc(var(--tech-side) + 12px); bottom: calc(16px + var(--toast-up, 0px)); }
+#app:not(.phone).tech-open.insp-open #hud #toasts, html[data-input='touch'] #app:not(.phone).tech-open.insp-open #hud #toasts { right: calc(var(--tech-side) - 320px + 12px); bottom: calc(16px + var(--toast-up, 0px)); }
 /* The top bar already shows the Data in hand; only the phone layout, where the tree covers the bar, repeats it. */
 #app:not(.phone) #tech .tdata { display: none; }
 
@@ -280,7 +285,7 @@ html[data-input='touch'] #tech .tt.own, html[data-input='touch'] #tech .qbox { m
   #app.phone #tech .tdetail { max-height: none; border-top: 0; border-left: 1px solid var(--line); border-radius: 0; box-shadow: none; animation: none; }
   #app.phone #tech .dhide { display: none; }
   /* Toasts raised while the tree is open keep to the list's side, clear of the detail and its Research button. */
-  #app.phone:has(#tech.open) #toasts { align-self: flex-start; max-width: calc(58% - 16px); }
+  #app.phone.tech-open #toasts { align-self: flex-start; max-width: calc(58% - 16px); }
 }
 
 @media (prefers-reduced-motion: reduce) {

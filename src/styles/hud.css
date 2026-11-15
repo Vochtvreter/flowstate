@@ -250,8 +250,7 @@ button.fav:hover { background: #263252; }
 .sum-fallback textarea { display: block; width: 100%; resize: none; padding: 8px 10px; border-radius: 10px; border: 1px solid #3a4a70; background: #0b0f17; color: var(--text); font: 12.5px/18px var(--mono); user-select: text; -webkit-user-select: text; -webkit-touch-callout: default; touch-action: auto; }
 .sum-said { position: absolute; width: 1px; height: 1px; overflow: hidden; clip-path: inset(50%); white-space: nowrap; }
 /* The strip behind still shows its Claim buttons, which cannot be pressed from here ("Keep playing" claims the
-   goal on the way out). (A class set with the card, not `#app:has(#summary…)`: that selector was looked up
-   for every frame of the Claim button's pulse, and cost five frames a second on a large board.) */
+   goal on the way out). (A class set with the card, not a has() selector on #app: tech.css says why.) */
 #app.summary-open #hud-strip .claim { visibility: hidden; }
 
 /* A phone: a sheet across the bottom, over the lower part of the stage. */
@@ -339,7 +338,8 @@ html[data-input='touch'] #insp .step::after, html[data-input='touch'] #insp .fil
    Outside the phone layout toasts dock at the bottom left of the stage, above the row of key hints, and keep
    their hands off every control: the zoom buttons and the minimap have the bottom right corner (192 px
    with its margins, 228 px with a finger's bigger buttons), the inspector is beside the stage, and while the
-   tech tree is open tech.css keeps them out of its detail column. --toast-up is set from hud-toasts.ts when
+   tech tree is open tech.css keeps them out of its detail column (#app.insp-open and #app.tech-open are set
+   in script: tech.css says why these are classes). --toast-up is set from hud-toasts.ts when
    the board's Expand button lies where they are: they step up above it. At most three show at once (two on
    a phone); hud-toasts.ts takes the oldest away, and the rules here are only the backstop. */
 #app:not(.phone) #hud #toasts { left: 16px; right: 192px; bottom: calc(44px + var(--toast-up, 0px)); align-items: flex-start; }
@@ -350,7 +350,7 @@ html[data-input='touch'] #app:not(.phone) #hud #toasts { right: 228px; bottom: c
   /* (No key hints at this width.) */
   #app:not(.phone) #hud #toasts { bottom: calc(16px + var(--toast-up, 0px)); }
   /* With the inspector open the stage is too narrow to share its foot with the zoom buttons: the toasts go above them. */
-  #app:not(.phone):has(#insp.open) #hud #toasts, html[data-input='touch'] #app:not(.phone):has(#insp.open) #hud #toasts { right: 16px; bottom: calc(190px + var(--toast-up, 0px)); }
+  #app:not(.phone).insp-open #hud #toasts, html[data-input='touch'] #app:not(.phone).insp-open #hud #toasts { right: 16px; bottom: calc(190px + var(--toast-up, 0px)); }
 }
 @media (prefers-reduced-motion: reduce) {
   .toast { animation-name: toast-fade; }
