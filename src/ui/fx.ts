@@ -1134,7 +1134,9 @@ function frameBoard(c: CanvasRenderingContext2D, cv: HTMLCanvasElement, dt: numb
     stillFor = 0;
   } else stillFor += dt;
   const list = overlays[BOARD];
-  for (let i = 0; i < list.length; i++) overlayDue[i] = Math.min(0.25, overlayDue[i] + pdt);
+  // (An overlay that is not active has nothing to catch up on: the first draw of one that has just started,
+  // a wire's light streak or a ring, is one frame's worth, or it would open a quarter of a second in.)
+  for (let i = 0; i < list.length; i++) overlayDue[i] = list[i].active() ? Math.min(0.25, overlayDue[i] + pdt) : 0;
   const busy = flows.length > BUSY_WIRES;
   // Dots that do not travel this frame: the game is paused (or less motion is asked for), or a card is up.
   const still = paused || held;
