@@ -4,10 +4,11 @@
 //  - the bar layer (`#fx-bar`, made here, a strip over the top bar and a little below it): whatever
 //    has to be seen up there, such as a coin on the last stretch of its way to the credits counter;
 //  - the top layer (`#fx-top`, made here, above every panel): a small window, a little larger than a
-//    celebration card (440 by 360 px), through which particles are seen above the HUD. A particle that asks to be
-//    on top is drawn there while it is inside the window and on the board or the strip once it has
-//    left, so a spark can start over the card and fly off across the board. The window is moved to
-//    wherever the next effect is whenever it is empty.
+//    celebration card (440 by 360 px; 220 px square for a small effect such as a claim), through which
+//    particles are seen above the HUD. A particle that asks to be on top is drawn there while it is
+//    inside the window and on the board or the strip once it has left, so a spark can start over the
+//    card and fly off across the board. The window is moved to wherever the next effect is whenever
+//    it is empty.
 // Nothing here touches the DOM after init, and nothing here knows about the game: the board hands
 // over wire geometry as `Flow` objects, everyone else calls the particle functions or adds an
 // overlay (a function that draws its own thing each frame).
@@ -132,6 +133,13 @@ const BOARD = 0, TOP = 1, BAR = 2, AUTO = -1;
  */
 const TOP_RATIO = 1;
 const TOP_W = 440, TOP_H = 360;
+/**
+ * A small effect (the sparks and first coins of a claim, thirty times a game) gets a small window:
+ * what the top layer costs each frame goes by its area, and this is a fifth of the full one.
+ */
+const SMALL_W = 220, SMALL_H = 220;
+/** The window is at its small size. */
+let topSmall = false;
 /** How far the bar layer reaches below the top bar, in px. */
 const BAR_SKIRT = 44;
 let appEl: HTMLElement | null = null;
@@ -219,7 +227,7 @@ function resize() {
   appX = a.left; appY = a.top;
   appW = Math.max(1, Math.round(a.width)); appH = Math.max(1, Math.round(a.height));
   // The top layer: a window in the middle until an effect asks for it somewhere else (see aimTop).
-  const tw = Math.min(appW, TOP_W), th = Math.min(appH, TOP_H);
+  const tw = Math.min(appW, topSmall ? SMALL_W : TOP_W), th = Math.min(appH, topSmall ? SMALL_H : TOP_H);
   place(top, appX + Math.round((appW - tw) / 2), appY + Math.round((appH - th) / 2), tw, th, TOP_RATIO);
   moveTop();
   // The strip from the top of the app to a little below the top of the stage: the top bar, in every
@@ -232,15 +240,26 @@ function moveTop() {
   if (top) top.canvas.style.transform = `translate(${top.x - appX}px, ${top.y - appY}px)`;
 }
 
-/** Centre the top layer on a point (as far as the app's edges allow), unless something is still being drawn on it. */
-function aimTop(x: number, y: number) {
+/**
+ * Centre the top layer on a point (as far as the app's edges allow), at its small or its full size,
+ * unless something is still being drawn on it. One thing overrides that: an effect that needs the
+ * full window (a celebration) takes it from a small one that is still in use; what was showing
+ * through the small window goes on where it would be without one, on the board or the bar.
+ */
+function aimTop(x: number, y: number, small = false) {
   if (sizeDirty) resize();
-  if (!top || topCount > 0) return;
-  const nx = Math.max(appX, Math.min(appX + appW - top.w, Math.round(x - top.w / 2)));
-  const ny = Math.max(appY, Math.min(appY + appH - top.h, Math.round(y - top.h / 2)));
-  if (nx === top.x && ny === top.y) return;
-  top.x = nx;
-  top.y = ny;
+  if (!top) return;
+  if (topCount > 0) {
+    if (!topSmall || small) return;
+    for (const p of pool) if (p.kind !== 0 && p.layer === TOP) p.layer = AUTO;
+    topCount = 0;
+  }
+  const w = Math.min(appW, small ? SMALL_W : TOP_W), h = Math.min(appH, small ? SMALL_H : TOP_H);
+  const nx = Math.max(appX, Math.min(appX + appW - w, Math.round(x - w / 2)));
+  const ny = Math.max(appY, Math.min(appY + appH - h, Math.round(y - h / 2)));
+  topSmall = small;
+  if (nx === top.x && ny === top.y && w === top.w && h === top.h) return;
+  place(top, nx, ny, w, h, TOP_RATIO);
   moveTop();
 }
 
@@ -499,7 +518,7 @@ interface Particle {
   cx: number; cy: number; tx: number; ty: number;
   size: number; color: string; text: string;
   shape: DotShape | '';
-  /** Text only: F_PLATE, F_LEFT, F_STILL (see FloaterOpts). */
+  /** Text only: F_STILL. */
   flags: number;
   /** Text only: seconds it takes to fade at the end of its life. */
   fade: number;
@@ -551,7 +570,11 @@ function kill(p: Particle) {
  * the top layer's window, about 440 by 360 px, which is centred on the first effect that uses it and
  * stays there until it is empty again. Outside the window the particle is drawn on the board as usual.
  */
-export interface LayerOpt { top?: boolean }
+export interface LayerOpt {
+  top?: boolean;
+  /** With `top`: a small effect. If the window above the panels is free it is brought here at its small size (about 220 px square). */
+  small?: boolean;
+}
 export interface BurstOpts extends LayerOpt {
   /** 1 = the usual spray; 2 flies about twice as far and lives a little longer. */
   power?: number;
@@ -581,10 +604,6 @@ export interface FloaterOpts extends LayerOpt {
   rise?: number;
   /** Seconds of fading at the end of its life (by default the last 35% of it). */
   fade?: number;
-  /** A dark plate behind the words, so they can be read over whatever they stand on. */
-  plate?: boolean;
-  /** `at` is the middle of the text's left edge instead of its bottom centre. */
-  left?: boolean;
   /** `size` is the size on screen, in px: not enlarged as moving text is. */
   exact?: boolean;
 }
@@ -599,7 +618,7 @@ export interface RingOpts extends LayerOpt { size?: number; life?: number }
 function layerFor(o: LayerOpt | undefined, x: number, y: number): number {
   if (!o?.top) return BOARD;
   if (inBar(x, y)) return AUTO;
-  aimTop(x, y);
+  aimTop(x, y, !!o.small);
   return TOP;
 }
 
@@ -667,46 +686,37 @@ export function fly(from: Pt, to: Pt, color: string, count = 3, onArrive?: () =>
   if (!sent && onArrive) onArrive();
 }
 
-const F_PLATE = 1, F_LEFT = 2, F_STILL = 4;
-
-/** The font size a floater of `size` is drawn at, in px. */
-const floaterPx = (size: number, o?: FloaterOpts) => (o?.exact ? size : size * TEXT_SCALE);
+/** Text only: it neither pops in nor rises (less motion was asked for when it was made). */
+const F_STILL = 1;
+const FONT = (size: number) => `700 ${size}px "Space Grotesk", Inter, system-ui, sans-serif`;
 
 /**
  * Text that pops in, rises and fades. (With `rise: 0` it pops in and stands where it is; with less
  * motion asked for it neither pops nor rises, and only fades.)
- * Returns a handle for endFloater(), or null when the pool is full and nothing was drawn.
  */
-export function floater(at: Pt, text: string, color: string, size = 13, o?: FloaterOpts): object | null {
+export function floater(at: Pt, text: string, color: string, size = 13, o?: FloaterOpts) {
   const p = spawn(TEXT, layerFor(o, at.x, at.y));
-  if (!p) return null;
+  if (!p) return;
   const calmNow = isCalm();
   p.x = at.x;
   p.y = at.y;
   p.ttl = o?.life ?? 1.05;
   p.vy = calmNow ? 0 : o?.rise ?? 34;
   p.fade = Math.min(p.ttl, o?.fade ?? p.ttl * 0.35);
-  p.flags = (o?.plate ? F_PLATE : 0) | (o?.left ? F_LEFT : 0) | (calmNow ? F_STILL : 0);
-  p.size = floaterPx(size, o);
+  p.flags = calmNow ? F_STILL : 0;
+  p.size = o?.exact ? size : size * TEXT_SCALE;
   p.color = color;
   p.text = text;
-  return p;
 }
 
-/** Take a floater away now (its handle is what floater() returned). Does nothing if it has already gone. */
-export function endFloater(handle: object | null, text: string) {
-  const p = handle as Particle | null;
-  // (The pool hands the same object out again: the words tell whether it is still the one that was made.)
-  if (p && p.kind === TEXT && p.text === text) kill(p);
-}
+let measurer: CanvasRenderingContext2D | null = null;
 
-/**
- * How large a floater's picture is on screen, in px: for placing one where it covers nothing.
- * (As it pops in it is a fifth larger for a tenth of a second: a tenth of its width more on each side.)
- */
-export function floaterSize(text: string, size = 13, o?: FloaterOpts): { w: number; h: number } {
-  const sp = textSprite(text, '#ffffff', floaterPx(size, o), 1, !!o?.plate);
-  return { w: sp.w, h: sp.h };
+/** How wide some words are in the bold face floaters are drawn in, at `px` on screen: for laying out a label of one's own. */
+export function textWidth(text: string, px: number): number {
+  measurer ??= document.createElement('canvas').getContext('2d');
+  if (!measurer) return text.length * px * 0.6;
+  measurer.font = FONT(px);
+  return measurer.measureText(text).width;
 }
 
 /** An expanding ring. */
@@ -818,8 +828,8 @@ let fontsWatched = false;
  * (how far the baseline is below the top) are in CSS px; the picture is `ratio` times that.
  * Kept while in use, so the "+1¢" of every Market each second is drawn once.
  */
-function textSprite(text: string, color: string, size: number, ratio: number, plate = false): Sprite {
-  const key = `${text}|${color}|${size}|${ratio}|${plate ? 1 : 0}`;
+function textSprite(text: string, color: string, size: number, ratio: number): Sprite {
+  const key = `${text}|${color}|${size}|${ratio}`;
   let s = sprites.get(key);
   if (s) {
     s.used = ++spriteClock;
@@ -832,31 +842,13 @@ function textSprite(text: string, color: string, size: number, ratio: number, pl
   }
   const canvas = document.createElement('canvas');
   const c = canvas.getContext('2d')!;
-  const font = `700 ${size}px "Space Grotesk", Inter, system-ui, sans-serif`;
-  const pad = plate ? 6 : 4, padY = plate ? 2 : 4;
+  const font = FONT(size);
+  const pad = 4;
   c.font = font;
-  const w = Math.ceil(c.measureText(text).width) + pad * 2, h = Math.ceil(size * (plate ? 1.3 : 1.45)) + padY * 2;
+  const w = Math.ceil(c.measureText(text).width) + pad * 2, h = Math.ceil(size * 1.45) + pad * 2;
   canvas.width = Math.ceil(w * ratio);
   canvas.height = Math.ceil(h * ratio);
   c.setTransform(ratio, 0, 0, ratio, 0, 0);
-  if (plate) {
-    // A small dark tablet with a hairline in the text's colour: the words can then stand on anything.
-    const r = Math.min(8, h / 2 - 0.5);
-    c.beginPath();
-    c.moveTo(0.5 + r, 0.5);
-    c.arcTo(w - 0.5, 0.5, w - 0.5, h - 0.5, r);
-    c.arcTo(w - 0.5, h - 0.5, 0.5, h - 0.5, r);
-    c.arcTo(0.5, h - 0.5, 0.5, 0.5, r);
-    c.arcTo(0.5, 0.5, w - 0.5, 0.5, r);
-    c.closePath();
-    c.fillStyle = 'rgba(13, 18, 30, 0.94)';
-    c.fill();
-    c.globalAlpha = 0.55;
-    c.strokeStyle = color;
-    c.lineWidth = 1;
-    c.stroke();
-    c.globalAlpha = 1;
-  }
   c.font = font;
   c.textAlign = 'center';
   c.textBaseline = 'alphabetic';
@@ -864,8 +856,8 @@ function textSprite(text: string, color: string, size: number, ratio: number, pl
   c.lineJoin = 'round';
   c.strokeStyle = 'rgba(11, 15, 23, 0.9)';
   c.fillStyle = color;
-  const base = padY + size * (plate ? 1.0 : 1.08);
-  if (!plate) c.strokeText(text, w / 2, base);
+  const base = pad + size * 1.08;
+  c.strokeText(text, w / 2, base);
   c.fillText(text, w / 2, base);
   s = { canvas, w, h, base, used: ++spriteClock };
   sprites.set(key, s);
@@ -923,7 +915,7 @@ function drawOne(c: CanvasRenderingContext2D, p: Particle, ratio: number) {
     case TEXT: {
       // Drawn once into a small picture of its own, then stamped each frame: stroking text is the
       // dearest thing a canvas does, and a floater lives for sixty frames.
-      const sp = textSprite(p.text, p.color, p.size, ratio, !!(p.flags & F_PLATE));
+      const sp = textSprite(p.text, p.color, p.size, ratio);
       const rise = p.vy * (1 - (1 - u) * (1 - u));
       // It pops in a little too big and settles, then rises. (With less motion asked for: neither.)
       // The pop takes about a fifth of a second, however long the text then stays.
@@ -931,9 +923,7 @@ function drawOne(c: CanvasRenderingContext2D, p: Particle, ratio: number) {
       const s = p.flags & F_STILL ? 1 : v < 0.1 ? 0.6 + v * 6 : v < 0.22 ? 1.2 - ((v - 0.1) / 0.12) * 0.2 : 1;
       const left = p.ttl - p.t;
       c.globalAlpha = left >= p.fade ? 1 : Math.max(0, left / p.fade);
-      // (Left-aligned text swells about its own middle, so it overshoots its box by the same little on each side.)
-      if (p.flags & F_LEFT) c.drawImage(sp.canvas, p.x - (sp.w * (s - 1)) / 2, p.y - rise - (sp.h * s) / 2, sp.w * s, sp.h * s);
-      else c.drawImage(sp.canvas, p.x - (sp.w * s) / 2, p.y - rise - sp.base * s, sp.w * s, sp.h * s);
+      c.drawImage(sp.canvas, p.x - (sp.w * s) / 2, p.y - rise - sp.base * s, sp.w * s, sp.h * s);
       break;
     }
     case RING: {

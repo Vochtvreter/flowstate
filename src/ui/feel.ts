@@ -17,7 +17,7 @@ import {
 import { boardRect, toClient } from './board';
 import { celebrateEnd, celebrateFlow, celebrateGoal, cancelCelebrations, celebrating, initCelebrate } from './celebrate';
 import { anchorPt, el, setAttr, setClass, setHTML } from './dom';
-import { FloaterOpts, FlyOpts, Overlay, addOverlay, burst, clearParticles, endFloater, floater, floaterSize, fly, pop, ring, setMood } from './fx';
+import { FlyOpts, Overlay, addOverlay, burst, clearParticles, fly, pop, ring, setMood, textWidth } from './fx';
 import { Pt, bezierAt, matColor, nodeSize, outPorts, wireEnds } from './geom';
 import { actOut, handState, initHand, tipSignal } from './hand';
 import { addTopItem, renderPanels } from './panels';
@@ -72,12 +72,21 @@ const coinCount = (amount: number) => Math.max(6, Math.min(10, 6 + Math.floor(Ma
 /**
  * A coin of a payout: 8 px across (`size` is its radius), 450 ms in the air, 40 ms after the one before.
  * It is seen above the panels around where it leaves from (the Claim button), so it comes out of the
- * button and not from under the goal card.
+ * button and not from under the goal card. (`small`: when the window above the panels is free it is
+ * brought there at its small size, which costs a fifth of the full one to keep on screen; a payout
+ * from a celebration card finds the full window already there.)
  */
-const COIN: FlyOpts = { size: 4, ttl: 0.45, stagger: 0.04, jitter: 0, top: true, topAtStart: true };
-/** The amount beside its counter: 16 px bold on a small dark plate, standing 0.9 s and then fading over 0.3. */
+const COIN: FlyOpts = { size: 4, ttl: 0.45, stagger: 0.04, jitter: 0, top: true, topAtStart: true, small: true };
+/**
+ * The amount beside its counter: 16 px bold in the counter's colour on a small dark plate, standing
+ * 0.9 s and then fading over 0.3. It is an element of its own above the bar (.feel-amount, feel.css):
+ * it pops in and fades by transform and opacity alone, so while it stands no canvas has to be redrawn
+ * for it. The plate is the words plus LABEL_PAD px on each side, LABEL_H px high.
+ */
 const LABEL_PX = 16;
-const LABEL: FloaterOpts = { top: true, exact: true, plate: true, left: true, rise: 0, life: 1.2, fade: 0.3 };
+const LABEL_PAD = 7;
+const LABEL_H = 26;
+const LABEL_MS = 1200;
 /** How long a counter carries the class `pop` after a coin has landed on it, in ms (the pop itself is 120 ms, feel.css). */
 const POP_MS = 150;
 
@@ -111,7 +120,7 @@ function labelSpot(testid: string, text: string): { at: Pt; where: 'beside' | 'u
   if (!chip || !bar) return null;
   const c = chip.getBoundingClientRect();
   if (!c.width || !c.height) return null;
-  const { w, h } = floaterSize(text, LABEL_PX, LABEL);
+  const w = Math.ceil(textWidth(text, LABEL_PX)) + LABEL_PAD * 2, h = LABEL_H;
   const num = (chip.querySelector('.nums b') ?? chip).getBoundingClientRect();
   const others: DOMRect[] = [];
   for (const e of bar.querySelectorAll('.res, .datas, .techbtn, .ibtn')) {
@@ -129,7 +138,8 @@ function labelSpot(testid: string, text: string): { at: Pt; where: 'beside' | 'u
   // Beside: just outside the counter, level with its middle; or, when something else is there, just
   // right of the number inside it (over the Flow bonus, which is the counter's own).
   const y = Math.round(Math.max(h / 2 + 2, c.top + c.height / 2));
-  for (const x of box === c ? [Math.round(c.right + 5), Math.round(num.right + 6)] : [Math.round(box.right + 5)]) {
+  // (Inside the counter it keeps clear of the number as it is at the top of its pop, a fifth wider.)
+  for (const x of box === c ? [Math.round(c.right + 5), Math.round(num.right + num.width * 0.2 + 6)] : [Math.round(box.right + 5)]) {
     if (fits(x) && clear(x, y)) return { at: { x, y }, where: 'beside', w, h };
   }
   // Under: in the middle of the counter, its top a few px into the counter's foot (under the rate
@@ -143,21 +153,34 @@ function labelSpot(testid: string, text: string): { at: Pt; where: 'beside' | 'u
 }
 
 /** The amount standing at each counter right now: a second payout to the same counter adds to it instead of writing over it. */
-const standing = new Map<string, { handle: object | null; text: string; amount: number; until: number }>();
+const standing = new Map<string, { el: HTMLElement; amount: number; until: number; timer: number }>();
 
 function showAmount(testid: string, amount: number, unit: string, color: string) {
   const now = performance.now();
   const was = standing.get(testid);
   let total = amount;
-  if (was && now < was.until) {
-    endFloater(was.handle, was.text);
-    total += was.amount;
+  if (was) {
+    if (now < was.until) total += was.amount;
+    clearTimeout(was.timer);
+    was.el.remove();
+    standing.delete(testid);
   }
   const text = `+${fmt(total)}${unit}`;
   const spot = labelSpot(testid, text);
   if (!spot) return;
   record('pay', 'label', `${testid} ${text} ${spot.where} ${spot.at.x},${spot.at.y} ${spot.w}x${spot.h}`);
-  standing.set(testid, { handle: floater(spot.at, text, color, LABEL_PX, LABEL), text, amount: total, until: now + (LABEL.life! - LABEL.fade!) * 1000 });
+  const a = app.getBoundingClientRect();
+  const e = document.createElement('div');
+  e.className = `feel-amount${reduced() ? ' calm' : ''}`;
+  e.setAttribute('aria-hidden', 'true');
+  e.textContent = text;
+  e.style.cssText = `left:${spot.at.x - a.left}px;top:${spot.at.y - spot.h / 2 - a.top}px;width:${spot.w}px;height:${spot.h}px;--c:${color}`;
+  app.appendChild(e);
+  const timer = window.setTimeout(() => {
+    e.remove();
+    if (standing.get(testid)?.el === e) standing.delete(testid);
+  }, LABEL_MS + 40);
+  standing.set(testid, { el: e, amount: total, until: now + LABEL_MS * 0.75, timer });
 }
 
 /**
@@ -226,8 +249,8 @@ function smallCelebration(name: string, from: Pt, r: GoalReward, color = GOLD) {
   cueClaim();
   buzz('claim', 15);
   // (With less motion asked for, fx draws neither sparks nor ring, and the reward arrives at once.)
-  burst(from, color, 10, { top: true, power: 1.2 });
-  ring(from, color, { top: true, size: 44 });
+  burst(from, color, 10, { top: true, small: true, power: 1.2 });
+  ring(from, color, { top: true, small: true, size: 44 });
   payout(from, r);
 }
 
@@ -713,6 +736,10 @@ export function initFeel() {
     worldRings.length = 0;
     for (const t of expandTimers.splice(0)) clearTimeout(t);
     lineSeen = null;
+    for (const st of standing.values()) {
+      clearTimeout(st.timer);
+      st.el.remove();
+    }
     standing.clear();
     for (const [testid, t] of popTimers) {
       clearTimeout(t);

@@ -5,7 +5,9 @@
    55  .cel        the celebration card
    56  #fx-top     particles that must be seen above the panels and the card (made and moved by fx.ts)
    56  #fx-bar     the strip of the same over the top bar: coins on their way to the counters
+   56  .feel-amount  "+12¢" beside a counter after a payout (feel.ts)
    56  #feel-hand  the guiding hand (hand.ts)
+   55  .cel-lead   a ring closing on something in the HUD as a card leaves
    All of it is under the modal (60), the summary (70) and the start screen (80), and none of it ever
    takes input: a press during a celebration, or where the hand is pointing, lands on the game underneath.
    A note on cost: every element here that fades or moves is kept small on purpose. The browser
@@ -46,6 +48,15 @@
   .datas .res.pop .sym { transform-origin: 0 50%; }
   .datas[data-n='3'] .res { --feel-pop: 1.15; }
 }
+
+/* The amount that has just been added, beside its counter (feel.ts places it where it covers nothing):
+   16 px bold in the counter's colour on a dark plate. It pops in, stands 0.9 s and fades, by transform
+   and opacity alone; with less motion asked for it is simply there and then fades. Its size is set by
+   feel.ts, which has measured the words. */
+.feel-amount { position: absolute; z-index: 56; pointer-events: none; box-sizing: border-box; display: flex; align-items: center; justify-content: center; border-radius: 8px; border: 1px solid color-mix(in srgb, var(--c) 55%, transparent); background: rgba(13, 18, 30, 0.94); color: var(--c); font: 700 16px/1 var(--disp); white-space: nowrap; contain: layout style paint; will-change: transform, opacity; animation: feel-amount 1.2s linear both; }
+@keyframes feel-amount { 0% { opacity: 0; transform: scale(0.6); } 9% { opacity: 1; transform: scale(1.2); } 19% { transform: none; } 75% { opacity: 1; transform: none; } 100% { opacity: 0; transform: none; } }
+.feel-amount.calm { animation-name: feel-amount-calm; }
+@keyframes feel-amount-calm { 0% { opacity: 1; } 75% { opacity: 1; } 100% { opacity: 0; } }
 
 /* ---------- board polish ---------- */
 /* A new node drops in, squashes as it lands and settles. (board.ts adds .pop once, for 320 ms.) */
