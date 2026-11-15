@@ -267,7 +267,20 @@ g.wire.dim:hover .base { stroke-opacity: 0.6; }
 /* (The square icons of nodes with no ring are a little smaller than a ring: scaled up to match.) */
 #board.ov .node .ring.flat { transform: translateX(56px) scale(calc(var(--ovs) * 1.18)); }
 #board.ov .node.compact .ring.flat { transform: translateX(42px) scale(calc(var(--ovs) * 1.34)); }
-#board.ov .pill, #board.ov .port, #board.ov .port-label, #board.ov #plot-label { display: none; }
+#board.ov .pill, #board.ov .port-label, #board.ov #plot-label { display: none; }
+/* Ports stay, as dots at the cards' sides, so that wiring works at every zoom: a press within about 12 px of one
+   starts a wire (board.ts `ovPortAt`). Far out, where an icon is drawn nearly as wide as its card, they stand out
+   from the sides by --opn (--opc on a narrow card), which board.ts sets for each step, clear of the icon. */
+#board.ov .node { --opx: var(--opn, 0px); }
+#board.ov .node.compact { --opx: var(--opc, 0px); }
+#board.ov .port { --pk: 1; transform: translateX(var(--opx)) scale(calc(var(--ovs) * var(--pk))); }
+#board.ov .port.in { transform: translateX(calc(-1 * var(--opx))) scale(calc(var(--ovs) * var(--pk))); }
+html:not([data-input='touch']) #board.ov .port:hover { --pk: 1.3; }
+#board.ov .port.armed { --pk: 1.5; }
+/* A wire being drawn out here is as heavy as the others. */
+#board.ov #temp-wire { stroke-width: calc(var(--ovw) + 1px); stroke-dasharray: calc(var(--ovs) * 2px) calc(var(--ovs) * 8px); }
+#board.ov #temp-wire.snap { stroke-dasharray: none; stroke-width: calc(var(--ovw) + 2px); }
+#board.ov #temp-end { transform: scale(var(--ovs)); transform-box: fill-box; transform-origin: center; }
 /* With no pill to read, a card's state is its colour: a starved or blocked card's whole ring (not only the
    part its use fills) and its tile's edge take the state's colour. */
 #board.ov .node[data-st='starved'] .trk { stroke: var(--bad); stroke-opacity: 0.75; }

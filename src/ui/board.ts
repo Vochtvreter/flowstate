@@ -39,7 +39,7 @@ import { tidy, tidyInput } from './layout';
 import { shortNum } from './panels';
 import { env } from './phone-env';
 import { diagnose } from './status';
-import { delegate, onPress, onSignal, select, signal, toast, touch, ui } from './ui';
+import { delegate, onGame, onPress, onSignal, select, signal, toast, touch, ui } from './ui';
 
 let boardEl: HTMLElement;
 let worldEl: HTMLElement;
@@ -176,6 +176,20 @@ const OVER_BELOW = 0.985;
 const NEAR_FIT = 0.97;
 /** The zoom a tap on a card in the overview comes back in to. */
 const READ_ZOOM = 1;
+/** How much larger than life a card's icon is drawn at each step of the overview (style.css, --ovs). */
+const OV_ICON = [1, 1.5, 1.9, 2.4, 3.2, 4];
+/**
+ * In the overview a card's ports are dots at its sides (style.css). Out at the furthest steps the icon is drawn
+ * nearly as wide as the card, so the dots are pushed out from the sides by this much (board units), to stand clear
+ * of it: for a full-width card and for a narrow one (a Router, a Void), at each step. The board sets these as
+ * --opn and --opc, and finds the dots by the same numbers (`ovDot`).
+ */
+const OV_PORT_OUT: [number, number][] = [[0, 0], [0, 0], [0, 0], [0, 9], [12, 30], [34, 52]];
+/**
+ * In the overview a press this close to a port's dot (screen px) is a press on the port, so that wiring works at
+ * every zoom: a mouse, and a finger. A press on a card's icon is always for the card (it comes back in to it).
+ */
+const OV_PORT_MOUSE = 12, OV_PORT_FINGER = 16;
 /** How long a rate chip stays on a wire that was just made, and how long that wire is kept from dimming. */
 const FRESH_MS = 3000;
 
@@ -295,6 +309,10 @@ function applyView() {
   if (ovStep !== wasStep) {
     if (ovStep) boardEl.dataset.ov = String(ovStep);
     else delete boardEl.dataset.ov;
+    // (How far the port dots stand out from a card's sides at this step: see OV_PORT_OUT.)
+    const [n, c] = OV_PORT_OUT[ovStep] ?? [0, 0];
+    boardEl.style.setProperty('--opn', `${n}px`);
+    boardEl.style.setProperty('--opc', `${c}px`);
   }
   if (big !== wasBig) boardEl.classList.toggle('big', big);
   if (lean !== wasLean) boardEl.classList.toggle('lean', lean);
@@ -1606,6 +1624,10 @@ export function initBoard(root: HTMLElement) {
   onSignal('showme', (d) => {
     shownWire = d.wire ? { ...d.wire } : null;
   });
+  // The next goal starts with the whole board: on a narrow stage the inspector closes (see `makeRoom`).
+  onGame((ev) => {
+    if (ev.kind === 'goal-claimed') makeRoom();
+  });
   // An option counts only for a press that began on the menu after it opened (see `menuPressOk`).
   for (const m of [radialEl, buildEl]) m.addEventListener('pointerdown', noteMenuPress, true);
   delegate(radialEl, (a, args, _el, ev) => {
@@ -2286,7 +2308,7 @@ function layoutWires() {
     }
   }
   // Output ports with nothing attached pulse; the pulse is drawn on the effects canvas. (Not in the
-  // overview, where there are no ports to see.)
+  // overview, where ports are small dots beside the icons and a pulse on each would crowd the map.)
   const open: Beacon[] = [];
   for (const n of over ? [] : ui.g.nodes) {
     const refs = nodeEls.get(n.id);
@@ -3023,9 +3045,24 @@ function built(id: number) {
 /** A mouse, and a stage wide enough for the inspector beside it (see INSPECT_WIDE). */
 function roomToInspect(): boolean {
   if (isTouch() || env.phone) return false;
+  return !narrowStage();
+}
+
+/** The stage, with the inspector's room counted in, is narrower than INSPECT_WIDE (a phone, a tablet, a small window). */
+function narrowStage(): boolean {
+  if (env.phone) return true;
   const insp = document.getElementById('insp');
   const open = insp?.classList.contains('open') ? insp.offsetWidth : 0;
-  return boardEl.offsetWidth + open >= INSPECT_WIDE;
+  return boardEl.offsetWidth + open < INSPECT_WIDE;
+}
+
+/**
+ * On a narrow stage the inspector covers much of the board (half of it on a phone, 320 px of a tablet's 768): it
+ * closes when the player starts on something else there, a port armed for a wire or the next goal. (A wide stage
+ * keeps it open beside the board, where it is in nobody's way.)
+ */
+function makeRoom() {
+  if (ui.sel && narrowStage()) select(null);
 }
 
 /** Distance from a point to a wire's path. */
@@ -3132,14 +3169,17 @@ const PORT_SNAP_PX = 12;
  * board (which opens the build menu), never a wire into that card.
  */
 function snapExact(p: Pt, ok: (n: GNode) => boolean, side: 'in' | 'out'): GNode | null {
-  const on = nodeAt(p);
+  // (In the overview a card is its icon, which can stand out past the card at the furthest steps, and its ports
+  // are dots beside it: see `ovDot`.)
+  const on = nodeAt(p) ?? (over ? iconUnder(p) : null);
   if (on) return ok(on) ? on : null;
   const g = ui.g;
   let best: GNode | null = null;
   let bestD = PORT_SNAP_PX / ui.view.k;
   for (const n of g.nodes) {
     if (!ok(n)) continue;
-    for (const q of side === 'in' ? inPorts(n) : outPorts(g, n)) {
+    for (const port of side === 'in' ? inPorts(n) : outPorts(g, n)) {
+      const q = over ? ovDot(n, port, side) : port;
       const d = Math.hypot(q.x - p.x, q.y - p.y);
       if (d < bestD) {
         bestD = d;
@@ -3266,8 +3306,8 @@ function arm(d: WireDrag) {
   tapWire = { ...d, p: d.a, tp: d.a, target: null, blend: 0, armed: false, hover: false };
   nodeEls.get(d.from)?.outs[d.port]?.classList.add('armed');
   markTargets(d.from, d.port);
-  // The inspector would sit over half the board on a phone; the player is choosing a target now.
-  if (env.phone && ui.sel) select(null);
+  // The player is choosing a target now: on a narrow stage the inspector would sit over the board (see `makeRoom`).
+  if (ui.sel && narrowStage()) select(null);
   else touch();
 }
 
@@ -3445,21 +3485,29 @@ type Hit =
   | { kind: 'wire'; id: number }
   | null;
 
-/** A mouse points exactly, so what it pressed is what the browser says it pressed. */
-function mouseHit(t: HTMLElement): Hit {
+/**
+ * A mouse points exactly, so what it pressed is what the browser says it pressed. In the overview the ports are
+ * small dots beside the icons, found by distance instead (see `ovPortAt`), and wires cannot be picked.
+ */
+function mouseHit(t: HTMLElement, p: Pt): Hit {
   const nodeEl = t.closest<HTMLElement>('.node');
+  if (over) {
+    const port = ovPortAt(p, OV_PORT_MOUSE, true);
+    if (port) return port;
+    return nodeEl ? { kind: 'node', id: iconAt(p)?.id ?? Number(nodeEl.dataset.id) } : null;
+  }
   if (nodeEl) {
     const id = Number(nodeEl.dataset.id);
-    // (In the overview a card has no ports to press, and wires cannot be picked: see the stylesheet.)
-    if (over) return { kind: 'node', id: iconAt(mouse)?.id ?? id };
     const portOut = t.closest<HTMLElement>('.port.out');
     if (portOut) return { kind: 'out', id, port: Number(portOut.dataset.out) };
     const portIn = t.closest<HTMLElement>('.port.in');
     if (portIn) return { kind: 'in', id, port: Number(portIn.dataset.in), mat: (portIn.dataset.mat as MatId) ?? null };
     return { kind: 'node', id };
   }
+  // (A free deposit lies above the wires that cross it, and with a port armed a click on a wire is a click on the
+  // board under it, as for a finger: see `touchHit`.)
   const wireEl = (t as Element).closest?.('g.wire') as SVGGElement | null;
-  if (wireEl) return { kind: 'wire', id: Number(wireEl.dataset.id) };
+  if (wireEl && !tapWire && !depositAt(p)) return { kind: 'wire', id: Number(wireEl.dataset.id) };
   return null;
 }
 
@@ -3477,12 +3525,15 @@ function mouseHit(t: HTMLElement): Hit {
  * a thumb goes to pan, and they are full of wires and within reach of ports: a drag that starts
  * there pans, and only a tap there selects the wire or arms the port.
  *
- * In the overview there are no ports and no wires to aim at: a touch is on a card or on nothing.
+ * In the overview there are no wires to aim at, and the ports are dots beside the icons: a touch is on an output
+ * port's dot (see `ovPortAt`), on a card, or on nothing.
  */
 function touchHit(p: Pt): Hit {
   const g = ui.g;
   const k = ui.view.k;
   if (over) {
+    const port = ovPortAt(p, OV_PORT_FINGER, false);
+    if (port) return port;
     const n = iconAt(p) ?? nodeAt(p) ?? cardNear(p, CARD_NEAR / k);
     return n ? { kind: 'node', id: n.id } : null;
   }
@@ -3511,10 +3562,13 @@ function touchHit(p: Pt): Hit {
   if (inn && dIn <= PORT_IN_NEAR) return { kind: 'in', ...inn };
   const on = nodeAt(p);
   if (on) return { kind: 'node', id: on.id };
+  // A free deposit lies above the wires that cross it: a tap there is for the deposit (see `tapDeposit`).
+  if (depositAt(p)) return null;
   // A wire comes before the wider reach of a port: every wire starts at one, and a short wire
   // would otherwise have nowhere left to be tapped (and so could never be cut). Right beside the
-  // port, though, a tap is for the port: a long wire can be tapped further along.
-  const w = wireNear(p, WIRE_REACH / k);
+  // port, though, a tap is for the port: a long wire can be tapped further along. With a port armed a
+  // wire is not something to tap at all: a tap on one is a tap on the board under it (see `tapEmpty`).
+  const w = tapWire ? null : wireNear(p, WIRE_REACH / k);
   if (w && !(out && dOut <= PORT_EDGE && (wireEls.get(w.id)?.flow.len ?? 0) * k >= WIRE_LONG)) return { kind: 'wire', id: w.id };
   if (out && dOut <= PORT_REACH) return { kind: 'reach', ...out };
   const near = cardNear(p, CARD_NEAR / k);
@@ -3527,7 +3581,7 @@ function touchHit(p: Pt): Hit {
  * margin. (The icon can stand out past the card's box, and icons of neighbouring cards come close.)
  */
 function iconAt(p: Pt): GNode | null {
-  const scale = [1, 1.5, 1.9, 2.4, 3.2, 4][ovStep] ?? 1;
+  const scale = OV_ICON[ovStep] ?? 1;
   const reach = 20 * scale + 8 / ui.view.k;
   let best: GNode | null = null;
   let bestD = reach;
@@ -3540,6 +3594,62 @@ function iconAt(p: Pt): GNode | null {
     }
   }
   return best;
+}
+
+/** In the overview, the card whose icon, as drawn, covers a world point (no margin). */
+function iconUnder(p: Pt): GNode | null {
+  const r = 20 * (OV_ICON[ovStep] ?? 1);
+  for (const n of ui.g.nodes) {
+    const { w, h } = nodeSize(n);
+    if (Math.hypot(n.x + w / 2 - p.x, n.y + h / 2 - p.y) <= r) return n;
+  }
+  return null;
+}
+
+/** Where a port's dot is drawn in the overview, in board units: at the card's side, pushed out at the furthest steps (OV_PORT_OUT). */
+function ovDot(n: GNode, q: Port, side: 'in' | 'out'): Pt {
+  const off = (OV_PORT_OUT[ovStep] ?? [0, 0])[nodeSize(n).w < 160 ? 1 : 0];
+  return { x: side === 'out' ? q.x + 1 + off : q.x - 1 - off, y: q.y };
+}
+
+/**
+ * In the overview: the port whose dot is nearest a world point, within `reach` screen px; output ports, and with
+ * `ins` input ports too. A point on a card's icon is for the card (a press there comes back in to it), unless it
+ * is on the dot itself: the dots are drawn above the icons, and far out a neighbour's icon can reach one. With a
+ * port armed, the ports of the cards its wire can go to do not count: a press beside one is for that card.
+ */
+function ovPortAt(p: Pt, reach: number, ins: boolean): Hit {
+  const g = ui.g;
+  const k = ui.view.k;
+  const t = tapWire;
+  const end = (n: GNode) => !!t && n.id !== t.from && wireOk(g, t.from, t.port, n.id);
+  const far = reach / k + 60;
+  let best: Hit = null;
+  let bestD = reach;
+  for (const n of g.nodes) {
+    const { w, h } = nodeSize(n);
+    if (p.x < n.x - far || p.x > n.x + w + far || p.y < n.y - far || p.y > n.y + h + far || end(n)) continue;
+    for (const q of outPorts(g, n)) {
+      const d = ovDot(n, q, 'out');
+      const dist = Math.hypot(d.x - p.x, d.y - p.y) * k;
+      if (dist < bestD) {
+        bestD = dist;
+        best = { kind: 'out', id: n.id, port: q.index };
+      }
+    }
+    if (!ins) continue;
+    for (const q of inPorts(n)) {
+      const d = ovDot(n, q, 'in');
+      const dist = Math.hypot(d.x - p.x, d.y - p.y) * k;
+      if (dist < bestD) {
+        bestD = dist;
+        best = { kind: 'in', id: n.id, port: q.index, mat: q.mat };
+      }
+    }
+  }
+  // (A dot is 14 board px across, scaled with the icons; a few px round it still count as on it.)
+  const onDot = bestD <= 7 * (OV_ICON[ovStep] ?? 1) * k + 3;
+  return best && (onDot || !iconUnder(p)) ? best : null;
 }
 
 /** The card nearest to a world point, within `max` (world px) of its edge. */
@@ -3691,7 +3801,7 @@ function onDown(e: PointerEvent) {
     drag = { kind: 'knife', a: p, b: p };
     return;
   }
-  const hit = touchy ? touchHit(p) : mouseHit(t);
+  const hit = touchy ? touchHit(p) : mouseHit(t, p);
   if (hit?.kind === 'out') {
     startWire(hit.id, hit.port, e.clientX, e.clientY, p, touchy);
     return;
@@ -3797,8 +3907,9 @@ function steer(cx: number, cy: number, hovering = false) {
       }
       if (n.type === 'well') {
         // A Well stays on its deposit. Under a finger the drag pans the board instead, so that a
-        // swipe that happens to start on a Well still goes somewhere.
-        if (drag.slop >= TOUCH_SLOP) drag = { kind: 'pan', sx: cx, sy: cy, vx: ui.view.x, vy: ui.view.y, moved: true, slop: 0, place: false };
+        // swipe that happens to start on a Well still goes somewhere; so does a mouse in the overview,
+        // where a drag that let go would otherwise count as a click on the Well and take the camera in to it.
+        if (drag.slop >= TOUCH_SLOP || over) drag = { kind: 'pan', sx: cx, sy: cy, vx: ui.view.x, vy: ui.view.y, moved: true, slop: 0, place: false };
         break;
       }
       if (!drag.moved) {
