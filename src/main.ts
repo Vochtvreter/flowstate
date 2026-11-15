@@ -49,6 +49,9 @@ function save() {
 /** Erase everything and return to the start screen. The one way a game is replaced. */
 function resetGame() {
   clearSave();
+  // A game begun afresh here is this tab's own, even in a tab that had stepped back for another: it saves again.
+  // (The other tab heard the save cleared, and steps back in its turn.)
+  elsewhere = false;
   ui.g = newGame();
   resumedFrom = null;
   clearHistory();

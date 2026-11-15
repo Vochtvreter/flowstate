@@ -186,6 +186,8 @@ export function initHud() {
     focusAfter = false;
     endingFrom = 0;
     summarySeen = false;
+    // (A new game is this tab's own: main.ts saves it again, and the slot no longer says another tab has it.)
+    elsewhere = false;
   });
 }
 
