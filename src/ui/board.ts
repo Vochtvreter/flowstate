@@ -1990,6 +1990,12 @@ function depositBoxes(): Box[] {
 }
 
 const CHIP_SPOTS = [0.5, 0.4, 0.6, 0.3, 0.7, 0.22, 0.78];
+/**
+ * Where a chip may stand off its wire when every place on it is taken by another chip (see `layoutWires`): in
+ * half-widths across and in heights up and down, never more than a width or two heights away.
+ */
+const NUDGES: [number, number][] = [];
+for (const dx of [0, 0.5, -0.5, 1, -1]) for (const dy of [0, 0.5, -0.5, 1, -1, 1.5, -1.5, 2, -2]) if ((dx || dy) && Math.abs(dx) + Math.abs(dy) / 2 <= 1.25) NUDGES.push([dx, dy]);
 /** Rate chips are set in bigger type when the cards are (15 px against 10.5), so they take more room. */
 const chipScale = () => (big ? 1.42 : 1);
 
@@ -2091,22 +2097,43 @@ function layoutWires() {
   // Chips on show are placed first, each keeping off those placed before it: two wires leaving the same
   // port (a Router's, with its weights on them) would otherwise put their chips one on top of the other.
   const order = [...wireEls.values()].sort((a, b) => Number(b.shown) - Number(a.shown));
+  /** Cards and deposits are the first `fixed` boxes of `avoid`; the chips placed so far come after them. */
+  const fixed = avoid.length;
+  const clearOf = (p: Pt, hw: number, hh: number, from = 0, to = avoid.length) => {
+    for (let i = from; i < to; i++) {
+      const b = avoid[i];
+      if (p.x + hw > b.x0 && p.x - hw < b.x1 && p.y + hh > b.y0 && p.y - hh < b.y1) return false;
+    }
+    return true;
+  };
   for (const refs of order) {
     const f = refs.flow;
     const hw = Math.max(24, refs.cChip.length * 3.3 + 9) * cs, hh = 11 * cs;
     let spot: Pt | null = null;
     for (const t of CHIP_SPOTS) {
       const p = flowPoint(f, f.len * t);
-      let clear = true;
-      for (const b of avoid) {
-        if (p.x + hw > b.x0 && p.x - hw < b.x1 && p.y + hh > b.y0 && p.y - hh < b.y1) {
-          clear = false;
-          break;
-        }
-      }
-      if (clear) {
+      if (clearOf(p, hw, hh)) {
         spot = p;
         break;
+      }
+    }
+    // Every place on the wire that no card covers is taken by a chip placed before (a Router's two wires that
+    // leave together for takers close by): this chip stands beside its wire there, nudged off the other by up to
+    // a chip's width or two of its heights, rather than going missing (the "×1" of a Router favouring its other
+    // wire "×3" was dropped). The nearest such place wins; still never over a card or a deposit.
+    if (!spot && refs.shown) {
+      let best = Infinity;
+      for (const t of CHIP_SPOTS) {
+        const p = flowPoint(f, f.len * t);
+        if (!clearOf(p, hw, hh, 0, fixed)) continue;
+        for (const [dx, dy] of NUDGES) {
+          const far = dx * dx + dy * dy;
+          if (far >= best) continue;
+          const q = { x: p.x + dx * hw, y: p.y + dy * (2 * hh + 4) };
+          if (!clearOf(q, hw, hh)) continue;
+          best = far;
+          spot = q;
+        }
       }
     }
     if (spot && refs.shown) avoid.push({ x0: spot.x - hw - 3, y0: spot.y - hh - 2, x1: spot.x + hw + 3, y1: spot.y + hh + 2 });
