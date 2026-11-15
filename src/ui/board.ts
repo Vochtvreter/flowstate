@@ -1100,6 +1100,8 @@ const ex = {
   miniW: 160,
   /** Shown at all: from the goal that asks for it on (see `expandShown`). */
   shown: false,
+  /** The button stood back (see `expandQuiet`) when the last press anywhere began. */
+  quietAtDown: false,
   /** What the last measurement was taken for (see `expandKey`), and when. */
   key: '', measuredAt: 0,
 };
@@ -1491,6 +1493,12 @@ export function initBoard(root: HTMLElement) {
   boardEl.addEventListener('contextmenu', (e) => e.preventDefault());
   window.addEventListener('keydown', onTidyKey);
   onPress(expandEl, expand);
+  // A finger's tap acts on the click that follows it, and by then the board may have answered the tap (a card
+  // placed, the build menu closed) and woken the button up under that finger. Whether it stood back is
+  // therefore taken when the finger comes down: a tap that began while it did was meant for the board.
+  window.addEventListener('pointerdown', () => {
+    ex.quietAtDown = expandQuiet() || expandEl.classList.contains('quiet');
+  }, true);
   onSignal('showme', (d) => {
     shownWire = d.wire ? { ...d.wire } : null;
   });
@@ -1545,7 +1553,7 @@ function expand(ev?: Event) {
   if (performance.now() < ex.restUntil || !ex.shown || expandQuiet()) return;
   // (A finger cannot see where the button is going: a tap on it while it slides is a tap meant for the board.)
   const finger = (ev as PointerEvent | undefined)?.pointerType === 'touch' || (ev as PointerEvent | undefined)?.pointerType === 'pen';
-  if (finger && performance.now() - ex.movedAt < MOVE_REST) return;
+  if (finger && (performance.now() - ex.movedAt < MOVE_REST || ex.quietAtDown)) return;
   const had = new Set(g.deposits.map((d) => d.id));
   const old = { w: g.board.w, h: g.board.h };
   if (!expandBoard(g)) {
