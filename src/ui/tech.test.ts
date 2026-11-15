@@ -329,4 +329,38 @@ describe('tech tree: the goal\'s wait', () => {
       setCardWait(() => null);
     }
   });
+
+  it('puts nothing off while the goal waits longer for the credits its step needs after the research (goal 21)', () => {
+    // "Research Fabrication, then save up and build a Fabricator": Fabrication's 720α come well before the 7,100¢.
+    const at21 = (credits: number, creditRate: number) => {
+      const g = newGame();
+      g.goal = { i: GOALS.findIndex((x) => x.id === 'build-fabricator'), ready: false };
+      g.techs = ['P1', 'R1', 'P2', 'P3', 'L1', 'P4', 'P5', 'S1'];
+      meetAll(g);
+      g.data.a = 362;
+      g.dataRate.a = 3.68;
+      g.data.b = 335;
+      g.credits = credits;
+      g.creditRate = creditRate;
+      return g;
+    };
+    const slow = at21(3931, 9);
+    expect(goalSaving(slow)?.tech?.id).toBe('P7');
+    expect(goalSaving(slow)?.then).toBeGreaterThan(7000);
+    // 50α for Lab Speed puts Fabrication's α off by about 14 s, but the Fabricator's credits are 6 min away.
+    expect(goalDelay(slow, TECHS.R2)).toBeNull();
+    expect(byId(slow, 'R2')).toMatchObject({ state: 'rdy', slows: false });
+    // The card's own income for those credits counts the same way.
+    setCardWait(() => ({ unit: '¢', have: 3931, need: 7100, eta: 221 }));
+    try {
+      expect(goalDelay(at21(3931, 0.01), TECHS.R2)).toBeNull();
+    } finally {
+      setCardWait(() => null);
+    }
+    // With the credits nearly in, the α is what the goal waits for: Lab Speed puts it off again.
+    const rich = at21(7090, 9);
+    expect(goalDelay(rich, TECHS.R2)!.seconds).toBeCloseTo(50 / 3.68, 1);
+    // No credits coming in at all says nothing about when: the Data alone is counted, as before.
+    expect(goalDelay(at21(3931, 0), TECHS.R2)!.seconds).toBeCloseTo(50 / 3.68, 1);
+  });
 });

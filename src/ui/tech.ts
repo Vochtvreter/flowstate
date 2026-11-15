@@ -156,6 +156,8 @@ export interface GoalSaving {
   /** The tech its next step names; null for a goal that counts Data itself ("Study Glyph for β"). */
   tech: Tech | null;
   need: Partial<Record<DataTier, number>>;
+  /** Credits the same step needs straight after the research (the machine it asks for next); 0 or absent: none. */
+  then?: number;
 }
 
 /**
@@ -169,7 +171,7 @@ export function goalSaving(g: Game): GoalSaving | null {
   if (step) {
     if (!('tech' in step)) return null;
     const t = TECHS[step.tech];
-    return t && !g.techs.includes(t.id) ? { tech: t, need: { ...t.cost } } : null;
+    return t && !g.techs.includes(t.id) ? { tech: t, need: { ...t.cost }, then: step.then ?? 0 } : null;
   }
   const p = goal.progress?.(g) ?? null;
   const k = p ? TIER_OF[p[2]] : undefined;
@@ -210,9 +212,23 @@ function savedIn(g: Game, s: GoalSaving, spend: Partial<Record<DataTier, number>
 }
 
 /**
- * How much researching `t` now would put off the Data the goal is saving: the kinds of Data it takes from that
- * saving, and by how many seconds (Infinity when nothing is bringing that Data in). null when it takes nothing
- * the goal needs, or is the goal's tech itself.
+ * Seconds until the credits the goal's step needs after its research (`then`) are in hand: 0 when there are
+ * none or they are in hand already, Infinity when nothing is bringing credits in. Counted at the income the goal
+ * card counts with when its wait is about credits (waitLine), else at the game's own rate.
+ */
+function creditsIn(g: Game, s: GoalSaving): number {
+  const short = (s.then ?? 0) - g.credits;
+  if (short <= 1e-9) return 0;
+  const w = cardWait(g);
+  const rate = w && w.unit === '¢' && isFinite(w.eta) && w.eta > 0 && w.need > w.have ? (w.need - w.have) / w.eta : g.creditRate;
+  return rate > 1e-9 ? short / rate : Infinity;
+}
+
+/**
+ * How much researching `t` now would put off the goal: the kinds of Data it takes from what the goal is saving,
+ * and by how many seconds (Infinity when nothing is bringing that Data in). null when it takes nothing the goal
+ * needs, is the goal's tech itself, or puts nothing off because the goal waits longer for the credits its step
+ * needs after the research (goal 21: Fabrication's α is in hand well before the Fabricator's 7,100¢).
  */
 export function goalDelay(g: Game, t: Tech): { tiers: DataTier[]; seconds: number; saving: GoalSaving } | null {
   const s = goalSaving(g);
@@ -221,8 +237,12 @@ export function goalDelay(g: Game, t: Tech): { tiers: DataTier[]; seconds: numbe
   if (!tiers.length) return null;
   const before = savedIn(g, s, {});
   const after = savedIn(g, s, t.cost);
+  // The step is done when both its Data and its credits are in. (Credits that are not coming in at all say
+  // nothing about when: the Data alone is counted then, as for a step with no credits.)
+  const credits = creditsIn(g, s);
+  const c = isFinite(credits) ? credits : 0;
   // (When `before` never ends, neither does `after`: the price is short of a kind nothing is bringing in.)
-  const seconds = after === Infinity ? Infinity : Math.max(0, after - before);
+  const seconds = after === Infinity ? Infinity : Math.max(0, Math.max(after, c) - Math.max(before, c));
   return seconds > 0.5 || seconds === Infinity ? { tiers, seconds, saving: s } : null;
 }
 
