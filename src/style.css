@@ -266,6 +266,12 @@ g.wire.dim:hover .base { stroke-opacity: 0.6; }
 #board.ov .node .ring.flat { transform: translateX(56px) scale(calc(var(--ovs) * 1.18)); }
 #board.ov .node.compact .ring.flat { transform: translateX(42px) scale(calc(var(--ovs) * 1.34)); }
 #board.ov .pill, #board.ov .port, #board.ov .port-label, #board.ov #plot-label { display: none; }
+/* With no pill to read, a card's state is its colour: a starved or blocked card's whole ring (not only the
+   part its use fills) and its tile's edge take the state's colour. */
+#board.ov .node[data-st='starved'] .trk { stroke: var(--bad); stroke-opacity: 0.75; }
+#board.ov .node[data-st='blocked'] .trk, #board.ov .node[data-st='victim'] .trk { stroke: var(--warn); stroke-opacity: 0.75; }
+#board.ov .node[data-st='starved']:not(.sel) { border-color: var(--bad); }
+#board.ov .node[data-st='blocked']:not(.sel):not(.t-well), #board.ov .node[data-st='victim']:not(.sel):not(.t-well) { border-color: var(--warn); }
 #board.ov .node { cursor: zoom-in; }
 #board.ov g.wire .glow { display: none; }
 #board.ov g.wire .hit { pointer-events: none; }

@@ -1107,13 +1107,24 @@ function measureExpand() {
       const b = strip.getBoundingClientRect();
       if (b.height > 1) out.push({ x0: -1e6, y0: -1e6, x1: 1e6, y1: b.bottom - r.top });
     }
-    // Its seat in the thumb row, beside Fit: a place that costs no working board. Taken while Claim or the
-    // "tap where…" line stands in the row, or the build menu is open (the floating buttons step aside then).
+    // Its seat in the thumb row, beside Fit, or beside Claim or the "tap where…" line when one of those stands
+    // in the row: a place that costs no working board. None while the build menu is open (the floating
+    // buttons step aside then).
     ex.short = r.height < 420 && r.width > r.height;
-    const fit = stageBoxOf(fabsEl?.querySelector('[data-testid="fab-fit"]'));
-    const busy = !!stageBoxOf(document.querySelector('#hud [data-testid="claim"]')) || !!stageBoxOf(document.getElementById('tap-hint'))
-      || !!appEl?.classList.contains('building');
-    ex.row = fit && !busy ? { x1: fit.x0 - 10, y: (fit.y0 + fit.y1) / 2 } : null;
+    // (Where Fit stands once an open sheet has pushed the floating buttons aside, read from layout, not from
+    // where they are drawn mid-slide: they are moved by a transform that follows --lift and --shift.)
+    const fitBtn = fabsEl?.querySelector<HTMLElement>('[data-testid="fab-fit"]');
+    const c = env.cover();
+    const fit: Box | null = fabsEl && fitBtn && fitBtn.offsetWidth ? {
+      x0: fabsEl.offsetLeft + fitBtn.offsetLeft - c.right, x1: fabsEl.offsetLeft + fitBtn.offsetLeft + fitBtn.offsetWidth - c.right,
+      y0: fabsEl.offsetTop + fitBtn.offsetTop - c.bottom, y1: fabsEl.offsetTop + fitBtn.offsetTop + fitBtn.offsetHeight - c.bottom,
+    } : null;
+    let x1 = fit ? fit.x0 - 10 : -1;
+    for (const e of [document.querySelector('#hud [data-testid="claim"]'), document.getElementById('tap-hint')]) {
+      const b = stageBoxOf(e);
+      if (b && fit && b.x0 < fit.x0) x1 = Math.min(x1, b.x0 - 10);
+    }
+    ex.row = fit && x1 > 0 && !appEl?.classList.contains('building') ? { x1, y: (fit.y0 + fit.y1) / 2 } : null;
   } else {
     // The goal card with the order beside it, over the middle of the top edge, and room under it for the
     // alert chip whether it is showing or not.
@@ -1191,9 +1202,9 @@ function placeExpand(byCamera = false) {
     { x0: area.x0 - by, y0: area.y0 - by, x1: area.x1 + by, y1: area.y1 + by }, ex.blocks, HOME_GAP + stick,
   );
   const docked = !seen;
-  // On a phone, docked, it stands in the thumb row beside Fit, in the nearest stretch of it that no card
-  // or port lies under. A phone held sideways has no board to spare: while that seat is taken (Claim, the
-  // "tap where…" line, the build menu, cards all along the row) it waits off the board.
+  // On a phone, docked, it stands in the thumb row beside Fit (or beside Claim), in the nearest stretch of
+  // it that no card or port lies under. A phone held sideways has no board to spare: while there is no
+  // such stretch (the row full, the build menu open, cards all along the row) it waits off the board.
   const rowX = docked && env.phone && ex.row ? rowSeat(ex.row) : null;
   if (docked && env.phone && ex.short && rowX == null) {
     hideExpand();
@@ -1434,7 +1445,7 @@ export function initBoard(root: HTMLElement) {
   const attach = () => {
     const hook = (window as unknown as { flowstate?: Record<string, unknown> }).flowstate;
     if (!hook) return false;
-    hook.board ??= { inClear: (id: number) => nodeInClear(id) };
+    hook.board ??= { inClear: (id: number) => nodeInClear(id), expand: () => ({ ...ex, now: performance.now() }) };
     return true;
   };
   queueMicrotask(() => {
@@ -2510,8 +2521,19 @@ function clampToBoard(x: number, y: number, w: number, h: number): Pt {
  * it is tested). `skip` is the node being moved, if any; `room` is the height to keep clear for it (see
  * roomFor); `dir` is the direction of the wire the card arrives on. Null when the plot is full.
  */
-function freeSpot(x: number, y: number, w: number, h: number, skip?: number, room = h, dir?: Pt): Pt | null {
-  return nearestSpot({ x, y, w, h: room, avoid: nodeBoxes(skip, true).concat(depositBoxes()), board: ui.g.board, grid: GRID, dir });
+function freeSpot(x: number, y: number, w: number, h: number, skip?: number, room = h, dir?: Pt, inView = false): Pt | null {
+  const avoid = nodeBoxes(skip, true).concat(depositBoxes());
+  const q = { x, y, w, h: room, avoid, board: ui.g.board, grid: GRID, dir };
+  // A card the game places itself (built from the menu, or from the build bar where a finger tapped) keeps
+  // out from under whatever covers the board (the strip, a sheet, the floating buttons with 16 px around
+  // them), while there is room for it elsewhere nearby.
+  if (inView) {
+    const v = viewAhead();
+    const covered = coverBoxes().map((b) => ({ x0: (b.x0 - v.x) / v.k, y0: (b.y0 - v.y) / v.k, x1: (b.x1 - v.x) / v.k, y1: (b.y1 - v.y) / v.k }));
+    const spot = nearestSpot({ ...q, avoid: avoid.concat(covered) });
+    if (spot) return spot;
+  }
+  return nearestSpot(q);
 }
 
 const NO_ROOM = 'No room left on the board. <b>Expand it</b>, or clear a space.';
@@ -2592,6 +2614,30 @@ function untangle(g: Game) {
 /** Size a node of this type and recipe will have once placed. */
 const sizeFor = (type: NodeType, recipe?: string | null) => nodeSize({ type, recipe: recipe ?? null } as GNode);
 
+/** The deposit with no Well on it under a world point, if any. */
+function depositAt(p: Pt) {
+  const used = new Set(ui.g.nodes.map((n) => n.depositId));
+  return ui.g.deposits.find((d) => !used.has(d.id) && p.x >= d.x && p.x <= d.x + 172 && p.y >= d.y && p.y <= d.y + 72) ?? null;
+}
+
+/**
+ * A tap on an empty deposit: a Well is taken up for it (as from the build bar), its ghost already on that
+ * deposit, so that one more tap there places it. A deposit not yet researched says what it needs. Returns
+ * false when the tap was not on an empty deposit.
+ */
+function tapDeposit(p: Pt): boolean {
+  const g = ui.g;
+  const d = depositAt(p);
+  if (!d) return false;
+  if (!matUnlocked(g, d.mat)) {
+    toast(isTouch() ? 'Research this deposit first (tap <b>Tech</b>), then put a Well on it.' : 'Research this deposit in the <b>Tech tree</b> first, then put a Well on it.', 'info');
+    return true;
+  }
+  if (ui.sel) select(null);
+  startPlacing('well', null, d.id);
+  return true;
+}
+
 function nearestDeposit(p: Pt) {
   let best: { d: ReturnType<typeof freeDeposits>[number]; dist: number } | null = null;
   for (const d of freeDeposits(ui.g)) {
@@ -2629,7 +2675,7 @@ function updateGhost() {
     }
   } else {
     // The ghost stands where the card would go: the nearest free spot to the pointer.
-    const spot = freeSpot(mouse.x - w / 2, mouse.y - h / 2, w, h, undefined, roomFor(p.type, h));
+    const spot = freeSpot(mouse.x - w / 2, mouse.y - h / 2, w, h, undefined, roomFor(p.type, h), undefined, true);
     pos = spot ?? clampToBoard(mouse.x - w / 2, mouse.y - h / 2, w, h);
     if (!spot) {
       ok = false;
@@ -2653,10 +2699,10 @@ function updateGhost() {
     : `${nodeIcon(p.type, 20)}<span>${label}<small class="mono">${brief}</small></span>`);
 }
 
-export function startPlacing(type: NodeType, recipe?: string | null) {
+export function startPlacing(type: NodeType, recipe?: string | null, deposit?: number) {
   const g = ui.g;
   if (!nodeUnlocked(g, type)) return;
-  if (ui.placing?.type === type) {
+  if (ui.placing?.type === type && deposit == null) {
     ui.placing = null;
     touch();
     return;
@@ -2677,7 +2723,30 @@ export function startPlacing(type: NodeType, recipe?: string | null) {
     const f = freeArea(true);
     mouse = { x: ((f.x0 + f.x1) / 2 - ui.view.x) / ui.view.k, y: ((f.y0 + f.y1) / 2 - ui.view.y) / ui.view.k };
   }
+  if (type === 'well') showDeposits(deposit);
   touch();
+}
+
+/**
+ * A Well has been taken up: the free deposits it can stand on are brought into view (as little as the
+ * camera can move; nothing moves when they are all in view already), and a finger's ghost starts on the
+ * one that matters most: the deposit tapped, else one whose material has no Well yet, nearest first.
+ */
+function showDeposits(tapped?: number) {
+  const g = ui.g;
+  const used = new Set(g.nodes.map((n) => n.depositId));
+  const have = new Set(g.nodes.filter((n) => n.type === 'well').map((n) => n.material));
+  const v = viewAhead();
+  const r = rectOf();
+  const mid = { x: (r.width / 2 - v.x) / v.k, y: (r.height / 2 - v.y) / v.k };
+  const free = g.deposits.filter((d) => !used.has(d.id) && matUnlocked(g, d.mat));
+  if (!free.length) return;
+  const far = (d: (typeof free)[number]) => Math.hypot(d.x + 86 - mid.x, d.y + 36 - mid.y);
+  // (The one that matters most goes last: a set too big to show at once shows that one.)
+  free.sort((a, b) => (a.id === tapped ? 1 : 0) - (b.id === tapped ? 1 : 0) || Number(!have.has(a.mat)) - Number(!have.has(b.mat)) || far(b) - far(a));
+  const best = free[free.length - 1];
+  if (tapped == null) frameBoxes(free.map((d) => ({ x0: d.x - 6, y0: d.y - 6, x1: d.x + 178, y1: d.y + 78 })));
+  if (env.touch || tapped != null) mouse = { x: best.x + 86, y: best.y + 36 };
 }
 
 /** The first goal that needs the inspector ("Upgrade a Well"). */
@@ -2750,7 +2819,7 @@ function placeAt(p: Pt, keep: boolean) {
     node = placeNode(g, 'well', d.x, d.y, { depositId: d.id });
   } else {
     const { w, h } = sizeFor(pl.type, pl.recipe);
-    const pos = freeSpot(p.x - w / 2, p.y - h / 2, w, h, undefined, roomFor(pl.type, h));
+    const pos = freeSpot(p.x - w / 2, p.y - h / 2, w, h, undefined, roomFor(pl.type, h), undefined, true);
     if (!pos) return toast(NO_ROOM, 'bad');
     const onWire = wireNear(p, 16);
     act(g, () => {
@@ -3132,7 +3201,7 @@ function mouseHit(t: HTMLElement): Hit {
   if (nodeEl) {
     const id = Number(nodeEl.dataset.id);
     // (In the overview a card has no ports to press, and wires cannot be picked: see the stylesheet.)
-    if (over) return { kind: 'node', id };
+    if (over) return { kind: 'node', id: iconAt(mouse)?.id ?? id };
     const portOut = t.closest<HTMLElement>('.port.out');
     if (portOut) return { kind: 'out', id, port: Number(portOut.dataset.out) };
     const portIn = t.closest<HTMLElement>('.port.in');
@@ -3164,7 +3233,7 @@ function touchHit(p: Pt): Hit {
   const g = ui.g;
   const k = ui.view.k;
   if (over) {
-    const n = nodeAt(p) ?? cardNear(p, CARD_NEAR / k);
+    const n = iconAt(p) ?? nodeAt(p) ?? cardNear(p, CARD_NEAR / k);
     return n ? { kind: 'node', id: n.id } : null;
   }
   const reach = PORT_REACH / k;
@@ -3200,6 +3269,27 @@ function touchHit(p: Pt): Hit {
   if (out && dOut <= PORT_REACH) return { kind: 'reach', ...out };
   const near = cardNear(p, CARD_NEAR / k);
   return near ? { kind: 'node', id: near.id } : null;
+}
+
+/**
+ * In the overview a card is drawn as its icon, in the middle of the card and larger than the card's own
+ * ring (by --ovs): the icon whose middle is nearest a world point, within its drawn size plus a finger's
+ * margin. (The icon can stand out past the card's box, and icons of neighbouring cards come close.)
+ */
+function iconAt(p: Pt): GNode | null {
+  const scale = [1, 1.5, 1.9, 2.4, 3.2][ovStep] ?? 1;
+  const reach = 20 * scale + 8 / ui.view.k;
+  let best: GNode | null = null;
+  let bestD = reach;
+  for (const n of ui.g.nodes) {
+    const { w, h } = nodeSize(n);
+    const d = Math.hypot(n.x + w / 2 - p.x, n.y + h / 2 - p.y);
+    if (d < bestD) {
+      bestD = d;
+      best = n;
+    }
+  }
+  return best;
 }
 
 /** The card nearest to a world point, within `max` (world px) of its edge. */
@@ -3449,6 +3539,12 @@ function steer(cx: number, cy: number, hovering = false) {
       if (!drag.moved && Math.hypot(cx - drag.sx, cy - drag.sy) < drag.slop) break;
       const n = nodeById(g, drag.id);
       if (!n) break;
+      // A finger that drags across a card while a port waits for its target, or out in the overview where
+      // cards are small icons close together, moves the board, not the card.
+      if (drag.slop >= TOUCH_SLOP && (tapWire || over)) {
+        drag = { kind: 'pan', sx: cx, sy: cy, vx: ui.view.x, vy: ui.view.y, moved: true, slop: 0, place: false };
+        break;
+      }
       if (n.type === 'well') {
         // A Well stays on its deposit. Under a finger the drag pans the board instead, so that a
         // swipe that happens to start on a Well still goes somewhere.
@@ -3655,6 +3751,9 @@ function onUp(e: PointerEvent) {
         endDrag();
         armPort(d.near.id, d.near.port);
         followArmed(e.pointerType !== 'mouse');
+        return;
+      } else if (tapDeposit(p)) {
+        endDrag();
         return;
       } else if (ui.sel) select(null);
       break;
@@ -4026,7 +4125,7 @@ export function pickRadial(i: number) {
   // The card goes where the wire was dropped, or the nearest free spot from there: further along the
   // wire for preference, then a row above or below.
   const { w, h } = sizeFor(o.type, o.recipe);
-  const pos = freeSpot(r.dir === 'consume' ? r.at.x : r.at.x - w, r.at.y - h / 2, w, h, undefined, roomFor(o.type, h), { x: r.at.x - r.a.x, y: r.at.y - r.a.y });
+  const pos = freeSpot(r.dir === 'consume' ? r.at.x : r.at.x - w, r.at.y - h / 2, w, h, undefined, roomFor(o.type, h), { x: r.at.x - r.a.x, y: r.at.y - r.a.y }, true);
   if (!pos) {
     closeRadial();
     toast(NO_ROOM, 'bad');
