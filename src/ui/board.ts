@@ -517,6 +517,8 @@ function builtBox(): Box | null {
 const STRIP_GAP = 14;
 /** How far under the goal card the alert chip reaches when it shows (outside the phone layout). */
 const ALERT_ROOM = 46;
+/** On a phone held upright the alert chip is a row of its own under the card: its height with the gap above it. */
+const PHONE_ALERT_ROOM = 40;
 
 /**
  * The camera that shows a world box in the part of the stage nothing covers: clear of the strip, an
@@ -1071,6 +1073,14 @@ const EXPAND_REST = 700;
  * opens, the camera eases), and that tap must not buy a plot. (A mouse pointer can be seen: a click counts.)
  */
 const MOVE_REST = 40;
+/**
+ * A finger that comes down on the button where it already stood this long before (ms) was aimed at it: its tap
+ * counts even if the button has moved a little since, or is moving (a sheet opened, the alert chip came in under
+ * the card and pushed it down). One that comes down where the button has only just arrived was not.
+ */
+const AIM_MS = 250;
+/** Docked over the board and in the way of what has just grown or moved beside it, the button waits this long (ms) for its surroundings to stop changing, then changes place once. */
+const SETTLE_MS = 160;
 
 /** Where the middle of the button is on the stage, and the scale it is drawn at. */
 interface Stand { x: number; y: number; s: number }
@@ -1104,6 +1114,14 @@ const ex = {
   shown: false,
   /** The button stood back (see `expandQuiet`) when the last press anywhere began. */
   quietAtDown: false,
+  /** The last press began on the button where it had already stood a moment before (see `aimedAt`). */
+  aimedAtDown: false,
+  /** Where it has been drawn of late (stage pixels; an empty box while hidden), newest last: see `aimedAt`. */
+  seats: [] as { t: number; x0: number; y0: number; x1: number; y1: number }[],
+  /** What it keeps clear of and where it may stand, as last placed (a signature), and when that last changed. */
+  around: '', aroundAt: 0,
+  /** It has been left where it was for its surroundings to settle (SETTLE_MS), and is placed again then. */
+  settling: false,
   /** What the last measurement was taken for (see `expandKey`), and when. */
   key: '', measuredAt: 0,
 };
@@ -1161,11 +1179,15 @@ function measureExpand() {
     for (const b of fabsEl?.querySelectorAll('.fab:not([hidden])') ?? []) add(b);
     if (toastsEl?.childElementCount) add(toastsEl);
     // The strip as it is laid out this moment (an alert chip that has just come in makes it taller
-    // before the cover is measured again).
+    // before the cover is measured again). Held upright, the strip takes the alert chip as one more row under the
+    // card: room is kept for it whether it is showing or not (as away from a phone, ALERT_ROOM), or the button
+    // docked under the card is pushed down the moment a problem is named, under a finger on its way to it.
     const strip = document.getElementById('hud-strip');
     if (strip && !strip.hidden) {
       const b = strip.getBoundingClientRect();
-      if (b.height > 1) out.push({ x0: -1e6, y0: -1e6, x1: 1e6, y1: b.bottom - r.top });
+      const upright = r.height > r.width;
+      const room = upright && document.getElementById('hud-alert')?.hidden ? PHONE_ALERT_ROOM : 0;
+      if (b.height > 1) out.push({ x0: -1e6, y0: -1e6, x1: 1e6, y1: b.bottom - r.top + room });
     }
     // Its seat in the thumb row, beside Fit, or beside Claim or the "tap where…" line when one of those stands
     // in the row: a place that costs no working board. None while the build menu is open (the floating
@@ -1253,6 +1275,7 @@ function placeExpand(byCamera = false) {
   const r = rectOf();
   if (r.width < 2 || r.height < 2) return;
   if (ex.stale) measureExpand();
+  ex.settling = false;
   ex.shown = expandShown(g);
   if (!ex.shown) {
     hideExpand();
@@ -1306,7 +1329,27 @@ function placeExpand(byCamera = false) {
       const b = onStage(cardBox(n), ui.view);
       if (b.x1 + pad > area.x0 && b.x0 - pad < area.x1 && b.y1 + pad > area.y0 && b.y0 - pad < area.y1) cards.push({ x0: b.x0 - pad, y0: b.y0, x1: b.x1 + pad, y1: b.y1 });
     }
-    const p = dockSpot({ home, w: ex.w, h: ex.h, area, blocks: cards.length < 40 ? ex.blocks.concat(cards) : ex.blocks, gap: DOCK_GAP });
+    const blocks = cards.length < 40 ? ex.blocks.concat(cards) : ex.blocks;
+    // Where it stands docked over the board it stays, for as long as that place is clear, unless the player is
+    // moving the board: when what moved was a sheet, a toast or the strip, or the camera gliding by itself (to
+    // keep the selected card in view as the strip grows), a button that changes place while a finger is on its way
+    // to it is a button that cannot be pressed. (As the player pans, it follows its place along the edge.)
+    // And when it has to move, it waits for its surroundings to settle and then moves once: the strip, the cover
+    // the phone shell reports, the sheet and the floating buttons above it each take their new place a frame or
+    // more apart (the alert chip coming in under the card moved it three times in 60 ms).
+    const at = ex.target;
+    const kept = (!byCamera || !!glide) && at && ex.docked && ex.mini === mini && !env.calm ? { x: at.x - ex.w / 2, y: at.y - ex.h / 2 } : null;
+    const sig = `${Math.round(area.x0)},${Math.round(area.y0)},${Math.round(area.x1)},${Math.round(area.y1)}|${ex.blocks.map((b) => `${Math.round(b.x0)},${Math.round(b.y0)},${Math.round(b.x1)},${Math.round(b.y1)}`).join(' ')}`;
+    if (sig !== ex.around) {
+      ex.around = sig;
+      ex.aroundAt = performance.now();
+    }
+    let p: { x: number; y: number };
+    if (kept && boxClear({ x0: kept.x, y0: kept.y, x1: kept.x + ex.w, y1: kept.y + ex.h }, area, blocks, DOCK_GAP)) p = kept;
+    else if (kept && performance.now() - ex.aroundAt < SETTLE_MS) {
+      p = kept;
+      ex.settling = true;
+    } else p = dockSpot({ home, w: ex.w, h: ex.h, area, blocks, gap: DOCK_GAP });
     target = { x: p.x + ex.w / 2, y: p.y + ex.h / 2, s: 1 };
     overCard = cards.some((b) => p.x < b.x1 && p.x + ex.w > b.x0 && p.y < b.y1 && p.y + ex.h > b.y0);
   }
@@ -1325,14 +1368,17 @@ function placeExpand(byCamera = false) {
     const step = Math.hypot(target.x - was.x, target.y - was.y);
     if (docked !== ex.docked || (byCamera ? docked && step > DOCK_JUMP : step > 2)) ex.movedAt = performance.now();
   }
-  if (was && ex.drawn && renderedGame && !env.calm && performance.now() >= openingUntil) {
+  // (Docked over the board in the same form before and after, pushed by what grew beside it, it changes place at
+  // once: a button on its way somewhere for a fifth of a second is a button whose taps do not count, see `aimedAt`.)
+  const pushed = !byCamera && docked && ex.docked && rowX == null && !ex.slide && mini === ex.mini;
+  if (was && ex.drawn && renderedGame && !env.calm && performance.now() >= openingUntil && !pushed) {
     const step = Math.hypot(target.x - was.x, target.y - was.y);
     if (docked !== ex.docked || (byCamera ? docked && step > DOCK_JUMP : step > 0.5 || Math.abs(target.s - was.s) > 0.002)) {
       ex.slide = { from: { ...ex.drawn }, t0: performance.now() };
     }
     // The way there must not pass under a floating control: then it just changes place.
     if (ex.slide && !slideClear(ex.drawn, target)) ex.slide = null;
-  } else ex.slide = null;
+  } else if (!pushed) ex.slide = null;
   ex.docked = docked;
   ex.mini = mini;
   ex.call = call;
@@ -1370,6 +1416,7 @@ function rowSeat(row: { x1: number; y: number }): number | null {
 
 /** Off the board for now: hidden, and no longer a place wire dots keep away from. */
 function hideExpand() {
+  noteSeat(0, 0, 0, 0);
   setHidden(expandEl, true);
   ex.target = ex.drawn = null;
   ex.slide = null;
@@ -1407,6 +1454,37 @@ function slideClear(a: Stand, b: Stand): boolean {
   return true;
 }
 
+/** Remember where the button is drawn now (stage pixels; all zero: hidden), for `aimedAt`. Kept for a second. */
+function noteSeat(x0: number, y0: number, x1: number, y1: number) {
+  const now = performance.now();
+  const log = ex.seats;
+  const last = log[log.length - 1];
+  if (last && last.x0 === x0 && last.y0 === y0 && last.x1 === x1 && last.y1 === y1) return;
+  log.push({ t: now, x0, y0, x1, y1 });
+  // (The newest entry older than the window stays: it says where the button stood when the window began.)
+  while (log.length > 2 && log[1].t < now - 1000) log.shift();
+}
+
+/**
+ * Was a press at this client point aimed at the button? It was if the button is under it now and was under it
+ * AIM_MS ago, wherever it has been in between: it had been on show there for longer than a finger takes to set
+ * off for it. A button that has slid or jumped under a finger on its way to a port or a card was not there then.
+ */
+function aimedAt(cx: number, cy: number): boolean {
+  if (!ex.shown || expandEl.hidden) return false;
+  const r = rectOf();
+  const x = cx - r.left, y = cy - r.top;
+  const log = ex.seats;
+  const now = performance.now();
+  const inside = (b: { x0: number; y0: number; x1: number; y1: number }) => b.x1 > b.x0 && x >= b.x0 && x <= b.x1 && y >= b.y0 && y <= b.y1;
+  const cur = log[log.length - 1];
+  if (!cur || !inside(cur)) return false;
+  // Where it stood AIM_MS ago: the newest entry from before then.
+  let then = null;
+  for (let i = log.length - 1; i >= 0; i--) if (log[i].t <= now - AIM_MS) { then = log[i]; break; }
+  return !!then && inside(then);
+}
+
 /** Put the button where it belongs, or where it has got to on its way there. */
 function drawExpand() {
   const t = ex.target;
@@ -1421,6 +1499,7 @@ function drawExpand() {
   }
   ex.drawn = d;
   const left = d.x - (ex.w * d.s) / 2, top = d.y - (ex.h * d.s) / 2;
+  noteSeat(left, top, left + ex.w * d.s, top + ex.h * d.s);
   // (While it slides it takes no press; the rest is counted from the end of the slide.)
   if (sl) ex.movedAt = performance.now();
   setStyle(expandEl, 'transform', `translate(${left.toFixed(1)}px, ${top.toFixed(1)}px) scale(${d.s.toFixed(4)})`);
@@ -1508,8 +1587,9 @@ export function initBoard(root: HTMLElement) {
   // A finger's tap acts on the click that follows it, and by then the board may have answered the tap (a card
   // placed, the build menu closed) and woken the button up under that finger. Whether it stood back is
   // therefore taken when the finger comes down: a tap that began while it did was meant for the board.
-  window.addEventListener('pointerdown', () => {
+  window.addEventListener('pointerdown', (e) => {
     ex.quietAtDown = expandQuiet() || expandEl.classList.contains('quiet');
+    ex.aimedAtDown = aimedAt(e.clientX, e.clientY);
   }, true);
   onSignal('showme', (d) => {
     shownWire = d.wire ? { ...d.wire } : null;
@@ -1565,9 +1645,10 @@ let popTimer = 0;
 function expand(ev?: Event) {
   const g = ui.g;
   if (performance.now() < ex.restUntil || !ex.shown || expandQuiet()) return;
-  // (A finger cannot see where the button is going: a tap on it while it slides is a tap meant for the board.)
+  // (A finger cannot see where the button is going: a tap on it while it slides is a tap meant for the board,
+  // unless the finger came down where the button had already been standing: then it was aimed at it.)
   const finger = (ev as PointerEvent | undefined)?.pointerType === 'touch' || (ev as PointerEvent | undefined)?.pointerType === 'pen';
-  if (finger && (performance.now() - ex.movedAt < MOVE_REST || ex.quietAtDown)) return;
+  if (finger && (ex.quietAtDown || (performance.now() - ex.movedAt < MOVE_REST && !ex.aimedAtDown))) return;
   const had = new Set(g.deposits.map((d) => d.id));
   const old = { w: g.board.w, h: g.board.h };
   if (!expandBoard(g)) {
@@ -2623,6 +2704,8 @@ export function updateBoard(dt: number) {
   if (freshUntil && performance.now() >= freshUntil && syncChips()) layoutWires();
   if (glide) stepGlide(dt);
   if (ex.slide) drawExpand();
+  // A docked button left where it was while its surroundings settled takes its new place once they have.
+  else if (ex.settling && performance.now() - ex.aroundAt >= SETTLE_MS) placeExpand();
   // While a port is armed, a wire drawn, a card placed or the build menu open, the button stands back in
   // either form (faint, and a press goes through it to the board): that tap is not meant for a new plot.
   setClass(expandEl, 'quiet', expandQuiet());
