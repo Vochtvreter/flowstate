@@ -432,11 +432,11 @@ function placeHint(line: string, force = false) {
 
 /**
  * Fold the goal card's hint away, as a press on the board does (where the card folds it at all: a phone held
- * sideways, or a strip that would take too much of an upright one). For the HUD's "Show me", which takes the
- * player to the board. Also at env.foldHint.
+ * sideways, a strip that would take too much of an upright one, or a wait, where the HUD marks the card `wait`).
+ * For the HUD's "Show me", which takes the player to the board. Also at env.foldHint.
  */
 export function foldHint() {
-  if (env.phone && fold && hintOpen) setHintOpen(false);
+  if (env.phone && (fold || goalEl?.classList.contains('wait')) && hintOpen) setHintOpen(false);
 }
 
 /**

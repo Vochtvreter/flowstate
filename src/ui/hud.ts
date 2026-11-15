@@ -202,18 +202,9 @@ let inspW = 320;
 
 /**
  * On a phone, where the card folds its hint behind a tap (phone.ts: #app.fold, #app.hint-open; and during a
- * wait, #goal.wait here), an open hint is folded away, as it is at a press on the board. The board's shell does
- * it where it folds the hint itself (env.foldHint); where only the card folds it (a wait on an upright phone), a
- * tap on the card that is not on a button does it: phone.ts turns the hint over at such a tap (the event does
- * not bubble, so nothing else hears it).
+ * wait, #goal.wait here), an open hint is folded away, as it is at a press on the board (phone.ts does it).
  */
-function foldHint() {
-  const app = document.getElementById('app');
-  if (!env.phone || !app) return;
-  (env as { foldHint?: () => void }).foldHint?.();
-  const folds = app.classList.contains('fold') || goalEl.classList.contains('wait');
-  if (folds && app.classList.contains('hint-open')) goalEl.dispatchEvent(new MouseEvent('click'));
-}
+const foldHint = () => env.foldHint();
 
 // ---------- how much room the strip has ----------
 
