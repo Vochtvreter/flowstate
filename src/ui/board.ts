@@ -752,10 +752,11 @@ const DOCK_JUMP = 24;
 /** After an expansion the button takes no press for this long: docked, it stays under the pointer, and a second press would buy a second plot. */
 const EXPAND_REST = 700;
 /**
- * Nor for this long after it last moved on screen: docked over the board, it can slide under a finger that
- * was on its way to a port or a card (a sheet opens, the camera eases), and that tap must not buy a plot.
+ * Nor a tap while it slides from one place to another, or this soon after it came to rest or changed place:
+ * docked over the board, it can slide under a finger that was on its way to a port or a card (a sheet
+ * opens, the camera eases), and that tap must not buy a plot. (A mouse pointer can be seen: a click counts.)
  */
-const MOVE_REST = 300;
+const MOVE_REST = 40;
 
 /** Where the middle of the button is on the stage, and the scale it is drawn at. */
 interface Stand { x: number; y: number; s: number }
@@ -773,8 +774,8 @@ const ex = {
   asked: false, askedKey: '', askedAt: 0,
   /** No press counts before this (performance.now). */
   restUntil: 0,
-  /** When it last moved on screen, and the box it was drawn in then (left, top, width): see `MOVE_REST`. */
-  movedAt: 0, at: [0, 0, 0],
+  /** When it last changed place other than by following the camera, or was last sliding: see `MOVE_REST`. */
+  movedAt: 0,
   /** The docked button as a world box: wire dots are not drawn over it (the first four numbers of every flow's `occ`). */
   occ: [0, 0, 0, 0],
 };
@@ -905,6 +906,12 @@ function placeExpand(byCamera = false) {
   // A change of place is slid: from one place to the other, to a docked place that jumped, and to any new
   // place the camera did not cause. (Not while the board is being opened, nor when motion is reduced.)
   const was = ex.target;
+  // (A change of place the camera did not cause, or a docked jump along the edge, also holds off presses
+  // for a moment: see `MOVE_REST`. Following the camera does not: the finger follows it too.)
+  if (was) {
+    const step = Math.hypot(target.x - was.x, target.y - was.y);
+    if (docked !== ex.docked || (byCamera ? docked && step > DOCK_JUMP : step > 2)) ex.movedAt = performance.now();
+  }
   if (was && ex.drawn && renderedGame && !env.calm && performance.now() >= openingUntil) {
     const step = Math.hypot(target.x - was.x, target.y - was.y);
     if (docked !== ex.docked || (byCamera ? docked && step > DOCK_JUMP : step > 0.5 || Math.abs(target.s - was.s) > 0.002)) {
@@ -960,13 +967,8 @@ function drawExpand() {
   }
   ex.drawn = d;
   const left = d.x - (ex.w * d.s) / 2, top = d.y - (ex.h * d.s) / 2;
-  const at = ex.at;
-  if (Math.abs(left - at[0]) > 1.5 || Math.abs(top - at[1]) > 1.5 || Math.abs(ex.w * d.s - at[2]) > 1.5) {
-    ex.movedAt = performance.now();
-    at[0] = left;
-    at[1] = top;
-    at[2] = ex.w * d.s;
-  }
+  // (While it slides it takes no press; the rest is counted from the end of the slide.)
+  if (sl) ex.movedAt = performance.now();
   setStyle(expandEl, 'transform', `translate(${left.toFixed(1)}px, ${top.toFixed(1)}px) scale(${d.s.toFixed(4)})`);
   // Wire dots are drawn above everything on the board: a docked button is one more thing they keep off.
   const { x: vx, y: vy, k } = ui.view;
@@ -1083,9 +1085,12 @@ let popTimer = 0;
  * POP_STAGGER apart.) With motion reduced, the camera jumps, the deposits are simply there, and a toast
  * says what happened instead.
  */
-function expand() {
+function expand(ev?: Event) {
   const g = ui.g;
-  if (performance.now() < ex.restUntil || performance.now() - ex.movedAt < MOVE_REST) return;
+  if (performance.now() < ex.restUntil) return;
+  // (A finger cannot see where the button is going: a tap on it while it slides is a tap meant for the board.)
+  const finger = (ev as PointerEvent | undefined)?.pointerType === 'touch' || (ev as PointerEvent | undefined)?.pointerType === 'pen';
+  if (finger && performance.now() - ex.movedAt < MOVE_REST) return;
   const had = new Set(g.deposits.map((d) => d.id));
   const old = { w: g.board.w, h: g.board.h };
   if (!expandBoard(g)) {
