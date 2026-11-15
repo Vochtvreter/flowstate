@@ -642,7 +642,8 @@ function openView() {
   const t = fitTarget(box);
   const go = (v: View) => moveView(v.x, v.y, v.k, false);
   if (t.k >= floor) return go(t);
-  const armed = tapWire ? [tapWire.from] : [];
+  // (A wire a finger is still drawing counts as armed: its start stays in view.)
+  const armed = tapWire ? [tapWire.from] : drag?.kind === 'wire' && drag.armed ? [drag.from] : drag?.kind === 'wireIn' && drag.armed ? [drag.to] : [];
   const named = (armed.length ? armed : goalFocus(g)).map((id) => nodeById(g, id)).filter((n): n is GNode => !!n);
   // On a phone (a game opened, or the phone turned) as much of the factory as can be read at once: at the
   // floor of the detailed tier, the stretch of it with the most cards on screen, the armed port among them.
