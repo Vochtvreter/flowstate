@@ -43,9 +43,6 @@ import { delegate, onPress, onSignal, select, signal, toast, touch, ui } from '.
 
 let boardEl: HTMLElement;
 let worldEl: HTMLElement;
-let gridEl: HTMLElement;
-/** The grid's cell size as last written (it changes only with the zoom). */
-let gridCell = 0;
 let plotEl: HTMLElement;
 let plotLabel: HTMLElement;
 let depositsEl: HTMLElement;
@@ -284,14 +281,8 @@ function applyView() {
   clampView();
   const { x, y, k } = ui.view;
   worldEl.style.transform = `translate(${x}px, ${y}px) scale(${k})`;
-  // The dotted grid: resized only when the zoom changes, otherwise only moved (by less than one cell).
-  const cell = 24 * k;
-  if (cell !== gridCell) {
-    gridCell = cell;
-    gridEl.style.backgroundSize = `${cell}px ${cell}px`;
-  }
-  const mod = (a: number) => ((a % cell) + cell) % cell;
-  gridEl.style.transform = `translate(${(mod(x + 48) - cell).toFixed(2)}px, ${(mod(y + 48) - cell).toFixed(2)}px)`;
+  boardEl.style.backgroundSize = `${24 * k}px ${24 * k}px`;
+  boardEl.style.backgroundPosition = `${x}px ${y}px`;
   const floor = zoomFloor();
   const wasOver = over, wasBig = big, wasLean = lean, wasStep = ovStep;
   over = wasOver ? k < floor - 1e-6 : k < floor * OVER_BELOW;
@@ -1375,7 +1366,6 @@ function drawExpand() {
 export function initBoard(root: HTMLElement) {
   boardEl = root;
   boardEl.innerHTML = `
-    <div id="grid"></div>
     <div id="world">
       <div id="plot"><span id="plot-label"></span></div>
       <div id="deposits"></div>
@@ -1388,7 +1378,6 @@ export function initBoard(root: HTMLElement) {
     <button id="expand" data-testid="expand" style="transform:translate(-9999px,0)"></button>
     <div id="radial"></div>`;
   worldEl = boardEl.querySelector('#world')!;
-  gridEl = boardEl.querySelector('#grid')!;
   plotEl = boardEl.querySelector('#plot')!;
   plotLabel = boardEl.querySelector('#plot-label')!;
   depositsEl = boardEl.querySelector('#deposits')!;
