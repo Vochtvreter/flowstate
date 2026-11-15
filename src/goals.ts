@@ -393,9 +393,13 @@ export function lensFeeds(g: Game): { mat: MatId; name: string; fed: boolean }[]
 }
 const lensFed = (g: Game, m: MatId) => !!lensFeeds(g)?.find((x) => x.mat === m)?.fed;
 
-/** "Upgrade all your Wells at once": an Upgrade all has been pressed since this goal came up. */
+/**
+ * "Upgrade all your Wells at once": an Upgrade all has been pressed since this goal came up (g.bulkAt, kept with
+ * the save; the edit notes are only a fallback, as they forget anything older than a minute).
+ */
 const bulkSince = (g: Game) => {
   const since = g.goalAt && g.goalAt.i === g.goal.i ? g.goalAt.t : g.time;
+  if (g.bulkAt != null && g.bulkAt >= since - 1e-9) return true;
   return (g.edits ?? []).some((e) => e.what.startsWith('upgrade-all:') && e.at >= since - 1e-9);
 };
 

@@ -247,6 +247,31 @@ describe('goal chain: ready, claim, skip ahead', () => {
     expect(TECHS.S1.cost).toEqual({});
   });
 
+  it('"Upgrade all your Wells at once" keeps its Claim a minute and more after the press: through an undo of something else, and a reload', () => {
+    const g = rich();
+    g.techs = ['P1', 'R1', 'L1', 'S1'];
+    g.credits = 1000;
+    placeNode(g, 'well', 0, 0, { depositId: 2 });
+    at(g, 'bulk-upgrade');
+    run(g, 1);
+    expect(g.goal.ready).toBe(false);
+    expect(upgradeAll(g, 'well', 'speed')).toBe(2);
+    run(g, 0.1);
+    expect(g.goal.ready).toBe(true);
+    // The edit notes forget anything older than a minute, at the next edit: the press must not go with them.
+    run(g, RULES.tips.repeatAfter + 10);
+    expect(placeNode(g, 'router', 200, 200)).not.toBeNull();
+    expect((g.edits ?? []).some((e) => e.what.startsWith('upgrade-all:'))).toBe(false);
+    expect(undo(g)).toBe(true); // the Router, nothing to do with the goal
+    run(g, 0.1);
+    expect(g.goal.ready).toBe(true);
+    const back = deserialize(serialize(g))!;
+    run(back, 0.5);
+    expect(activeGoal(back)!.id).toBe('bulk-upgrade');
+    expect(back.goal.ready).toBe(true);
+    expect(claimGoal(back)).toBe(true);
+  });
+
   it('unlocks Orders, the Flow meter and the end of the demo', () => {
     const g = rich();
     at(g, 'make-spark');
