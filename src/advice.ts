@@ -969,8 +969,9 @@ function flowCands(g: Game): Cand[] {
  * Left out: what the player has just done to the same kind of node (g.edits); `skip`, the tips (as they
  * read) that have already come and gone on this board; and the step the goal card's "while you wait" line is
  * asking for right now (lineStep): the card says that itself, with a "Show me" of its own. A player who
- * reads only the tips and never the lines reaches the Lens half a minute to a minute and a half later for it
- * (`npm run pacing -- --policies=newcomer --noMeanwhile`), and is not stranded.
+ * reads only the tips and never the lines is slower for it at the fast end and not at the slow end (first Lens
+ * 24:23 to 26:20 over seeds 0 to 14, where it was 22:13 to 26:21), and no goal takes them longer than it did
+ * (`npm run pacing -- --policies=newcomer --noMeanwhile`): slower, not stranded.
  */
 function candidates(g: Game, w: Wait, skip: ReadonlySet<string> = new Set()): Cand[] {
   const recent = new Set((g.edits ?? []).filter((e) => g.time - e.at < RULES.tips.repeatAfter).map((e) => e.what));
