@@ -24,7 +24,8 @@
 //  - It never reverses a goal card. "Cut this wire" is only ever said when the active card says so too,
 //    and a Router that a card had turned toward a Lab is never turned away from it.
 //  - It never says what the card is saying already: while the card's "while you wait" line is up and not
-//    done, the step that line asks for next (lineAdvice) is not offered as a tip as well.
+//    done, the step that line asks for next (lineAdvice) is not offered as a tip as well. One exception: on
+//    the Flow goal, when the goal would not complete without that step (no step of the valve passes the board).
 //  - Every tip carries `saves` (a number of seconds, or Infinity when the wait would not end without it), and
 //    every sentence fits RULES.tips.maxLength characters (90), for mouse and for touch.
 //
@@ -574,6 +575,8 @@ interface Cand {
   culprit?: number;
   /** In a wait for credits and Data both: which of the two this candidate is meant to bring in. */
   brings?: 'credits' | 'data';
+  /** A Flow fix the card's line is naming right now: a tip only where the goal would not complete without it (judgeFlow). */
+  line?: boolean;
 }
 
 /** Do what a candidate says. A build with its wires is one undo step and is rolled back if any part fails. */
@@ -1021,7 +1024,8 @@ function flowCands(g: Game): Cand[] {
  *
  * Left out: what the player has just done to the same kind of node (g.edits); `skip`, the tips (as they
  * read) that have already come and gone on this board; and the step the goal card's "while you wait" line is
- * asking for right now (lineStep): the card says that itself, with a "Show me" of its own. A player who
+ * asking for right now (lineStep): the card says that itself, with a "Show me" of its own (on the Flow goal it
+ * stays in, marked, and judgeFlow keeps it only where the goal would not complete without it). A player who
  * reads only the tips and never the lines is slower for it at the fast end and not at the slow end (first Lens
  * 24:23 to 26:20 over seeds 0 to 14, where it was 22:13 to 26:21), and no goal takes them longer than it did
  * (`npm run pacing -- --policies=newcomer --noMeanwhile`): slower, not stranded.
@@ -1045,11 +1049,12 @@ function candidates(g: Game, w: Wait, skip: ReadonlySet<string> = new Set()): Ca
     const well = line.act.from;
     return (c.act.t === 'wire' || c.act.t === 'build') && c.act.from === well;
   };
-  const best = (list: Cand[]): Cand[] => {
+  /** `lineToo`: the line's own step stays in, marked (the Flow goal: see judgeFlow). */
+  const best = (list: Cand[], lineToo = false): Cand[] => {
     const seen = new Set<string>();
-    return top(list, list.length).filter((c) => {
+    return top(list, list.length).map((c) => (lineToo && theLines(c) ? { ...c, line: true } : c)).filter((c) => {
       const key = JSON.stringify(c.act);
-      if (theLines(c)) return false;
+      if (!c.line && theLines(c)) return false;
       if (seen.has(key) || seen.size >= ADVICE.candidates || skip.has(reads(c.text))) return false;
       const note = noteOf(g, c.act);
       if (!note || recent.has(note)) return false;
@@ -1057,7 +1062,7 @@ function candidates(g: Game, w: Wait, skip: ReadonlySet<string> = new Set()): Ca
       return true;
     });
   };
-  if (w.kind === 'flow') return best(flowCands(g)).sort((a, b) => b.hope - a.hope);
+  if (w.kind === 'flow') return best(flowCands(g), true).sort((a, b) => b.hope - a.hope);
   if (w.kind === 'order') return best(orderCands(g));
   const data = TIERS.some((k) => w.need[k] > g.data[k] + 1e-9);
   const credits = w.need.credits > g.credits + 1e-6;
@@ -1267,6 +1272,10 @@ function judgeFlow(g: Game, w: Wait, cands: Cand[]): Verdict | null {
   if (base.t <= ADVICE.minWait) return null;
   const tried: { c: Cand; o: Outcome; rank: number }[] = [];
   cands.forEach((c, rank) => {
+    // The fix the card's line names is the line's to say, unless the goal would not complete without it within
+    // the look-ahead (the valve's steps included): a player who reads no line is then not left on a board that
+    // no valve step passes (the rules review's F1: a second Glyph Assembler built ahead, three producers short).
+    if (c.line && isFinite(base.t)) return;
     const copy = lookahead(g);
     if (!copy || !perform(copy, c.act)) return;
     const o = tryOut(copy, w, isFinite(base.t) ? base.t : horizon);

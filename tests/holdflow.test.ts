@@ -65,6 +65,25 @@ describe('Hold 95% Flow with a second Glyph Assembler built ahead', () => {
     expect(slack2 || g.time - t0 < RULES.flow.valveAfter2).toBe(true);
   }, 120_000);
 
+  it('the player who reads no line and follows the tips (the review\'s own script): the adviser names the fix the line names, then the valve\'s second step', () => {
+    const { g } = builtAhead();
+    const t0 = g.time;
+    const tips: string[] = [];
+    // As tests/rev-holdflow did: a look at the tips every 16 s, nothing else.
+    for (let k = 0; k < 450 && !g.goal.ready; k++) {
+      for (let i = 0; i < 40; i++) tick(g, 0.05);
+      if (g.order?.ready) claimOrder(g);
+      if (k % 8 === 0) {
+        const t = advice(g);
+        if (t && applyAdvice(g, t)) tips.push(`${Math.round(g.time - t0)} s: ${t.text.mouse}`);
+      }
+    }
+    console.info(`Hold Flow by the tips alone: ready after ${Math.round(g.time - t0)} s\n  ${tips.join('\n  ')}`);
+    expect(g.goal.ready, tips.join('\n')).toBe(true);
+    expect(g.time - t0).toBeLessThanOrEqual(RULES.flow.valveAfter2 + RULES.flow.holdSeconds + 30);
+    expect(tips.some((x) => /The Spark Refiner needs more Ember/.test(x))).toBe(true);
+  }, 120_000);
+
   it('the goal view says how many may be short: none, then one at 90 s, then two at 180 s', () => {
     const { g } = builtAhead();
     const seen: Record<number, number> = {};

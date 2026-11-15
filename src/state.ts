@@ -241,6 +241,12 @@ export interface Game {
    * copy of the game as on the game itself (a look-ahead copy, or one handed to a worker).
    */
   edits?: Edit[];
+  /**
+   * Game time of the last press of Upgrade all (src/actions.ts upgradeAll). "Upgrade all your Wells at once" is
+   * met by a press made since the goal came up; `edits` cannot carry that, as it forgets anything older than a
+   * minute, and the Claim then went with the next undo or reload.
+   */
+  bulkAt?: number;
   // --- not saved ---
   rev: number;
   events: GameEvent[];
@@ -512,6 +518,9 @@ export function deserialize(json: string): Game | null {
     g.seenSurplus = !!raw.seenSurplus;
     // Market Lens comes with the first sale over demand (src/sim.ts). A save that saw one before that rule gets it now.
     if (g.seenSurplus && !g.techs.includes('C1')) g.techs.push('C1');
+    // The last press of Upgrade all: a time in the game, none from the future.
+    if (typeof raw.bulkAt === 'number' && isFinite(raw.bulkAt) && raw.bulkAt >= 0) g.bulkAt = Math.min(raw.bulkAt, g.time);
+    else delete g.bulkAt;
     // The adviser's memory of the last changes: plain notes, none from the future.
     g.edits = (Array.isArray(raw.edits) ? raw.edits : [])
       .filter((e: Partial<Edit> | null) => !!e && typeof e.what === 'string' && typeof e.at === 'number' && isFinite(e.at) && e.at <= g.time)

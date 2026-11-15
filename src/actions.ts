@@ -248,7 +248,10 @@ export function upgradeAll(g: Game, type: NodeType, track: Track): number {
     for (const n of nodes) if (upgrade(g, n.id, track)) count++;
     return count ? 0 : false;
   });
-  if (count) noteEdit(g, upgradeAllNote(type, track));
+  if (count) {
+    noteEdit(g, upgradeAllNote(type, track));
+    g.bulkAt = g.time;
+  }
   return count;
 }
 
