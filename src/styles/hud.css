@@ -360,8 +360,12 @@ html[data-input='touch'] #insp .step::after, html[data-input='touch'] #insp .fil
 html[data-input='touch'] #insp .link::after { content: ''; position: absolute; inset: -15px -8px; }
 
 /* (The phone layout of the strip and where Claim sits on a phone are at the end of this file, under "phone seating".) */
-#app.phone #toasts { position: static; transform: none; align-self: center; margin-top: 6px; max-width: 100%; }
+/* On a phone the toasts stand under the strip, docked by hud-toasts.ts clear of what lies over the board there: from
+   --toast-top down, between --toast-x0 and --toast-x1 (from the stage's edges); an older one waiting out of sight
+   while there is room for the newest only is `crowd`. */
+#app.phone #toasts { position: absolute; top: var(--toast-top, 0px); left: var(--toast-x0, 8px); right: var(--toast-x1, 8px); bottom: auto; transform: none; margin: 0; max-width: none; align-items: center; }
 #app.phone .toast { max-width: 100%; }
+#toasts .toast.crowd { display: none; }
 
 /* ---------- inspector under touch: what the rules above leave short of 44 px ----------
    The Router's mode buttons were 40 px tall, and the reach around its small steppers and filter chips came
@@ -371,14 +375,15 @@ html[data-input='touch'] #insp .step::after, html[data-input='touch'] #insp .fil
 
 /* ---------- toasts ----------
    Outside the phone layout toasts dock at the bottom left of the stage, above the row of key hints, and keep
-   their hands off every control: the zoom buttons and the minimap have the bottom right corner (192 px
-   with its margins, 228 px with a finger's bigger buttons), the inspector is beside the stage, and while the
+   their hands off every control: the zoom buttons and the minimap have the bottom right corner (as wide as they
+   really are there, --toast-r from hud-toasts.ts; 192 px, or 228 px for a finger, until that has been measured),
+   the inspector is beside the stage, and while the
    tech tree is open tech.css keeps them out of its detail column (#app.insp-open and #app.tech-open are set
    in script: tech.css says why these are classes). --toast-up is set from hud-toasts.ts when
    the board's Expand button lies where they are: they step up above it. At most three show at once (two on
    a phone); hud-toasts.ts takes the oldest away, and the rules here are only the backstop. */
-#app:not(.phone) #hud #toasts { left: 16px; right: 192px; bottom: calc(44px + var(--toast-up, 0px)); align-items: flex-start; }
-html[data-input='touch'] #app:not(.phone) #hud #toasts { right: 228px; bottom: calc(16px + var(--toast-up, 0px)); }
+#app:not(.phone) #hud #toasts { left: 16px; right: var(--toast-r, 192px); bottom: calc(44px + var(--toast-up, 0px)); align-items: flex-start; }
+html[data-input='touch'] #app:not(.phone) #hud #toasts { right: var(--toast-r, 228px); bottom: calc(16px + var(--toast-up, 0px)); }
 #app:not(.phone) .toast { text-align: left; }
 #toasts .toast:nth-last-child(n + 4) { display: none; }
 /* The one-off "Best played upright" line on a phone held sideways (hud-screens.ts): it can be dismissed. */
