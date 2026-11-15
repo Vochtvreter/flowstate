@@ -85,7 +85,8 @@ html[data-input='touch'] #top .techbtn { height: 44px; }
 .hb.poor { color: #6b7690; }
 .hb.poor .p { color: #8c97ad; }
 /* The one locked slot on show: a dim silhouette, and in place of a price what unlocks it. */
-.hb.locked { border: 1px dashed #2a3550; color: #5d6880; }
+/* (Its name is still to be read: 5.4 to 1 against the bar, AA for text this small.) */
+.hb.locked { border: 1px dashed #2a3550; color: var(--dim); }
 div.hb.locked { cursor: default; }
 div.hb.locked:hover { background: transparent; border-color: #2a3550; }
 .hb.locked svg { opacity: 0.7; }

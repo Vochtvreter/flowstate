@@ -93,7 +93,10 @@ export function initPanels(refs: {
   }, true);
 
   hotEl.addEventListener('scroll', hotMoreSoon, { passive: true });
-  window.addEventListener('resize', hotMoreSoon);
+  window.addEventListener('resize', () => {
+    winW = window.innerWidth;
+    hotMoreSoon();
+  });
   // The web fonts arrive after the first frames (they do not hold up the first paint): widths measured with
   // the fallback font are measured again.
   document.fonts?.addEventListener?.('loadingdone', () => {
@@ -465,6 +468,10 @@ function renderTop() {
 
 /** What decides whether the phone's bar has room for the word "Tech": its width and how long its numbers are. */
 let roomKey = '';
+/** The numbers in the bar (they patch their own text, so the elements stay), and the window's width. */
+let roomTexts: Element[] | null = null;
+/** (Kept from resize events: reading innerWidth in the middle of a refresh makes the browser lay the page out.) */
+let winW = typeof window !== 'undefined' ? window.innerWidth : 0;
 
 /**
  * On a phone the Tech button carries its word while the bar has room for it (`#top.roomy`, phone.css): at
@@ -476,12 +483,14 @@ let roomKey = '';
 function fitTechWord(g: Game) {
   if (!env.phone) {
     roomKey = '';
+    roomTexts = null;
     return;
   }
   const res = topSlots.res!;
+  roomTexts ??= Array.from(res.querySelectorAll('.nums b, .nums i, .flowpct'));
   let lens = '';
-  for (const e of Array.from(res.querySelectorAll('.nums b, .nums i, .flowpct'))) lens += `${e.textContent?.length ?? 0},`;
-  const key = `${window.innerWidth}|${g.flowOn ? 1 : 0}|${dataShown.a ? 1 : 0}${dataShown.b ? 1 : 0}${dataShown.g ? 1 : 0}|${lens}`;
+  for (const e of roomTexts) lens += `${e.textContent?.length ?? 0},`;
+  const key = `${winW}|${g.flowOn ? 1 : 0}|${dataShown.a ? 1 : 0}${dataShown.b ? 1 : 0}${dataShown.g ? 1 : 0}|${lens}`;
   if (key === roomKey) return;
   roomKey = key;
   setClass(topEl, 'roomy', true);
@@ -553,7 +562,13 @@ function renderHot(force: boolean) {
   // (And only where the rail has room for it under the slots: on a short window a full bar takes it all.)
   const room = env.phone || hotRect().height >= slots * HOT_SLOT + HOT_PAD + HOT_SLOT;
   const tip = touchy || !room ? '' : `<div class="grow"></div><div class="hb tip" title="Select a node and press Delete. Everything is refunded in full.">${icon('trash')}<span class="p">Del = refund</span></div>`;
-  if (hotPanel.render(items + tip, force)) hotMore();
+  hotPanel.render(items + tip, force);
+  // (Only when the slots themselves change: a price filling up must not make the browser lay the page out.)
+  const slotsKey = `${env.phone ? 1 : 0}|${slots}|${tease?.type ?? ''}|${tip ? 1 : 0}`;
+  if (slotsKey !== hotSlotsKey) {
+    hotSlotsKey = slotsKey;
+    hotMoreSoon();
+  }
   for (const type of became) {
     const btn = hotEl.querySelector<HTMLElement>(`[data-testid="hot-${type}"]`);
     if (!btn) continue;
@@ -575,6 +590,8 @@ function hotMore() {
   setClass(hotEl, 'more-l', more && hotEl.scrollLeft > 4);
 }
 let hotMoreFrame = 0;
+/** The build bar's slots as they were when its overflow was last looked at. */
+let hotSlotsKey = '';
 const hotMoreSoon = () => {
   if (!hotMoreFrame) hotMoreFrame = requestAnimationFrame(() => {
     hotMoreFrame = 0;
