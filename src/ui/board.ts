@@ -412,7 +412,18 @@ const STRIP_GAP = 14;
  */
 function fitTarget(box: Box, detailed = false): View {
   const floor = zoomFloor();
-  const settle = (area: Box, k: number) => centreView(box, area, k >= floor ? k : detailed || k >= floor * NEAR_FIT ? floor : Math.max(ZOOM.min, k));
+  const plot = ui.g.board;
+  const settle = (area: Box, k: number) => {
+    const v = centreView(box, area, k >= floor ? k : detailed || k >= floor * NEAR_FIT ? floor : Math.max(ZOOM.min, k));
+    // No more empty ground past the plot's edge than there has to be: where the plot is larger than
+    // the space it fills it, and where it is smaller it sits in the middle. (What is built lies inside
+    // the plot, so this never pushes any of it out of view.)
+    const along = (at: number, size: number, a0: number, a1: number) =>
+      size * v.k <= a1 - a0 ? (a0 + a1 - size * v.k) / 2 : Math.min(a0, Math.max(a1 - size * v.k, at));
+    v.x = along(v.x, plot.w, area.x0, area.x1);
+    v.y = along(v.y, plot.h, area.y0, area.y1);
+    return v;
+  };
   if (env.phone) {
     // Clear of the floating controls when that leaves room at a readable zoom; otherwise behind them
     // (they sit in the corners), with thinner margins. The overview keeps clear of them again.
