@@ -367,7 +367,7 @@ describe('goal chain: conditions and progress', () => {
     g.techs.push('P5');
     expect(step('build-fabricator')).toEqual({ tech: 'P7', then: 7100, thenWhat: 'the Fabricator' });
     // What the card shows is still the Data for the research.
-    expect(activeGoal(g)!.progress!(g)).toEqual([0, 900, 'α']);
+    expect(activeGoal(g)!.progress!(g)).toEqual([0, 720, 'α']);
     g.techs.push('P7');
     expect(step('build-fabricator')).toEqual({ credits: 7100, what: 'the Fabricator' });
     // A research with nothing to buy after it carries no price.

@@ -7,6 +7,7 @@ import { RULES, TECHS } from '../src/content';
 import { nodeCost } from '../src/economy';
 import { GOALS, MAIN_GOALS, activeGoal, goalById, goalView, meanwhileOf } from '../src/goals';
 import { Game, cloneGame } from '../src/state';
+import { Bot, CFG, POLICIES } from '../tools/pacing';
 import { followMeanwhile, playByTheCard } from './cardPlayer';
 import { fresh, market, realWaitEnds, rich, run, well } from './helpers';
 
@@ -315,5 +316,83 @@ describe('"while you wait": each line is true, and nothing undoes it', () => {
     // The goal after the Fabricator wires Glyph into it: claimable as ever.
     const g = fresh();
     expect(claimGoal(g)).toBe(false);
+  });
+});
+
+// ---------------------------------------------------------------------------------------------------
+// True for the players the pacing is judged by, too (tools/pacing.ts): the card-only player, who never takes
+// a tip, and the newcomer, who takes them. Their boards are not the boards above: they claim 8 to 16 s late,
+// which shifts what each wait is for. (At 900 α for Fabrication the card-only player had the Fabricator's
+// price in hand before the research on every seed, and the last line was worth nothing to them.)
+// ---------------------------------------------------------------------------------------------------
+
+describe('"while you wait": true for the pacing tool\'s card players', () => {
+  const SEEDS = [0, 1, 2, 3];
+  const play = (policy: string, seed: number, skip: string[] = [], onLine: typeof CFG.onLine = null) => {
+    CFG.skipLines = skip;
+    CFG.onLine = onLine;
+    try {
+      const bot = new Bot(POLICIES[policy], seed, 45);
+      bot.run();
+      return bot;
+    } finally {
+      CFG.skipLines = [];
+      CFG.onLine = null;
+    }
+  };
+  /** Seconds a run spent on a goal: from the claim before it to its own. */
+  const spent = (bot: Bot, id: string) => {
+    const i = GOALS.findIndex((x) => x.id === id);
+    return bot.goalClaimedAt[id] - bot.goalClaimedAt[GOALS[i - 1].id];
+  };
+
+  it('the card-only player who leaves one line out spends longer on that goal (goals 11, 15 and 18)', () => {
+    const report: string[] = [];
+    for (const seed of SEEDS) {
+      const plain = play('cardonly', seed);
+      expect(plain.g.ended).toBe(true);
+      for (const [id, atLeast] of [['make-spark', 60], ['make-glyph', 60], ['make-mist', 10]] as const) {
+        const without = play('cardonly', seed, [id]);
+        expect(without.g.ended, `seed ${seed}, without the line of ${id}`).toBe(true);
+        const gain = spent(without, id) - spent(plain, id);
+        report.push(`seed ${seed} ${id}: ${Math.round(spent(plain, id))} s with the line, ${Math.round(spent(without, id))} s without`);
+        expect(gain, `seed ${seed}: ${id}`).toBeGreaterThanOrEqual(atLeast);
+        // And the whole demo is longer for it.
+        expect(without.g.stats.firstLensAt!, `seed ${seed}: ${id}`).toBeGreaterThan(plain.g.stats.firstLensAt!);
+      }
+    }
+    console.info(`the card-only player of the pacing tool, each line left out in turn:\n  ${report.join('\n  ')}`);
+  });
+
+  it('the Fabricator line: on the board each of them has when it comes up, the wait ends sooner with the wire gone', () => {
+    const report: string[] = [];
+    for (const policy of ['cardonly', 'newcomer']) {
+      for (const seed of SEEDS) {
+        let snap: Game | null = null;
+        play(policy, seed, [], (g, goal) => {
+          if (goal === 'build-fabricator') snap = cloneGame(g);
+        });
+        expect(snap, `${policy}/${seed}: the line came up`).not.toBeNull();
+        const g: Game = snap!;
+        const gains: number[] = [];
+        // The game's own order sequence, and another.
+        for (let k = 0; k < 2; k++) {
+          const done = cloneGame(g)!;
+          const left = cloneGame(g)!;
+          done.orderSeed = left.orderSeed = (g.orderSeed + k * 7919) >>> 0;
+          expect(followMeanwhile(done)).toBe(true);
+          expect(meanwhileOf(done)!.done(done)).toBe(true);
+          const idle = realWaitEnds(left, 1500, 0.05);
+          const withIt = realWaitEnds(done, 1500, 0.05);
+          expect(isFinite(idle) && isFinite(withIt)).toBe(true);
+          gains.push(idle - withIt);
+        }
+        clearHistory();
+        report.push(`${policy}/${seed}: ${gains.map((x) => x.toFixed(0)).join(', ')} s sooner`);
+        for (const x of gains) expect(x, `${policy}/${seed}`).toBeGreaterThan(0);
+        expect((gains[0] + gains[1]) / 2, `${policy}/${seed}`).toBeGreaterThanOrEqual(5);
+      }
+    }
+    console.info(`the Fabricator line on the pacing tool's boards (two order sequences):\n  ${report.join('\n  ')}`);
   });
 });

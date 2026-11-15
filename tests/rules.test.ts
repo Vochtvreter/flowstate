@@ -30,7 +30,7 @@ describe('numbers (2.6)', () => {
     expect(TECHS.P3.cost).toEqual({ a: 215 });
     expect(TECHS.P4.cost).toEqual({ a: 1140 });
     expect(TECHS.P5.cost).toEqual({ a: 1420 });
-    expect(TECHS.P7.cost).toEqual({ a: 900, b: 100 }); // lower than the curve: by then the Assemblers take what the Labs studied
+    expect(TECHS.P7.cost).toEqual({ a: 720, b: 100 }); // lower than the curve: the card players' last wait is for credits, not for α
     // Free play needs all three kinds of Data, and Reclamation cannot be had before the first Lens.
     expect(TECHS.P6.cost).toEqual({ a: 300, g: 25 });
     expect(TECHS.P8.cost).toEqual({ a: 1200, b: 300, g: 100 });
