@@ -751,6 +751,11 @@ const DOCK_MS = 220;
 const DOCK_JUMP = 24;
 /** After an expansion the button takes no press for this long: docked, it stays under the pointer, and a second press would buy a second plot. */
 const EXPAND_REST = 700;
+/**
+ * Nor for this long after it last moved on screen: docked over the board, it can slide under a finger that
+ * was on its way to a port or a card (a sheet opens, the camera eases), and that tap must not buy a plot.
+ */
+const MOVE_REST = 300;
 
 /** Where the middle of the button is on the stage, and the scale it is drawn at. */
 interface Stand { x: number; y: number; s: number }
@@ -768,6 +773,8 @@ const ex = {
   asked: false, askedKey: '', askedAt: 0,
   /** No press counts before this (performance.now). */
   restUntil: 0,
+  /** When it last moved on screen, and the box it was drawn in then (left, top, width): see `MOVE_REST`. */
+  movedAt: 0, at: [0, 0, 0],
   /** The docked button as a world box: wire dots are not drawn over it (the first four numbers of every flow's `occ`). */
   occ: [0, 0, 0, 0],
 };
@@ -953,6 +960,13 @@ function drawExpand() {
   }
   ex.drawn = d;
   const left = d.x - (ex.w * d.s) / 2, top = d.y - (ex.h * d.s) / 2;
+  const at = ex.at;
+  if (Math.abs(left - at[0]) > 1.5 || Math.abs(top - at[1]) > 1.5 || Math.abs(ex.w * d.s - at[2]) > 1.5) {
+    ex.movedAt = performance.now();
+    at[0] = left;
+    at[1] = top;
+    at[2] = ex.w * d.s;
+  }
   setStyle(expandEl, 'transform', `translate(${left.toFixed(1)}px, ${top.toFixed(1)}px) scale(${d.s.toFixed(4)})`);
   // Wire dots are drawn above everything on the board: a docked button is one more thing they keep off.
   const { x: vx, y: vy, k } = ui.view;
@@ -1071,7 +1085,7 @@ let popTimer = 0;
  */
 function expand() {
   const g = ui.g;
-  if (performance.now() < ex.restUntil) return;
+  if (performance.now() < ex.restUntil || performance.now() - ex.movedAt < MOVE_REST) return;
   const had = new Set(g.deposits.map((d) => d.id));
   const old = { w: g.board.w, h: g.board.h };
   if (!expandBoard(g)) {
@@ -2749,7 +2763,9 @@ function onDown(e: PointerEvent) {
   // A press on the board takes the camera over from whatever move was under way. (Not a press on a
   // control that stands on the board: Expand starts a camera move of its own.)
   if (!onControl) glide = null;
-  if (e.pointerType === 'touch' && !onControl) {
+  // (A finger on the Expand button still counts towards a pinch: docked, the button may stand in the middle
+  // of a small screen, and a pinch that starts on it must still move the camera. A tap on it stays a press.)
+  if (e.pointerType === 'touch' && !t.closest('#radial')) {
     fingers.set(e.pointerId, { x: e.clientX, y: e.clientY });
     if (fingers.size >= 2) {
       // A second finger: whatever the first was doing ends (a node in mid-move is dropped where it
