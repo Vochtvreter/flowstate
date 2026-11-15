@@ -110,47 +110,51 @@ function popCounter(testid: string) {
 
 /**
  * Where "+12¢" may stand, as the middle of its left edge (and how large it is): beside the counter
- * when nothing else is there (it may lie over the counter's own Flow bonus); otherwise tucked under
- * the counter, against the foot of the bar. Never over another counter or a button, never past the
- * edge of the window. Reads layout: called once for each counter a payout lands on.
+ * when nothing else is there; else inside it, right of its number and of its rate line (over its own
+ * Flow bonus); otherwise just under the counter, below its rate line. It never covers the counter's
+ * number or rate, another counter or a button, and never goes past the edge of the window. Reads
+ * layout: called once for each counter a payout lands on.
  */
-function labelSpot(testid: string, text: string): { at: Pt; where: 'beside' | 'under'; w: number; h: number } | null {
+function labelSpot(testid: string, text: string): { at: Pt; where: 'beside' | 'inside' | 'under'; w: number; h: number } | null {
   const chip = counterEl(testid);
   const bar = document.getElementById('top');
   if (!chip || !bar) return null;
   const c = chip.getBoundingClientRect();
   if (!c.width || !c.height) return null;
   const w = Math.ceil(textWidth(text, LABEL_PX)) + LABEL_PAD * 2, h = LABEL_H;
-  const num = (chip.querySelector('.nums b') ?? chip).getBoundingClientRect();
+  // The counter's own figures: its number and, when it shows one, its rate line ("+11.5/s").
+  const own: DOMRect[] = [];
+  for (const e of [chip.querySelector('.nums b'), chip.querySelector('.nums i')]) {
+    const r = e?.getBoundingClientRect();
+    if (r && r.width && r.height) own.push(r);
+  }
   const others: DOMRect[] = [];
   for (const e of bar.querySelectorAll('.res, .datas, .techbtn, .ibtn')) {
     if (e === chip || chip.contains(e) || e.contains(chip)) continue;
     const r = e.getBoundingClientRect();
     if (r.width && r.height) others.push(r);
   }
-  // Clear of everything else by 3 px at rest, and not touching it while it pops in (a tenth wider on each side for a moment).
-  const m = Math.max(3, w * 0.1);
+  // Clear of everything by 3 px at rest, and not touching it while it pops in (a tenth larger each way for a moment).
+  const m = Math.max(3, w * 0.1), mv = Math.max(2, h * 0.1);
   const fits = (x: number) => x >= m && x + w <= window.innerWidth - m;
-  const clear = (x: number, y: number) => !others.some((r) => x < r.right + m && x + w > r.left - m && y - h / 2 < r.bottom && y + h / 2 > r.top);
+  const hits = (rs: DOMRect[], x: number, y: number) => rs.some((r) => x < r.right + m && x + w > r.left - m && y - h / 2 - mv < r.bottom && y + h / 2 + mv > r.top);
   // The Data counters of a narrow bar are lines of one block: "beside" and "under" are then beside and under the block.
   const block = chip.parentElement?.classList.contains('datas') ? chip.parentElement.getBoundingClientRect() : null;
   const box = block && block.height > c.height ? block : c;
-  // Beside: just outside the counter, level with its middle; or, when something else is there, just
-  // right of the number inside it (over the Flow bonus, which is the counter's own).
-  // (Never so near the top of the window that its pop-in, a tenth taller each way, is cut off.)
-  const y = Math.round(Math.max(h * 0.6 + 2, c.top + c.height / 2));
-  // (Inside the counter it keeps clear of the number as it is at the top of its pop, a fifth wider.)
-  for (const x of box === c ? [Math.round(c.right + 5), Math.round(num.right + num.width * 0.2 + 6)] : [Math.round(box.right + 5)]) {
-    if (fits(x) && clear(x, y)) return { at: { x, y }, where: 'beside', w, h };
+  // (Never so near the top of the window that its pop-in is cut off.)
+  const y = Math.round(Math.max(h / 2 + mv + 2, c.top + c.height / 2));
+  // Beside the counter, level with its middle.
+  const besideX = Math.round(box.right + 5);
+  if (fits(besideX) && !hits(others, besideX, y)) return { at: { x: besideX, y }, where: 'beside', w, h };
+  // Inside it, right of its figures (over the Flow bonus, which is the counter's own).
+  if (box === c && own.length) {
+    const x = Math.round(Math.max(...own.map((r) => r.right)) + m + 3);
+    if (fits(x) && !hits(others, x, y) && !hits(own, x, y)) return { at: { x, y }, where: 'inside', w, h };
   }
-  // Under: in the middle of the counter, its top a few px into the counter's foot (under the rate
-  // line); or just clear of the bar's row when that would touch anything else (another line of a
-  // Data block, a neighbour it is wider than).
+  // Under: centred under the counter, its top (at the height of its pop) just below the counter's foot,
+  // so its rate line stays readable.
   const x = Math.round(Math.max(m, Math.min(window.innerWidth - m - w, box.left + box.width / 2 - w / 2)));
-  const tucked = Math.round(box.bottom - 7 + h / 2);
-  // (Its own number counts too: the last line of a Data block reaches down to the block's foot.)
-  const free = clear(x, tucked) && !(x < num.right && x + w > num.left && tucked - h / 2 < num.bottom);
-  return { at: { x, y: free ? tucked : Math.round(box.bottom + 1 + h * 0.6) }, where: 'under', w, h };
+  return { at: { x, y: Math.round(box.bottom + 2 + mv + h / 2) }, where: 'under', w, h };
 }
 
 /** The amount standing at each counter right now: a second payout to the same counter adds to it instead of writing over it. */

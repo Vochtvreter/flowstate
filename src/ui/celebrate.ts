@@ -20,6 +20,7 @@ import { graph, isMachine } from '../sim';
 import { GNode, GoalReward } from '../state';
 import { boardRect, fitView, toClient } from './board';
 import { anchorPt } from './dom';
+import { SUMMARY_DELAY } from './hud-screens';
 import { Overlay, addOverlay, burst, fly, holdFlows, ring } from './fx';
 import { Pt, bezierAt, nodeSize, wireEnds } from './geom';
 import { esc, icon, matGlyph, nodeIcon } from './icons';
@@ -54,6 +55,11 @@ interface Spec {
   leaving?: () => void;
   /** Runs when it ends, however it ends. */
   done?: () => void;
+  /**
+   * The Lens at the end of the demo: no press or key sends it away (a press on the card itself still
+   * goes no further), and it leaves when the summary screen opens, as the summary fades in over it.
+   */
+  holds?: boolean;
 }
 
 /**
@@ -65,6 +71,8 @@ const MIN_SHOWN_MS = 400;
 /** How far the middle of the glyph is above the middle of the card, in px, for each size of card. */
 const GLYPH_RISE: Record<CardKind, number> = { shard: 36, lab: 37, spark: 36, glyph: 41, flow: 36, prism: 36, lens: 47, note: 38 };
 const OUT_MS = 320;
+/** How long the dots hold still under the Lens card, which stays until the summary (see start). */
+const LENS_HOLD_MS = 1500;
 
 let app: HTMLElement;
 let record: (kind: 'celebrate', name: string, detail?: string | number) => void = () => {};
@@ -86,7 +94,7 @@ export function initCelebrate(hooks: { record: typeof record; payout: typeof pay
   const dismiss = () => {
     if (bow && !bow.revealed) return void revealLens();
     const c = current;
-    if (!c || c.leaving) return;
+    if (!c || c.leaving || c.spec.holds) return;
     const wait = MIN_SHOWN_MS - (performance.now() - c.shownAt);
     if (wait <= 0) leave();
     else c.timers.push(window.setTimeout(() => current === c && leave(), wait));
@@ -95,16 +103,22 @@ export function initCelebrate(hooks: { record: typeof record; payout: typeof pay
   window.addEventListener('keydown', (e) => {
     if (e.key === 'Escape' || e.key === 'Enter' || e.key === ' ') dismiss();
   }, true);
-  // The summary screen (and the start screen) are never shared with a celebration: whatever is still
-  // up when one of them opens is taken down on the spot. The Lens is timed to be gone by then; this
-  // is for a page that was held up (a background tab, a long frame).
+  // The summary screen is never shared with a celebration for long. The Lens card is waiting for it: it
+  // leaves as the summary fades in over it (the two take about the same 0.3 s). Anything else still up
+  // when the summary opens (a page that was held up: a background tab, a long frame) is taken down on
+  // the spot.
   if (typeof MutationObserver !== 'undefined') {
     const watch = new MutationObserver(() => {
       const summary = document.getElementById('summary');
-      if (summary && !summary.hasAttribute('hidden') && celebrating()) {
-        record('celebrate', 'cut', 'summary');
-        cancelCelebrations();
+      if (!summary || summary.hasAttribute('hidden') || !celebrating()) return;
+      if (current?.spec.holds && !queue.length) {
+        record('celebrate', 'leave', 'summary');
+        endBow();
+        leave();
+        return;
       }
+      record('celebrate', 'cut', 'summary');
+      cancelCelebrations();
     });
     const summary = document.getElementById('summary');
     if (summary) watch.observe(summary, { attributes: true, attributeFilter: ['hidden'] });
@@ -162,8 +176,13 @@ function start(spec: Spec) {
     : { x: window.innerWidth / 2, y: window.innerHeight / 2 - GLYPH_RISE[spec.kind] };
   const c: Card = (current = { spec, wash, wrap, timers, raf: 0, leaving: false, shownAt: performance.now(), at, paid: false });
   // A big card covers the middle of the board: the dots there hold still until it has gone, which saves
-  // redrawing the whole board layer while the card, its wash and its sparks are on screen.
-  if (!small) holdFlows(true);
+  // redrawing the whole board layer while the card, its wash and its sparks are on screen. (The Lens
+  // card stays for five seconds or more, until the summary: there they hold for its opening only, as a
+  // factory standing still that long at its finest moment reads as one that has stopped.)
+  if (!small) {
+    holdFlows(true);
+    if (spec.holds) timers.push(window.setTimeout(() => current === c && holdFlows(false), LENS_HOLD_MS));
+  }
   timers.push(window.setTimeout(leave, spec.life));
   if (spec.reward) timers.push(window.setTimeout(() => pay(c), spec.payAt ?? 700));
   // The rest of the opening is spread over the next three frames, one piece each, so that no single
@@ -334,7 +353,8 @@ export function celebrateGoal(goalId: string, reward: GoalReward) {
         life: 2200, show: converge, reward, payAt: 1150,
       });
     case 'make-lens':
-      return lensCard(reduced() ? 4500 : 2600);
+      // (A Lens made in an earlier session: no summary is on its way, so the card keeps its own time.)
+      return lensCard(reduced() ? 4500 : 2600, false);
     default: {
       // A big goal this file has not met: celebrate it at the smallest size, with the goal's own words
       // (the Shard's fanfare and sparks, in gold, under a star).
@@ -493,10 +513,20 @@ export function celebrateFlow() {
 
 const RAINBOW = ['shard', 'ink', 'spark', 'mist', 'glyph', 'prism'] as const;
 
-function lensCard(life: number) {
+/**
+ * The Lens card made at the end of the demo stays until the summary screen opens (SUMMARY_DELAY after
+ * the Lens is made) and leaves with it. Its own time runs out SUMMARY_GRACE later: the summary opening
+ * is what normally sends it, and the timer is for a page where no summary comes (`?nosummary`).
+ */
+const SUMMARY_GRACE = 400;
+/** When the Lens was made (performance.now()), for the time left until the summary. */
+let endAt = 0;
+const untilSummary = () => Math.max(900, endAt + SUMMARY_DELAY * 1000 + SUMMARY_GRACE - performance.now());
+
+function lensCard(life: number, holds = true) {
   start({
     kind: 'lens', title: 'First Lens', line: 'Demo complete · free play is open', glyph: matGlyph('lens', 80), color: MATERIALS.lens.color,
-    life,
+    life, holds,
     show: (at) => {
       // Three waves, each in the colours of what the factory makes on the way to a Lens.
       for (let wave = 0; wave < 3; wave++) {
@@ -528,11 +558,6 @@ let bow: { t0: number; step: number; rows: number; wires: BowWire[]; nodes: BowN
 const BOW_SEGS = 18;
 /** The light may take this long (s) to run from the Wells to the Lens, however deep the factory is. */
 const BOW_MAX = 2.6;
-/**
- * The Lens card starts to leave this long (ms) after the Lens was made, whatever happened before:
- * 5.9 s, plus its exit, is 6.2 s, and the summary screen opens at 6.5 (SUMMARY_DELAY in hud-screens.ts).
- */
-const END_BY = 5900;
 /** After the light has reached the Lens the factory stays lit this long (ms), then fades over BOW_FADE. */
 const BOW_HOLD = 700;
 const BOW_FADE = 500;
@@ -548,7 +573,7 @@ function startBow() {
   const g = ui.g;
   const gr = graph(g);
   const lens = g.nodes.find((n) => n.recipe === RULES.capstone && n.cycles > 0) ?? g.nodes.find((n) => n.recipe === RULES.capstone);
-  if (!lens) return lensCard(2600);
+  if (!lens) return lensCard(untilSummary());
   // Everything upstream of the Lens, with its row: the longest way there from a node that nothing feeds.
   const depth = new Map<number, number>();
   const visiting = new Set<number>();
@@ -626,8 +651,8 @@ function revealLens() {
     ring(at, '#ffffff', { size: 120, life: 0.7 });
     ring(at, MATERIALS.lens.color, { size: 70, life: 0.5 });
   }
-  // The card arrives a moment after the flash and stays until just before the summary screen.
-  b.timers.push(window.setTimeout(() => lensCard(Math.max(900, END_BY - (performance.now() - b.t0))), 350));
+  // The card arrives a moment after the flash and stays until the summary screen opens.
+  b.timers.push(window.setTimeout(() => lensCard(untilSummary()), 350));
   // The lit wires and outlines have done their work once the card is up: they fade soon after, so
   // that for most of the card's stay nothing extra is being drawn on the board.
   b.timers.push(window.setTimeout(() => bow === b && endBow(), BOW_HOLD));
@@ -724,9 +749,11 @@ const bowOverlay: Overlay = {
 
 /**
  * The first Lens has just been made and the demo is complete: the factory takes its bow, then the
- * Lens card. All of it is over within 6.3 seconds, because the summary screen opens at 6.5.
+ * Lens card, which stays until the summary screen opens 6.5 s after this (SUMMARY_DELAY) and leaves
+ * as it fades in. Call in the frame the 'demo-end' event arrives: the summary counts from the same one.
  */
 export function celebrateEnd() {
-  if (reduced()) return lensCard(4500);
+  endAt = performance.now();
+  if (reduced()) return lensCard(untilSummary());
   startBow();
 }
