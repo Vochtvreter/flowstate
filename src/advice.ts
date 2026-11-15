@@ -1266,7 +1266,11 @@ function worth(base: number, tip: number, measured = true): boolean {
 
 interface Verdict { cand: Cand; base: number; tip: number; cut?: { wire: number; from: number; to: number } }
 
-/** How far the Flow goal is looked ahead: long enough to see its valve open, if that is still to come (doing nothing may end the wait too). */
+/**
+ * How far the Flow goal is looked ahead: long enough to see its valve open, if that is still to come (doing nothing
+ * may end the wait too). Its first two steps only: from the third on (one more producer every RULES.flow.valveEvery
+ * seconds) the valve is minutes away, and a tip that puts the board right is worth giving all the same.
+ */
 function flowHorizon(g: Game): number {
   const age = goalAge(g);
   let short = 0;
