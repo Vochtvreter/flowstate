@@ -19,7 +19,8 @@ button:focus-visible { outline: 2px solid var(--sel); outline-offset: 2px; }
 /* `hidden` wins over any display rule, so persistent elements can simply be switched off. */
 [hidden] { display: none !important; }
 
-#app { display: grid; grid-template-columns: 72px minmax(0, 1fr) auto; grid-template-rows: 56px minmax(0, 1fr); height: 100vh; position: relative; }
+/* --top-h is the height of the top bar: the tech tree starts under it (the phone layout sets its own, see phone.css). */
+#app { --top-h: 56px; display: grid; grid-template-columns: 72px minmax(0, 1fr) auto; grid-template-rows: var(--top-h) minmax(0, 1fr); height: 100vh; position: relative; }
 
 /* ---------- top bar ---------- */
 #top { grid-column: 1 / -1; display: flex; align-items: center; gap: 8px; padding: 0 14px 0 20px; background: var(--chrome); border-bottom: 1px solid var(--line); z-index: 30; }
@@ -36,10 +37,8 @@ button:focus-visible { outline: 2px solid var(--sel); outline-offset: 2px; }
 .res.credits .nums b { font-size: 17px; }
 .coin { width: 26px !important; height: 26px !important; border-radius: 50% !important; background: var(--credits) !important; color: #1a1405 !important; display: inline-flex; align-items: center; justify-content: center; font-weight: 700; font-size: 15px; font-family: Inter, sans-serif; }
 .coin.big { width: 30px !important; height: 30px !important; font-size: 17px; }
-.res.ghost { border: 1px dashed #2a3550; background: transparent; }
-.res.ghost .sym { color: var(--dim); background: #181e2c; }
-.res.ghost .hint { font-size: 11px; color: var(--dim); }
-.res.ghost .nums, .res:not(.ghost) .hint { display: none; }
+/* The three Data chips share a wrapper: side by side here, one stacked block on a narrow bar (see the end of this file). */
+.datas { display: contents; }
 .acts { display: flex; align-items: center; gap: 8px; }
 .ibtn { width: 36px; height: 36px; border-radius: 10px; border: 1px solid var(--border); background: #121929; color: #c9d3e8; display: flex; align-items: center; justify-content: center; padding: 0; }
 .ibtn:hover:not(:disabled) { background: #1a2338; }
@@ -51,10 +50,23 @@ button:focus-visible { outline: 2px solid var(--sel); outline-offset: 2px; }
 .techbtn svg { color: #5eead4; }
 .techbtn.ready { border-color: #2f5c55; background: #10241f; }
 .techbtn .badge { font-size: 11px; font-weight: 700; padding: 2px 7px; border-radius: 999px; background: #5eead4; color: #062b25; }
+/* The gear menu. While it is down the bar rides above the tech tree (40), which starts right under the
+   bar and would otherwise hide the menu; it stays under toasts (50). */
+#top.menu-open { z-index: 42; }
 .menuwrap { position: relative; }
 .menu { position: absolute; right: 0; top: 44px; background: #151c2d; border: 1px solid var(--border); border-radius: 10px; padding: 6px; min-width: 160px; box-shadow: 0 12px 30px rgba(0, 0, 0, 0.5); }
-.menu button { width: 100%; text-align: left; height: 34px; padding: 0 10px; border: 0; border-radius: 7px; background: transparent; color: #f2a3ae; font-size: 13px; }
-.menu button:hover { background: #24131a; }
+.menu button { display: flex; align-items: center; justify-content: space-between; gap: 12px; width: 100%; text-align: left; height: 34px; padding: 0 10px; border: 0; border-radius: 7px; background: transparent; color: var(--text); font-size: 13px; white-space: nowrap; }
+.menu button:hover:not(:disabled) { background: #1a2338; }
+.menu button:disabled { opacity: 0.4; }
+.menu .ms { font-style: normal; font-size: 12px; color: var(--muted); }
+.menu .on .ms { color: #fcd34d; }
+.menu .danger { color: #f2a3ae; }
+.menu .danger:hover { background: #24131a; }
+/* Pause, sound, undo and redo are in the menu only where the bar has no room for their buttons (the phone layout). */
+.menu .m-only { display: none; }
+/* A finger gets full-size buttons in the bar. */
+html[data-input='touch'] #top .ibtn { width: 44px; height: 44px; }
+html[data-input='touch'] #top .techbtn { height: 44px; }
 
 /* ---------- hotbar ---------- */
 #hot { grid-row: 2; display: flex; flex-direction: column; gap: 4px; padding: 10px 8px; background: var(--chrome); border-right: 1px solid var(--line); z-index: 20; overflow: hidden; }
@@ -184,7 +196,7 @@ g.wire.new .glow { animation: wire-glow 0.25s ease-out; }
 #ghost.outline { background: transparent; border-style: solid; border-width: 2px; padding: 0; margin: -1px 0 0 -1px; }
 #ghost .cap { position: absolute; left: 50%; top: 100%; transform: translateX(-50%); margin-top: 7px; display: flex; align-items: center; gap: 6px; padding: 3px 9px; border-radius: 8px; background: #17213a; border: 1px solid #34467a; font-size: 11.5px; white-space: nowrap; }
 #ghost.bad .cap { background: #24131a; border-color: #5a2630; }
-#expand { position: absolute; width: 260px; height: 60px; border-radius: 14px; border: 1.5px dashed #3a4a70; background: rgba(122, 162, 255, 0.05); color: #9db8ff; display: flex; align-items: center; gap: 12px; padding: 0 14px; text-align: left; }
+#expand { position: absolute; width: 260px; height: 64px; border-radius: 14px; border: 1.5px dashed #3a4a70; background: rgba(122, 162, 255, 0.05); color: #9db8ff; display: flex; align-items: center; gap: 12px; padding: 0 14px; text-align: left; }
 #expand b { display: block; font-size: 13px; color: var(--text); font-weight: 600; }
 #expand i { font-style: normal; color: #8c97ad; }
 #expand.ok i { color: var(--credits); }
@@ -203,17 +215,14 @@ g.wire.new .glow { animation: wire-glow 0.25s ease-out; }
 .slot .sn { font-size: 11px; font-weight: 600; text-align: center; line-height: 13px; }
 .slot .ss { font-size: 10px; color: #a3aec4; text-align: center; }
 .slot .key { position: absolute; right: 8px; top: 6px; font-size: 10px; color: var(--dim); }
+html[data-input='touch'] .slot .key { display: none; }
 .slot.poor { opacity: 0.6; }
 .slot.poor .ss .mono { color: #fca5a5; }
 .slot.locked { background: #10151f; border: 1px dashed #3a3328; color: #a3aec4; }
 .slot.locked > svg:first-of-type { position: absolute; left: 8px; top: 7px; color: var(--dim); }
 
 /* HUD */
-#objective { position: absolute; left: 50%; top: 14px; transform: translateX(-50%); max-width: calc(100% - 40px); padding: 10px 16px; border-radius: 12px; background: #17213a; border: 1px solid #34467a; font-size: 13px; color: #dbe6ff; box-shadow: 0 10px 30px rgba(0, 0, 0, 0.45); z-index: 10; text-align: center; }
-#alert { position: absolute; left: 50%; top: 14px; transform: translateX(-50%); display: flex; align-items: center; gap: 10px; height: 38px; padding: 0 6px 0 12px; border-radius: 12px; background: #191f2e; border: 1px solid #3a3040; box-shadow: 0 10px 30px rgba(0, 0, 0, 0.5); white-space: nowrap; font-size: 12.5px; z-index: 10; }
-#alert .dot { width: 8px; height: 8px; border-radius: 50%; background: var(--warn); }
-#alert .dot.starved { background: var(--bad); }
-#alert button { height: 28px; padding: 0 10px; border-radius: 8px; border: 1px solid #3a4a70; background: #1f2840; font-size: 12px; font-weight: 600; }
+/* (The goal card, the order chip and the alert chip are styled in styles/hud.css.) */
 /* Above the tech tree (40), below the modal (60): a toast is the only answer some actions get. */
 #toasts { position: absolute; left: 50%; bottom: 20px; transform: translateX(-50%); display: flex; flex-direction: column; gap: 8px; align-items: center; z-index: 50; pointer-events: none; }
 .toast { display: flex; align-items: center; gap: 10px; padding: 9px 14px; border-radius: 12px; background: #191f2e; border: 1px solid var(--border); font-size: 12.5px; box-shadow: 0 10px 30px rgba(0, 0, 0, 0.5); animation: pop 0.18s ease-out; max-width: 520px; }
@@ -224,6 +233,10 @@ g.wire.new .glow { animation: wire-glow 0.25s ease-out; }
 #hints { position: absolute; left: 16px; bottom: 16px; display: flex; gap: 14px; font-size: 11px; color: var(--muted); pointer-events: none; }
 #zoom { position: absolute; right: 16px; bottom: 132px; width: 160px; display: flex; gap: 4px; align-items: center; }
 #zoom .ibtn { width: 32px; height: 32px; }
+/* A finger gets full-size buttons here too (the phone layout has none of this: pinch, and a Fit button). */
+html[data-input='touch'] #zoom { width: 196px; }
+html[data-input='touch'] #zoom .ibtn { width: 44px; height: 44px; }
+html[data-input='touch'] #zoom .zl { height: 44px; }
 #zoom .zl { flex: 1; height: 32px; border-radius: 10px; border: 1px solid var(--border); background: #121929; font-size: 11px; display: flex; align-items: center; justify-content: center; }
 #mini { position: absolute; right: 16px; bottom: 16px; width: 160px; height: 106px; border-radius: 12px; background: #0e1422; border: 1px solid var(--border); }
 
@@ -309,13 +322,27 @@ g.wire.new .glow { animation: wire-glow 0.25s ease-out; }
 #modal h2 { margin: 0 0 6px; font-family: var(--disp); font-size: 22px; }
 #modal p { margin: 0; color: #c9d3e8; }
 #modal .gains { margin: 18px 0; font-size: 16px; font-weight: 600; }
-#modal button { height: 40px; padding: 0 28px; border-radius: 10px; border: 0; background: var(--sel); color: #0b1430; font-size: 14px; font-weight: 700; }
+#modal button { height: 44px; padding: 0 28px; border-radius: 10px; border: 0; background: var(--sel); color: #0b1430; font-size: 14px; font-weight: 700; }
 
-@media (max-width: 1180px) {
-  .res.ghost { display: none; }
-}
 @media (max-width: 900px) {
   #hints { display: none; }
   .logo span { display: none; }
   .logo { width: auto; }
+  /* A narrow bar: the Data chips become one block with a line for each kind, set as large as the
+     number of kinds allows (.datas carries data-n). */
+  .datas { display: flex; flex-direction: column; justify-content: center; height: 40px; padding: 0 9px 0 8px; border-radius: 12px; background: #131a28; border: 1px solid #1e2740; }
+  .datas[data-n='0'] { display: none; }
+  .datas .res.data { height: auto; padding: 0; gap: 6px; border: 0; border-radius: 0; background: none; justify-content: space-between; }
+  .datas .res.data .sym { width: auto; height: auto; border-radius: 0; background: none; font-size: 11px; line-height: 12px; }
+  .datas .res.data .nums b { font-size: 11px; line-height: 12px; }
+  .datas .res.data .nums i { display: none; }
+  .datas[data-n='2'] .res.data .sym, .datas[data-n='2'] .res.data .nums b { font-size: 12.5px; line-height: 16px; }
+  .datas[data-n='1'] .res.data .sym, .datas[data-n='1'] .res.data .nums b { font-size: 15px; line-height: 18px; }
+  .techbtn .tl2 { display: none; }
+}
+/* Just above the phone layout's width, with 44 px buttons for a finger, the bar is at its fullest: it gives up its divider and some air. */
+@media (max-width: 760px) {
+  #top { gap: 6px; padding: 0 10px; }
+  #top .sep { display: none; }
+  .acts { gap: 6px; }
 }

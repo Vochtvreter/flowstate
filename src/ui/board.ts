@@ -22,6 +22,7 @@ import {
   Beacon, Flow, floater, flowPoint, fly, frameFx, invalidateFx, makeFlow, setBeacons, setFlowPath, setFlows,
 } from './fx';
 import { NODE_W, Port, Pt, bezierAt, inPorts, matColor, nodeSize, outPorts, pathD, pinchView, segmentsCross, wireEnds } from './geom';
+import { isTouch, pressWord } from './hud-words';
 import { esc, icon, matGlyph, matShape, nodeIcon } from './icons';
 import { env } from './phone-env';
 import { diagnose } from './status';
@@ -75,6 +76,8 @@ let depositsHtml = '';
 let selNodeId: number | null = null;
 let selWireId: number | null = null;
 let targetId: number | null = null;
+// (`far` and `tiny` are overview modes for zooms under 0.6 and 0.5. With today's floors, 0.7 and 0.74 (see
+// `zoomMin`), the board never gets there; they are kept for the day a floor is lowered.)
 let far = false;
 /** Zoomed out so far that the small print on cards cannot be read; it is then not kept up to date. */
 let tiny = false;
@@ -111,10 +114,15 @@ const EDGE_PX = 52;
 const EDGE_SPEED = 640;
 
 /**
- * Zoom limits. On a phone the floor is set by type size: cards there use 15 px type (see phone.css),
- * which is 11 px on screen at 0.74. Below that the text could not be read, so the board stops there.
+ * Zoom limits. The floor is set by type size: below it the text on a card could not be read, so the
+ * board stops there, and Fit centres a factory that is too big instead of shrinking it further.
+ *  - Phone: cards use 15 px type (see phone.css), which is 11 px on screen at 0.74.
+ *  - Elsewhere: cards use 13 px titles over 11 px and 10.5 px lines. At 0.7 those are 9.1, 7.7 and
+ *    7.4 px on screen, the smallest that still reads on a desktop monitor (the 9.5 px status pill, in
+ *    bold capitals, is 6.7 px). The minimap is there for the overview.
  */
-const zoomMin = () => (env.phone ? 0.74 : 0.3);
+const ZOOM_FLOOR = 0.7;
+const zoomMin = () => (env.phone ? 0.74 : ZOOM_FLOOR);
 const zoomMax = () => (env.phone ? 1.5 : 2);
 /** Phone: the 12 px second line of a card is shown from this zoom up (11 px on screen). */
 const LEAN_BELOW = 0.92;
@@ -304,9 +312,27 @@ export function fitView(smooth = false) {
     moveView((f.x0 + f.x1) / 2 - ((box.x0 + box.x1) / 2) * k, (f.y0 + f.y1) / 2 - ((box.y0 + box.y1) / 2) * k, k, smooth);
     return;
   }
-  const pad = 60;
-  const k = Math.max(0.3, Math.min(1.2, Math.min((r.width - pad * 2) / g.board.w, (r.height - pad * 2 - 40) / g.board.h)));
-  moveView((r.width - g.board.w * k) / 2, (r.height - g.board.h * k) / 2 + 10, k, false);
+  // The space for the plot: clear of the strip at the top (the plot is wide, so the card in the middle
+  // of the top edge counts as a band across it), with room under it for the Expand button.
+  const s = env.strip();
+  const ax0 = 60, ax1 = r.width - 60;
+  const ay0 = (s ? s.bottom : 40) + 22, ay1 = Math.max(ay0 + 120, r.height - 76);
+  const whole = Math.min(1.2, (ax1 - ax0) / g.board.w, (ay1 - ay0) / g.board.h);
+  if (whole >= zoomMin()) {
+    moveView(ax0 + (ax1 - ax0 - g.board.w * whole) / 2, ay0 + (ay1 - ay0 - g.board.h * whole) / 2, whole, false);
+    return;
+  }
+  // The plot does not fit at a zoom anyone can read. The board stays at the floor, with the middle of
+  // what has been built in the middle of the space, and no more empty ground past the plot's edge
+  // than the margins.
+  const k = zoomMin();
+  const box = nodesBox() ?? { x0: 0, y0: 0, x1: g.board.w, y1: g.board.h };
+  const place = (mid: number, plot: number, a0: number, a1: number) => {
+    const size = plot * k;
+    if (size <= a1 - a0) return a0 + (a1 - a0 - size) / 2;
+    return Math.max(a1 - size, Math.min(a0, (a0 + a1) / 2 - mid * k));
+  };
+  moveView(place((box.x0 + box.x1) / 2, g.board.w, ax0, ax1), place((box.y0 + box.y1) / 2, g.board.h, ay0, ay1), k, false);
 }
 
 export function jumpTo(id: number) {
@@ -315,9 +341,16 @@ export function jumpTo(id: number) {
   const f = freeArea();
   const { w, h } = nodeSize(n);
   const k = glide?.k ?? ui.view.k;
-  moveView((f.x0 + f.x1) / 2 - (n.x + w / 2) * k, (f.y0 + f.y1) / 2 - (n.y + h / 2) * k, k, true);
+  // Outside the phone layout the strip hangs over the middle of the top edge, which is where a centred
+  // node would go: it is centred in what is left below the strip instead.
+  const s = env.phone ? null : env.strip();
+  const y0 = s && f.y1 - s.bottom > h * k + 80 ? s.bottom : f.y0;
+  moveView((f.x0 + f.x1) / 2 - (n.x + w / 2) * k, (y0 + f.y1) / 2 - (n.y + h / 2) * k, k, true);
   select({ kind: 'node', id });
 }
+
+/** Clear space kept between the strip and whatever the camera brings into view beside or below it. */
+const STRIP_GAP = 14;
 
 /** Pan just enough that a world box is inside the visible part of the board. */
 function reveal(bx: number, by: number, bw: number, bh: number) {
@@ -326,18 +359,35 @@ function reveal(bx: number, by: number, bw: number, bh: number) {
   // Kept out from under the floating controls too, unless the space left would be too small for it.
   let f = freeArea(true);
   if (f.y1 - f.y0 - pad * 2 < bh * k) f = freeArea();
-  // Desktop keeps 50 px clear at the top for the goal line; on a phone the strip is measured instead.
-  const x0 = f.x0 + pad, x1 = f.x1 - pad, y0 = f.y0 + pad + (env.phone ? 0 : 50), y1 = f.y1 - pad;
+  const x0 = f.x0 + pad, x1 = f.x1 - pad, y1 = f.y1 - pad;
+  let y0 = f.y0 + pad;
   let x = glide?.x ?? ui.view.x, y = glide?.y ?? ui.view.y;
-  const left = bx * k + x, top = by * k + y;
+  const left = bx * k + x;
   if (left + bw * k > x1) x -= left + bw * k - x1;
   else if (left < x0) x += x0 - left;
+  // A box bigger than the space shows its top left corner.
+  if (env.phone && bx * k + x < x0) x = x0 - bx * k;
+  // On a phone the strip spans the stage and is part of what `freeArea` leaves out. Elsewhere it is a
+  // card over the middle of the top edge: a box that would end up under it goes below it instead.
+  if (!env.phone) {
+    const s = env.strip();
+    const l = bx * k + x;
+    if (s && l < s.x1 + STRIP_GAP && l + bw * k > s.x0 - STRIP_GAP && y1 - (s.bottom + STRIP_GAP) >= bh * k) y0 = Math.max(y0, s.bottom + STRIP_GAP);
+  }
+  const top = by * k + y;
   if (top + bh * k > y1) y -= top + bh * k - y1;
   else if (top < y0) y += y0 - top;
-  // A box bigger than the space shows its top left corner.
-  if (env.phone) {
-    if (bx * k + x < x0) x = x0 - bx * k;
-    if (by * k + y < y0) y = y0 - by * k;
+  if (env.phone && by * k + y < y0) y = y0 - by * k;
+  // The zoom buttons and the minimap hold the bottom right corner (outside the phone layout): a box
+  // that would end up under them is moved up, or to the left, whichever is less and leaves it in view.
+  const c = env.corner();
+  if (c) {
+    const over = bx * k + x + bw * k - (c.x0 - STRIP_GAP), under = by * k + y + bh * k - (c.y0 - STRIP_GAP);
+    if (over > 0 && under > 0) {
+      const canUp = by * k + y - under >= y0, canLeft = bx * k + x - over >= x0;
+      if (canUp && (under <= over || !canLeft)) y -= under;
+      else if (canLeft) x -= over;
+    }
   }
   if (x === (glide?.x ?? ui.view.x) && y === (glide?.y ?? ui.view.y)) return;
   moveView(x, y, k, true);
@@ -1238,7 +1288,7 @@ function updateGhost() {
   setClass(ghostEl, 'bad', !ok);
   // On a deposit the ghost is only an outline with its caption underneath, so the deposit's own label stays readable.
   setClass(ghostEl, 'outline', onDeposit);
-  const hint = ok ? `${fmt(cost)}¢ · ${env.touch ? 'tap' : 'click'} to place` : why;
+  const hint = ok ? `${fmt(cost)}¢ · ${pressWord()} to place` : why;
   // In the phone layout a line above the hotbar already says "tap the board to place": the card
   // itself has room for the price only at that type size.
   const brief = ok && env.phone ? `${fmt(cost)}¢` : hint;
@@ -2086,7 +2136,8 @@ function onUp(e: PointerEvent) {
         }
       } else if (Math.hypot(p.x - d.b.x, p.y - d.b.y) > 36 && !nodeAt(p)) {
         const opts = d.mat ? produceOptions(g, d.mat) : [];
-        if (!opts.length) toast(d.mat ? `Nothing you have unlocked makes ${MATERIALS[d.mat].name}. Wire a Well to it.` : `${env.touch ? 'Start' : 'Drag'} from an output port instead`, 'bad');
+        // (Said to a finger without naming the gesture: there, wires are made by tapping.)
+        if (!opts.length) toast(d.mat ? `Nothing you have unlocked makes ${MATERIALS[d.mat].name}. Wire a Well to it.` : isTouch() ? 'Start from an output port instead' : 'Drag from an output port instead', 'bad');
         else {
           endDrag();
           openRadial({ at: p, dir: 'produce', from: 0, port: 0, to: d.to, mat: d.mat, a: d.b, opts });
@@ -2250,12 +2301,27 @@ function openRadial(state: RadialState) {
   const R = n >= 8 ? 180 : n === 7 ? 158 : n >= 6 ? 142 : 122;
   // Keep the whole menu on screen; the node is built wherever the menu ends up.
   const rect = rectOf();
-  const raw = toScreen(state.at);
+  let raw = toScreen(state.at);
   const m = R + 58;
-  const c = {
-    x: Math.max(Math.min(m, rect.width / 2), Math.min(rect.width - Math.min(m, rect.width / 2), raw.x)),
-    y: Math.max(Math.min(m, rect.height / 2), Math.min(rect.height - Math.min(m, rect.height / 2), raw.y)),
-  };
+  const mx = Math.min(m, rect.width / 2), my = Math.min(m, rect.height / 2);
+  const c = { x: Math.max(mx, Math.min(rect.width - mx, raw.x)), y: Math.max(my, Math.min(rect.height - my, raw.y)) };
+  // The menu opens clear of the goal card (and of the chips under it, when there is room for that).
+  // If the spot the player chose is under the strip, the board slides down first, so the menu, the
+  // wire and the new node all stay where they belong to each other.
+  const s = env.strip();
+  if (s && c.x + m > s.x0 && c.x - m < s.x1) {
+    const fits = (edge: number) => rect.height - (edge + 8) >= m * 2;
+    const edge = fits(s.bottom) ? s.bottom : fits(s.goalBottom) ? s.goalBottom : -1;
+    // (No room under the card at all, on a very short window: as low as the menu can go.)
+    const top = edge >= 0 ? edge + 8 + m : rect.height - my;
+    if (c.y < top) {
+      ui.view.y += top - raw.y;
+      glide = null;
+      applyView();
+      raw = toScreen(state.at);
+      c.y = Math.max(my, Math.min(rect.height - my, Math.max(top, raw.y)));
+    }
+  }
   state.at = { x: (c.x - ui.view.x) / ui.view.k, y: (c.y - ui.view.y) / ui.view.k };
   const a = toScreen(state.a);
   hideTemp();
@@ -2346,6 +2412,9 @@ export function cancelGesture(): boolean {
   if (tapWire) disarm();
   return true;
 }
+
+/** A pointer is on the board in the middle of something (a pan, a pinch, a wire, a node being moved). */
+export const gestureActive = () => !!drag || fingers.size > 0;
 
 /**
  * Call before something other than the pointer changes the board (a keyboard shortcut, say):
