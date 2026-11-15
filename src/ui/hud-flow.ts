@@ -1,4 +1,5 @@
-// The Flow ring: a ring around the credits coin with the price bonus beside it. Owned by the HUD track.
+// The Flow ring: a ring around the credits coin with Flow as a percentage beside it. Owned by the HUD track.
+// (What that Flow earns, the price bonus, is in the ring's tooltip and in what it says when pressed.)
 //
 // Hidden until the Flow meter is unlocked. The arc is stepped with the panels (four times a second)
 // and only written when its whole-percent value changes: no transition, nothing per frame.
@@ -19,7 +20,7 @@ let ringEl: SVGElement;
 let arc: SVGElement;
 let pct: HTMLElement;
 
-/** Wrap the coin of the credits chip in the ring button and add the bonus label after the numbers. */
+/** Wrap the coin of the credits chip in the ring button and add the Flow percentage after the numbers. */
 export function initFlowRing() {
   app = document.getElementById('app')!;
   const chip = document.querySelector<HTMLElement>('#top .res.credits');
@@ -38,10 +39,11 @@ export function initFlowRing() {
     const g = ui.g;
     if (!g.flowOn) return;
     const worst = worstProducer(g);
+    const f = flowInfo(g);
     if (worst) jumpTo(worst.id);
     // With nothing counted yet (everything unwired, or only just built) there is nothing to praise.
-    else if (!flowInfo(g).producers) toast(NONE_YET, 'info');
-    else toast('Everything is flowing', 'good');
+    else if (!f.producers) toast(NONE_YET, 'info');
+    else toast(`Everything is flowing: every sale pays <b>+${Math.round(f.bonus * 100)}%</b>`, 'good');
   });
 }
 
@@ -66,6 +68,7 @@ export function updateFlowRing(g: Game) {
     invalidateLayout();
   }
   setHidden(pct, !f.on);
+  if (!f.on) setAttr(pct, 'title', null);
   setClass(btn, 'on', f.on);
   setAttr(btn, 'data-testid', f.on ? 'flow-ring' : null);
   setAttr(btn, 'tabindex', f.on ? '0' : '-1');
@@ -77,7 +80,9 @@ export function updateFlowRing(g: Game) {
   setStyle(arc, 'stroke-dasharray', `${v} 100`);
   setAttr(btn, 'data-flow', String(v));
   const bonus = Math.round(f.bonus * 100);
-  setText(pct, `+${bonus}%`);
+  setAttr(btn, 'data-bonus', String(bonus));
+  // The pill reads Flow itself, the number the ring draws and the "hold Flow" goal asks for.
+  setText(pct, `${v}%`);
   const worst = f.flowing < f.producers ? worstProducer(g) : null;
   const jump = worst ? ` ${isTouch() ? 'Tap' : 'Click'} to jump to the ${producerName(g, worst.id)} holding it back.` : '';
   const label = f.producers
@@ -85,4 +90,5 @@ export function updateFlowRing(g: Game) {
     : `Flow ${v}%: the share of your Wells and machines running flat out. ${NONE_YET}.`;
   setAttr(btn, 'title', label);
   setAttr(btn, 'aria-label', label);
+  setAttr(pct, 'title', label);
 }

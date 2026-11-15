@@ -18,7 +18,7 @@ import { hotbarTypes, initPanels, renderPanels, tickPanels } from './ui/panels';
 import { closeTech, initTech, openTech, renderTech } from './ui/tech';
 import { initFeel } from './ui/feel';
 import { adviserStats, boardKey, holdAdviser } from './ui/advice-client';
-import { TIP, offerTip, tipShown } from './ui/advice-tip';
+import { TIP, lineShown, offerTip, tipBought, tipShown } from './ui/advice-tip';
 import { markedControl } from './ui/advice-show';
 import { hudAnchors, initHud } from './ui/hud';
 import { backToStart, initScreens, isStarted, screenOpen, screensApi, showStart } from './ui/hud-screens';
@@ -101,8 +101,12 @@ function boot() {
   // Test hooks. `ui` and `tick` are relied on by scripts; the rest are there for convenience.
   (window as unknown as Record<string, unknown>).flowstate = {
     ui, tick, fx, view: { fit: fitView, zoomBy, jumpTo }, onSignal, hud: { ...screensApi, anchors: hudAnchors },
-    // The adviser: how it is run and what it cost; the tip on the card and its timing; the control "Show me" ringed.
-    adviser: { stats: adviserStats, hold: holdAdviser, key: () => boardKey(ui.g), tip: tipShown, offer: (a: Parameters<typeof offerTip>[1]) => { offerTip(ui.g, a); renderPanels(true); }, marked: markedControl, TIP },
+    // The adviser: how it is run and what it cost; the tip on the card and its timing; the control "Show me" ringed;
+    // the goal card's "while you wait" line with its next step; what the tip row says a followed tip bought.
+    adviser: {
+      stats: adviserStats, hold: holdAdviser, key: () => boardKey(ui.g), tip: tipShown, offer: (a: Parameters<typeof offerTip>[1]) => { offerTip(ui.g, a); renderPanels(true); },
+      marked: markedControl, TIP, line: lineShown, bought: tipBought,
+    },
   };
   requestAnimationFrame(frame);
 }

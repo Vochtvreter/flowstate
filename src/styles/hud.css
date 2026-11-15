@@ -30,7 +30,11 @@
 #goal { flex: 0 1 500px; min-width: 0; max-width: 100%; display: flex; align-items: center; gap: 14px; padding: 11px 14px 12px 16px; border-radius: 14px; background: #141d33; border: 1px solid #34467a; box-shadow: 0 10px 30px rgba(0, 0, 0, 0.45); color: #dbe6ff; }
 #goal[data-ready='1'] { background: #0f2219; border-color: #2f8f58; box-shadow: 0 0 0 4px rgba(74, 222, 128, 0.1), 0 10px 30px rgba(0, 0, 0, 0.5); }
 #goal.done { flex-basis: auto; padding: 7px 14px; border-radius: 999px; background: #121929; border-color: var(--border); box-shadow: none; }
-.gc-main { flex: 1 1 200px; min-width: 0; display: flex; flex-direction: column; gap: 5px; }
+/* .gc-main holds the strip of pips and .gc-body, the part that changes with the goal (and the only part
+   that moves when one is claimed: see "the card, this round" below). --gc-gap is the space between the
+   card's parts; a row that opens or closes inside it takes that into account (advice.css). */
+.gc-main { --gc-gap: 4px; flex: 1 1 200px; min-width: 0; position: relative; display: flex; flex-direction: column; gap: var(--gc-gap); }
+.gc-body { min-width: 0; display: flex; flex-direction: column; gap: var(--gc-gap); }
 .gc-head { display: flex; align-items: center; justify-content: space-between; gap: 10px; min-height: 20px; }
 .gc-step { font-size: 10.5px; font-weight: 700; letter-spacing: 0.09em; text-transform: uppercase; color: #9db8ff; white-space: nowrap; }
 .gc-done { display: inline-flex; align-items: center; gap: 4px; font-size: 10.5px; font-weight: 700; letter-spacing: 0.09em; text-transform: uppercase; color: #4ade80; }
@@ -60,7 +64,9 @@ div.gc-rewards { justify-content: flex-start; margin-top: 2px; }
 
 #hud-strip.over-tech #goal { flex: 0 1 auto; gap: 14px; padding: 6px 6px 6px 16px; border-radius: 16px; }
 /* One row whatever the width: the title gives way (…) before the reward or Claim do. */
-#hud-strip.over-tech .gc-main { flex: 0 1 auto; flex-direction: row; align-items: center; flex-wrap: nowrap; gap: 12px; }
+#hud-strip.over-tech .gc-main { flex: 0 1 auto; }
+#hud-strip.over-tech .gc-body { flex-direction: row; align-items: center; flex-wrap: nowrap; gap: 12px; }
+#hud-strip.over-tech .gc-pips { display: none; }
 #hud-strip.over-tech .gc-title { flex: 0 1 auto; min-width: 0; font-size: 15px; line-height: 19px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 #hud-strip.over-tech div.gc-rewards { flex: none; flex-wrap: nowrap; margin-top: 0; }
 #hud-strip.over-tech .claim { min-width: 96px; height: 44px; border-radius: 12px; font-size: 16px; }
@@ -73,6 +79,12 @@ div.gc-rewards { justify-content: flex-start; margin-top: 2px; }
 .claim::before { content: ''; position: absolute; inset: -4px; z-index: -1; border-radius: 18px; background: #4ade80; opacity: 0.25; pointer-events: none; animation: claim-breathe 1.5s ease-in-out infinite; }
 .claim::after { content: ''; position: absolute; inset: -5px; border-radius: 19px; border: 2px solid #4ade80; opacity: 0; pointer-events: none; animation: claim-halo 1.5s ease-out infinite; }
 .claim:hover { background: #6cf09a; }
+/* Pressed: the button gives a little (the `scale` property, so the phone seat's own transform is left alone).
+   A finger sees this while it is down (hud.ts sets `down`: a browser is late with :active for a finger, or
+   leaves it out). A mouse claims on the way down, and sees the same on the button's ghost (.claim-ghost,
+   under "the card, this round"). */
+.claim { transition: scale 80ms ease-out; }
+.claim:active, .claim.down { scale: 0.96; }
 .claim.sm { min-width: 74px; height: 44px; padding: 0 14px; border-radius: 12px; font-size: 15px; }
 .claim.sm::before { border-radius: 16px; }
 .claim.sm::after { border-radius: 17px; }
@@ -241,7 +253,7 @@ button.fav:hover { background: #263252; }
 html[data-input='touch'] #hints, html[data-input='touch'] .kbd { display: none; }
 html[data-input='touch'] .alertchip { min-height: 44px; }
 html[data-input='touch'] .gc-show { height: 36px; padding: 0 14px; }
-html[data-input='touch'] .gc-show::after { content: ''; position: absolute; inset: -6px 0; }
+html[data-input='touch'] .gc-show::after { content: ''; position: absolute; inset: -4px 0; }
 html[data-input='touch'] .menu button { height: 44px; }
 /* Inside the inspector: full-height buttons, and a wider reach around the small ones. */
 html[data-input='touch'] #insp .buy, html[data-input='touch'] #insp .fbtn, html[data-input='touch'] #insp .ghostbtn, html[data-input='touch'] #insp .recipelist button { height: 44px; }
@@ -264,6 +276,118 @@ html[data-input='touch'] #insp .link::after { content: ''; position: absolute; i
   .pbar span, .dg-full, .dg-over, #start { transition: none; }
 }
 
+/* ---------- the card, this round (card track) ----------
+   New parts of the goal card and of the strip: the pips, the Flow goal's bar, what moves when a goal is
+   claimed, and the layout of a squeezed desktop stage. (The two rows of guidance are in advice.css.) */
+
+/* The chain as pips: one for each goal of the demo, the big ones larger, claimed ones filled, the current
+   one lit. They stay where they are when a goal is claimed; the one just claimed pops. */
+.gc-pips { display: flex; align-items: center; gap: 4px; height: 10px; }
+.pip { flex: none; width: 6px; height: 6px; border-radius: 50%; background: #26345a; transition: background-color 0.3s, box-shadow 0.3s; }
+.pip.big { width: 10px; height: 10px; background: transparent; box-shadow: inset 0 0 0 2px #33467c; }
+.pip.done { background: #6f8fe0; }
+.pip.big.done { background: #7aa2ff; box-shadow: none; }
+.pip.now, .pip.big.now { background: #fff; box-shadow: 0 0 0 2.5px rgba(122, 162, 255, 0.35), 0 0 9px rgba(157, 184, 255, 0.95); }
+.pip.just { animation: pip-pop 0.5s cubic-bezier(0.3, 1.6, 0.5, 1); }
+@keyframes pip-pop { 0% { transform: scale(1); } 40% { transform: scale(1.9); background: #fff; } 100% { transform: scale(1); } }
+/* Free play: four more, a step apart, in the colour of what is done. */
+.pip-gap { flex: none; width: 5px; height: 1px; }
+.pip.free.done { background: #4ade80; }
+
+/* The Flow goal: Flow on a bar with a mark at the share to hold, the count beside it, and the seconds still
+   to hold once it is held. When the bar has come down to "all but one" the mark moves and the card says so. */
+.gc-prog .fl-bar { flex: 1 1 60px; min-width: 40px; position: relative; display: flex; }
+.fl-bar .pbar { flex: 1; }
+.fl-mark { position: absolute; top: -3px; bottom: -3px; width: 2px; margin-left: -1px; border-radius: 1px; background: #fff; box-shadow: 0 0 0 1px #141d33; transition: left 0.5s ease; }
+.fl-bar.valve .fl-mark { background: #5ce1ff; }
+.gc-hold b { font-weight: 600; color: #fff; }
+.gc-valve { flex: 1 0 100%; font-size: 11.5px; line-height: 15px; color: #5ce1ff; animation: tip-in 0.35s ease-out; }
+
+/* Claiming. The old card lifts away as a ghost over the new one, which rises after it; the button that was
+   pressed sinks away where it stood. Only .gc-body moves: #goal, and the Claim button in it, never do. */
+.gc-ghost { position: absolute; left: 0; z-index: 1; pointer-events: none; animation: gc-lift 120ms ease-in forwards; }
+@keyframes gc-lift { to { transform: translateY(-7px); opacity: 0; } }
+/* (The names alternate so that the rise plays again on the next claim: the element is patched, not rebuilt.) */
+.gc-body.rise0 { animation: gc-rise-a 180ms cubic-bezier(0.2, 0.8, 0.3, 1) 120ms backwards; }
+.gc-body.rise1 { animation: gc-rise-b 180ms cubic-bezier(0.2, 0.8, 0.3, 1) 120ms backwards; }
+@keyframes gc-rise-a { from { transform: translateY(8px); opacity: 0; } }
+@keyframes gc-rise-b { from { transform: translateY(8px); opacity: 0; } }
+/* The pressed button: it gives to 0.96 over 80 ms, then fades over the 120 ms the old card takes to lift.
+   (A finger has already seen the button give under it: there the ghost starts pressed.) */
+.claim-ghost { position: fixed; z-index: 1; display: flex; align-items: center; justify-content: center; border-radius: 14px; background: #4ade80; color: #04240f; font-family: var(--disp); font-size: 19px; font-style: normal; font-weight: 700; letter-spacing: 0.01em; pointer-events: none; animation: claim-sink 200ms ease-out forwards; }
+.claim-ghost.sm { border-radius: 12px; font-size: 15px; }
+html[data-input='touch'] .claim-ghost { animation-name: claim-sink-touch; }
+@keyframes claim-sink { 0% { scale: 1; opacity: 1; } 40% { scale: 0.96; opacity: 1; } 100% { scale: 0.96; opacity: 0; } }
+@keyframes claim-sink-touch { 0%, 40% { scale: 0.96; opacity: 1; } 100% { scale: 0.96; opacity: 0; } }
+
+/* A squeezed stage (a desktop with the inspector open; #hud-strip.tight, set in hud.ts where the card and
+   the order no longer fit side by side). The card takes the width, set a little tighter, and the order and
+   the alert share one row under it instead of stacking: the strip keeps to a third of the stage. */
+#hud-strip.tight:not(.over-tech) { display: grid; grid-template-columns: auto minmax(0, 1fr); grid-template-areas: 'goal goal' 'order alert'; gap: 6px 8px; align-items: start; margin-top: -6px; }
+#hud-strip.tight:not(.over-tech) #hud-row { display: contents; }
+#hud-strip.tight:not(.over-tech) #goal { grid-area: goal; justify-self: center; width: 100%; max-width: 640px; padding: 7px 12px 8px 14px; }
+#hud-strip.tight:not(.over-tech) .gc-main { --gc-gap: 3px; }
+#hud-strip.tight:not(.over-tech) .gc-line > .gc-in { padding-top: 4px; }
+#hud-strip.tight:not(.over-tech) .gc-tip > .gc-in { padding-top: 5px; }
+#hud-strip.tight:not(.over-tech) #order { grid-area: order; justify-self: start; max-width: 100%; }
+#hud-strip.tight:not(.over-tech) #hud-alert { grid-area: alert; justify-self: start; }
+#hud-strip.tight:not(:has(#hud-alert:not([hidden]))) #order, #hud-strip.tight:not(:has(#order:not([hidden]))) #hud-alert { grid-column: 1 / -1; justify-self: center; }
+#hud-strip.tight .alertchip { min-height: 40px; border-radius: 12px; }
+/* (An order none of which is sold says so in a sentence: it and the alert then get half the row each, or the
+   alert would be left a sliver four lines tall.) */
+#hud-strip.tight:not(.over-tech):has(#order[data-stuck='1']) { grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); }
+/* With a window of 1000 px or more the squeezed card is still wide enough for the pips to ride in its head
+   row, after the step (as on a phone held sideways): no line of their own. */
+@media (min-width: 1000px) {
+  #hud-strip.tight:not(.over-tech) .gc-main { gap: 0; }
+  #hud-strip.tight:not(.over-tech) .gc-pips { position: absolute; left: 106px; top: 5px; }
+}
+
+/* The line's label run in before its sentence (a squeezed desktop stage, a phone held sideways): one line
+   of the card less. While the line says what it bought, those words lie where the sentence starts and the
+   sentence, which has been done, is out of sight: nothing in the row moves when the box is ticked. */
+#hud-strip.tight .gc-linehead { display: inline; height: auto; white-space: normal; }
+#hud-strip.tight .gc-linehead .gc-lbl { margin-right: 7px; }
+#hud-strip.tight .gc-linetxt { display: inline; }
+#hud-strip.tight .gc-bought { position: absolute; white-space: nowrap; font-size: 12px; }
+#hud-strip.tight .gc-line.said .gc-linetxt { visibility: hidden; }
+#hud-strip.tight .gc-tick { margin-top: 1px; }
+
+/* The order as one row (a squeezed desktop stage, and the phone): what to deliver, how long that takes, what
+   it pays, and its progress as a line along the foot. An order none of which is being sold says so on a
+   second line. */
+#hud-strip.tight #order, #app.phone #order { position: relative; flex: none; gap: 8px; min-height: 44px; padding: 4px 6px 6px 8px; border-radius: 12px; font-size: 12.5px; }
+#hud-strip.tight #order[data-ready='1'], #app.phone #order[data-ready='1'] { padding: 3px 4px 5px 8px; }
+#hud-strip.tight .oc-ico, #app.phone .oc-ico { width: 28px; height: 28px; border-radius: 8px; }
+#hud-strip.tight .oc-main, #app.phone .oc-main { flex-flow: row wrap; align-items: center; gap: 1px 8px; }
+#hud-strip.tight .oc-lbl, #hud-strip.tight .oc-pay .gc-lbl, #app.phone .oc-lbl, #app.phone .oc-pay .gc-lbl { display: none; }
+#hud-strip.tight .oc-line, #app.phone .oc-line { order: 1; flex: 0 1 auto; }
+#hud-strip.tight .oc-top, #app.phone .oc-top { order: 2; flex: 1 1 auto; justify-content: flex-start; }
+#hud-strip.tight .oc-top:empty, #app.phone .oc-top:empty { display: none; }
+/* (Beside the alert there is no room for the time left as well: the bar along the foot says how far it is.) */
+#hud-strip.tight .oc-top { display: none; }
+#hud-strip.tight #order { min-height: 40px; }
+html[data-input='mouse'] #hud-strip.tight .claim.sm { height: 32px; }
+#hud-strip.tight .oc-pay, #app.phone .oc-pay { order: 3; flex: none; flex-wrap: nowrap; margin-left: auto; }
+#hud-strip.tight .oc-warn, #app.phone .oc-warn { order: 4; flex: 1 0 100%; font-size: 11.5px; line-height: 14px; padding-bottom: 1px; }
+#hud-strip.tight #order .rw, #app.phone #order .rw { height: 18px; padding: 0 6px; font-size: 11px; line-height: 18px; }
+#hud-strip.tight .oc-main .pbar, #app.phone .oc-main .pbar { position: absolute; left: 10px; right: 10px; bottom: 2px; height: 3px; min-width: 0; }
+
+/* Less motion: nothing lifts, rises, sinks or pops; the old card and the new one fade. */
+@media (prefers-reduced-motion: reduce) {
+  .claim { transition: none; }
+  .claim:active, .claim.down { scale: none; opacity: 0.85; }
+  .gc-ghost { animation: gc-fade-out 120ms linear forwards; }
+  .gc-body.rise0 { animation: gc-fade-a 180ms linear 120ms backwards; }
+  .gc-body.rise1 { animation: gc-fade-b 180ms linear 120ms backwards; }
+  .claim-ghost, html[data-input='touch'] .claim-ghost { animation: gc-fade-out 200ms linear forwards; }
+  .pip.just { animation: none; }
+  .pip, .fl-mark { transition: none; }
+}
+@keyframes gc-fade-out { to { opacity: 0; } }
+@keyframes gc-fade-a { from { opacity: 0; } }
+@keyframes gc-fade-b { from { opacity: 0; } }
+
 /* ---------- phone seating ----------
    Everything below is the phone layout (#app.phone, set in phone.ts) of the strip: the goal card, the
    order and the alert, kept short because every pixel of them is taken from the board, and the Claim
@@ -271,7 +395,8 @@ html[data-input='touch'] #insp .link::after { content: ''; position: absolute; i
 
    Claim. The button stays where hud.ts writes it, inside #goal, and is placed from here against #hud
    (which fills the stage; nothing between the two is positioned). It sits just above the build bar, left
-   of the Fit and Undo buttons (104 px, see #fabs in phone.css), and moves with them: up by --lift when a
+   of the Fit and Undo buttons (104 px, see #fabs in phone.css; a third button stacked above those two
+   stays inside the same 104 px and so never meets it), and moves with them: up by --lift when a
    sheet opens under it, left by --shift when one stands at the side. The 'goal' anchor is this button,
    so coins leave from under the thumb. It steps aside while the build sheet is open, and while the
    player is wiring, placing or carrying something, so it can never lie on the node they are aiming at
@@ -286,7 +411,7 @@ html[data-input='touch'] #insp .link::after { content: ''; position: absolute; i
   position: absolute; left: var(--edge-l, 8px); right: calc(var(--edge-r, 8px) + 104px); bottom: 8px;
   min-width: 0; height: 54px; padding: 0 12px; border-radius: 16px; font-size: 19px;
   transform: translateY(calc(-1 * var(--lift, 0px)));
-  transition: transform 0.22s cubic-bezier(0.2, 0.8, 0.2, 1), opacity 0.15s, visibility 0s;
+  transition: transform 0.22s cubic-bezier(0.2, 0.8, 0.2, 1), opacity 0.15s, visibility 0s, scale 80ms ease-out;
 }
 /* A wide button breathes less across, or its halo would reach under the buttons beside it. */
 #app.phone #goal .claim::before { animation-name: claim-breathe-wide; }
@@ -295,58 +420,72 @@ html[data-input='touch'] #insp .link::after { content: ''; position: absolute; i
 @keyframes claim-halo-wide { 0% { transform: scale(0.99, 0.96); opacity: 0.8; } 75%, 100% { transform: scale(1.03, 1.3); opacity: 0; } }
 #app.phone.building #goal .claim, #app.phone.carrying #goal .claim,
 #app.phone:has(#board.arming, #board.wiring, #board.placing) #goal .claim { opacity: 0; visibility: hidden; pointer-events: none; transition: transform 0.22s, opacity 0.15s, visibility 0s linear 0.15s; }
+#app.phone .claim-ghost { border-radius: 16px; }
 
 /* The goal card: the same parts, set tighter. */
 #app.phone #goal { display: flex; flex-wrap: nowrap; gap: 0; padding: 6px 10px 7px 12px; border-radius: 12px; }
 #app.phone #goal.done { align-self: center; padding: 6px 14px; }
-#app.phone .gc-main { flex: 1 1 auto; gap: 2px; }
+#app.phone .gc-main { --gc-gap: 2px; flex: 1 1 auto; }
+#app.phone .gc-pips { gap: 3px; height: 8px; margin-bottom: 1px; }
+#app.phone .pip { width: 5px; height: 5px; }
+#app.phone .pip.big { width: 8px; height: 8px; }
+#app.phone .pip-gap { width: 3px; }
 #app.phone .gc-head { min-height: 18px; gap: 8px; }
 #app.phone .gc-step, #app.phone .gc-done { font-size: 10px; }
 #app.phone .gc-head .rw { height: 18px; padding: 0 6px; font-size: 11px; line-height: 18px; }
 #app.phone .gc-title { font-size: 15px; line-height: 18px; }
 #app.phone .gc-hint { font-size: 12.5px; line-height: 16px; }
-#app.phone .gc-prog { margin-top: 1px; gap: 8px; font-size: 11.5px; line-height: 14px; }
+#app.phone .gc-prog { margin-top: 1px; gap: 0 8px; font-size: 11.5px; line-height: 14px; }
+#app.phone .gc-eta::before { margin-right: 6px; }
+/* ("nothing is being sold yet" often drops to a line of its own on a phone: no separator to start that line with.) */
+#app.phone .gc-eta.never::before { content: none; }
+#app.phone .gc-valve { line-height: 14px; }
 #app.phone div.gc-rewards { margin-top: 1px; }
 #app.phone [data-ready='1'] .rw { height: 22px; padding: 0 8px; font-size: 12.5px; line-height: 22px; }
-/* The tip: its text beside a Show me button that answers a 44 px press (the reach is its ::after). */
-#app.phone .gc-tip { align-items: center; gap: 8px; margin-top: 4px; padding-top: 4px; font-size: 12px; line-height: 15px; }
-#app.phone .gc-tiptxt b { margin-right: 5px; line-height: 14px; }
-#app.phone .gc-tiptxt i { display: inline; }
-#app.phone .gc-tiptxt i::before { content: ' · '; }
+/* The two rows of guidance (a phone shows one at a time: the line while it is not done, the tip otherwise).
+   Show me answers a 44 px press: 36 px to look at, and its ::after reaches the rest. */
 #app.phone .gc-show { height: 36px; padding: 0 12px; }
-#app.phone .gc-show::after { content: ''; position: absolute; inset: -6px 0; }
+#app.phone .gc-show::after { content: ''; position: absolute; inset: -4px 0; }
+/* The line: the tick, its label over the sentence (at the hint's size), and the button. */
+#app.phone .gc-line > .gc-in { margin-top: 2px; padding-top: 4px; }
+#app.phone .gc-linebody { line-height: 16px; }
+#app.phone .gc-linehead { height: 14px; line-height: 14px; }
+#app.phone .gc-linehead .gc-lbl { font-size: 10px; }
+/* What the line bought takes the label's place while it is said (there is no room beside it), and may run on
+   over where the button was: the row does not grow by a line when the box is ticked. */
+#app.phone .gc-bought { position: absolute; left: 0; top: 0; white-space: nowrap; font-size: 11.5px; }
+#app.phone .gc-line.said .gc-lbl { visibility: hidden; }
+/* The tip: what it buys, the sentence and its price, beside the button. */
+#app.phone .gc-tip > .gc-in { flex-wrap: nowrap; gap: 8px; margin-top: 2px; padding-top: 4px; font-size: 12px; line-height: 15px; }
+#app.phone .gc-tipbody { flex: 1 1 auto; gap: 1px; }
+#app.phone .gc-tiplead { height: 15px; gap: 6px; }
+#app.phone .gc-tipbadge { height: 14px; line-height: 14px; }
+#app.phone .gc-tipold { top: 16px; }
 
 /* Where the strip would take too much of the stage the card folds its hint behind a tap: always on a
    phone held sideways, and upright whenever card, order and alert together would pass 45% of the stage.
    phone.ts decides (#app.fold) and keeps #app.hint-open: each new goal opens its hint, a press on the
-   board folds it away, a tap on the card opens and closes it. A small chevron says the card opens. */
+   board folds it away, a tap on the card opens and closes it. A small chevron says the card opens.
+   (The line and the tip do not fold: during a wait they are what there is to do.) */
 #app.phone.fold #goal { cursor: pointer; }
 #app.phone.fold:not(.hint-open) .gc-hint { display: none; }
-#app.phone.fold #goal:not(.done):not([data-ready='1']) .gc-head::after { content: ''; flex: none; order: 9; width: 7px; height: 7px; margin: -3px 2px 0 4px; border-right: 2px solid #9db8ff; border-bottom: 2px solid #9db8ff; transform: rotate(45deg); opacity: 0.8; }
-#app.phone.fold.hint-open #goal:not(.done):not([data-ready='1']) .gc-head::after { transform: rotate(-135deg); margin-top: 3px; }
+#app.phone.fold #goal:not(.done):not([data-ready='1']) .gc-body:not(.gc-ghost) .gc-head::after { content: ''; flex: none; order: 9; width: 7px; height: 7px; margin: -3px 2px 0 4px; border-right: 2px solid #9db8ff; border-bottom: 2px solid #9db8ff; transform: rotate(45deg); opacity: 0.8; }
+#app.phone.fold.hint-open #goal:not(.done):not([data-ready='1']) .gc-body:not(.gc-ghost) .gc-head::after { transform: rotate(-135deg); margin-top: 3px; }
 #app.phone.fold .gc-head { justify-content: flex-start; }
 #app.phone.fold .gc-head .gc-rewards, #app.phone.fold .gc-head .gc-done { margin-left: auto; }
 
-/* The order: one row. What to deliver, what it pays, and its progress as a line along the foot. */
-#app.phone #order { position: relative; gap: 8px; min-height: 44px; padding: 4px 6px 6px 8px; border-radius: 12px; font-size: 12.5px; }
-#app.phone #order[data-ready='1'] { padding: 3px 4px 5px 8px; }
-#app.phone .oc-ico { width: 28px; height: 28px; border-radius: 8px; }
-#app.phone .oc-main { flex-flow: row wrap; align-items: center; gap: 1px 8px; }
-#app.phone .oc-lbl, #app.phone .oc-pay .gc-lbl { display: none; }
-#app.phone .oc-line { flex: 1 1 auto; }
-#app.phone .oc-pay { flex: none; flex-wrap: nowrap; }
-#app.phone #order .rw { height: 18px; padding: 0 6px; font-size: 11px; line-height: 18px; }
-#app.phone .oc-main .pbar { position: absolute; left: 10px; right: 10px; bottom: 2px; height: 3px; min-width: 0; }
+/* The order is one row (see "the order as one row" above). */
 
 /* The alert: one pill, two lines of text at most before it grows. */
 #app.phone #hud-alert { align-self: center; }
 #app.phone .alertchip { min-height: 44px; padding: 3px 4px 3px 12px; gap: 8px; font-size: 12.5px; line-height: 16px; }
 #app.phone .al-go { height: 32px; }
 
-/* A phone on its side has 276 px of stage. The card folds to one line (step and reward over the title,
-   progress beside it) with its hint behind a tap, as above. The order and the alert are small pills
-   beside it. While a sheet stands at the side there is half the width and the player is busy with one
-   node: the order and the alert wait out of sight until the sheet is closed. */
+/* A phone on its side has 276 px of stage. The card folds to one line (step, pips and reward over the
+   title, progress beside it) with its hint behind a tap, as above; the line or the tip follows as one
+   more row. The order and the alert are small pills beside it. While a sheet stands at the side there is
+   half the width and the player is busy with one node: the order and the alert wait out of sight until
+   the sheet is closed. */
 @media (orientation: landscape) and (max-height: 520px) {
   #app.phone #hud { padding-top: 4px; padding-right: calc(var(--edge-r, 8px) + var(--shift, 0px)); }
   #app.phone #hud-strip, #app.phone #hud-strip.over-tech { display: grid; grid-template-columns: minmax(0, 3fr) minmax(0, 2fr); grid-template-areas: 'goal order' 'goal alert'; grid-template-rows: auto 1fr; gap: 4px 6px; align-items: start; }
@@ -360,15 +499,46 @@ html[data-input='touch'] #insp .link::after { content: ''; position: absolute; i
   #app.phone #hud-alert { grid-area: alert; align-self: start; justify-self: stretch; }
   #app.phone .alertchip { width: 100%; border-radius: 12px; }
   #app.phone .al-txt { flex: 1; }
-  #app.phone .gc-main { display: grid; grid-template-columns: minmax(0, 1fr) auto; grid-template-areas: 'head head' 'title prog' 'hint hint' 'tip tip'; align-items: center; gap: 1px 12px; }
+  /* The pips ride in the head row, after the step: no line of their own where every line counts. */
+  #app.phone .gc-main { gap: 0; }
+  #app.phone .gc-pips { position: absolute; left: 104px; top: 4px; margin: 0; }
+  #app.phone .gc-body { display: grid; grid-template-columns: minmax(40%, 1fr) auto; grid-template-areas: 'head head' 'title prog' 'hint hint' 'line line' 'tip tip'; align-items: center; gap: 1px 12px; }
+  /* The Flow goal's progress (bar and mark, the count, the seconds to hold, the word about the valve) is a row of its own. */
+  #app.phone .gc-body:has(.gc-prog.flow) { grid-template-areas: 'head head' 'title title' 'prog prog' 'hint hint' 'line line' 'tip tip'; }
   #app.phone .gc-head { grid-area: head; min-height: 16px; }
   #app.phone .gc-head .rw { height: 16px; line-height: 16px; }
   #app.phone .gc-title { grid-area: title; }
   #app.phone .gc-prog { grid-area: prog; margin: 0; }
-  #app.phone .gc-prog .pbar { flex: none; width: 72px; }
+  #app.phone .gc-prog .pbar, #app.phone .gc-prog .fl-bar { flex: none; width: 48px; }
+  /* (Beside the title there is room for the count and the time left, or for a bar: while a time is shown, not for both.) */
+  #app.phone .gc-prog:has(.gc-eta) > .pbar { display: none; }
+  #app.phone .gc-prog .fl-bar .pbar { flex: 1; width: auto; }
+  #app.phone .gc-valve { flex: 0 1 auto; }
   #app.phone div.gc-rewards { grid-area: prog; margin: 0; flex-wrap: nowrap; }
   #app.phone .gc-hint { grid-area: hint; padding: 2px 0 1px; }
-  #app.phone .gc-tip { grid-area: tip; margin-top: 3px; padding-top: 3px; }
+  #app.phone .gc-line { grid-area: line; }
+  #app.phone .gc-line > .gc-in { margin-top: 2px; padding-top: 3px; }
+  /* (The label runs in before the sentence, as on a squeezed desktop stage: see "run in" above.) */
+  #app.phone .gc-linehead { display: inline; height: auto; white-space: normal; }
+  #app.phone .gc-linehead .gc-lbl { margin-right: 6px; }
+  #app.phone .gc-linetxt { display: inline; }
+  #app.phone .gc-bought { left: auto; top: auto; font-size: 12px; }
+  #app.phone .gc-line.said .gc-lbl { visibility: visible; }
+  #app.phone .gc-line.said .gc-linetxt { visibility: hidden; }
+  #app.phone .gc-tip { grid-area: tip; }
+  #app.phone .gc-tip > .gc-in { margin-top: 2px; padding-top: 3px; }
+  /* The tip's lead runs in before its sentence too. Done, the row says what that bought where the lead stood,
+     and the tip's own words keep their room unseen: the row is as tall as it was. */
+  #app.phone .gc-tipbody { display: block; }
+  #app.phone .gc-tiplead, #app.phone .gc-tipwas { display: inline; height: auto; white-space: normal; margin-right: 6px; }
+  #app.phone .gc-tiplead .gc-tipbadge, #app.phone .gc-tipwas .gc-tipbadge { margin-right: 6px; vertical-align: 1px; }
+  #app.phone .gc-tiptxt { display: inline; }
+  #app.phone .gc-tipold { display: none; }
+  #app.phone .gc-tip.done .gc-tiplead { position: absolute; left: 0; top: 0; white-space: nowrap; }
+  #app.phone .gc-tip.done .gc-tipwas, #app.phone .gc-tip.done .gc-tiptxt { visibility: hidden; }
+  /* An order none of which is sold: its sentence a little smaller, and no room kept for the bar it does not have. */
+  #app.phone #order[data-stuck='1'] { padding-bottom: 4px; }
+  #app.phone .oc-warn { font-size: 11px; line-height: 13px; padding-bottom: 0; }
   /* Claim keeps to the right-hand thumb, beside Fit and Undo, and to the left of a sheet at the side. */
   #app.phone #goal .claim { left: auto; right: calc(var(--edge-r, 8px) + 104px + var(--shift, 0px)); width: min(300px, calc(100% - var(--edge-l, 8px) - var(--edge-r, 8px) - 104px - var(--shift, 0px))); bottom: 6px; height: 52px; transform: none; }
 }
