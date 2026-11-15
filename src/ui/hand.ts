@@ -70,6 +70,12 @@ interface Act {
   loops: number;
   born: number;
   shown: boolean;
+  /** A control (press, point): where it was at the last look, to show the hand only once it has stopped moving. */
+  last?: Pt | null;
+  /** It was on screen and then could not be seen (performance.now()); it is dropped if it does not come back soon. */
+  lostAt?: number;
+  /** A press whose control was scrolled out of sight in its panel has had it scrolled back once. */
+  revealed?: boolean;
 }
 
 /** A point either on the board (world space, followed as the view moves) or on the screen (client px). */
@@ -205,19 +211,36 @@ function buildPlan(g: Game, from: GNode, portIndex: number, source: Source, loop
   // Where the fingertip may go: on the part of the board that shows, and clear of the floating buttons at its foot.
   const free = freeBox(36);
   free.y1 -= env.cover().row;
-  // First a spot where the whole outline of the new card can be seen; failing that (a narrow screen),
-  // one where at least the fingertip can.
+  const ok = (p: Pt, whole: boolean) => {
+    // Room for the card that would be built here, with some air around it.
+    const x0 = p.x - 30, y0 = p.y - 56, x1 = p.x + 190, y1 = p.y + 56;
+    if (x0 < 10 || y0 < 10 || x1 > g.board.w - 10 || y1 > g.board.h - 10) return false;
+    if (boxes.some((b) => x0 < b.x + b.w && x1 > b.x && y0 < b.y + b.h && y1 > b.y)) return false;
+    if (!inBox(toClient(p), free)) return false;
+    return !whole || inBox(toClient({ x: p.x + 176, y: p.y + 40 }), freeBox(4));
+  };
+  const plan = (p: Pt): Plan => ({ kind: 'build', source, mode, a: mode === 'tap2' ? null : world(port), b: world(p), wire: { from: { x: port.x, y: port.y }, end: p }, card: null, ghost: true, color: matColor(port.mat), loops });
+  // First a spot near the port where the whole outline of the new card can be seen; failing that (a narrow
+  // screen), one where at least the fingertip can.
   for (const whole of [true, false]) {
     for (const [dx, dy] of SPOTS) {
       const p = { x: port.x + dx, y: port.y + dy };
-      // Room for the card that would be built here, with some air around it.
-      const x0 = p.x - 30, y0 = p.y - 56, x1 = p.x + 190, y1 = p.y + 56;
-      if (x0 < 10 || y0 < 10 || x1 > g.board.w - 10 || y1 > g.board.h - 10) continue;
-      if (boxes.some((b) => x0 < b.x + b.w && x1 > b.x && y0 < b.y + b.h && y1 > b.y)) continue;
-      if (!inBox(toClient(p), free)) continue;
-      if (whole && !inBox(toClient({ x: p.x + 176, y: p.y + 40 }), freeBox(4))) continue;
-      return { kind: 'build', source, mode, a: mode === 'tap2' ? null : world(port), b: world(p), wire: { from: { x: port.x, y: port.y }, end: p }, card: null, ghost: true, color: matColor(port.mat), loops };
+      if (ok(p, whole)) return plan(p);
     }
+  }
+  // Nothing near the port is free and in sight (a port at the edge of a phone's screen, with cards all
+  // round it): any empty spot that can be seen will do, the nearest first. The new card is wired to the
+  // port wherever it is built.
+  const k = ui.view.k || 1;
+  const step = 36;
+  const at = toClient(port);
+  const spots: { p: Pt; d: number }[] = [];
+  for (let y = free.y0; y <= free.y1; y += step) {
+    for (let x = free.x0; x <= free.x1; x += step) spots.push({ p: toWorld(x, y), d: Math.hypot(x - at.x, y - at.y) });
+  }
+  spots.sort((u, v) => u.d - v.d);
+  for (const whole of [true, false]) {
+    for (const { p, d } of spots) if (d > 60 * Math.min(1, k) && ok(p, whole)) return plan(p);
   }
   return null;
 }
@@ -260,6 +283,30 @@ function controlHit(selector: string): { at: Pt; el: HTMLElement } | null {
 }
 
 const controlAt = (selector: string): Pt | null => controlHit(selector)?.at ?? null;
+
+/**
+ * A control that is in the page but scrolled out of its panel's view: scroll the panel (its nearest
+ * scrolling ancestor) so that it shows, 8 px in from the edge. True if it did. Reads layout.
+ */
+function revealControl(selector: string): boolean {
+  for (const e of document.querySelectorAll<HTMLElement>(selector)) {
+    let box: HTMLElement | null = e.parentElement;
+    while (box && box !== document.body) {
+      const oy = getComputedStyle(box).overflowY;
+      if ((oy === 'auto' || oy === 'scroll') && box.scrollHeight > box.clientHeight + 1) break;
+      box = box.parentElement;
+    }
+    if (!box || box === document.body) continue;
+    const r = e.getBoundingClientRect(), b = box.getBoundingClientRect();
+    if (r.height < 4) continue;
+    const by = r.top < b.top + 8 ? r.top - b.top - 8 : r.bottom > b.bottom - 8 ? r.bottom - b.bottom + 8 : 0;
+    if (!by) continue;
+    box.scrollTop += by;
+    record('hand', 'reveal', selector);
+    return true;
+  }
+  return false;
+}
 
 /** The button under a point of the screen, if there is one. Reads layout. */
 const buttonAt = (p: Pt): Element | null => document.elementFromPoint(p.x, p.y)?.closest('button') ?? null;
@@ -305,7 +352,12 @@ function resolve(g: Game, a: Act): Plan | 'done' | null {
     case 'press': {
       if (blockedAnywhere()) return null;
       const hit = controlHit(byTestId(a.testid!));
-      if (!hit) return null;
+      if (!hit) {
+        // Show me was pressed for a control in a panel that has scrolled it out of sight (a phone's sheet
+        // that was still sliding in when the card asked for it to be shown): it is scrolled back, once.
+        if (a.source === 'showme' && !a.revealed) a.revealed = revealControl(byTestId(a.testid!));
+        return null;
+      }
       // A control that is part of the board (Expand board) moves with the camera: the hand stays on it.
       const b = hit.el.closest('#board') ? world(toWorld(hit.at.x, hit.at.y)) : screen(hit.at);
       return { kind: 'press', source: a.source, mode: 'tap', a: null, b, wire: null, card: null, ghost: false, color: '#fff', loops: a.loops };
@@ -410,6 +462,14 @@ function drop(why: string) {
   act = null;
 }
 
+/** A control the hand is about to point at (a button) has stopped moving: it is where it was at the last look. */
+function settled(a: Act, p: Plan): boolean {
+  if (p.b.world || a.shown) return true;
+  const was = a.last;
+  a.last = { x: p.b.x, y: p.b.y };
+  return !!was && Math.abs(was.x - p.b.x) <= 2 && Math.abs(was.y - p.b.y) <= 2;
+}
+
 function evaluate() {
   const g = ui.g;
   const now = performance.now();
@@ -421,13 +481,23 @@ function evaluate() {
     if (p === 'done') {
       drop('done');
       hide('done');
-    } else if (p) {
+    } else if (p && settled(a, p)) {
+      // (A button is pointed at once it has stayed put between two looks: a sheet that is still sliding in, or a
+      // panel being scrolled to it, would otherwise leave the hand pointing where the button was.)
       a.shown = true;
+      a.lostAt = undefined;
       return show(p);
+    } else if (p) {
+      return hide('wait');
     } else if (a.shown) {
-      // It was on screen and something got in the way: it does not come back by itself.
-      drop('busy');
-      hide('busy');
+      // It was on screen and something got in the way (the player's own input has already dropped it): it may
+      // come back for a moment, and is dropped if it does not.
+      a.lostAt ??= now;
+      if (now - a.lostAt > WAIT_MS) {
+        drop('lost');
+        hide('lost');
+      } else hide('busy');
+      return;
     } else if (now - a.born > WAIT_MS) drop('timeout');
     else return hide('wait');
   }
