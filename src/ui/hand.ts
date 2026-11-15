@@ -386,6 +386,8 @@ export function initHand(hooks: { record: typeof record; busy: () => boolean }) 
   const up = () => {
     pointersDown = Math.max(0, pointersDown - 1);
     lastInput = performance.now();
+    // Show me was pressed with a mouse: the hand may start now that the button is let go.
+    if (act && !act.shown && !pointersDown) soon();
   };
   window.addEventListener('pointerup', up, opts);
   window.addEventListener('pointercancel', up, opts);
@@ -418,6 +420,7 @@ export function actOut(d: Signals['showme']) {
   act = next;
   hide('showme');
   record('hand', 'ask', `showme:${next.kind}`);
+  soon();
 }
 
 /** A tip has gone stale: appear at its Show me button and tap it once in the air. `null`: the tip has gone. */
@@ -433,6 +436,14 @@ export function pointAt(at: Pt | null) {
   if (act) return;
   act = { source: 'tip', kind: 'point', at: { x: at.x, y: at.y }, loops: 1, born: performance.now(), shown: false };
   record('hand', 'ask', 'tip:point');
+  soon();
+}
+
+let soonTimer = 0;
+/** Look again in a moment rather than on the next beat, once whoever raised the signal has finished drawing. */
+function soon() {
+  clearTimeout(soonTimer);
+  soonTimer = window.setTimeout(evaluate, 0);
 }
 
 /** For tests: what the hand is doing, and where its ends are on screen right now. */
