@@ -1236,7 +1236,15 @@ function placeExpand(byCamera = false) {
   let target = home;
   if (rowX != null && ex.row) target = { x: Math.min(rowX, ex.row.x1) - ex.w / 2, y: ex.row.y, s: 1 };
   else if (docked) {
-    const p = dockSpot({ home, w: ex.w, h: ex.h, area, blocks: ex.blocks, gap: DOCK_GAP });
+    // (Docked over the board it keeps off the cards on screen too, with their ports, when there is room
+    // anywhere for that: a tap meant for a port must not buy a plot.)
+    const pad = isTouch() ? 24 : 6;
+    const cards: Box[] = [];
+    for (const n of g.nodes) {
+      const b = onStage(cardBox(n), ui.view);
+      if (b.x1 + pad > area.x0 && b.x0 - pad < area.x1 && b.y1 + pad > area.y0 && b.y0 - pad < area.y1) cards.push({ x0: b.x0 - pad, y0: b.y0, x1: b.x1 + pad, y1: b.y1 });
+    }
+    const p = dockSpot({ home, w: ex.w, h: ex.h, area, blocks: cards.length < 40 ? ex.blocks.concat(cards) : ex.blocks, gap: DOCK_GAP });
     target = { x: p.x + ex.w / 2, y: p.y + ex.h / 2, s: 1 };
   }
   // A change of place is slid: from one place to the other, to a docked place that jumped, and to any new
