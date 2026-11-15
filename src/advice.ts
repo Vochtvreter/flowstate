@@ -8,6 +8,7 @@
 // that has to work one out takes some tens of milliseconds, every other call is free.
 //
 //   waitInfo(g)       what the goal card is waiting for, and how long that takes at the current income
+//   savingFor(g)      the research the card is saving for; researchDelay(g, id) what another research costs it
 //   advice(g)         one tip, or null
 //   lineAdvice(g)     the next step of the goal card's "while you wait" line, in the shape of a tip, or null
 //   applyAdvice(g, a) do what a tip or a line's step says, through the normal actions (for bots and tests)
@@ -336,6 +337,44 @@ export function waitInfo(g: Game): WaitInfo | null {
   const name = !step ? undefined : 'tech' in step ? (key === 'credits' ? step.thenWhat : TECHS[step.tech]?.name) : step.what;
   if (name) info.name = name;
   return info;
+}
+
+/**
+ * The research the goal card is saving for right now (its step's tech, e.g. 'P4' while "Assemble your first
+ * Glyph" waits for Assembly), or null: no such step, ready to claim, or already owned. For the tech tree, to
+ * preselect it. Read from the goal's step, not its wording.
+ */
+export function savingFor(g: Game): string | null {
+  const goal = activeGoal(g);
+  if (!goal || g.goal.ready) return null;
+  const step = goal.step?.(g) ?? null;
+  return step && 'tech' in step && !g.techs.includes(step.tech) ? step.tech : null;
+}
+
+/**
+ * Seconds by which researching `id` now would push back the research the card is saving for (savingFor), at the
+ * income the card's own count uses (waitInfo): what it spends of the Data that research still lacks, divided by
+ * how fast that Data comes in. 0 when it would not delay it (no such research, the same tech, or Data of another
+ * kind or to spare); Infinity when the Data it spends has nothing coming in. For the tech tree's warning.
+ */
+export function researchDelay(g: Game, id: string): number {
+  const goal = savingFor(g);
+  const t = TECHS[id];
+  if (!goal || !t || goal === id) return 0;
+  const want = TECHS[goal].cost;
+  const f = income(g);
+  let delay = 0;
+  for (const k of TIERS) {
+    const spend = t.cost[k] ?? 0;
+    const need = want[k] ?? 0;
+    if (spend <= 0 || need <= 0) continue;
+    const before = Math.max(0, need - g.data[k]);
+    const after = Math.max(0, need - (g.data[k] - spend));
+    if (after <= before) continue;
+    const rate = f.data[k];
+    delay = Math.max(delay, rate > 1e-6 ? (after - before) / rate : Infinity);
+  }
+  return delay;
 }
 
 // =====================================================================================

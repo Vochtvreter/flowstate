@@ -4,7 +4,7 @@ import {
   canRedo, canUndo, claimOrder, clearHistory, connect, cutWire, deleteNode, expandBoard, favour, favouredWire, placeNode, redo, setMode, undo,
   upgrade, upgradeAll,
 } from '../src/actions';
-import { ADVICE, Advice, SAY, advice, adviceQuiet, adviceTrials, applyAdvice, lineAdvice, waitInfo, waitKind } from '../src/advice';
+import { ADVICE, Advice, SAY, advice, adviceQuiet, adviceTrials, applyAdvice, lineAdvice, researchDelay, savingFor, waitInfo, waitKind } from '../src/advice';
 import { DATA_NAMES, DATA_YIELD, MATERIALS, MAT_IDS, NODE_DEFS, RECIPES, RULES, TECHS } from '../src/content';
 import { costText, demandInfo, nodeCost, nodeCostAt, research, techAffordable, upgradeCostAt } from '../src/economy';
 import { countsForFlow, flowInfo, isFlowing } from '../src/flow';
@@ -1815,5 +1815,33 @@ describe('every tip on a real board is affordable, can be done, and is true', ()
     console.info(`adviser: ${outcomes.length / 2} tips timed in the real game on real boards, under two order sequences each: ${better} of ${outcomes.length} outcomes better, `
       + `worst ${Math.min(...outcomes).toFixed(0)} s; on average ${(100 * delivered / promised).toFixed(0)}% of what was promised; for the card-following player the smallest saving was ${smallestOwn.toFixed(1)} s; `
       + `${rescued} ended a wait that would not have ended.`);
+  });
+});
+
+describe('for the tech tree: what the card is saving for, and what another research costs it', () => {
+  it('savingFor names the research of the card\'s step; researchDelay is the seconds a purchase pushes it back', () => {
+    const g = rich();
+    g.techs = ['P1', 'R1', 'P2', 'P3'];
+    const m = market(g);
+    connect(g, well(g).id, 0, m.id);
+    const shard = placeNode(g, 'refiner', 400, 100, { recipe: 'shard' })!;
+    connect(g, well(g).id, 0, shard.id);
+    connect(g, shard.id, 0, placeNode(g, 'lab', 900, 100)!.id);
+    g.goal = { i: GOALS.findIndex((x) => x.id === 'make-glyph'), ready: false };
+    run(g, 20);
+    expect(savingFor(g)).toBe('P4');
+    g.data.a = 600;
+    const rate = waitInfo(g)!.eta > 0 ? (TECHS.P4.cost.a! - g.data.a) / waitInfo(g)!.eta : 0;
+    expect(rate).toBeGreaterThan(0);
+    // Lab Speed (50α) out of the 600α saved: Assembly 50α further off.
+    expect(researchDelay(g, 'R2')).toBeCloseTo(50 / rate, 0);
+    // Spent from Data the card does not need: no delay. The card's own research: none either.
+    expect(researchDelay(g, 'P4')).toBe(0);
+    g.data.a = TECHS.P4.cost.a! + 100;
+    expect(researchDelay(g, 'R2')).toBe(0);
+    // Ready to claim, or the research owned: nothing is being saved for.
+    g.techs.push('P4');
+    expect(savingFor(g)).toBeNull();
+    expect(researchDelay(g, 'R2')).toBe(0);
   });
 });
