@@ -678,10 +678,15 @@ function labSection(g: Game, n: GNode): string {
     const y = dataYield(g, m);
     return `<div class="row sm"><span>${matGlyph(m, 12)} ${MATERIALS[m].name}</span><span class="mono" style="color:${DATA_COLORS[y.tier]}">${fmt(y.amount)}${DATA_NAMES[y.tier]} each</span></div>`;
   }).join('');
+  // What each tier of item gives, as far as the player has got: β and γ are named once Tier 2 and Tier 3
+  // items can be made (or that kind of Data has been in hand), not before.
+  let kinds = 'Raw and Tier 1 items give α.';
+  if (has(g, 'P4') || everHad(g, 'b')) kinds += ' Tier 2 items give β.';
+  if (has(g, 'P7') || everHad(g, 'g')) kinds += ' Tier 3 items give γ.';
   return `<div class="sec flow"><span class="lbl">Studying</span>${rows || '<div class="note">Wire any item into the Lab.</div>'}
     <div class="row sm"><span>Throughput</span><span class="mono"><b>${fmtRate(n.rate)}</b> / ${fmtRate(labRate(g, n))} /s</span></div>
     <div class="bar"><span style="width:${pct(n.rate / labRate(g, n))}%;background:#C4A1FF"></span></div>
-    <div class="note">Raw and T1 items give α. T2 gives β. T3 gives γ.</div></div>`;
+    <div class="note">${kinds}</div></div>`;
 }
 
 function nodeInspector(g: Game, n: GNode): string {
