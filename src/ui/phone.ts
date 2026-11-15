@@ -463,6 +463,8 @@ let hintGoal = -1;
 let hintOpen = false;
 /** The card folds its hint behind a tap (`#app.fold`): see below. */
 let fold = false;
+/** A sheet the player works in (the inspector, the build sheet) was open at the last sync. */
+let sheetSeenOpen = false;
 let coverSeen = '';
 /** How much the summary covered when last looked at: a change means the factory is framed again. */
 let summarySeen = '0|0';
@@ -493,6 +495,11 @@ function sync() {
     hintH = 0;
     setHintOpen(true);
   }
+  // A sheet that opens folds it away too, as the tap on the board that opens one does: a sheet opened from the alert's
+  // Show or the Flow ring was left a sliver on a short phone while the hint stood open above it.
+  const sheetOpen = env.phone && (isOpen(insp) || isOpen(build));
+  if (sheetOpen && !sheetSeenOpen) foldHint();
+  sheetSeenOpen = sheetOpen;
   measure();
   const c = coverNow;
   // The card folds its hint behind a tap where the strip would otherwise take too much of the board:

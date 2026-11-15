@@ -393,6 +393,9 @@ html[data-input='touch'] #insp .link::after { content: ''; position: absolute; i
 #app.phone #toasts { position: absolute; top: var(--toast-top, 0px); left: var(--toast-x0, 8px); right: var(--toast-x1, 8px); bottom: auto; transform: none; margin: 0; max-width: none; align-items: center; }
 #app.phone .toast { max-width: 100%; }
 #toasts .toast.crowd { display: none; }
+/* Over the open tech tree, which covers the whole screen, the column is placed on the screen itself (hud-toasts.ts,
+   dockTree: in a room kept at the foot of the list of tiles), out of the stage that would clip it. */
+#app.phone.tech-open #toasts { position: fixed; }
 
 /* ---------- inspector under touch: what the rules above leave short of 44 px ----------
    The Router's mode buttons were 40 px tall, and the reach around its small steppers and filter chips came
@@ -690,6 +693,12 @@ html[data-input='mouse'] #hud-strip.tight .claim.sm { height: 32px; }
 #app.phone .alertchip::after { content: ''; position: absolute; inset: -5px 0; }
 #app.phone .al-go { height: 28px; }
 #app.phone .pz-ico { width: 24px; height: 24px; }
+/* A short phone held upright (740 px tall or less): while a sheet is open the alert waits out of sight, as it does on a
+   phone held sideways. The sheet is as tall as the strip leaves room for, and an alert that arrived while it was open
+   left its scroller 52 px at 360x740, a ringed button half in its faded foot. Paused is still said. */
+@media (orientation: portrait) and (max-height: 760px) {
+  #app.phone.insp-open #hud-alert:not([data-kind='paused']), #app.phone.building #hud-alert:not([data-kind='paused']) { display: none; }
+}
 
 /* A phone on its side has 276 px of stage. The card folds to one line (step, pips and reward over the
    title, progress beside it) with its hint behind a tap, as above; the line or the tip follows as one
