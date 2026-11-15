@@ -126,6 +126,12 @@ const PORT_NEAR = 22;
 const PORT_IN_NEAR = 18;
 /** Off the cards, the nearest output port within this distance is taken. */
 const PORT_REACH = 44;
+/**
+ * Off the cards and this close to an output port, the port also comes before a wire that passes under
+ * the finger, as long as that wire is long enough (WIRE_LONG on screen) to be tapped somewhere else.
+ */
+const PORT_EDGE = 30;
+const WIRE_LONG = 100;
 /** Half the width of the band along a wire that selects it (28 px in all). */
 const WIRE_REACH = 14;
 /** A finger that just misses a card, by no more than this, still means the card (when nothing else is nearer). */
@@ -589,52 +595,60 @@ export function frameNodes(ids: number[]): void {
   if (!box || !last) return;
   const cur = viewAhead();
   const floor = zoomFloor();
-  // The areas the nodes may be shown in, and what must not lie over them there.
-  const areas: Box[] = [];
+  // The areas the nodes may be shown in, in order of preference (roomy margins first, then thin ones),
+  // and what must not lie over them there.
+  const tiers: Box[][] = [];
   const blocks: Box[] = [];
   if (env.phone) {
-    const clear = inset(freeArea(true), 14);
-    areas.push(clear);
-    // Behind the floating controls only when the room clear of them is too small for the card itself.
-    if ((clear.y1 - clear.y0) < (last.y1 - last.y0) * Math.min(cur.k, floor)) areas.push(inset(freeArea(), 6));
+    const free = freeArea(true);
+    tiers.push([inset(free, 14)], [inset(free, 4)]);
+    // Behind the floating controls only when the room clear of them is too small for one card.
+    if (free.y1 - free.y0 - 8 < (last.y1 - last.y0) * Math.min(cur.k, floor)) tiers.push([inset(freeArea(), 4)]);
   } else {
     const r = rectOf();
-    const full: Box = { x0: 40, y0: 40, x1: Math.max(120, r.width - 40), y1: Math.max(120, r.height - 40) };
     const s = env.strip(), c = env.corner();
-    const below = s ? { ...full, y0: s.bottom + STRIP_GAP } : null;
-    areas.push(full);
-    if (below) areas.push(below);
-    if (c) {
-      const left = c.x0 - STRIP_GAP, above = c.y0 - STRIP_GAP;
-      areas.push({ ...full, x1: left }, { ...full, y1: above });
-      if (below) areas.push({ ...below, x1: left }, { ...below, y1: above });
-      blocks.push({ x0: c.x0 - STRIP_GAP, y0: c.y0 - STRIP_GAP, x1: Infinity, y1: Infinity });
+    for (const pad of [40, 12]) {
+      const full: Box = { x0: pad, y0: pad, x1: Math.max(120, r.width - pad), y1: Math.max(120, r.height - pad) };
+      const below = s ? { ...full, y0: s.bottom + STRIP_GAP } : null;
+      const tier = [full];
+      if (below) tier.push(below);
+      if (c) {
+        const left = c.x0 - STRIP_GAP, above = c.y0 - STRIP_GAP;
+        tier.push({ ...full, x1: left }, { ...full, y1: above });
+        if (below) tier.push({ ...below, x1: left }, { ...below, y1: above });
+      }
+      tiers.push(tier);
     }
+    if (c) blocks.push({ x0: c.x0 - STRIP_GAP, y0: c.y0 - STRIP_GAP, x1: Infinity, y1: Infinity });
     if (s) blocks.push({ x0: s.x0 - STRIP_GAP, y0: -Infinity, x1: s.x1 + STRIP_GAP, y1: s.bottom + STRIP_GAP });
   }
   const tryBox = (b: Box): View | null => {
-    let best: View | null = null;
-    let bestCost = Infinity;
-    for (const area of areas) {
-      if (area.x1 - area.x0 < 80 || area.y1 - area.y0 < 60) continue;
-      const v = frameBox(cur, b, area, floor);
-      const sx0 = b.x0 * v.k + v.x, sy0 = b.y0 * v.k + v.y, sx1 = b.x1 * v.k + v.x, sy1 = b.y1 * v.k + v.y;
-      // All of it has to be inside the area (a box too big for the area at the floor is not), under nothing.
-      if (sx0 < area.x0 - 0.5 || sy0 < area.y0 - 0.5 || sx1 > area.x1 + 0.5 || sy1 > area.y1 + 0.5) continue;
-      if (blocks.some((o) => sx0 < o.x1 && sx1 > o.x0 && sy0 < o.y1 && sy1 > o.y0)) continue;
-      // The least change wins: keeping the zoom matters most, then how far the board slides.
-      const cost = (cur.k - v.k) * 4000 + Math.abs(v.x - cur.x) + Math.abs(v.y - cur.y);
-      if (cost < bestCost) {
-        bestCost = cost;
-        best = v;
+    for (const areas of tiers) {
+      let best: View | null = null;
+      let bestCost = Infinity;
+      for (const area of areas) {
+        if (area.x1 - area.x0 < 80 || area.y1 - area.y0 < 60) continue;
+        const v = frameBox(cur, b, area, floor);
+        const sx0 = b.x0 * v.k + v.x, sy0 = b.y0 * v.k + v.y, sx1 = b.x1 * v.k + v.x, sy1 = b.y1 * v.k + v.y;
+        // All of it has to be inside the area (a box too big for the area at the floor is not), under nothing.
+        if (sx0 < area.x0 - 0.5 || sy0 < area.y0 - 0.5 || sx1 > area.x1 + 0.5 || sy1 > area.y1 + 0.5) continue;
+        if (blocks.some((o) => sx0 < o.x1 && sx1 > o.x0 && sy0 < o.y1 && sy1 > o.y0)) continue;
+        // The least change wins: keeping the zoom matters most, then how far the board slides.
+        const cost = (cur.k - v.k) * 4000 + Math.abs(v.x - cur.x) + Math.abs(v.y - cur.y);
+        if (cost < bestCost) {
+          bestCost = cost;
+          best = v;
+        }
       }
+      if (best) return best;
     }
-    return best;
+    return null;
   };
   const next = tryBox(box) ?? tryBox(last);
   if (!next) {
     // No room for even one card clear of everything (a very small stage): show its top left corner.
-    const v = frameBox(cur, last, areas[areas.length - 1], floor);
+    const tier = tiers[tiers.length - 1];
+    const v = frameBox(cur, last, tier[tier.length - 1], floor);
     if (v !== cur) moveView(v.x, v.y, v.k, true, FRAME_MS);
     return;
   }
@@ -827,7 +841,7 @@ function expand() {
     // Once the last one has landed they are ordinary deposits again (a later redraw must not replay the pop).
     popTimer = window.setTimeout(() => {
       popping.clear();
-      touch();
+      if (ui.g === g) syncDeposits(g);
     }, fresh.length * POP_STAGGER + POP_MS + 120);
   }
   signal('expand', { deposits: fresh, stagger: POP_STAGGER });
@@ -2150,8 +2164,8 @@ function mouseHit(t: HTMLElement): Hit {
  * A finger does not: ports are 14 px dots and wires a few pixels wide, and the browser reports a
  * touch as landing on whatever interesting thing is near it, not on what is under it. So a touch is
  * matched by distance on screen, whatever the zoom. In order: a port right under the finger, the card
- * under the finger, a wire within reach, the nearest output port within reach, a card the finger
- * just missed.
+ * under the finger, a wire within reach (unless the finger is right beside a port and the wire is a
+ * long one), the nearest output port within reach, a card the finger just missed.
  *
  * (The port's reach comes before the near miss of a card: a tap a little to the right of a Well's
  * port is a tap for the port, not for the Well.)
@@ -2195,9 +2209,10 @@ function touchHit(p: Pt): Hit {
   const on = nodeAt(p);
   if (on) return { kind: 'node', id: on.id };
   // A wire comes before the wider reach of a port: every wire starts at one, and a short wire
-  // would otherwise have nowhere left to be tapped (and so could never be cut).
+  // would otherwise have nowhere left to be tapped (and so could never be cut). Right beside the
+  // port, though, a tap is for the port: a long wire can be tapped further along.
   const w = wireNear(p, WIRE_REACH / k);
-  if (w) return { kind: 'wire', id: w.id };
+  if (w && !(out && dOut <= PORT_EDGE && (wireEls.get(w.id)?.flow.len ?? 0) * k >= WIRE_LONG)) return { kind: 'wire', id: w.id };
   if (out && dOut <= PORT_REACH) return { kind: 'reach', ...out };
   const near = cardNear(p, CARD_NEAR / k);
   return near ? { kind: 'node', id: near.id } : null;
@@ -2291,9 +2306,11 @@ function fingerGone(id: number): boolean {
 }
 
 function onDown(e: PointerEvent) {
-  glide = null;
   const t = e.target as HTMLElement;
   const onControl = !!(t.closest('#radial') || t.closest('#expand'));
+  // A press on the board takes the camera over from whatever move was under way. (Not a press on a
+  // control that stands on the board: Expand starts a camera move of its own.)
+  if (!onControl) glide = null;
   if (e.pointerType === 'touch' && !onControl) {
     fingers.set(e.pointerId, { x: e.clientX, y: e.clientY });
     if (fingers.size >= 2) {
