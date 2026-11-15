@@ -217,6 +217,11 @@ export interface Game {
   flowNear: number;
   /** The same for "all but two producers flowing" (nearShare(producers, 2)), the valve's second step (RULES.flow.valveAfter2). */
   flowNear2?: number;
+  /**
+   * The valve's later steps (all but three, all but four... RULES.flow.valveEvery): seconds the smoothed Flow has
+   * stayed at or above the bar of the step open now, counted from the third step's opening (tickValve in src/goals.ts).
+   */
+  flowNearLate?: number;
   // --- goals and orders ---
   /** Active goal: index into GOALS (GOALS.length when all are claimed) and whether it is waiting for claimGoal(). */
   goal: { i: number; ready: boolean };
@@ -323,7 +328,7 @@ export function newGame(): Game {
     paused: false, time: 0, savedAt: Date.now(),
     creditRate: 0, dataRate: { a: 0, b: 0, g: 0 },
     madeAt: { glint: 0 }, demandLeft: {},
-    flow: 0, flowOn: false, flowStreak: 0, flowBest: 0, flowHold: 0, flowNear: 0, flowNear2: 0,
+    flow: 0, flowOn: false, flowStreak: 0, flowBest: 0, flowHold: 0, flowNear: 0, flowNear2: 0, flowNearLate: 0,
     goal: { i: 0, ready: false }, goalAt: { i: 0, t: 0 },
     ordersOn: false, order: null, orderSeed: RULES.orders.seed >>> 0,
     ended: false, seenSurplus: false,
@@ -512,6 +517,7 @@ export function deserialize(json: string): Game | null {
     g.flowHold = num(raw.flowHold, 0);
     g.flowNear = pos(raw.flowNear);
     g.flowNear2 = pos(raw.flowNear2);
+    g.flowNearLate = pos(raw.flowNearLate);
     g.orderSeed = num(raw.orderSeed, base.orderSeed) >>> 0;
     g.order = loadOrder(raw.order);
     // A save from before the `ended` flag that already has a Lens is past the demo.

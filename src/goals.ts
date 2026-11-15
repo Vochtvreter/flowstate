@@ -491,20 +491,53 @@ export const goalAge = (g: Game) => (g.goalAt && g.goalAt.i === g.goal.i ? Math.
  * the card for RULES.flow.valveAfter seconds it also passes with all but one producer flowing, held just as
  * long, and from RULES.flow.valveAfter2 seconds with all but two. (A board with one producer that nobody can
  * get flowing would otherwise stop the chain for good; so would one with two, which a player who builds a second
- * Glyph Assembler on arrival has.) The number of producers that may be short right now is the valve's slack.
+ * Glyph Assembler on arrival has.) After that one more may be short every RULES.flow.valveEvery seconds (all but
+ * three at 300 s, all but four at 420 s...), until one producer flowing is enough: every board on which anything
+ * flows passes in the end, a save from the public version left to the tips three short among them. The number of
+ * producers that may be short at a goal age, before it is held to the board's own count (see flowSlack).
  */
-export const flowSlack = (g: Game) => (goalAge(g) >= RULES.flow.valveAfter2 ? 2 : goalAge(g) >= RULES.flow.valveAfter ? 1 : 0);
+export function valveSlack(age: number): number {
+  const F = RULES.flow;
+  if (age < F.valveAfter) return 0;
+  if (age < F.valveAfter2) return 1;
+  return 2 + Math.floor((age - F.valveAfter2) / F.valveEvery);
+}
+/** How many producers may be short right now and the goal still counts: the valve's slack, at most all but one of them. */
+export const flowSlack = (g: Game) => Math.max(0, Math.min(valveSlack(goalAge(g)), flowCount(g).of - 1));
+/** The valve's later steps (all but three and on) are open from this goal age. */
+const lateValve = () => RULES.flow.valveAfter2 + RULES.flow.valveEvery;
 /**
  * Seconds held toward the goal. Under the valve's lower bars they are counted from the moment each opens,
  * however long the board has been there before: the player sees the bar come down and the ten seconds run.
+ * (The steps from the third on share one count, g.flowNearLate: see tickValve.)
  */
 const flowHeld = (g: Game) => {
   let held = g.flowHold;
   const age = goalAge(g);
   if (age >= RULES.flow.valveAfter) held = Math.max(held, Math.min(g.flowNear, age - RULES.flow.valveAfter));
   if (age >= RULES.flow.valveAfter2) held = Math.max(held, Math.min(g.flowNear2 ?? 0, age - RULES.flow.valveAfter2));
+  if (age >= lateValve()) held = Math.max(held, g.flowNearLate ?? 0);
   return held;
 };
+
+/**
+ * The count for the valve's later steps, once a tick (src/sim.ts, after Flow is updated): seconds the smoothed
+ * Flow has stayed at or above "all but (the slack open now)", from the moment the third step opens. It starts
+ * from nothing when a step opens on a board that was not at the bar before it, or when the board drops under
+ * the bar; when the next step opens on a board already holding the last one's bar it runs on (the bar only came
+ * down), as the steps before it do. Nothing to count on any other goal, or while one of the first two steps is
+ * all the board can use (three producers or fewer: all but two of three is one).
+ */
+export function tickValve(g: Game, dt: number) {
+  const goal = GOALS[g.goal.i];
+  const open = !!goal && goal.id === 'hold-flow' && !g.goal.ready && g.flowOn && goalAge(g) >= lateValve();
+  const slack = open ? flowSlack(g) : 0;
+  if (slack < 3) {
+    if (g.flowNearLate) g.flowNearLate = 0;
+    return;
+  }
+  g.flowNearLate = g.flow >= nearShare(flowCount(g).of, slack) - 0.005 ? (g.flowNearLate ?? 0) + dt : 0;
+}
 
 /** What the Flow goal's card shows beside its count-down. */
 export interface FlowGoalView {
@@ -515,11 +548,13 @@ export interface FlowGoalView {
   of: number;
   /** The share needed right now: the goal's bar, or "all but one" once the valve is open. */
   need: number;
-  /** The valve is open: the bar has come down to "all but one running" because the goal has been up a while. */
+  /** The valve is open: the goal has been up for RULES.flow.valveAfter seconds, and its bar comes down from there. */
   valve?: boolean;
   /**
-   * How many producers may be short right now and the goal still counts: absent or 0 before the valve opens,
-   * 1 once it has ("all but one running"), more if the valve opens further later on. The card words it.
+   * How many producers may be short right now and the goal still counts, once the valve is open (absent before):
+   * a whole number from 0 to the producers counted less one. 1 from RULES.flow.valveAfter ("all but one
+   * running"), 2 from valveAfter2, then one more every valveEvery seconds; never more than all but one of them
+   * (so 0 on a board of one producer, whose bar the valve cannot lower). The card words it.
    */
   slack?: number;
 }
@@ -527,7 +562,8 @@ export interface FlowGoalView {
 function flowGoalView(g: Game): FlowGoalView {
   const { of, running } = flowCount(g);
   const slack = flowSlack(g);
-  return { pct: g.flow, running, of, need: slack ? nearShare(of, slack) : RULES.flow.holdShare, ...(slack ? { valve: true, slack } : {}) };
+  const open = goalAge(g) >= RULES.flow.valveAfter;
+  return { pct: g.flow, running, of, need: slack ? nearShare(of, slack) : RULES.flow.holdShare, ...(open ? { valve: true, slack } : {}) };
 }
 
 // ---------- the chain ----------

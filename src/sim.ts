@@ -5,7 +5,7 @@ import {
   sellValue, wellRate,
 } from './economy';
 import { updateFlow } from './flow';
-import { tickGoal } from './goals';
+import { tickGoal, tickValve } from './goals';
 import { Graph, graph, isMachine, isPass, isSink, leadsToMachine } from './graph';
 import { tickOrders } from './orders';
 import { Bag, Game, GNode, Status, Wire, cloneGame } from './state';
@@ -482,10 +482,11 @@ export function tick(g: Game, dt: number) {
   progress(g, dt);
 }
 
-/** The research queue, Flow, the active order and the active goal. */
+/** The research queue, Flow (and the Flow goal's valve), the active order and the active goal. */
 function progress(g: Game, dt: number) {
   if (g.queue.length) for (const id of [...g.queue]) research(g, id);
   updateFlow(g, dt);
+  tickValve(g, dt);
   tickOrders(g);
   tickGoal(g);
 }

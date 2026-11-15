@@ -771,6 +771,68 @@ describe('"Hold 95% Flow": the bar, and the valve for a board nobody can fix', (
     expect(fine.goal.ready).toBe(false);
     run(fine, 2);
     expect(fine.goal.ready).toBe(true);
+    // A lone producer that does not flow is not passed by the later steps either: the slack stays at none.
+    const alone = rich();
+    alone.flowOn = true;
+    connect(alone, placeNode(alone, 'refiner', 400, 100, { recipe: 'spark' })!.id, 0, market(alone).id);
+    run(alone, 30);
+    at(alone, 'hold-flow');
+    run(alone, 700);
+    expect(goalView(alone)!.flow).toMatchObject({ of: 1, running: 0, need: 0.95, valve: true, slack: 0 });
+    expect(alone.goal.ready).toBe(false);
+  });
+
+  it('after all but two, one more may be short every 120 s, up to all but one: a board on which one producer flows passes in the end', () => {
+    // One Well that sells and five Refiners wired to the Market with nothing to work on: one of six flows.
+    const g = rich();
+    g.flowOn = true;
+    connect(g, well(g).id, 0, market(g).id);
+    for (let i = 0; i < 5; i++) connect(g, placeNode(g, 'refiner', 400, 100 + 140 * i, { recipe: 'spark' })!.id, 0, market(g).id);
+    run(g, 30);
+    at(g, 'hold-flow');
+    expect(RULES.flow.valveEvery).toBe(120);
+    run(g, 0.05);
+    const seen: Record<number, number> = {};
+    while (!g.goal.ready && goalAge(g) < 900) {
+      run(g, 0.5);
+      const v = goalView(g)!.flow!;
+      expect(v).toMatchObject({ of: 6, running: 1 });
+      // A whole number, never more than all but one.
+      expect(Number.isInteger(v.slack ?? 0)).toBe(true);
+      expect(v.slack ?? 0).toBeLessThanOrEqual(5);
+      seen[v.slack ?? 0] ??= Math.round(goalAge(g));
+    }
+    // The steps, at 90 and 180 s and then every 120 s, to all but five of six (one flowing is enough) at 540 s...
+    expect(seen).toEqual({ 0: 1, 1: 90, 2: 180, 3: 300, 4: 420, 5: 540 });
+    // ...and its ten seconds are held from that moment.
+    expect(g.goal.ready).toBe(true);
+    expect(goalAge(g)).toBeGreaterThanOrEqual(550);
+    expect(goalAge(g)).toBeLessThan(552);
+    expect(goalView(g)!.flow!.need).toBeCloseTo(1 / 6, 9);
+  });
+
+  it('a board three short passes ten seconds after the third step opens (all but three, at 300 s), and a save keeps the count', () => {
+    const g = flowBoard(6, 3); // 6 Glint Wells and 3 Ember Wells flow, 3 Spark Refiners never can: 9 of 12
+    run(g, 0.05);
+    run(g, 299);
+    expect(g.goal.ready).toBe(false);
+    expect(goalView(g)!.flow).toMatchObject({ of: 12, running: 9, valve: true, slack: 2 });
+    expect(g.flowNearLate).toBe(0); // the third step is not open yet: nothing counts toward it
+    run(g, 1.5);
+    expect(goalView(g)!.flow).toMatchObject({ slack: 3 });
+    expect(goalView(g)!.flow!.need).toBeCloseTo(9 / 12, 9);
+    // Nine of twelve has been the case all along: the ten seconds count from the step's opening, not before.
+    expect(g.goal.ready).toBe(false);
+    run(g, 4);
+    const mid = deserialize(serialize(g))!;
+    expect(mid.flowNearLate).toBeCloseTo(g.flowNearLate!, 9);
+    expect(goalView(mid)!.progress![0]).toBeCloseTo(goalView(g)!.progress![0], 6);
+    run(mid, 4);
+    expect(mid.goal.ready).toBe(false);
+    run(mid, 1.6);
+    expect(mid.goal.ready).toBe(true);
+    expect(goalAge(mid)).toBeGreaterThanOrEqual(310);
+    expect(goalAge(mid)).toBeLessThan(311);
   });
 
   it('the time on the goal is counted from its claim, survives a save, and starts afresh in a save from before the valve', () => {
