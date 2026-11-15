@@ -104,20 +104,31 @@ export function initCelebrate(hooks: { record: typeof record; payout: typeof pay
   // Over the open tech tree, Enter and Space would research the tree's selection as well (they do that in the tree,
   // and the research card that has just come up there is what invites the press): while a card is up over the tree,
   // they only put it away. Nothing past the window hears them, nor does the focused button (Space presses one as the
-  // key comes up, so that is held back too).
-  let ateSpace = false;
+  // key comes up, so that is held back too). A key held down goes on repeating after the card has gone: its repeats
+  // are held back as well, until it comes up (a held Enter on the focused Research button researched the next tech).
+  let ate = '';
   window.addEventListener('keydown', (e) => {
     if (e.key !== 'Escape' && e.key !== 'Enter' && e.key !== ' ') return;
+    if (e.repeat && e.key === ate) {
+      e.preventDefault();
+      e.stopPropagation();
+      return;
+    }
     const eat = e.key !== 'Escape' && ui.techOpen && !!current;
     dismiss();
-    if (!eat) return;
+    if (!eat) {
+      // (A key whose coming up was missed, the window having lost the focus meanwhile, is not held back for ever.)
+      if (e.key === ate) ate = '';
+      return;
+    }
     e.preventDefault();
     e.stopPropagation();
-    if (e.key === ' ') ateSpace = true;
+    ate = e.key;
   }, true);
   window.addEventListener('keyup', (e) => {
-    if (e.key !== ' ' || !ateSpace) return;
-    ateSpace = false;
+    if (!ate || e.key !== ate) return;
+    ate = '';
+    if (e.key !== ' ') return;
     e.preventDefault();
     e.stopPropagation();
   }, true);
