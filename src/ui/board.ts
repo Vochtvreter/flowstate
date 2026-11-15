@@ -617,8 +617,9 @@ export function fitView(smooth = false) {
  * had before, when the board is coming back to it. Otherwise the whole factory, when it can be read at
  * once. When it is too big for that: what the player is in the middle of (a port armed for a wire, when a
  * phone is turned) or what the goal is about (goalFocus), at a readable zoom; with nothing named, the
- * middle of the factory at a readable zoom on a phone, and elsewhere all of it in the overview, so that no
- * card opens cut in half at the stage's edges.
+ * middle of the factory at a readable zoom on a phone, and elsewhere the floor of the detailed tier when
+ * every card is whole and uncovered there, else all of it in the overview, so that no card opens cut in
+ * half at the stage's edges.
  */
 function openView() {
   const g = ui.g;
@@ -656,7 +657,40 @@ function openView() {
     return go(fitTarget(fb!, true, armed.length ? floor : 1));
   }
   if (env.phone) return go(fitTarget(box, true));
+  // Wider than the room under the strip, but whole on the stage at the floor with no card cut or under the
+  // strip, the corner controls or the key hints (a big factory on a wide screen): it opens there, readable.
+  // (The hint row is put away first if the goal is past it.)
+  syncHints(g);
+  const d = wholeAtFloor(fitTarget(box, true));
+  if (d) return go(d);
   go(t);
+}
+
+/**
+ * Outside the phone layout, at the zoom of `v` (the floor): a camera near `v` under which every card is whole
+ * on the stage and under nothing (see `coverBoxes`), or null when there is none. Tried in turn: `v` itself,
+ * then slid as little as keeps every card on the stage, then with the cards as low as they go (away from
+ * the strip) and as far left as they go (away from the corner controls).
+ */
+function wholeAtFloor(v: View): View | null {
+  const g = ui.g;
+  const r = rectOf();
+  const k = v.k;
+  const boxes = g.nodes.map(cardBox);
+  if (!boxes.length) return null;
+  let all: Box | null = null;
+  for (const b of boxes) all = boxUnion(all, b);
+  const m = 8;
+  // The camera positions that keep every card on the stage, on each axis.
+  const xa = m - all!.x0 * k, xb = r.width - m - all!.x1 * k, ya = m - all!.y0 * k, yb = r.height - m - all!.y1 * k;
+  if (xa > xb || ya > yb) return null;
+  // (The lower bound puts the cards as far left, or as high, as they go; the upper as far right, or as low.)
+  const x = Math.min(xb, Math.max(xa, v.x)), y = Math.min(yb, Math.max(ya, v.y));
+  const covers = coverBoxes();
+  for (const c of [v, { x, y, k }, { x, y: yb, k }, { x: xa, y, k }, { x: xa, y: yb, k }]) {
+    if (boxes.every((b) => inClear(onStage(b, c), covers))) return c;
+  }
+  return null;
 }
 
 /** The view that puts a node in the middle of what the player can see, at zoom `k`. */
