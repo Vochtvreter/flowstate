@@ -1114,7 +1114,8 @@ function stageResized() {
 // the factory seldom shows the edge of the map. So whenever its place is off screen, or under the goal
 // card, a sheet or a floating control, the button docks: it comes to rest at life size in the free part
 // of the stage, as near to its place as it can (the rule is `dockSpot` in geom.ts), in a one-line form
-// unless the goal card is asking for it. It slides from one place to the other.
+// unless the goal card is asking for it. It slides from one place to the other. On a phone it docks only
+// in the thumb row, beside Fit: a button floating over so small a board lies on top of cards.
 //
 // The element is a child of the board, not of the world, and is placed by a transform in stage pixels.
 
@@ -1371,8 +1372,9 @@ function placeExpand(byCamera = false) {
   );
   const docked = !seen;
   // On a phone, docked, it stands in the thumb row beside Fit (or beside Claim), in the nearest stretch of
-  // it that no card or port lies under. A phone held sideways has no board to spare: while there is no
-  // such stretch (the row full, the build menu open, cards all along the row) it waits off the board.
+  // it that no card or port lies under, and nowhere else: over the board it would float on top of cards. While
+  // there is no such stretch (the row full, the build menu open, cards all along the row) it waits off the board;
+  // Fit, and the overview, where it stands at the plot's edge, bring it back.
   const rowX = docked && env.phone && ex.row ? rowSeat(ex.row) : null;
   const afford = g.credits + 1e-6 >= expansionCost(g);
   const call = ex.asked && afford;
@@ -1393,8 +1395,12 @@ function placeExpand(byCamera = false) {
     ex.h = mini ? expandEl.offsetHeight || 36 : EXPAND_H;
     if (mini) ex.miniW = ex.w;
   }
+  // (On a phone, docked and with no seat in the thumb row, it is not on the board at all.)
+  if (docked && env.phone && rowX == null) {
+    hideExpand();
+    return;
+  }
   let target = home;
-  let overCard = false;
   if (rowX != null && ex.row) target = { x: Math.min(rowX, ex.row.x1) - ex.w / 2, y: ex.row.y, s: 1 };
   else if (docked) {
     // (Docked over the board it keeps off the cards on screen too, with their ports, when there is room
@@ -1427,13 +1433,6 @@ function placeExpand(byCamera = false) {
       ex.settling = true;
     } else p = dockSpot({ home, w: ex.w, h: ex.h, area, blocks, gap: DOCK_GAP });
     target = { x: p.x + ex.w / 2, y: p.y + ex.h / 2, s: 1 };
-    overCard = cards.some((b) => p.x < b.x1 && p.x + ex.w > b.x0 && p.y < b.y1 && p.y + ex.h > b.y0);
-  }
-  // A phone held sideways has no board to spare: when neither the thumb row nor the board has a place for
-  // it clear of every card and port, it waits off the board (Fit, which pulls the cards together, brings it back).
-  if (docked && env.phone && ex.short && rowX == null && overCard) {
-    hideExpand();
-    return;
   }
   // A change of place is slid: from one place to the other, to a docked place that jumped, and to any new
   // place the camera did not cause. (Not while the board is being opened, nor when motion is reduced.)
