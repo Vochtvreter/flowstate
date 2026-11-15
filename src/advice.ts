@@ -1269,7 +1269,10 @@ interface Verdict { cand: Cand; base: number; tip: number; cut?: { wire: number;
 /**
  * How far the Flow goal is looked ahead: long enough to see its valve open, if that is still to come (doing nothing
  * may end the wait too). Its first two steps only: from the third on (one more producer every RULES.flow.valveEvery
- * seconds) the valve is minutes away, and a tip that puts the board right is worth giving all the same.
+ * seconds) the valve is minutes away, and a tip that puts the board right is worth giving all the same. (The run
+ * itself is the real game: once the next of those steps is within ADVICE.flowScreen it is seen, and doing nothing
+ * then ends the wait too. On a board three short the line's fix stops being offered as a tip about 50 s before
+ * the third step opens.)
  */
 function flowHorizon(g: Game): number {
   const age = goalAge(g);
