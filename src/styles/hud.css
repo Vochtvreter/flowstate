@@ -23,8 +23,13 @@
 /* The bar is centred over the tree's own column: the column on the right (--tech-side wide) holds
    the tree's way out and its Research button, which nothing may cover. With the inspector open the
    stage already ends where that column begins. */
-#app:has(#insp.open) #hud-strip.over-tech, #app.phone #hud-strip.over-tech { padding-right: 0; }
+#app.insp-open #hud-strip.over-tech, #app.phone #hud-strip.over-tech { padding-right: 0; }
 #hud-strip.over-tech #order, #hud-strip.over-tech #hud-alert, #hud-strip.over-tech .gc-head, #hud-strip.over-tech .gc-lbl { display: none; }
+/* The strip and the inspector (outside the phone layout). The inspector opens beside the stage and the stage
+   gets narrower; the strip is laid out in the stage as it is with the inspector open, whether it is or not, so
+   the card and its Claim do not move when it opens or closes (a press aimed at Claim lands on Claim). hud.ts
+   sets --insp-w (the inspector's width) and decides `tight` on the same box. */
+#app:not(.phone):not(.insp-open) #hud-strip:not(.over-tech) { padding-right: var(--insp-w, 320px); }
 
 /* ---------- goal card ---------- */
 #goal { flex: 0 1 500px; min-width: 0; max-width: 100%; display: flex; align-items: center; gap: 14px; padding: 11px 14px 12px 16px; border-radius: 14px; background: #141d33; border: 1px solid #34467a; box-shadow: 0 10px 30px rgba(0, 0, 0, 0.45); color: #dbe6ff; }
@@ -49,6 +54,8 @@
 .gc-eta::before { content: '·'; margin-right: 8px; }
 /* Nothing is coming in: the wait would never end. Said in the colour of a warning. */
 .gc-eta.never { color: #fcd34d; }
+/* Paused: no time left is promised. */
+.gc-eta.paused, .oc-eta.paused { color: #fcd34d; font-weight: 600; }
 .gc-rewards { display: flex; align-items: center; gap: 5px; flex-wrap: wrap; justify-content: flex-end; }
 div.gc-rewards { justify-content: flex-start; margin-top: 2px; }
 .gc-lbl { font-size: 10.5px; font-weight: 600; letter-spacing: 0.06em; text-transform: uppercase; color: var(--muted); margin-right: 2px; }
@@ -117,6 +124,15 @@ div.gc-rewards { justify-content: flex-start; margin-top: 2px; }
 .alertchip .dot.starved { background: var(--bad); }
 .alertchip b { font-weight: 600; }
 .al-go { flex: none; display: flex; align-items: center; height: 26px; padding: 0 11px; border-radius: 999px; border: 1px solid #3a4a70; background: #1f2840; font-size: 12px; font-weight: 600; }
+/* Paused: the slot says so before anything else, and a press goes on. */
+.alertchip.paused { gap: 8px; padding-left: 8px; border-color: #7a6324; background: #2a2412; color: #fde9b0; }
+.alertchip.paused:hover { background: #332c15; }
+.alertchip.paused b { font-weight: 700; letter-spacing: 0.02em; }
+.pz-ico { flex: none; display: flex; align-items: center; justify-content: center; width: 26px; height: 26px; border-radius: 50%; background: #fcd34d; color: #2a2412; }
+.alertchip.paused .al-go { gap: 5px; border-color: #7a6324; background: #3a3014; color: #fde9b0; }
+/* The game is open in another tab: this one has stopped saving. */
+.alertchip.notice { border-color: #5a4718; }
+.alertchip.notice .dot { background: #fcd34d; }
 
 /* ---------- top bar ---------- */
 /* The Flow ring sits around the credits coin without moving it: the ring hangs outside the button. */
@@ -404,6 +420,20 @@ html[data-input='touch'] #app:not(.phone) #hud #toasts { right: 228px; bottom: c
 .gc-hold b { font-weight: 600; color: #fff; }
 .gc-valve { flex: 1 0 100%; font-size: 11.5px; line-height: 15px; color: #5ce1ff; animation: tip-in 0.35s ease-out; }
 
+/* "Make your first Lens": the Fabricator's inputs, wired or not ("Prism ✓ · Glyph ✗"). */
+.gc-inputs { display: inline-flex; align-items: center; gap: 6px; }
+.gi { display: inline-flex; align-items: center; gap: 4px; font-weight: 600; color: var(--text); }
+.gi svg:last-child { flex: none; }
+.gi.ok svg:last-child { color: #4ade80; }
+.gi.no { color: #fcd34d; }
+.gi.no svg:last-child { color: #f87171; }
+.gi-sep { font-style: normal; color: var(--muted); }
+/* "While you wait · 2 of 3": where the goal has more than one line. */
+.gc-of { color: #7d8aa6; }
+/* The card takes the focus after a claim made from the keyboard. */
+#goal:focus { outline: none; }
+#goal:focus-visible { outline: 2px solid #7aa2ff; outline-offset: 3px; }
+
 /* Claiming. The old card lifts away as a ghost over the new one, which rises after it; the button that was
    pressed sinks away where it stood. Only .gc-body moves: #goal, and the Claim button in it, never do. */
 .gc-ghost { position: absolute; left: 0; z-index: 1; pointer-events: none; animation: gc-lift 120ms ease-in forwards; }
@@ -432,11 +462,16 @@ html[data-input='touch'] .claim-ghost { animation-name: claim-sink-touch; }
 #hud-strip.tight:not(.over-tech) .gc-tip > .gc-in { padding-top: 5px; }
 #hud-strip.tight:not(.over-tech) #order { grid-area: order; justify-self: start; max-width: 100%; }
 #hud-strip.tight:not(.over-tech) #hud-alert { grid-area: alert; justify-self: start; }
-#hud-strip.tight:not(:has(#hud-alert:not([hidden]))) #order, #hud-strip.tight:not(:has(#order:not([hidden]))) #hud-alert { grid-column: 1 / -1; justify-self: center; }
+#hud-strip.tight:not(.has-alert) #order, #hud-strip.tight:not(.has-order) #hud-alert { grid-column: 1 / -1; justify-self: center; }
 #hud-strip.tight .alertchip { min-height: 40px; border-radius: 12px; }
 /* (An order none of which is sold says so in a sentence: it and the alert then get half the row each, or the
    alert would be left a sliver four lines tall.) */
-#hud-strip.tight:not(.over-tech):has(#order[data-stuck='1']) { grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); }
+#hud-strip.tight.stuck:not(.over-tech) { grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); }
+/* A box too narrow even for that (a tablet held upright: the stage beside an open inspector, which is the box the
+   strip keeps, is under 520 px): the order and the alert each take a row of their own, the width of the card. */
+#hud-strip.tight.stack:not(.over-tech) { grid-template-columns: minmax(0, 1fr); grid-template-areas: 'goal' 'order' 'alert'; }
+#hud-strip.tight.stack:not(.over-tech) #order, #hud-strip.tight.stack:not(.over-tech) #hud-alert { justify-self: stretch; }
+#hud-strip.tight.stack .alertchip { width: 100%; }
 /* With a window of 1000 px or more the squeezed card is still wide enough for the pips to ride in its head
    row, after the step (as on a phone held sideways): no line of their own. */
 @media (min-width: 1000px) {
@@ -459,6 +494,7 @@ html[data-input='touch'] .claim-ghost { animation-name: claim-sink-touch; }
    second line. */
 #hud-strip.tight #order, #app.phone #order { position: relative; flex: none; gap: 8px; min-height: 44px; padding: 4px 6px 6px 8px; border-radius: 12px; font-size: 12.5px; }
 #hud-strip.tight #order[data-ready='1'], #app.phone #order[data-ready='1'] { padding: 3px 4px 5px 8px; }
+#app.phone #order[data-ready='1'] { padding-top: 2px; padding-bottom: 4px; }
 #hud-strip.tight .oc-ico, #app.phone .oc-ico { width: 28px; height: 28px; border-radius: 8px; }
 #hud-strip.tight .oc-main, #app.phone .oc-main { flex-flow: row wrap; align-items: center; gap: 1px 8px; }
 #hud-strip.tight .oc-lbl, #hud-strip.tight .oc-pay .gc-lbl, #app.phone .oc-lbl, #app.phone .oc-pay .gc-lbl { display: none; }
@@ -504,8 +540,8 @@ html[data-input='mouse'] #hud-strip.tight .claim.sm { height: 32px; }
    (the "tap where..." line takes its place). Under the open tech tree the whole strip stays below the
    tree (z-index 10): the tree's own "Goal complete" bar leads back to it. */
 #app.phone #hud { padding: 4px var(--edge-r, 8px) 0 var(--edge-l, 8px); align-items: stretch; }
-#app.phone #hud-strip, #app.phone #hud-strip.over-tech { z-index: 10; align-items: stretch; gap: 4px; padding-right: 0; }
-#app.phone #hud-row { flex-direction: column; flex-wrap: nowrap; align-items: stretch; gap: 4px; }
+#app.phone #hud-strip, #app.phone #hud-strip.over-tech { z-index: 10; align-items: stretch; gap: 3px; padding-right: 0; }
+#app.phone #hud-row { flex-direction: column; flex-wrap: nowrap; align-items: stretch; gap: 3px; }
 #app.phone #goal, #app.phone #order { flex: none; }
 
 #app.phone #goal .claim {
@@ -520,14 +556,14 @@ html[data-input='mouse'] #hud-strip.tight .claim.sm { height: 32px; }
 @keyframes claim-breathe-wide { 50% { transform: scale(1.012, 1.08); opacity: 0.6; } }
 @keyframes claim-halo-wide { 0% { transform: scale(0.99, 0.96); opacity: 0.8; } 75%, 100% { transform: scale(1.03, 1.3); opacity: 0; } }
 #app.phone.building #goal .claim, #app.phone.carrying #goal .claim,
-#app.phone:has(#board.arming, #board.wiring, #board.placing) #goal .claim { opacity: 0; visibility: hidden; pointer-events: none; transition: transform 0.22s, opacity 0.15s, visibility 0s linear 0.15s; }
+#app.phone #hud-strip.aiming #goal .claim { opacity: 0; visibility: hidden; pointer-events: none; transition: transform 0.22s, opacity 0.15s, visibility 0s linear 0.15s; }
 #app.phone .claim-ghost { border-radius: 16px; }
 
 /* The goal card: the same parts, set tighter. */
-#app.phone #goal { display: flex; flex-wrap: nowrap; gap: 0; padding: 6px 10px 7px 12px; border-radius: 12px; }
+#app.phone #goal { display: flex; flex-wrap: nowrap; gap: 0; padding: 5px 10px 6px 12px; border-radius: 12px; }
 #app.phone #goal.done { align-self: center; padding: 6px 14px; }
 #app.phone .gc-main { --gc-gap: 2px; flex: 1 1 auto; }
-#app.phone .gc-pips { gap: 3px; height: 8px; margin-bottom: 1px; }
+#app.phone .gc-pips { gap: 3px; height: 8px; }
 #app.phone .pip { width: 5px; height: 5px; }
 #app.phone .pip.big { width: 8px; height: 8px; }
 #app.phone .pip-gap { width: 3px; }
@@ -548,7 +584,7 @@ html[data-input='mouse'] #hud-strip.tight .claim.sm { height: 32px; }
 #app.phone .gc-show { height: 36px; padding: 0 12px; }
 #app.phone .gc-show::after { content: ''; position: absolute; inset: -4px 0; }
 /* The line: the tick, its label over the sentence (at the hint's size), and the button. */
-#app.phone .gc-line > .gc-in { margin-top: 2px; padding-top: 4px; }
+#app.phone .gc-line > .gc-in { margin-top: 1px; padding-top: 3px; }
 #app.phone .gc-linebody { line-height: 16px; }
 #app.phone .gc-linehead { height: 14px; line-height: 14px; }
 #app.phone .gc-linehead .gc-lbl { font-size: 10px; }
@@ -557,7 +593,7 @@ html[data-input='mouse'] #hud-strip.tight .claim.sm { height: 32px; }
 #app.phone .gc-bought { position: absolute; left: 0; top: 0; white-space: nowrap; font-size: 11.5px; }
 #app.phone .gc-line.said .gc-lbl { visibility: hidden; }
 /* The tip: what it buys, the sentence and its price, beside the button. */
-#app.phone .gc-tip > .gc-in { flex-wrap: nowrap; gap: 8px; margin-top: 2px; padding-top: 4px; font-size: 12px; line-height: 15px; }
+#app.phone .gc-tip > .gc-in { flex-wrap: nowrap; gap: 8px; margin-top: 1px; padding-top: 3px; font-size: 12px; line-height: 15px; }
 #app.phone .gc-tipbody { flex: 1 1 auto; gap: 1px; }
 #app.phone .gc-tiplead { height: 15px; gap: 6px; }
 #app.phone .gc-tipbadge { height: 14px; line-height: 14px; }
@@ -568,19 +604,32 @@ html[data-input='mouse'] #hud-strip.tight .claim.sm { height: 32px; }
    phone.ts decides (#app.fold) and keeps #app.hint-open: each new goal opens its hint, a press on the
    board folds it away, a tap on the card opens and closes it. A small chevron says the card opens.
    (The line and the tip do not fold: during a wait they are what there is to do.) */
-#app.phone.fold #goal { cursor: pointer; }
-#app.phone.fold:not(.hint-open) .gc-hint { display: none; }
-#app.phone.fold #goal:not(.done):not([data-ready='1']) .gc-body:not(.gc-ghost) .gc-head::after { content: ''; flex: none; order: 9; width: 7px; height: 7px; margin: -3px 2px 0 4px; border-right: 2px solid #9db8ff; border-bottom: 2px solid #9db8ff; transform: rotate(45deg); opacity: 0.8; }
-#app.phone.fold.hint-open #goal:not(.done):not([data-ready='1']) .gc-body:not(.gc-ghost) .gc-head::after { transform: rotate(-135deg); margin-top: 3px; }
-#app.phone.fold .gc-head { justify-content: flex-start; }
-#app.phone.fold .gc-head .gc-rewards, #app.phone.fold .gc-head .gc-done { margin-left: auto; }
+/* During a wait (#goal.wait, set in hud.ts: the card is saving up, or shows the line or a tip) the card folds its
+   hint the same way on any phone: what there is to do then is the line or the tip, and the title says what the
+   goal is. The hint is open when the goal comes up and comes back at a tap on the card. */
+#app.phone.fold #goal, #app.phone #goal.wait { cursor: pointer; }
+#app.phone.fold:not(.hint-open) .gc-hint, #app.phone:not(.hint-open) #goal.wait .gc-hint { display: none; }
+#app.phone.fold #goal:not(.done):not([data-ready='1']) .gc-body:not(.gc-ghost) .gc-head::after,
+#app.phone #goal.wait:not(.done):not([data-ready='1']) .gc-body:not(.gc-ghost) .gc-head::after { content: ''; flex: none; order: 9; width: 7px; height: 7px; margin: -3px 2px 0 4px; border-right: 2px solid #9db8ff; border-bottom: 2px solid #9db8ff; transform: rotate(45deg); opacity: 0.8; }
+#app.phone.fold.hint-open #goal:not(.done):not([data-ready='1']) .gc-body:not(.gc-ghost) .gc-head::after,
+#app.phone.hint-open #goal.wait:not(.done):not([data-ready='1']) .gc-body:not(.gc-ghost) .gc-head::after { transform: rotate(-135deg); margin-top: 3px; }
+#app.phone.fold .gc-head, #app.phone #goal.wait .gc-head { justify-content: flex-start; }
+#app.phone.fold .gc-head .gc-rewards, #app.phone.fold .gc-head .gc-done,
+#app.phone #goal.wait .gc-head .gc-rewards, #app.phone #goal.wait .gc-head .gc-done { margin-left: auto; }
 
-/* The order is one row (see "the order as one row" above). */
+/* The order is one row (see "the order as one row" above). While it is not ready it has no button in it, and
+   it is as tall as its line needs: a press does nothing there. */
+#app.phone #order:not([data-ready='1']):not([data-stuck='1']) { min-height: 34px; padding-top: 3px; padding-bottom: 5px; }
+#app.phone #order:not([data-ready='1']):not([data-stuck='1']) .oc-ico { width: 24px; height: 24px; border-radius: 7px; }
 
 /* The alert: one pill, two lines of text at most before it grows. */
 #app.phone #hud-alert { align-self: center; }
-#app.phone .alertchip { min-height: 44px; padding: 3px 4px 3px 12px; gap: 8px; font-size: 12.5px; line-height: 16px; }
-#app.phone .al-go { height: 32px; }
+/* 36 px to look at and 44 px to press: the reach above and below is the gap over it and the board under it.
+   (Measured from inside the chip's 1 px border, hence 5 px.) */
+#app.phone .alertchip { position: relative; min-height: 36px; padding: 3px 4px 3px 12px; gap: 8px; font-size: 12.5px; line-height: 16px; }
+#app.phone .alertchip::after { content: ''; position: absolute; inset: -5px 0; }
+#app.phone .al-go { height: 28px; }
+#app.phone .pz-ico { width: 24px; height: 24px; }
 
 /* A phone on its side has 276 px of stage. The card folds to one line (step, pips and reward over the
    title, progress beside it) with its hint behind a tap, as above; the line or the tip follows as one
@@ -590,10 +639,10 @@ html[data-input='mouse'] #hud-strip.tight .claim.sm { height: 32px; }
 @media (orientation: landscape) and (max-height: 520px) {
   #app.phone #hud { padding-top: 4px; padding-right: calc(var(--edge-r, 8px) + var(--shift, 0px)); }
   #app.phone #hud-strip, #app.phone #hud-strip.over-tech { display: grid; grid-template-columns: minmax(0, 3fr) minmax(0, 2fr); grid-template-areas: 'goal order' 'goal alert'; grid-template-rows: auto 1fr; gap: 4px 6px; align-items: start; }
-  #app.phone #hud-strip:not(:has(#order:not([hidden]), #hud-alert:not([hidden]))) { grid-template-columns: minmax(0, 1fr); grid-template-areas: 'goal'; }
+  #app.phone #hud-strip:not(.has-order):not(.has-alert) { grid-template-columns: minmax(0, 1fr); grid-template-areas: 'goal'; }
   #app.phone #hud-row { display: contents; }
-  #app.phone:has(#insp.open, #build-sheet.open) #hud-strip { grid-template-columns: minmax(0, 1fr); grid-template-areas: 'goal'; }
-  #app.phone:has(#insp.open, #build-sheet.open) #order, #app.phone:has(#insp.open, #build-sheet.open) #hud-alert { display: none; }
+  #app.phone.insp-open #hud-strip, #app.phone.building #hud-strip { grid-template-columns: minmax(0, 1fr); grid-template-areas: 'goal'; }
+  #app.phone.insp-open #order, #app.phone.insp-open #hud-alert, #app.phone.building #order, #app.phone.building #hud-alert { display: none; }
   #app.phone #goal { grid-area: goal; padding: 4px 10px 5px 12px; }
   #app.phone #goal.done { justify-self: center; }
   #app.phone #order { grid-area: order; }
@@ -605,20 +654,20 @@ html[data-input='mouse'] #hud-strip.tight .claim.sm { height: 32px; }
   #app.phone .gc-pips { position: absolute; left: 104px; top: 4px; margin: 0; }
   #app.phone .gc-body { display: grid; grid-template-columns: minmax(40%, 1fr) auto; grid-template-areas: 'head head' 'title prog' 'hint hint' 'line line' 'tip tip'; align-items: center; gap: 1px 12px; }
   /* The Flow goal's progress (bar and mark, the count, the seconds to hold, the word about the valve) is a row of its own. */
-  #app.phone .gc-body:has(.gc-prog.flow) { grid-template-areas: 'head head' 'title title' 'prog prog' 'hint hint' 'line line' 'tip tip'; }
+  #app.phone .gc-body.flow { grid-template-areas: 'head head' 'title title' 'prog prog' 'hint hint' 'line line' 'tip tip'; }
   #app.phone .gc-head { grid-area: head; min-height: 16px; }
   #app.phone .gc-head .rw { height: 16px; line-height: 16px; }
   #app.phone .gc-title { grid-area: title; }
   #app.phone .gc-prog { grid-area: prog; margin: 0; }
   #app.phone .gc-prog .pbar, #app.phone .gc-prog .fl-bar { flex: none; width: 48px; }
   /* (Beside the title there is room for the count and the time left, or for a bar: while a time is shown, not for both.) */
-  #app.phone .gc-prog:has(.gc-eta) > .pbar { display: none; }
+  #app.phone .gc-prog.eta > .pbar { display: none; }
   #app.phone .gc-prog .fl-bar .pbar { flex: 1; width: auto; }
   #app.phone .gc-valve { flex: 0 1 auto; }
   #app.phone div.gc-rewards { grid-area: prog; margin: 0; flex-wrap: nowrap; }
   #app.phone .gc-hint { grid-area: hint; padding: 2px 0 1px; }
   #app.phone .gc-line { grid-area: line; }
-  #app.phone .gc-line > .gc-in { margin-top: 2px; padding-top: 3px; }
+  #app.phone .gc-line > .gc-in { margin-top: 1px; padding-top: 3px; }
   /* (The label runs in before the sentence, as on a squeezed desktop stage: see "run in" above.) */
   #app.phone .gc-linehead { display: inline; height: auto; white-space: normal; }
   #app.phone .gc-linehead .gc-lbl { margin-right: 6px; }
@@ -627,7 +676,7 @@ html[data-input='mouse'] #hud-strip.tight .claim.sm { height: 32px; }
   #app.phone .gc-line.said .gc-lbl { visibility: visible; }
   #app.phone .gc-line.said .gc-linetxt { visibility: hidden; }
   #app.phone .gc-tip { grid-area: tip; }
-  #app.phone .gc-tip > .gc-in { margin-top: 2px; padding-top: 3px; }
+  #app.phone .gc-tip > .gc-in { margin-top: 1px; padding-top: 3px; }
   /* The tip's lead runs in before its sentence too. Done, the row says what that bought where the lead stood,
      and the tip's own words keep their room unseen: the row is as tall as it was. */
   #app.phone .gc-tipbody { display: block; }

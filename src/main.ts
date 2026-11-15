@@ -19,8 +19,8 @@ import { closeTech, initTech, openTech, renderTech } from './ui/tech';
 import { initFeel } from './ui/feel';
 import { adviserStats, boardKey, holdAdviser } from './ui/advice-client';
 import { TIP, lineShown, offerTip, tipBought, tipShown } from './ui/advice-tip';
-import { markedControl } from './ui/advice-show';
-import { hudAnchors, initHud } from './ui/hud';
+import { focusSeen, markedControl } from './ui/advice-show';
+import { alertState, hudAnchors, initHud, setElsewhere } from './ui/hud';
 import { backToStart, initScreens, isStarted, screenOpen, screensApi, showStart } from './ui/hud-screens';
 import { initPhone } from './ui/phone';
 import { emitBeat, emitFrame, emitGame, emitNewGame, initToasts, onSignal, select, toast, touch, ui } from './ui/ui';
@@ -33,9 +33,17 @@ const $ = <T extends HTMLElement>(id: string) => document.getElementById(id) as 
 /** When the loaded save was written (ms), until the player presses Continue; null for a new game. */
 let resumedFrom: number | null = null;
 
+/** The save's key in localStorage (state.ts). */
+const SAVE_KEY = 'flowstate-save-v1';
+/**
+ * Another tab has written the save since this page loaded: this one no longer saves, so that neither tab can
+ * overwrite what the other has done. It says so (hud.ts) and a reload takes the game up where the other left it.
+ */
+let elsewhere = false;
+
 /** Nothing is saved before the player has pressed Start: a game nobody began is not a save to continue. */
 function save() {
-  if (isStarted()) saveGame(ui.g);
+  if (isStarted() && !elsewhere) saveGame(ui.g);
 }
 
 /** Erase everything and return to the start screen. The one way a game is replaced. */
@@ -56,6 +64,9 @@ function resetGame() {
 
 /** The game starts running. A loaded save is first credited with the time it was away. */
 function begin() {
+  // This is the tab being played now: it writes the save at once (once the start screen has done its part), so
+  // that another tab still open on the same game hears of it and stops saving.
+  setTimeout(save, 0);
   const g = ui.g;
   const from = resumedFrom;
   resumedFrom = null;
@@ -94,13 +105,26 @@ function boot() {
   });
   window.addEventListener('keydown', onKey);
   window.addEventListener('beforeunload', save);
+  // Two tabs on one game: when the other writes the save, this one stops saving and says so.
+  window.addEventListener('storage', (e) => {
+    if (e.key !== SAVE_KEY || elsewhere) return;
+    try {
+      if (e.storageArea && e.storageArea !== localStorage) return;
+    } catch {
+      return;
+    }
+    elsewhere = true;
+    setElsewhere();
+  });
   document.addEventListener('visibilitychange', () => {
     if (document.hidden) save();
   });
   setInterval(save, 10000);
   // Test hooks. `ui` and `tick` are relied on by scripts; the rest are there for convenience.
   (window as unknown as Record<string, unknown>).flowstate = {
-    ui, tick, fx, view: { fit: fitView, zoomBy, jumpTo, frame: frameNodes, tidy: tidyBoard }, onSignal, hud: { ...screensApi, anchors: hudAnchors },
+    ui, tick, fx, view: { fit: fitView, zoomBy, jumpTo, frame: frameNodes, tidy: tidyBoard }, onSignal,
+    // (The HUD: the screens, where effects start from, what the alert slot says, and the last look at the goal's nodes.)
+    hud: { ...screensApi, anchors: hudAnchors, alert: alertState, focus: focusSeen },
     // The adviser: how it is run and what it cost; the tip on the card and its timing; the control "Show me" ringed;
     // the goal card's "while you wait" line with its next step; what the tip row says a followed tip bought.
     adviser: {
