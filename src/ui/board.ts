@@ -28,7 +28,7 @@ import {
   Beacon, Flow, floater, flowPoint, fly, frameFx, invalidateFx, makeFlow, setBeacons, setFlowPath, setFlows,
 } from './fx';
 import {
-  Box, CARD_GAP, Card, NODE_W, Port, Pt, View, ZOOM, bezierAt, boxClear, boxUnion, centreView, dockSpot, fadeColor, fitBox, fitZoom,
+  Box, CARD_GAP, Card, NODE_W, Port, Pt, View, ZOOM, bestWindow, bezierAt, boxClear, boxUnion, centreView, dockSpot, fadeColor, fitBox, fitZoom,
   frameBox, freeSpot as nearestSpot, heldRate, inPorts, matColor, nodeSize, outPorts, pathD, pinchView, roomFor, segmentsCross, separate,
   wholeGain, wireEnds,
 } from './geom';
@@ -643,6 +643,12 @@ function openView() {
   if (t.k >= floor) return go(t);
   const armed = tapWire ? [tapWire.from] : [];
   const named = (armed.length ? armed : goalFocus(g)).map((id) => nodeById(g, id)).filter((n): n is GNode => !!n);
+  // On a phone (a game opened, or the phone turned) as much of the factory as can be read at once: at the
+  // floor of the detailed tier, the stretch of it with the most cards on screen, the armed port among them.
+  if (env.phone && (!named.length || armed.length)) {
+    const v = bestWindow(g.nodes.map(cardBox), named.map(cardBox), inset(freeArea(true), 16), floor);
+    if (v) return go(v);
+  }
   if (named.length) {
     let fb: Box | null = null;
     for (const n of named) fb = boxUnion(fb, cardBox(n));

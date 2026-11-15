@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import {
-  Box, CARD_GAP, Card, PLOT_MARGIN, boxClear, cardsOverlap, dockSpot, fadeColor, fitBox, frameBox, freeSpot, heldRate, pinchView, separate, spotFree,
-  wholeGain,
+  Box, CARD_GAP, Card, PLOT_MARGIN, bestWindow, boxClear, cardsOverlap, dockSpot, fadeColor, fitBox, frameBox, freeSpot, heldRate, pinchView, separate,
+  spotFree, wholeGain,
 } from './geom';
 
 const free = (k: number) => k;
@@ -449,5 +449,40 @@ describe('heldRate: a still pattern is only redrawn for a real change of rate', 
     expect(heldRate(1, 0)).toBe(0);
     expect(heldRate(0, 0.02)).toBe(0.02);
     expect(heldRate(2, -1)).toBe(0);
+  });
+});
+
+describe('bestWindow: the stretch of a big factory with the most cards on screen', () => {
+  const card = (x: number, y: number): Box => ({ x0: x, y0: y, x1: x + 172, y1: y + 72 });
+  const area: Box = { x0: 16, y0: 100, x1: 374, y1: 700 };
+  const shows = (v: { x: number; y: number; k: number }, b: Box) =>
+    b.x0 * v.k + v.x >= area.x0 - 0.5 && b.x1 * v.k + v.x <= area.x1 + 0.5 && b.y0 * v.k + v.y >= area.y0 - 0.5 && b.y1 * v.k + v.y <= area.y1 + 0.5;
+  it('picks the cluster of cards over a lone card', () => {
+    const boxes = [card(100, 100), card(100, 240), card(300, 160), card(1400, 160)];
+    const v = bestWindow(boxes, [], area, 0.74)!;
+    expect(boxes.filter((b) => shows(v, b)).length).toBe(3);
+    expect(shows(v, boxes[3])).toBe(false);
+  });
+  it('keeps every card it must show in view, even when another stretch has more', () => {
+    const boxes = [card(100, 100), card(100, 240), card(300, 160), card(1400, 160)];
+    const v = bestWindow(boxes, [boxes[3]], area, 0.74)!;
+    expect(shows(v, boxes[3])).toBe(true);
+  });
+  it('shows everything when everything fits, and is null with no cards', () => {
+    const boxes = [card(0, 0), card(200, 0)];
+    const v = bestWindow(boxes, [], area, 0.74)!;
+    expect(boxes.every((b) => shows(v, b))).toBe(true);
+    expect(bestWindow([], [], area, 0.74)).toBeNull();
+  });
+  it('on random boards no camera at that zoom shows more cards', () => {
+    let seed = 7;
+    const rnd = () => ((seed = (seed * 16807) % 2147483647) / 2147483647);
+    for (let t = 0; t < 40; t++) {
+      const boxes = Array.from({ length: 3 + Math.floor(rnd() * 10) }, () => card(Math.round(rnd() * 1600), Math.round(rnd() * 900)));
+      const k = 0.5 + rnd() * 0.5;
+      const v = bestWindow(boxes, [], area, k)!;
+      const n = boxes.filter((b) => shows(v, b)).length;
+      for (let x = -1800; x < 400; x += 25) for (let y = -900; y < 700; y += 25) expect(boxes.filter((b) => shows({ x, y, k }, b)).length).toBeLessThanOrEqual(n);
+    }
   });
 });

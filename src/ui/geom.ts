@@ -192,6 +192,48 @@ export function frameBox(v: View, box: Box, area: Box, floor: number): View {
   return { x, y, k };
 }
 
+/**
+ * At zoom `k`, the camera that shows the most of these world boxes whole inside a screen area, with every
+ * one of `must` among them (when that is possible at all). Ties go to the camera nearest the middle of all
+ * the boxes. For a factory too big to read at once: the stretch of it with the most cards on screen. Null
+ * when no box can be shown whole.
+ */
+export function bestWindow(boxes: Box[], must: Box[], area: Box, k: number): View | null {
+  if (!boxes.length) return null;
+  const aw = area.x1 - area.x0, ah = area.y1 - area.y0;
+  // Every camera worth trying puts some box's left or right edge on the area's left or right side, and
+  // likewise top and bottom: a best window can always be slid until it does.
+  const xs = new Set<number>(), ys = new Set<number>();
+  for (const b of boxes) {
+    xs.add(area.x0 - b.x0 * k);
+    xs.add(area.x1 - b.x1 * k);
+    ys.add(area.y0 - b.y0 * k);
+    ys.add(area.y1 - b.y1 * k);
+  }
+  let all: Box | null = null;
+  for (const b of boxes) all = boxUnion(all, b);
+  const mid = centreView(all!, area, k);
+  const inside = (b: Box, x: number, y: number) =>
+    b.x0 * k + x >= area.x0 - 0.5 && b.x1 * k + x <= area.x1 + 0.5 && b.y0 * k + y >= area.y0 - 0.5 && b.y1 * k + y <= area.y1 + 0.5;
+  let best: View | null = null;
+  let bestN = 0, bestD = Infinity;
+  for (const x of xs) {
+    for (const y of ys) {
+      if (must.some((b) => !inside(b, x, y))) continue;
+      let n = 0;
+      for (const b of boxes) if (inside(b, x, y)) n++;
+      const d = Math.hypot(x - mid.x, y - mid.y);
+      if (n > bestN || (n === bestN && n > 0 && d < bestD)) {
+        bestN = n;
+        bestD = d;
+        best = { x, y, k };
+      }
+    }
+  }
+  // (Room for no box at all, or `must` cannot all be shown: nothing to choose.)
+  return best && aw > 0 && ah > 0 ? best : null;
+}
+
 // ---------- where a card may stand ----------
 
 /** Clear space kept between two cards, and between a card and a deposit with no Well on it. */
