@@ -333,13 +333,18 @@ function ignite(at: Pt, spec: Spec) {
 /** The colours a Prism splits light into, red to violet, each from a material of that colour. */
 const SPECTRUM = ['spark', 'ember', 'glint', 'shard', 'breeze', 'ink', 'murk'] as const;
 
-/** First Prism: a ray of white comes in from the left, and leaves on the right as a fan of seven colours. Diamonds, as Prism is on the wires. */
+/**
+ * First Prism: a ray of white comes in from the left, and leaves on the right as a fan of seven colours. Diamonds, as Prism is on the wires.
+ * (On the flat card of a short screen the words are to the right of the glyph: there the fan opens upward and downward instead, clear of them.)
+ */
 function refract(at: Pt, spec: Spec) {
-  const reach = Math.min(window.innerWidth * 0.42, 200);
+  const flat = window.innerHeight < FLAT.below;
+  const reach = Math.min(window.innerWidth * 0.42, flat ? 150 : 200);
   const ray = { top: true, jitter: 0, bend: 0, shape: 'diamond' as const };
   fly({ x: at.x - reach, y: at.y }, at, '#ffffff', 8, () => {
     SPECTRUM.forEach((m, i) => {
-      const a = ((i - (SPECTRUM.length - 1) / 2) / (SPECTRUM.length - 1)) * 1.3;
+      const u = (i - (SPECTRUM.length - 1) / 2) / ((SPECTRUM.length - 1) / 2);
+      const a = flat ? (u <= 0 ? -1 : 1) * (0.7 + 0.8 * Math.abs(u)) : u * 0.65;
       fly(at, { x: at.x + Math.cos(a) * reach, y: at.y + Math.sin(a) * reach }, MATERIALS[m].color, 4, undefined, { ...ray, ttl: 0.5, stagger: 0.045, spread: 0, size: 5 });
     });
     burst(at, '#ffffff', 10, { top: true, power: 1.1, shape: 'diamond' });
