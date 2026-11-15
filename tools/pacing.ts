@@ -22,7 +22,10 @@
  *                                      or by goal (make-glyph: all of that goal's lines). Against the plain run,
  *                                      the seconds on the goals a line stands on are what that line is worth
  *                --lineReserve=0       what-if: a line's step does not keep back the credits for the card's own
- *                                      next purchase (ADVICE.lineReserve)
+ *                                      next purchase (ADVICE.lineReserve); --lineReserve=full keeps back all of its
+ *                                      price from the start, the rule before ADVICE.reserveEarned
+ *                --claimDelay=<lo>,<hi> what-if: the card players claim this many seconds after Claim lights (8,16
+ *                                      otherwise); 1,3 is a person who presses it at once
  *                --lineDelay=<seconds> what-if: they get to a line only once it has been on the card that long
  *                --tipDelay=<seconds>  what-if: they follow a tip after this long on offer (15 otherwise)
  *                --tipEvery=<n>[,<k>]  what-if: they follow only every nth tip that comes due, starting with
@@ -272,8 +275,8 @@ export const TARGETS = {
     /** An action available at least this often in the first two minutes. */
     earlyIdleMax: 10,
     glyph: [360, 480] as [number, number],
-    /** 14:30–18:00. */
-    lens: [870, 1080] as [number, number],
+    /** 14:00–18:00 (the first Lens for the card players came down to 17:30–21:00: decision D1 of the second fix round). */
+    lens: [840, 1080] as [number, number],
     /** No more than this long on "Build a Fabricator". */
     fabricatorMax: 300,
     /** No dead stretch over 60 s before 10:00, none over 120 s before the first Lens. */
@@ -285,8 +288,8 @@ export const TARGETS = {
     paradoxBy: 1800,
   },
   newcomer: {
-    /** 19:00–23:00. */
-    lens: [1140, 1380] as [number, number],
+    /** 17:30–21:00, as for the player who follows no tip (the two play the same game: the newcomer follows none). */
+    lens: [1050, 1260] as [number, number],
     /** Never more than this long on one goal of the demo... */
     goalMax: 240,
     /** ...and "Build a Fabricator" has the same limit by name. */
@@ -294,23 +297,26 @@ export const TARGETS = {
   },
   /** The newcomer at 10 s per action. */
   newcomer10: {
-    lensBy: 1800,
+    lensBy: 1440,
     goalMax: 300,
   },
   /**
-   * The newcomer who never follows a tip: the cards and their "while you wait" lines alone. The demo's twenty
-   * minutes with something to do in them: no stretch of nothing to do (Bot.nothing) over a minute and a half,
-   * and nothing to do for no more than 40% of the time to the first Lens.
+   * The newcomer who never follows a tip: the cards and their "while you wait" lines alone. Decision D1 of the
+   * second fix round, "idle over length": the first Lens between 17:30 and 21:00, with something to do in it: no
+   * stretch of nothing to do (Bot.nothing) over a minute, no goal with more than 75 s of nothing to do in all,
+   * nothing to do for no more than 30% of the time to the first Lens, and nothing sold over its demand before it
+   * (the first surplus is a moment of free play).
    */
   cardonly: {
-    lens: [1200, 1380] as [number, number],
+    lens: [1050, 1260] as [number, number],
     goalMax: 360,
-    nothingStretch: 90,
-    nothingShare: 0.4,
+    nothingStretch: 60,
+    nothingShare: 0.3,
+    nothingGoal: 75,
   },
   /** The newcomer who reads no line, only the hints and the tips: slower, never stranded. */
   nolines: {
-    lensBy: 1920,
+    lensBy: 1800,
   },
   /** The old floor, for --policy=slow. */
   slow: {
@@ -1224,7 +1230,7 @@ export class Bot {
     if (CFG.lineDelay > 0 && (this.lineSeen?.goal !== g.goal.i || g.time - this.lineSeen.t < CFG.lineDelay)) return null;
     const a = lineAdvice(g);
     if (!a) return null;
-    const kind: Kind = a.expand ? 'expand' : a.cut ? 'cut' : a.upgrade ? 'upgrade' : a.build ? 'build' : 'wire';
+    const kind: Kind = a.expand ? 'expand' : a.research ? 'research' : a.cut ? 'cut' : a.upgrade ? 'upgrade' : a.build ? 'build' : 'wire';
     return {
       cls: a.build || a.expand ? 'new' : 'fix', kind, cost: a.cost ?? 0, label: `card, meanwhile (${line.id}): ${a.text.mouse}`,
       run: () => {
@@ -1875,7 +1881,9 @@ function checks(r: Result): Check[] {
     within('first Lens', r.lens, T.lens);
     goalMax(T.goalMax);
     add('longest stretch with nothing to do', `${Math.round(r.nothing.longest)}s (${r.nothing.longestGoal})`, `≤ ${T.nothingStretch}s`, r.nothing.longest <= T.nothingStretch);
-    add('nothing to do, share of the time to the Lens', `${Math.round(r.nothing.share * 100)}%`, `≤ ${Math.round(T.nothingShare * 100)}%`, r.lens != null && r.nothing.share <= T.nothingShare);
+    add('nothing to do, share of the time to the Lens', `${(r.nothing.share * 100).toFixed(1)}%`, `≤ ${Math.round(T.nothingShare * 100)}%`, r.lens != null && r.nothing.share <= T.nothingShare);
+    const worst = Object.entries(r.nothing.perGoal).reduce((m, [i, s]) => (s > m.s ? { i: Number(i), s } : m), { i: -1, s: 0 });
+    add('most nothing to do on one goal', `${Math.round(worst.s)}s (${GOALS[worst.i]?.title ?? '—'})`, `≤ ${T.nothingGoal}s`, worst.s <= T.nothingGoal);
   } else if (judge === 'nolines') {
     by('first Lens', r.lens, TARGETS.nolines.lensBy);
   } else {
@@ -1885,6 +1893,12 @@ function checks(r: Result): Check[] {
     add('dearest goal-path tech, in Data income', `${isFinite(r.wall.seconds) ? Math.round(r.wall.seconds) + 's' : 'never'} (${r.wall.id})`, `≤ about ${T.dataWall}s`, r.wall.seconds <= T.dataWall * 1.1);
   }
   add('credits from sales and orders at the Lens', r.earnedShare == null ? '—' : `${Math.round(r.earnedShare * 100)}%`, `≥ ${Math.round(TARGETS.earnedShare * 100)}%`, r.earnedShare != null && r.earnedShare >= TARGETS.earnedShare);
+  // The card players sell nothing over its demand before the first Lens (decision D1): the first surplus, Market
+  // Lens and the Commerce branch belong to free play. (The fast players may: their own upgrades get them there.)
+  if (r.policy.card) {
+    const early = r.surplusAt != null && (r.lens == null || r.surplusAt.t < r.lens);
+    add('first sale over demand', r.surplusAt ? mmss(r.surplusAt.t) : 'never', 'after the first Lens', !early);
+  }
   return out;
 }
 
@@ -2213,7 +2227,16 @@ function main() {
     else if (k === 'noTips') CFG.tips = false;
     else if (k === 'noMeanwhile') CFG.meanwhile = false;
     else if (k === 'minShare' && v) ADVICE.minShare = Number(v);
-    else if (k === 'lineReserve' && v) ADVICE.lineReserve = v !== '0';
+    else if (k === 'lineReserve' && v) {
+      // 0: no reserve at all; full: the whole price of the card's next purchase is kept back from the start (the
+      // rule before the second fix round); anything else: only what cannot be earned back before it can be made.
+      ADVICE.lineReserve = v !== '0';
+      ADVICE.reserveEarned = v !== 'full';
+    } else if (k === 'claimDelay' && v) {
+      // A card player who claims sooner (or later): --claimDelay=1,3 is a person who presses Claim the moment it lights.
+      const [lo, hi] = v.split(',').map(Number);
+      for (const pol of Object.values(POLICIES)) if (pol.card) pol.claimDelay = [lo, hi ?? lo];
+    }
     else if (k === 'skipLine' && v) CFG.skipLines = v.split(',');
     else if (k === 'lineDelay' && v) CFG.lineDelay = Number(v);
     else if (k === 'tipDelay' && v) {
@@ -2250,7 +2273,7 @@ function main() {
   const what = [
     profileName !== 'current' ? `profile "${profileName}": ${profile.describe}` : '', ...overrides.map((o) => `--set=${o}`),
     CFG.bulk ? '' : '--noBulk', CFG.tips ? '' : '--noTips', CFG.meanwhile ? '' : '--noMeanwhile',
-    ...process.argv.slice(2).filter((a) => /^--(skipLine|lineDelay|tipDelay|tipEvery|hands|minShare)=/.test(a)),
+    ...process.argv.slice(2).filter((a) => /^--(skipLine|lineDelay|tipDelay|tipEvery|hands|minShare|lineReserve|claimDelay)=/.test(a)),
   ].filter(Boolean).join('  ');
   const play = (p: Policy, s: number) => {
     const bot = new Bot(p, s, minutes ?? (p.card ? CFG.minutesCard : p.fast ? CFG.minutesFast : CFG.minutesSlow));
