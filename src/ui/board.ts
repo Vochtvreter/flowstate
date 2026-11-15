@@ -692,10 +692,15 @@ function openView() {
   const armed = tapWire ? [tapWire.from] : drag?.kind === 'wire' && drag.armed ? [drag.from] : drag?.kind === 'wireIn' && drag.armed ? [drag.to] : [];
   const named = (armed.length ? armed : goalFocus(g)).map((id) => nodeById(g, id)).filter((n): n is GNode => !!n);
   // On a phone (a game opened, or the phone turned) as much of the factory as can be read at once: at the
-  // floor of the detailed tier, the stretch of it with the most cards on screen, the armed port among them.
+  // floor of the detailed tier, the stretch of it with the most cards on screen, the armed port among them; or,
+  // when the goal names no node but a place (a free deposit to put a Well on), with that place among them, and
+  // failing that the place itself, readable.
   if (env.phone && (!named.length || armed.length)) {
-    const v = bestWindow(g.nodes.map(cardBox), named.map(cardBox), inset(freeArea(true), 16), floor);
+    const place = armed.length ? null : goalPlace(g);
+    const extra = place ? [place] : [];
+    const v = bestWindow(g.nodes.map(cardBox).concat(extra), named.map(cardBox).concat(extra), inset(freeArea(true), 16), floor);
     if (v) return go(v);
+    if (place) return go(fitTarget(place, true, 1));
   }
   if (named.length) {
     let fb: Box | null = null;
@@ -714,15 +719,25 @@ function openView() {
   // deposit the card's line wants a Well on, or the hint's own ("Place a Well on the Murk deposit"), at a
   // readable zoom; or, where the card asks for the expansion, the plot's lower edge, under which the Expand
   // button stands, with the factory around it at the floor.
+  const place = goalPlace(g);
+  if (place) return go(fitTarget(place, true, 1));
   const spot = lineSpot(g);
-  const depId = spot && 'deposit' in spot ? spot.deposit : goalDeposit(g);
-  const dep = depId != null ? g.deposits.find((x) => x.id === depId) : undefined;
-  if (dep) return go(fitTarget({ x0: dep.x - 12, y0: dep.y - 12, x1: dep.x + 184, y1: dep.y + 84 }, true, 1));
   if ((spot && 'expand' in spot) || (activeGoal(g)?.id === 'expand' && !g.goal.ready)) {
     const w = EXPAND_W * 1.4, mid = g.board.w / 2;
     return go(fitTarget({ x0: mid - w, y0: g.board.h - 200, x1: mid + w, y1: g.board.h + 18 + EXPAND_H + 12 }, true, floor));
   }
   go(t);
+}
+
+/**
+ * The free deposit the goal names, as a world box with a little room round it: the one the card's line wants a
+ * Well on, or the hint's own ("Place a Well on the Murk deposit"). Null when it names none.
+ */
+function goalPlace(g: Game): Box | null {
+  const spot = lineSpot(g);
+  const depId = spot && 'deposit' in spot ? spot.deposit : goalDeposit(g);
+  const dep = depId != null ? g.deposits.find((x) => x.id === depId) : undefined;
+  return dep ? { x0: dep.x - 12, y0: dep.y - 12, x1: dep.x + 184, y1: dep.y + 84 } : null;
 }
 
 /**
@@ -1694,7 +1709,7 @@ export function initBoard(root: HTMLElement) {
     }).observe(boardEl);
   }
   applyView();
-  // For scripts: `flowstate.board.inClear(id)`, `.buildSpot(x, y, type)`, `.covers()` (main.ts builds window.flowstate after the modules have started).
+  // For scripts: `flowstate.board.inClear(id)`, `.buildSpot(x, y, type)`, `.covers()`, `.place()` (main.ts builds window.flowstate after the modules have started).
   const attach = () => {
     const hook = (window as unknown as { flowstate?: Record<string, unknown> }).flowstate;
     if (!hook) return false;
@@ -1706,6 +1721,7 @@ export function initBoard(root: HTMLElement) {
         return buildSpot({ x, y }, w, h, roomFor(type, h));
       },
       covers: () => coverBoxes(),
+      place: () => goalPlace(ui.g),
     };
     return true;
   };
