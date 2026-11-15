@@ -903,12 +903,27 @@ function placeExpand(byCamera = false) {
     if (docked !== ex.docked || (byCamera ? docked && step > DOCK_JUMP : step > 0.5 || Math.abs(target.s - was.s) > 0.002)) {
       ex.slide = { from: { ...ex.drawn }, t0: performance.now() };
     }
+    // The way there must not pass under a floating control: then it just changes place.
+    if (ex.slide && !slideClear(ex.drawn, target)) ex.slide = null;
   } else ex.slide = null;
   ex.docked = docked;
   ex.mini = mini;
   ex.call = call;
   ex.target = target;
   drawExpand();
+}
+
+/** A slide from one stand to the other keeps clear of every control on the way (sampled along it). */
+function slideClear(a: Stand, b: Stand): boolean {
+  const all: Box = { x0: -1e7, y0: -1e7, x1: 1e7, y1: 1e7 };
+  const n = Math.max(10, Math.ceil(Math.hypot(b.x - a.x, b.y - a.y) / 3));
+  for (let i = 1; i < n; i++) {
+    const u = i / n;
+    const x = a.x + (b.x - a.x) * u, y = a.y + (b.y - a.y) * u, sc = a.s + (b.s - a.s) * u;
+    const hw = (ex.w * sc) / 2, hh = (ex.h * sc) / 2;
+    if (!boxClear({ x0: x - hw, y0: y - hh, x1: x + hw, y1: y + hh }, all, ex.blocks, 2)) return false;
+  }
+  return true;
 }
 
 /** Put the button where it belongs, or where it has got to on its way there. */
@@ -2386,29 +2401,60 @@ function arm(d: WireDrag) {
 /** The wire "Show me" last acted out (the 'showme' signal), if it was a wire. */
 let shownWire: { from: number; to: number; port?: number } | null = null;
 
-/** Some of this card can be seen, clear of whatever covers the board's edges. */
-function cardInView(n: GNode): boolean {
+/** Some of this card can be seen, clear of whatever covers the board's edges (`v`: as seen from this view). */
+function cardInView(n: GNode, v: View = ui.view): boolean {
   const b = cardBox(n), a = freeArea(true);
-  const { x: vx, y: vy, k } = ui.view;
-  const cx = ((b.x0 + b.x1) / 2) * k + vx, cy = ((b.y0 + b.y1) / 2) * k + vy;
+  const cx = ((b.x0 + b.x1) / 2) * v.k + v.x, cy = ((b.y0 + b.y1) / 2) * v.k + v.y;
   return cx > a.x0 && cx < a.x1 && cy > a.y0 && cy < a.y1;
 }
 
+/** The general pull-back waits this long after the tap (ms): a player who already knows where to tap is not moved. */
+const PULL_WAIT = 650;
+let pullTimer = 0;
+
 /** A port has just been armed by a tap: bring a node the wire can go to into view (see above). */
 function followArmed(touchy: boolean) {
+  clearTimeout(pullTimer);
   const g = ui.g;
   const t = tapWire;
   if (!t || !touchy || fingers.size > 0) return;
-  const src = nodeById(g, t.from);
-  if (!src) return;
   const sw = shownWire;
   const asked = sw && sw.from === t.from && (sw.port == null || sw.port === t.port) ? nodeById(g, sw.to) : null;
   if (asked && wireOk(g, t.from, t.port, asked.id)) {
+    // "Show me" asked for this wire: its far end, at once.
     if (!cardInView(asked)) frameNodes([t.from, asked.id], true);
     return;
   }
+  const armed = { from: t.from, port: t.port };
+  pullTimer = window.setTimeout(() => pullBack(armed), PULL_WAIT);
+}
+
+/**
+ * No card that can take the armed wire is in view: pull back, about the armed port, until one is (not
+ * past the floor of the detailed tier). If even the floor does not show one, the nearest is framed
+ * together with the port, or alone if they do not fit (the prompt at the top still says what is armed).
+ * Not when the port is no longer armed, nor while a finger is on the board or something else moves it.
+ */
+function pullBack(armed: { from: number; port: number }) {
+  const g = ui.g;
+  const t = tapWire;
+  if (!t || t.from !== armed.from || t.port !== armed.port || fingers.size > 0 || drag || glide || radial || ui.placing) return;
+  const src = nodeById(g, t.from);
+  if (!src) return;
   const can = g.nodes.filter((n) => n.id !== t.from && wireOk(g, t.from, t.port, n.id));
-  if (!can.length || can.some(cardInView)) return;
+  if (!can.length || can.some((n) => cardInView(n))) return;
+  const now = ui.view;
+  const floor = zoomFloor();
+  // The armed port stays where it is on screen while the camera pulls back.
+  const fp = toScreen(t.a);
+  for (let k = now.k; k > floor; ) {
+    k = Math.max(floor, k * 0.94);
+    const v: View = { x: fp.x - t.a.x * k, y: fp.y - t.a.y * k, k };
+    if (can.some((n) => cardInView(n, v))) {
+      moveView(v.x, v.y, v.k, true, FRAME_MS);
+      return;
+    }
+  }
   const d = (n: GNode) => Math.hypot(n.x - src.x, n.y - src.y);
   const near = can.reduce((a, b) => (d(b) < d(a) ? b : a));
   frameNodes([t.from, near.id], true);
@@ -2683,6 +2729,8 @@ function fingerGone(id: number): boolean {
 }
 
 function onDown(e: PointerEvent) {
+  // (A new gesture is the player getting on with it: an armed port's pull-back is not wanted any more.)
+  clearTimeout(pullTimer);
   const t = e.target as HTMLElement;
   const onControl = !!(t.closest('#radial') || t.closest('#expand'));
   // A press on the board takes the camera over from whatever move was under way. (Not a press on a
