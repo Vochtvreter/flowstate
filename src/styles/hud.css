@@ -249,8 +249,10 @@ button.fav:hover { background: #263252; }
 .sum-fallback { display: flex; flex-direction: column; gap: 6px; font-size: 12px; line-height: 16px; color: var(--muted); text-align: left; }
 .sum-fallback textarea { display: block; width: 100%; resize: none; padding: 8px 10px; border-radius: 10px; border: 1px solid #3a4a70; background: #0b0f17; color: var(--text); font: 12.5px/18px var(--mono); user-select: text; -webkit-user-select: text; -webkit-touch-callout: default; touch-action: auto; }
 .sum-said { position: absolute; width: 1px; height: 1px; overflow: hidden; clip-path: inset(50%); white-space: nowrap; }
-/* The strip behind still shows its Claim buttons, which cannot be pressed from here ("Keep playing" claims the goal on the way out). */
-#app:has(#summary:not([hidden])) #hud-strip .claim { visibility: hidden; }
+/* The strip behind still shows its Claim buttons, which cannot be pressed from here ("Keep playing" claims the
+   goal on the way out). (A class set with the card, not `#app:has(#summary…)`: that selector was looked up
+   for every frame of the Claim button's pulse, and cost five frames a second on a large board.) */
+#app.summary-open #hud-strip .claim { visibility: hidden; }
 
 /* A phone: a sheet across the bottom, over the lower part of the stage. */
 #app.phone #summary { padding: 0; }

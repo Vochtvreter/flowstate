@@ -3,7 +3,8 @@
 //
 // Contracts with the other modules:
 //  - #app gets the class `started` the moment the player presses Start or Continue. Until then the
-//    simulation does not run (main.ts asks isStarted()) and nothing is saved.
+//    simulation does not run (main.ts asks isStarted()) and nothing is saved. It has the class
+//    `summary-open` while the end-of-demo summary is up.
 //  - `?play` in the URL skips the start screen, also after a reset. Scripts rely on it.
 //  - The summary opens SUMMARY_DELAY seconds after the 'demo-end' event; the celebration plays in
 //    between. `?nosummary` keeps it shut (for benchmarks that build a finished factory).
@@ -271,6 +272,7 @@ export function openSummary() {
     <span class="sum-said" role="status" aria-live="polite"></span></div>`;
   summaryEl.hidden = false;
   summaryOpen = true;
+  app.classList.add('summary-open');
   coverBehind();
   summaryEl.querySelector<HTMLElement>('.sum-go')!.focus({ preventScroll: true });
   // (On a phone the camera frames the factory above the sheet: phone.ts measures this card.)
@@ -343,6 +345,7 @@ function closeSummary() {
   if (!summaryOpen) return;
   summaryOpen = false;
   summaryEl.hidden = true;
+  app.classList.remove('summary-open');
   summaryEl.innerHTML = '';
   clearTimeout(copiedTimer);
   coverBehind();
