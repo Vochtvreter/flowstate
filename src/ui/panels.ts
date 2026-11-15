@@ -866,10 +866,9 @@ let inspOpenedFor = '';
 /**
  * Scroll the inspector, just opened, so what the player most likely came for is in view: the control "Show me" has
  * ringed, the "Upgrade all" the goal on the card asks for (goal 20, whether it can be afforded yet or not), on a
- * Router the rows of its wires with their
- * Favour buttons, on anything else the first upgrade they can afford. Below the fold of a phone's sheet those were
- * missed, or showed a sliver over Duplicate and Delete (rev-phone F5, rev-wide F2, fr-rules). Nothing moves when it is
- * in view already, nor once a finger is on the panel.
+ * Router the rows of its wires with their Favour buttons, on anything else the first upgrade they can afford. Below
+ * the fold of a phone's sheet those were missed, or showed a sliver over Duplicate and Delete (rev-phone F5, rev-wide
+ * F2, fr-rules). Nothing moves when it is in view already, nor once a finger is on the panel.
  */
 function revealInInspector(opened: string, again = false) {
   if (opened !== inspOpenedFor || inspPanel.busy()) return;
