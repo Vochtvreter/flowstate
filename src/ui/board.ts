@@ -463,14 +463,38 @@ function stageBoxOf(e: Element | null | undefined, gap = 0): Box | null {
   return { x0: b.left - r.left - gap, y0: b.top - r.top - gap, x1: b.right - r.left + gap, y1: b.bottom - r.top + gap };
 }
 
-/** The phone's floating buttons on show, each with FAB_CLEAR around it (stage pixels). */
+/**
+ * How far an open sheet pushes the phone's floating buttons: up by a sheet across the foot of the screen, aside by
+ * one standing at the side (as phone.ts sets --lift and --shift from the same sheets, a frame later).
+ */
+function sheetAside(): { lift: number; shift: number } {
+  let lift = 0, shift = 0;
+  const sw = boardEl.offsetWidth || 1;
+  for (const sheet of [document.getElementById('insp'), buildEl]) {
+    // (While its node is being carried the inspector waits out of sight: see `carrying` in phone.css.)
+    if (!sheet?.classList.contains('open') || (sheet.id === 'insp' && appEl?.classList.contains('carrying'))) continue;
+    if (sheet.offsetWidth >= sw * 0.7) lift = Math.max(lift, sheet.offsetHeight);
+    else shift = Math.max(shift, sheet.offsetWidth + 8);
+  }
+  return { lift, shift };
+}
+
+/**
+ * The phone's floating buttons on show, each with `gap` around it (stage pixels), where they stand once they have
+ * settled: their place in the layout, moved aside by an open sheet. (They slide there with a transition, so where
+ * they are drawn a moment after a sheet opens or closes is on the way: a camera that framed a card from that was
+ * still under them once they had arrived.)
+ */
 function fabBoxes(gap = FAB_CLEAR): Box[] {
   const out: Box[] = [];
   if (!env.phone) return out;
   fabsEl ??= document.getElementById('fabs');
-  for (const b of fabsEl?.querySelectorAll('.fab:not([hidden])') ?? []) {
-    const s = stageBoxOf(b, gap);
-    if (s) out.push(s);
+  if (!fabsEl || !fabsEl.offsetWidth) return out;
+  const { lift, shift } = sheetAside();
+  for (const b of fabsEl.querySelectorAll<HTMLElement>('.fab:not([hidden])')) {
+    if (!b.offsetWidth) continue;
+    const x0 = fabsEl.offsetLeft + b.offsetLeft - shift, y0 = fabsEl.offsetTop + b.offsetTop - lift;
+    out.push({ x0: x0 - gap, y0: y0 - gap, x1: x0 + b.offsetWidth + gap, y1: y0 + b.offsetHeight + gap });
   }
   return out;
 }
@@ -888,10 +912,11 @@ function framePlan(boxes: Box[], readable: boolean, opts: { least?: number; hint
     const free = freeArea(true);
     // (Room for the "tap where…" line under the strip, when asked: the boxes go below it.)
     if (band) free.y0 = Math.min(Math.max(free.y0, band.y1), free.y1 - 80);
-    // Tidy stands above the thumb row, in the corner: nothing is framed under it either.
-    const fab = fabsEl?.querySelector('[data-testid="fab-tidy"]:not([hidden])')?.getBoundingClientRect();
-    const r = rectOf();
-    const corner = fab && fab.width > 0 ? { x0: fab.left - r.left - 8, y0: fab.top - r.top - 8 } : null;
+    // Tidy stands above the thumb row, in the corner: nothing is framed under it either. (Where it will have settled: see `fabBoxes`.)
+    const tidyFab = fabsEl?.querySelector<HTMLElement>('[data-testid="fab-tidy"]:not([hidden])');
+    const aside = sheetAside();
+    const corner = fabsEl && tidyFab && tidyFab.offsetWidth
+      ? { x0: fabsEl.offsetLeft + tidyFab.offsetLeft - aside.shift - 8, y0: fabsEl.offsetTop + tidyFab.offsetTop - aside.lift - 8 } : null;
     for (const pad of [14, 4]) {
       const a = inset(free, pad);
       tiers.push(corner ? [a, { ...a, x1: Math.min(a.x1, corner.x0) }, { ...a, y1: Math.min(a.y1, corner.y0) }] : [a]);
@@ -1670,11 +1695,19 @@ export function initBoard(root: HTMLElement) {
     }).observe(boardEl);
   }
   applyView();
-  // For scripts: `flowstate.board.inClear(id)` (main.ts builds window.flowstate after the modules have started).
+  // For scripts: `flowstate.board.inClear(id)`, `.buildSpot(x, y, type)`, `.covers()` (main.ts builds window.flowstate after the modules have started).
   const attach = () => {
     const hook = (window as unknown as { flowstate?: Record<string, unknown> }).flowstate;
     if (!hook) return false;
-    hook.board ??= { inClear: (id: number) => nodeInClear(id), expand: () => ({ ...ex, now: performance.now() }) };
+    hook.board ??= {
+      inClear: (id: number) => nodeInClear(id), expand: () => ({ ...ex, now: performance.now() }),
+      // Where a card of this type built at a board point would stand (see `buildSpot`), and what covers the stage.
+      buildSpot: (x: number, y: number, type: NodeType, recipe?: string) => {
+        const { w, h } = sizeFor(type, recipe);
+        return buildSpot({ x, y }, w, h, roomFor(type, h));
+      },
+      covers: () => coverBoxes(),
+    };
     return true;
   };
   queueMicrotask(() => {
@@ -2812,21 +2845,44 @@ function clampToBoard(x: number, y: number, w: number, h: number): Pt {
  * Where a w×h card wanted at (x, y) may stand: the nearest spot on the grid that keeps clear of every
  * other card and of every deposit with no Well on it (the rule itself is `freeSpot` in geom.ts, where
  * it is tested). `skip` is the node being moved, if any; `room` is the height to keep clear for it (see
- * roomFor); `dir` is the direction of the wire the card arrives on. Null when the plot is full.
+ * roomFor). Null when the plot is full. (For a card the player moves by hand; one the game builds where the
+ * player chose goes by `buildSpot`.)
  */
-function freeSpot(x: number, y: number, w: number, h: number, skip?: number, room = h, dir?: Pt, inView = false): Pt | null {
-  const avoid = nodeBoxes(skip, true).concat(depositBoxes());
-  const q = { x, y, w, h: room, avoid, board: ui.g.board, grid: GRID, dir };
-  // A card the game places itself (built from the menu, or from the build bar where a finger tapped) keeps
-  // out from under whatever covers the board (the strip, a sheet, the floating buttons with 16 px around
-  // them), while there is room for it elsewhere nearby.
-  if (inView) {
-    const v = viewAhead();
-    const covered = coverBoxes().map((b) => ({ x0: (b.x0 - v.x) / v.k, y0: (b.y0 - v.y) / v.k, x1: (b.x1 - v.x) / v.k, y1: (b.y1 - v.y) / v.k }));
-    const spot = nearestSpot({ ...q, avoid: avoid.concat(covered) });
-    if (spot) return spot;
-  }
-  return nearestSpot(q);
+function freeSpot(x: number, y: number, w: number, h: number, skip?: number, room = h): Pt | null {
+  return nearestSpot({ x, y, w, h: room, avoid: nodeBoxes(skip, true).concat(depositBoxes()), board: ui.g.board, grid: GRID });
+}
+
+/** Air kept between a card built where the player chose and every other card and port (and free deposit). */
+const BUILD_CLEAR = 40;
+/** ...and between it and the edge of the stage, or whatever covers the stage. */
+const EDGE_CLEAR = 8;
+/** A card's ports stand out this far from its sides (style.css: 14 px dots centred a px past the edge). */
+const PORT_OUT = 8;
+
+/**
+ * Where a w×h card built at a point the player chose stands (its top left corner): centred on the point, on the
+ * grid, when that keeps BUILD_CLEAR from every other card and port, and from every free deposit; otherwise the
+ * nearest spot that does. Never under what covers the stage (the strip, a sheet, the floating buttons, the corner
+ * controls); a spot off the stage is taken when it is the nearest, and the camera then brings the card in (see
+ * `built`). With no room for that much air anywhere, the nearest spot with the usual gap (CARD_GAP). Null when the
+ * plot is full. `room`: the height to keep clear for it (roomFor).
+ */
+function buildSpot(at: Pt, w: number, h: number, room = h): Pt | null {
+  const g = ui.g;
+  // Everything is kept EDGE_CLEAR away; cards and deposits are grown to make up the rest of their own gap. (Ports
+  // stand out at the sides of the others and of this card: the cards are kept that much further apart across.)
+  const grow = (b: Box, d: number, dx = 0): Box => ({ x0: b.x0 - d - dx, y0: b.y0 - d, x1: b.x1 + d + dx, y1: b.y1 + d });
+  const solid = (gap: number) => nodeBoxes(undefined, true).map((b) => grow(b, gap - EDGE_CLEAR, 2 * PORT_OUT))
+    .concat(depositBoxes().map((b) => grow(b, gap - EDGE_CLEAR)));
+  // What covers the stage, in board units. (A card's pill stands 14 px above it: a card under the strip is kept that much lower.)
+  const v = viewAhead();
+  const covered = coverBoxes().map((b) => ({ x0: (b.x0 - v.x) / v.k, y0: (b.y0 - v.y) / v.k, x1: (b.x1 - v.x) / v.k, y1: (b.y1 - v.y) / v.k + 14 }));
+  const q = { x: at.x - w / 2, y: at.y - h / 2, w, h: room, board: g.board, grid: GRID, gap: EDGE_CLEAR };
+  const airy = solid(BUILD_CLEAR), usual = solid(CARD_GAP);
+  return nearestSpot({ ...q, avoid: airy.concat(covered) })
+    ?? nearestSpot({ ...q, avoid: airy })
+    ?? nearestSpot({ ...q, avoid: usual.concat(covered) })
+    ?? nearestSpot({ ...q, avoid: usual });
 }
 
 const NO_ROOM = 'No room left on the board. <b>Expand it</b>, or clear a space.';
@@ -2967,8 +3023,8 @@ function updateGhost() {
       why = 'expand the board';
     }
   } else {
-    // The ghost stands where the card would go: the nearest free spot to the pointer.
-    const spot = freeSpot(mouse.x - w / 2, mouse.y - h / 2, w, h, undefined, roomFor(p.type, h), undefined, true);
+    // The ghost stands where the card would go: on the pointer, or the nearest spot with air round it.
+    const spot = buildSpot(mouse, w, h, roomFor(p.type, h));
     pos = spot ?? clampToBoard(mouse.x - w / 2, mouse.y - h / 2, w, h);
     if (!spot) {
       ok = false;
@@ -3127,7 +3183,7 @@ function placeAt(p: Pt, keep: boolean) {
     node = placeNode(g, 'well', d.x, d.y, { depositId: d.id });
   } else {
     const { w, h } = sizeFor(pl.type, pl.recipe);
-    const pos = freeSpot(p.x - w / 2, p.y - h / 2, w, h, undefined, roomFor(pl.type, h), undefined, true);
+    const pos = buildSpot(p, w, h, roomFor(pl.type, h));
     if (!pos) return toast(NO_ROOM, 'bad');
     const onWire = wireNear(p, 16);
     act(g, () => {
@@ -4408,8 +4464,8 @@ function openBuildSheet(state: RadialState) {
   tempEnd.style.fill = color;
   tempEnd.classList.add('on');
   tempD = '';
-  // Room for the card that will appear there (a consumer grows to the right of the spot, a producer to the left).
-  reveal(state.dir === 'consume' ? state.at.x - 16 : state.at.x - NODE_W, state.at.y - 46, NODE_W + 16, 92);
+  // Room for the card that will appear there, centred on the spot (as tall as a card gets, with its ports and pill).
+  reveal(state.at.x - NODE_W / 2 - 16, state.at.y - 56 - 14, NODE_W + 32, 112 + 28);
 }
 
 /** Room kept above the build sheet for the spot where the new node goes (a card is 72 to 112 px tall). */
@@ -4588,10 +4644,10 @@ export function pickRadial(i: number) {
   }
   // The menu goes first: an open sheet is not something the new card has to keep out from under.
   closeRadial();
-  // The card goes where the wire was dropped, or the nearest free spot from there: further along the
-  // wire for preference, then a row above or below.
+  // The card goes where the wire was let go (or the empty spot tapped), centred on it, or to the nearest spot with
+  // air round it, in view first (see `buildSpot`).
   const { w, h } = sizeFor(o.type, o.recipe);
-  const pos = freeSpot(r.dir === 'consume' ? r.at.x : r.at.x - w, r.at.y - h / 2, w, h, undefined, roomFor(o.type, h), { x: r.at.x - r.a.x, y: r.at.y - r.a.y }, true);
+  const pos = buildSpot(r.at, w, h, roomFor(o.type, h));
   if (!pos) {
     closeRadial();
     toast(NO_ROOM, 'bad');

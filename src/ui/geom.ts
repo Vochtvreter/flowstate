@@ -256,6 +256,8 @@ export interface SpotQuery {
    * wire came from, and to a row above or below before it goes back.
    */
   dir?: Pt;
+  /** Clear space kept from every box in `avoid` (CARD_GAP unless said). */
+  gap?: number;
 }
 
 /** True when a w×h card at (x, y) keeps `gap` clear of every box. */
@@ -271,7 +273,7 @@ const SIDE = 1.5, BACK = 3;
 
 /**
  * The spot on the grid nearest to where a card is wanted at which it stands inside the plot and keeps
- * CARD_GAP clear of everything in `avoid`. Null when the plot has no such spot left.
+ * CARD_GAP (or `gap`) clear of everything in `avoid`. Null when the plot has no such spot left.
  *
  * "Nearest" is plain distance (sideways counting a little less: cards are wider than tall), unless the
  * card arrives on a wire (`dir`): then distance along the wire is the cheapest, a row above or below
@@ -279,13 +281,14 @@ const SIDE = 1.5, BACK = 3;
  */
 export function freeSpot(q: SpotQuery): Pt | null {
   const { w, h, avoid, board, grid } = q;
+  const gap = q.gap ?? CARD_GAP;
   const snap = (v: number) => Math.round(v / grid) * grid;
   // The grid lines a card of this size can stand on inside the plot.
   const gx0 = Math.ceil(PLOT_MARGIN / grid) * grid, gy0 = Math.ceil(PLOT_MARGIN / grid) * grid;
   const gx1 = Math.floor((board.w - w - PLOT_MARGIN) / grid) * grid, gy1 = Math.floor((board.h - h - PLOT_MARGIN) / grid) * grid;
   if (gx1 < gx0 || gy1 < gy0) return null;
   const bx = Math.max(gx0, Math.min(gx1, snap(q.x))), by = Math.max(gy0, Math.min(gy1, snap(q.y)));
-  if (spotFree(bx, by, w, h, avoid)) return { x: bx, y: by };
+  if (spotFree(bx, by, w, h, avoid, gap)) return { x: bx, y: by };
   const len = q.dir ? Math.hypot(q.dir.x, q.dir.y) : 0;
   const ux = len > 1e-6 ? q.dir!.x / len : 0, uy = len > 1e-6 ? q.dir!.y / len : 0;
   let best: Pt | null = null;
@@ -299,7 +302,7 @@ export function freeSpot(q: SpotQuery): Pt | null {
         cost = (along >= 0 ? along : -along * BACK) + side * SIDE;
       } else cost = Math.hypot(ox * 0.9, oy);
       if (cost >= bestCost) continue;
-      if (!spotFree(x, y, w, h, avoid)) continue;
+      if (!spotFree(x, y, w, h, avoid, gap)) continue;
       bestCost = cost;
       best = { x, y };
     }
