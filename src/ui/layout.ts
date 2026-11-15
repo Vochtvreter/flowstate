@@ -50,8 +50,12 @@ const WORTH = 30;
 const ROOM_X = 56, ROOM_Y = 24;
 /** Columns of a fresh layout stand this far apart (a card is 172 wide), starting where the first deposits are. */
 const COL_X0 = 100, COL_PITCH = 240;
-/** Straight pieces each wire is cut into when the board is measured, and (coarser, for speed) while layouts are compared. */
-const SEGS = 16, SEARCH_SEGS = 8;
+/**
+ * Straight pieces each wire is cut into when the board is measured, and (coarser, for speed) while
+ * layouts are compared. Odd numbers, so that two wires that mirror each other cross in the middle of a
+ * piece and not at a corner of both, where the crossing would be missed.
+ */
+const SEGS = 15, SEARCH_SEGS = 7;
 
 // ---------- measuring ----------
 
