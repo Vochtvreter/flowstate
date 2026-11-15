@@ -110,8 +110,9 @@ export function initHud() {
       foldHint();
       return a === 'show' ? showTip(g, () => renderPanels(true)) : showLine(g, () => renderPanels(true));
     } else if (a === 'jump') {
-      // The alert: the camera goes to the node, and the alert is put away until the problem is another one.
+      // The alert: the camera goes to the node, and that problem is put away until it is another one.
       alertPut = alertKey;
+      putGone = -1;
       jumpTo(Number(args[0]));
     } else if (a === 'resume') {
       g.paused = false;
@@ -177,6 +178,7 @@ export function initHud() {
     alertNode = -1;
     alertPut = '';
     alertKey = '';
+    putGone = -1;
     ghost = null;
     pressGhost = null;
     justClaimed = -1;
@@ -553,18 +555,27 @@ function problemText(g: Game, n: GNode): string | null {
 /** The node the chip is about. It keeps pointing at the same node until that one is fixed. */
 let alertNode = -1;
 
-/** The single worst root-cause problem on the board, or null. Nothing is flagged before the first wire. */
-function worstProblem(g: Game): { n: GNode; text: string } | null {
+/** A problem as the chip would name it: node, kind of problem, material. */
+const problemKey = (g: Game, n: GNode) => {
+  const dx = diagnose(g, n);
+  return `${n.id}|${dx.problem}|${dx.mat}`;
+};
+
+/**
+ * The single worst root-cause problem on the board, or null. Nothing is flagged before the first wire. `skip`: a
+ * problem the player has put away (problemKey), which is passed over for the others.
+ */
+function worstProblem(g: Game, skip = ''): { n: GNode; text: string } | null {
   if (!g.wires.length && g.stats.wiresMade === 0) return null;
   // Two machines that are about as badly off would otherwise swap places four times a second.
   const held = alertNode >= 0 ? nodeById(g, alertNode) : null;
   const heldText = held ? problemText(g, held) : null;
-  if (held && heldText) return { n: held, text: heldText };
+  if (held && heldText && (!skip || problemKey(g, held) !== skip)) return { n: held, text: heldText };
   let worst: { n: GNode; text: string } | null = null;
   for (const n of g.nodes) {
     if (worst && worst.n.util <= n.util) continue;
     const text = problemText(g, n);
-    if (text) worst = { n, text };
+    if (text && (!skip || problemKey(g, n) !== skip)) worst = { n, text };
   }
   alertNode = worst ? worst.n.id : -1;
   return worst;
@@ -584,11 +595,14 @@ export function setElsewhere() {
   renderPanels(true);
 }
 
-/** What the problem chip names (node, problem, material), and the problem the player put away by pressing the chip. */
+/**
+ * What the problem chip names (problemKey), and the problem the player put away by pressing the chip: it is passed
+ * over (other problems are still named) until it changes, or has been gone for ALERT_CALM seconds.
+ */
 let alertKey = '';
 let alertPut = '';
-/** Game time since which there has been no problem to name (a put-away problem that comes back much later is news again). */
-let calmSince = -1;
+/** Game time since which the put-away problem has been gone (-1: it is still there). */
+let putGone = -1;
 /** What the slot showed last, for scripts: 'elsewhere', 'paused', 'problem', or '' (and why a problem was left out). */
 let alertSaid: { kind: string; key?: string; left?: 'card' | 'put' } = { kind: '' };
 
@@ -626,18 +640,20 @@ function renderAlert(g: Game, force: boolean) {
     html = `<button class="alertchip paused" data-act="resume" data-testid="paused-pill" aria-label="Paused. Resume the game"><span class="pz-ico">${icon('pause', 14)}</span><span class="al-txt"><b>Paused</b></span><span class="al-go">${icon('play', 12)}Resume</span></button>`;
     alertSaid = { kind };
   } else {
-    const worst = worstProblem(g);
-    const key = worst ? `${worst.n.id}|${diagnose(g, worst.n).problem}|${diagnose(g, worst.n).mat}` : '';
-    // A problem the player put away stays away until it is another one, or until there has been none for a while.
-    if (!worst) {
-      if (calmSince < 0) calmSince = g.time;
-      else if (g.time - calmSince > ALERT_CALM) alertPut = '';
-    } else {
-      calmSince = -1;
-      if (alertPut && key !== alertPut) alertPut = '';
+    // A problem the player put away stays away while it is the same problem on the same node: once that node has
+    // another problem, it is news; once it has had none for a while, it may be named again if it comes back.
+    if (alertPut) {
+      const put = nodeById(g, Number(alertPut.split('|')[0]));
+      const now = put && problemText(g, put) ? problemKey(g, put) : '';
+      if (now === alertPut) putGone = -1;
+      else if (now) alertPut = '';
+      else if (putGone < 0) putGone = g.time;
+      else if (g.time - putGone > ALERT_CALM) alertPut = '';
     }
+    const worst = worstProblem(g, alertPut);
+    const key = worst ? problemKey(g, worst.n) : '';
     alertKey = key;
-    const left = !worst ? undefined : key === alertPut ? 'put' : cardSays(g, worst.n) ? 'card' : undefined;
+    const left = !worst ? undefined : cardSays(g, worst.n) ? 'card' : undefined;
     alertSaid = { kind: worst && !left ? 'problem' : '', key, left };
     if (worst && !left) {
       kind = 'problem';
@@ -652,7 +668,7 @@ function renderAlert(g: Game, force: boolean) {
 /** Game seconds without a problem after which one the player put away is shown again if it comes back. */
 const ALERT_CALM = 10;
 
-/** For scripts: what the alert slot says, and why a problem was left out ('card': the card says it; 'put': pressed away). */
+/** For scripts: what the alert slot says, why a problem was left out ('card': the card says it), and the problem put away. */
 export const alertState = () => ({ ...alertSaid, put: alertPut || null });
 
 // ---------- everything together ----------
