@@ -489,9 +489,10 @@ function renderGoal(g: Game, force: boolean) {
     const body = flowView ? flowHtml(v.flow!, v.progress) : lensInputs ? inputsHtml(inputs!) : wait ? waitHtml(wait, g.paused) : v.progress ? progressHtml(v.progress) : '';
     prog = body ? `<div class="gc-prog${flowView ? ' flow' : ''}${body.includes('gc-eta') ? ' eta' : ''}">${body}</div>` : '';
     rows = lineHtml(g, narrow) + tipHtml(g);
-    // A wait: what to do now is the line or the tip, and on a phone the hint folds behind a tap once the player
-    // has pressed the board (hud.css, "phone seating").
-    setClass(goalEl, 'wait', !!wait || saving(v.progress) || !!rows);
+    // A wait (what the goal asks for next has to be saved up for, or Flow has to be held): what there is to do
+    // meanwhile is the line or the tip, and on a phone the hint folds behind a tap once the player has pressed the
+    // board (hud.css, "phone seating"). Once it can be bought, the hint is what to do, and it is shown again.
+    setClass(goalEl, 'wait', !!wait || saving(v.progress) || flowView);
   } else setClass(goalEl, 'wait', false);
   goalPanel.render(goalHtml(g, v, rows, prog), force);
   announceTips(goalEl);
