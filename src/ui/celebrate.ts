@@ -4,8 +4,11 @@
 // takes a bow (a pulse runs along the wires from the Wells to the Lens, lighting each card it passes)
 // and then its card comes up.
 //
-// Nothing here stops play for more than 0.4 s: the card ignores the pointer after that, and a press
-// anywhere sends it away. Everything added to the page is taken out again when it ends.
+// Nothing here ever takes input: every layer ignores the pointer, so a press during a celebration
+// lands on the game underneath, and it also sends the celebration on its way (the reward flies at
+// once and the card leaves). Everything added to the page is taken out again when it ends. The four
+// that follow a claim are over in about 2.5 s; the Lens, bow and all, in about 6.3 s, because the
+// summary screen opens 6.5 s after the Lens is made.
 import { DATA_COLORS, MATERIALS, RULES, TECHS } from '../content';
 import { recipeOf } from '../economy';
 import { GOALS } from '../goals';
@@ -30,15 +33,21 @@ interface Spec {
   color: string;
   /** How long the card stays, in ms, before it leaves by itself. */
   life: number;
-  /** The celebration answers a press (Claim): it swallows presses for the first 0.4 s so a double tap cannot land on something else. */
-  block: boolean;
   /** Runs once the card is on screen, with the centre of its glyph. Particles go here. */
   show?: (at: Pt, spec: Spec) => void;
+  /** What the goal paid. It flies from the glyph to the counters `payAt` ms in, or at once if the card is sent away sooner. */
+  reward?: GoalReward;
+  payAt?: number;
   /** Runs when it ends, however it ends. */
   done?: () => void;
 }
 
-const BLOCK_MS = 400;
+/**
+ * A card is never sent away sooner than this after it came up, in ms: the second press of a double
+ * press on Claim would otherwise take it down before it had been seen. (That press still reaches
+ * the game, and the card leaves as soon as this is up.)
+ */
+const MIN_SHOWN_MS = 400;
 /** How far the middle of the glyph is above the middle of the card, in px, for each size of card. */
 const GLYPH_RISE: Record<BigKind, number> = { shard: 36, lab: 37, glyph: 41, flow: 36, lens: 47 };
 const OUT_MS = 320;
@@ -49,7 +58,8 @@ let payout: (from: Pt, r: GoalReward) => void = () => {};
 const reducedQuery = typeof matchMedia === 'function' ? matchMedia('(prefers-reduced-motion: reduce)') : null;
 const reduced = () => !!reducedQuery?.matches;
 
-let current: { spec: Spec; wash: HTMLElement | null; wrap: HTMLElement; timers: number[]; leaving: boolean; shownAt: number } | null = null;
+interface Card { spec: Spec; wash: HTMLElement | null; wrap: HTMLElement; timers: number[]; raf: number; leaving: boolean; shownAt: number; at: Pt; paid: boolean }
+let current: Card | null = null;
 const queue: Spec[] = [];
 
 export function initCelebrate(hooks: { record: typeof record; payout: typeof payout }) {
@@ -57,15 +67,34 @@ export function initCelebrate(hooks: { record: typeof record; payout: typeof pay
   record = hooks.record;
   payout = hooks.payout;
   addOverlay(bowOverlay);
-  // A press or a key anywhere sends the card away (once it has stopped swallowing presses).
+  // A press or a key anywhere sends the celebration on its way. The press itself is not touched: it
+  // reaches whatever is under the pointer.
   const dismiss = () => {
     if (bow && !bow.revealed) return void revealLens();
-    if (current && !current.leaving && performance.now() - current.shownAt >= BLOCK_MS) leave();
+    const c = current;
+    if (!c || c.leaving) return;
+    const wait = MIN_SHOWN_MS - (performance.now() - c.shownAt);
+    if (wait <= 0) leave();
+    else c.timers.push(window.setTimeout(() => current === c && leave(), wait));
   };
   window.addEventListener('pointerdown', dismiss, { capture: true, passive: true });
   window.addEventListener('keydown', (e) => {
     if (e.key === 'Escape' || e.key === 'Enter' || e.key === ' ') dismiss();
   }, true);
+  // The summary screen (and the start screen) are never shared with a celebration: whatever is still
+  // up when one of them opens is taken down on the spot. The Lens is timed to be gone by then; this
+  // is for a page that was held up (a background tab, a long frame).
+  if (typeof MutationObserver !== 'undefined') {
+    const watch = new MutationObserver(() => {
+      const summary = document.getElementById('summary');
+      if (summary && !summary.hasAttribute('hidden') && celebrating()) {
+        record('celebrate', 'cut', 'summary');
+        cancelCelebrations();
+      }
+    });
+    const summary = document.getElementById('summary');
+    if (summary) watch.observe(summary, { attributes: true, attributeFilter: ['hidden'] });
+  }
 }
 
 /** True while a card is up or the factory is taking its bow. */
@@ -92,24 +121,75 @@ function start(spec: Spec) {
     wash = document.createElement('div');
     wash.className = `cel-wash k-${spec.kind}`;
     wash.style.setProperty('--c', spec.color);
-    wash.style.setProperty('--life', spec.life + OUT_MS + 'ms');
-    app.appendChild(wash);
+    wash.style.setProperty('--life', washLife(spec) + 'ms');
   }
   const wrap = document.createElement('div');
-  wrap.className = `cel k-${spec.kind}${spec.block ? ' block' : ''}${calm ? ' calm' : ''}`;
+  wrap.className = `cel k-${spec.kind}${calm ? ' calm' : ''}`;
   wrap.setAttribute('data-testid', 'celebration');
   wrap.style.setProperty('--c', spec.color);
-  wrap.innerHTML = `<div class="cel-card" role="status"><div class="cel-glyph">${spec.glyph}</div><div class="cel-title">${esc(spec.title)}</div><div class="cel-line">${esc(spec.line)}</div></div>`;
+  wrap.innerHTML = `<div class="cel-card" role="status"><div class="cel-glyph">${spec.glyph}</div><div class="cel-words"><div class="cel-title">${esc(spec.title)}</div><div class="cel-line">${esc(spec.line)}</div></div></div>`;
   app.appendChild(wrap);
   const timers: number[] = [];
-  current = { spec, wash, wrap, timers, leaving: false, shownAt: performance.now() };
-  if (spec.block) timers.push(window.setTimeout(() => wrap.classList.remove('block'), BLOCK_MS));
-  timers.push(window.setTimeout(leave, spec.life));
-  cueFanfare(spec.kind);
-  buzz('big', spec.kind === 'lens' ? [30, 60, 30, 60, 60] : spec.kind === 'glyph' ? [20, 50, 30] : [20, 40, 20]);
-  // The glyph sits a little above the middle of the card, which is in the middle of the window.
+  // The glyph sits a little above the middle of the card, which is in the middle of the window; on a
+  // screen too short for that the card lies flat and the glyph is at its left end (feel.css).
   // (Worked out rather than measured: measuring here would make the browser lay the page out on the spot.)
-  if (!calm && spec.show) spec.show({ x: window.innerWidth / 2, y: window.innerHeight / 2 - GLYPH_RISE[spec.kind] }, spec);
+  const flat = window.innerHeight < FLAT.below;
+  const at = flat
+    ? { x: window.innerWidth / 2 - Math.min(FLAT.width, window.innerWidth - 32) / 2 + FLAT.glyphX, y: window.innerHeight / 2 + FLAT.down }
+    : { x: window.innerWidth / 2, y: window.innerHeight / 2 - GLYPH_RISE[spec.kind] };
+  const c: Card = (current = { spec, wash, wrap, timers, raf: 0, leaving: false, shownAt: performance.now(), at, paid: false });
+  timers.push(window.setTimeout(leave, spec.life));
+  if (spec.reward) timers.push(window.setTimeout(() => pay(c), spec.payAt ?? 700));
+  // The rest of the opening is spread over the next three frames, one piece each, so that no single
+  // frame has to lay out the card, paint the wash, build the fanfare's notes and launch the sparks:
+  // on a slow phone that one frame was long enough to see.
+  const steps = [
+    () => {
+      if (!wash) return;
+      app.appendChild(wash);
+      // Taken out as soon as it has faded: see washLife.
+      timers.push(window.setTimeout(() => {
+        wash.remove();
+        if (current === c) c.wash = null;
+      }, washLife(spec) + 60));
+    },
+    () => {
+      cueFanfare(spec.kind);
+      buzz('big', spec.kind === 'lens' ? [30, 60, 30, 60, 60] : spec.kind === 'glyph' ? [20, 50, 30] : [20, 40, 20]);
+    },
+    () => !calm && spec.show?.(at, spec),
+  ];
+  const next = () => {
+    if (current !== c) return;
+    steps.shift()!();
+    c.raf = steps.length ? requestAnimationFrame(next) : 0;
+  };
+  c.raf = requestAnimationFrame(next);
+}
+
+/**
+ * How long the colour wash lasts, in ms: as long as the card for the short ones, but never more than
+ * WASH_MAX. A wash is a large see-through layer whose opacity changes on every frame, and the browser
+ * has to blend it over the board for as long as it does; the Lens card stays up for three seconds and
+ * more, and a wash that lasted with it cost a fifth of the frame rate under the CPU throttle. A flash
+ * that fades in a second and a half says the same. (The Flow State wash breathes for the whole of its card:
+ * that slow swell is the point of it, and its card is short.)
+ */
+const WASH_MAX = 1400;
+const washLife = (spec: Spec) => (spec.kind === 'flow' ? spec.life + OUT_MS : Math.min(spec.life + OUT_MS, WASH_MAX));
+
+/**
+ * The flat card of a short screen (a phone on its side), as feel.css draws it: used below this
+ * window height, this wide, with the middle of its glyph this far from its left edge, and the whole
+ * card this far below the middle of the window.
+ */
+const FLAT = { below: 480, width: 400, glyphX: 42, down: 8 };
+
+/** The reward leaves the glyph for the counters. Once only, however the card ends. */
+function pay(c: Card) {
+  if (c.paid || current !== c) return;
+  c.paid = true;
+  if (c.spec.reward) payout(c.at, c.spec.reward);
 }
 
 /** Start the card's exit; it is taken out of the page when the exit has played. */
@@ -117,7 +197,8 @@ function leave() {
   const c = current;
   if (!c || c.leaving) return;
   c.leaving = true;
-  c.wrap.classList.remove('block');
+  // Sent away before the reward had flown: it flies now.
+  pay(c);
   c.wrap.classList.add('out');
   // The wash fades from wherever its own animation has got to. (Done in script: a class that swapped
   // the animation for a transition would snap it to nothing instead.)
@@ -129,6 +210,7 @@ function remove() {
   const c = current;
   if (!c) return;
   for (const t of c.timers) clearTimeout(t);
+  if (c.raf) cancelAnimationFrame(c.raf);
   c.wrap.remove();
   c.wash?.remove();
   current = null;
@@ -160,15 +242,14 @@ export function openedText(r: GoalReward): string {
   return parts.join(' · ');
 }
 
-/** Sparks around the glyph, then (a beat later) the reward flying off to where it lives. */
-function sparksThenPay(count: number, power: number, shape: 'hexagon' | 'diamond' | 'star', r: GoalReward) {
+/** Sparks around the glyph. (The reward flies off a beat later: see `reward` and `payAt` in Spec.) */
+function sparks(count: number, power: number, shape: 'hexagon' | 'diamond' | 'star') {
   return (at: Pt, spec: Spec) => {
     burst(at, spec.color, count, { top: true, power, shape });
     burst(at, '#ffffff', Math.round(count / 3), { top: true, power: power * 0.7 });
     // Two rings leave the glyph, one after the other.
     ring(at, spec.color, { top: true, size: 96, life: 0.7 });
     later(300, () => ring(at, spec.color, { top: true, size: 120, life: 0.8 }));
-    later(Math.min(700, spec.life * 0.4), () => payout(at, r));
   };
 }
 
@@ -190,33 +271,33 @@ export function celebrateGoal(goalId: string, reward: GoalReward) {
     case 'sell-shard':
       return start({
         kind: 'shard', title: 'First Shard', line, glyph: matGlyph('shard', 64), color: MATERIALS.shard.color,
-        life: 1600, block: true, show: sparksThenPay(22, 1.5, 'hexagon', reward),
+        life: 1600, show: sparks(22, 1.5, 'hexagon'), reward, payAt: 640,
       });
     case 'feed-lab':
       return start({
         kind: 'lab', title: 'First Data', line, glyph: nodeIcon('lab', 60), color: DATA_COLORS.a,
-        life: 2000, block: true, show: sparksThenPay(30, 1.7, 'diamond', reward),
+        life: 1900, show: sparks(30, 1.7, 'diamond'), reward, payAt: 700,
       });
     case 'make-glyph':
       return start({
         kind: 'glyph', title: 'First Glyph', line, glyph: matGlyph('glyph', 72), color: MATERIALS.glyph.color,
-        life: 2800, block: true, show: (at, spec) => converge(at, spec, reward),
+        life: 2200, show: converge, reward, payAt: 1150,
       });
     case 'make-lens':
-      return lensCard(reduced() ? 4500 : 3000);
+      return lensCard(reduced() ? 4500 : 2600);
     default: {
       // A big goal this file has not met: celebrate it at the smallest size, with the goal's own words.
       const goal = GOALS.find((x) => x.id === goalId);
       return start({
         kind: 'shard', title: goal?.title ?? 'Goal complete', line, glyph: '<span class="cel-star">★</span>', color: '#FFC857',
-        life: 1600, block: true, show: sparksThenPay(22, 1.5, 'star', reward),
+        life: 1600, show: sparks(22, 1.5, 'star'), reward, payAt: 640,
       });
     }
   }
 }
 
 /** First Glyph: two streams, Ink from the left and Spark from the right, run into the glyph and set it off. */
-function converge(at: Pt, spec: Spec, reward: GoalReward) {
+function converge(at: Pt, spec: Spec) {
   const reach = Math.min(window.innerWidth * 0.46, 520);
   const left = { x: at.x - reach, y: at.y + 30 }, right = { x: at.x + reach, y: at.y - 30 };
   const opts = { ttl: 0.5, stagger: 0.024, spread: 54, size: 6, top: true };
@@ -227,7 +308,6 @@ function converge(at: Pt, spec: Spec, reward: GoalReward) {
     ring(at, '#ffffff', { top: true, size: 80, life: 0.5 });
   }, { ...opts, shape: 'square' });
   fly(right, at, MATERIALS.spark.color, 22, undefined, { ...opts, shape: 'star' });
-  later(1300, () => payout(at, reward));
 }
 
 /** The first Flow State: no sparks, only slow rings widening from the middle, like breath on glass. */
@@ -236,10 +316,10 @@ export function celebrateFlow() {
   start({
     kind: 'flow', title: 'Flow State', line: `Everything is running flat out · sales pay +${bonus}%`,
     glyph: `<svg viewBox="0 0 40 40" width="68" height="68" aria-hidden="true"><circle cx="20" cy="20" r="15" fill="none" stroke="currentColor" stroke-width="3"/><path d="M8 22c4-6 8-6 12 0s8 6 12 0" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round"/></svg>`,
-    color: '#5CE1FF', life: 3000, block: false,
+    color: '#5CE1FF', life: 2200,
     show: (at, spec) => {
       const from = anchorPt('flow') ?? at;
-      for (let i = 0; i < 3; i++) later(i * 520, () => ring(at, spec.color, { top: true, size: 240 + i * 60, life: 1.5 }));
+      for (let i = 0; i < 3; i++) later(i * 420, () => ring(at, spec.color, { top: true, size: 240 + i * 60, life: 1.3 }));
       ring(from, '#ffffff', { top: true, size: 44, life: 0.7 });
     },
   });
@@ -250,20 +330,21 @@ const RAINBOW = ['shard', 'ink', 'spark', 'mist', 'glyph', 'prism'] as const;
 function lensCard(life: number) {
   start({
     kind: 'lens', title: 'First Lens', line: 'Demo complete · free play is open', glyph: matGlyph('lens', 80), color: MATERIALS.lens.color,
-    life, block: false,
+    life,
     show: (at) => {
       // Three waves, each in the colours of what the factory makes on the way to a Lens.
       for (let wave = 0; wave < 3; wave++) {
         later(wave * 380, () => {
           RAINBOW.forEach((m, i) => {
             const a = (i / RAINBOW.length) * Math.PI * 2 + wave;
-            burst({ x: at.x + Math.cos(a) * 60 * wave, y: at.y + Math.sin(a) * 40 * wave }, MATERIALS[m].color, 14, { top: true, power: 2.4 - wave * 0.3, shape: wave === 1 ? 'star' : 'diamond' });
+            burst({ x: at.x + Math.cos(a) * 60 * wave, y: at.y + Math.sin(a) * 40 * wave }, MATERIALS[m].color, 10, { top: true, power: 2.4 - wave * 0.3, shape: wave === 1 ? 'star' : 'diamond' });
           });
           ring(at, '#ffffff', { top: true, size: 170 + wave * 90, life: 0.9 });
         });
       }
-      burst(at, '#ffffff', 30, { top: true, power: 2.6 });
+      burst(at, '#ffffff', 24, { top: true, power: 2.6 });
     },
+    // Whatever is left of the bow goes with the card. (It has usually faded long before: BOW_HOLD.)
     done: endBow,
   });
 }
@@ -279,8 +360,16 @@ interface BowNode { x: number; y: number; w: number; h: number; at: number; colo
 let bow: { t0: number; step: number; rows: number; wires: BowWire[]; nodes: BowNode[]; lens: BowNode | null; revealAt: number; revealed: boolean; fadeFrom: number; timers: number[] } | null = null;
 
 const BOW_SEGS = 18;
-/** The bow may take this long before the Lens card, however deep the factory is. */
-const BOW_MAX = 2.9;
+/** The light may take this long (s) to run from the Wells to the Lens, however deep the factory is. */
+const BOW_MAX = 2.6;
+/**
+ * The Lens card starts to leave this long (ms) after the Lens was made, whatever happened before:
+ * 5.9 s, plus its exit, is 6.2 s, and the summary screen opens at 6.5 (SUMMARY_DELAY in hud-screens.ts).
+ */
+const END_BY = 5900;
+/** After the light has reached the Lens the factory stays lit this long (ms), then fades over BOW_FADE. */
+const BOW_HOLD = 700;
+const BOW_FADE = 500;
 
 function nodeColor(n: GNode): string {
   if (n.type === 'well' && n.material) return MATERIALS[n.material].color;
@@ -293,7 +382,7 @@ function startBow() {
   const g = ui.g;
   const gr = graph(g);
   const lens = g.nodes.find((n) => n.recipe === RULES.capstone && n.cycles > 0) ?? g.nodes.find((n) => n.recipe === RULES.capstone);
-  if (!lens) return lensCard(3000);
+  if (!lens) return lensCard(2600);
   // Everything upstream of the Lens, with its row: the longest way there from a node that nothing feeds.
   const depth = new Map<number, number>();
   const visiting = new Set<number>();
@@ -309,7 +398,8 @@ function startBow() {
     return d;
   };
   const rows = rowOf(lens.id) + 1;
-  const step = Math.max(0.22, Math.min(0.6, BOW_MAX / rows));
+  // A shallow factory takes its time (0.6 s a row); a deep one is squeezed into BOW_MAX.
+  const step = Math.min(0.6, BOW_MAX / Math.max(1, rows - 1));
   const wires: BowWire[] = [];
   const nodes: BowNode[] = [];
   let lensBox: BowNode | null = null;
@@ -370,20 +460,22 @@ function revealLens() {
     ring(at, '#ffffff', { size: 120, life: 0.7 });
     ring(at, MATERIALS.lens.color, { size: 70, life: 0.5 });
   }
-  // The card arrives a moment after the flash and stays until just before the summary screen (6.5 s after the event).
-  const elapsed = performance.now() - b.t0;
-  b.timers.push(window.setTimeout(() => lensCard(Math.max(1800, 6000 - elapsed - 350)), 350));
+  // The card arrives a moment after the flash and stays until just before the summary screen.
+  b.timers.push(window.setTimeout(() => lensCard(Math.max(900, END_BY - (performance.now() - b.t0))), 350));
+  // The lit wires and outlines have done their work once the card is up: they fade soon after, so
+  // that for most of the card's stay nothing extra is being drawn on the board.
+  b.timers.push(window.setTimeout(() => bow === b && endBow(), BOW_HOLD));
 }
 
 function endBow() {
   const b = bow;
   if (!b) return;
-  // Fade the lit wires and outlines out rather than cutting them off.
+  // Fade the lit wires and outlines out rather than cutting them off. (A second call ends it at once.)
   if (b.fadeFrom === Infinity && b.revealed) {
     b.fadeFrom = performance.now();
     b.timers.push(window.setTimeout(() => {
       if (bow === b) bow = null;
-    }, 600));
+    }, BOW_FADE));
     return;
   }
   for (const t of b.timers) clearTimeout(t);
@@ -407,7 +499,7 @@ const bowOverlay: Overlay = {
     if (!b) return;
     const now = performance.now();
     const t = (now - b.t0) / 1000;
-    const fade = b.fadeFrom === Infinity ? 1 : Math.max(0, 1 - (now - b.fadeFrom) / 600);
+    const fade = b.fadeFrom === Infinity ? 1 : Math.max(0, 1 - (now - b.fadeFrom) / BOW_FADE);
     const k = ui.view.k;
     const o = toClient({ x: 0, y: 0 });
     c.lineCap = 'round';
@@ -466,7 +558,7 @@ const bowOverlay: Overlay = {
 
 /**
  * The first Lens has just been made and the demo is complete: the factory takes its bow, then the
- * Lens card. All of it is over within six seconds, because the summary screen opens at 6.5.
+ * Lens card. All of it is over within 6.3 seconds, because the summary screen opens at 6.5.
  */
 export function celebrateEnd() {
   if (reduced()) return lensCard(4500);

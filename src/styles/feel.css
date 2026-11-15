@@ -5,17 +5,28 @@
    55  .cel        the celebration card
    56  #fx-top     particles that must be seen above the panels and the card (made and moved by fx.ts)
    56  #fx-bar     the strip of the same over the top bar: coins on their way to the counters
-   All of it is under the modal (60), the summary (70) and the start screen (80), and none of it takes
-   input (the card swallows presses for its first 0.4 s only, see celebrate.ts).
+   56  #feel-hand  the guiding hand (hand.ts)
+   All of it is under the modal (60), the summary (70) and the start screen (80), and none of it ever
+   takes input: a press during a celebration, or where the hand is pointing, lands on the game underneath.
    A note on cost: every element here that fades or moves is kept small on purpose. The browser
    blends each such layer over the page on every frame it is visible, and that work grows with the
-   layer's area, so the wash is a patch rather than the whole screen and the Flow State glow is four
+   layer's area (shadows count: they make a card's layer bigger than the card), so the wash is a
+   patch rather than the whole screen, the card's shadow is tight, and the Flow State glow is four
    strips rather than one frame-sized box. */
 #fx-top, #fx-bar { position: absolute; left: 0; top: 0; pointer-events: none; z-index: 56; }
 
+/* ---------- the guiding hand ----------
+   One small element, moved with a transform from hand.ts (its top left corner is the screen's, so
+   the numbers in the transform are client pixels). It is laid out once and never again. */
+#feel-hand { position: fixed; left: 0; top: 0; z-index: 56; pointer-events: none; opacity: 0; visibility: hidden; contain: layout style; }
+#feel-hand.on { visibility: visible; will-change: transform, opacity; }
+#feel-hand svg { display: block; overflow: visible; }
+#feel-hand path { fill: #fff; stroke: rgba(11, 15, 23, 0.9); stroke-width: 2.6; stroke-linejoin: round; paint-order: stroke; }
+
 /* ---------- mute button ---------- */
 [data-testid='mute'].off { color: var(--dim); }
-#app.phone [data-testid='mute'] { width: 44px; height: 44px; }
+/* A finger gets a full-size target, in the phone layout and on a tablet (desktop layout, touch input). */
+#app.phone [data-testid='mute'], html[data-input='touch'] [data-testid='mute'] { width: 44px; height: 44px; }
 
 /* ---------- board polish ---------- */
 /* A new node drops in, squashes as it lands and settles. (board.ts adds .pop once, for 320 ms.) */
@@ -53,7 +64,7 @@ g.wire.sat .base { stroke-opacity: 0.58; }
 #app.flow-state g.wire.sat .glow { stroke-opacity: 0.3; }
 
 /* ---------- big celebrations ---------- */
-.cel-wash { --peak: 0.46; position: absolute; left: 50%; top: 48%; width: min(780px, 100%); height: min(560px, 88%); margin: 0; translate: -50% -50%; z-index: 54; pointer-events: none; opacity: 0; background: radial-gradient(closest-side, color-mix(in srgb, var(--c) 72%, transparent) 0%, color-mix(in srgb, var(--c) 50%, transparent) 46%, transparent 100%); animation: cel-wash var(--life, 1.9s) linear both; }
+.cel-wash { --peak: 0.46; position: absolute; left: 50%; top: 48%; width: min(640px, 100%); height: min(460px, 80%); margin: 0; translate: -50% -50%; z-index: 54; pointer-events: none; opacity: 0; background: radial-gradient(closest-side, color-mix(in srgb, var(--c) 72%, transparent) 0%, color-mix(in srgb, var(--c) 50%, transparent) 46%, transparent 100%); animation: cel-wash var(--life, 1.9s) linear both; }
 .cel-wash.k-lab { --peak: 0.5; }
 .cel-wash.k-glyph { --peak: 0.6; animation-name: cel-wash-late; }
 .cel-wash.k-lens { --peak: 0.7; }
@@ -61,12 +72,11 @@ g.wire.sat .base { stroke-opacity: 0.58; }
 .cel-wash.k-flow { --peak: 0.4; animation-name: cel-wash-breathe; animation-timing-function: ease-in-out; }
 @keyframes cel-wash { 0% { opacity: 0; } 8% { opacity: var(--peak); } 40% { opacity: calc(var(--peak) * 0.65); } 100% { opacity: 0; } }
 /* The Glyph's flash waits for the two streams to meet. */
-@keyframes cel-wash-late { 0% { opacity: 0; } 12% { opacity: calc(var(--peak) * 0.3); } 22% { opacity: var(--peak); } 55% { opacity: calc(var(--peak) * 0.5); } 100% { opacity: 0; } }
+@keyframes cel-wash-late { 0% { opacity: 0; } 20% { opacity: calc(var(--peak) * 0.3); } 40% { opacity: var(--peak); } 68% { opacity: calc(var(--peak) * 0.5); } 100% { opacity: 0; } }
 @keyframes cel-wash-breathe { 0% { opacity: 0; } 24% { opacity: var(--peak); } 50% { opacity: calc(var(--peak) * 0.45); } 74% { opacity: var(--peak); } 100% { opacity: 0; } }
 
 .cel { position: absolute; inset: 0; z-index: 55; display: flex; align-items: center; justify-content: center; padding: 16px; pointer-events: none; }
-.cel.block { pointer-events: auto; }
-.cel-card { display: flex; flex-direction: column; align-items: center; gap: 6px; min-width: 240px; max-width: min(440px, 100%); padding: 22px 30px 20px; border-radius: 22px; text-align: center; background: rgba(13, 18, 30, 0.9); border: 1.5px solid color-mix(in srgb, var(--c) 55%, #27324a); box-shadow: 0 14px 36px rgba(0, 0, 0, 0.5), 0 0 30px color-mix(in srgb, var(--c) 24%, transparent); animation: cel-in 0.42s cubic-bezier(0.2, 1.5, 0.4, 1) both; will-change: transform, opacity; }
+.cel-card { display: flex; flex-direction: column; align-items: center; gap: 6px; min-width: 240px; max-width: min(440px, 100%); padding: 22px 30px 20px; border-radius: 22px; text-align: center; background: rgba(13, 18, 30, 0.9); border: 1.5px solid color-mix(in srgb, var(--c) 55%, #27324a); box-shadow: 0 10px 24px rgba(0, 0, 0, 0.5), 0 0 20px color-mix(in srgb, var(--c) 26%, transparent); animation: cel-in 0.42s cubic-bezier(0.2, 1.5, 0.4, 1) both; will-change: transform, opacity; }
 .cel.out .cel-card { animation: cel-out 0.32s ease-in both; }
 @keyframes cel-in { from { transform: translateY(14px) scale(0.72); opacity: 0; } }
 @keyframes cel-out { to { transform: translateY(-16px) scale(0.97); opacity: 0; } }
@@ -74,6 +84,7 @@ g.wire.sat .base { stroke-opacity: 0.58; }
 .cel-glyph > svg, .cel-star { animation: cel-pop 0.5s cubic-bezier(0.2, 1.6, 0.4, 1) 0.12s both; }
 .cel-star { font-size: 56px; line-height: 1; }
 @keyframes cel-pop { from { transform: scale(0.2) rotate(-25deg); opacity: 0; } }
+.cel-words { display: contents; }
 .cel-title { font-family: var(--disp); font-size: 34px; font-weight: 700; letter-spacing: -0.01em; line-height: 1.1; color: #fff; }
 .cel-line { font-size: 15px; line-height: 1.35; color: #c9d3e8; }
 
@@ -88,7 +99,7 @@ g.wire.sat .base { stroke-opacity: 0.58; }
 .k-flow.out .cel-card { animation: cel-out 0.32s ease-in both; }
 .k-flow .cel-glyph > svg { animation: cel-fade 1.2s ease-out both; }
 @keyframes cel-in-soft { from { transform: scale(0.94); opacity: 0; } }
-.k-lens .cel-card { padding: 30px 44px 28px; box-shadow: 0 14px 36px rgba(0, 0, 0, 0.5), 0 0 44px rgba(255, 255, 255, 0.3); }
+.k-lens .cel-card { padding: 30px 44px 28px; box-shadow: 0 10px 24px rgba(0, 0, 0, 0.5), 0 0 28px rgba(255, 255, 255, 0.32); }
 .k-lens .cel-glyph { width: 140px; height: 140px; }
 .k-lens .cel-title { font-size: 50px; }
 .k-lens .cel-line { font-size: 17px; }
@@ -105,6 +116,23 @@ g.wire.sat .base { stroke-opacity: 0.58; }
 #app.phone .k-glyph .cel-title { font-size: 34px; }
 #app.phone .k-lens .cel-title { font-size: 38px; }
 #app.phone .k-lens .cel-glyph { width: 116px; height: 116px; }
+/* A screen too short for the card (a phone on its side): the card lies flat, glyph on the left and
+   words on the right, about 74 px high, so it fits in the strip of board that is left between the
+   goal card above it and the Claim button below. Its width is fixed because celebrate.ts works out
+   where the glyph is without measuring (FLAT there). The selectors are long so that they win over
+   the phone rules just above, whichever kind of card it is. */
+@media (max-height: 479px) {
+  /* (8 px below the middle: the goal card above is taller than the Claim button below.) */
+  .cel { padding-top: 32px; }
+  #app .cel .cel-card { flex-direction: row; align-items: center; gap: 14px; width: 400px; min-width: 0; max-width: 100%; min-height: 68px; padding: 8px 16px; border-radius: 18px; text-align: left; }
+  #app .cel .cel-card > .cel-glyph { flex: none; width: 52px; height: 52px; margin: 0; }
+  #app .cel .cel-card .cel-glyph > svg { width: 34px; height: 34px; }
+  #app .cel .cel-card .cel-star { font-size: 30px; }
+  #app .cel .cel-card .cel-title { font-size: 22px; }
+  #app .cel .cel-card .cel-line { font-size: 12px; line-height: 1.3; }
+  #app .cel .cel-card .cel-words { display: flex; flex-direction: column; gap: 3px; min-width: 0; }
+  .cel-wash { height: min(300px, 80%); }
+}
 
 @media (prefers-reduced-motion: reduce) {
   #nodes .node.pop { animation: none; }

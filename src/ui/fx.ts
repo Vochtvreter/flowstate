@@ -3,8 +3,8 @@
 //    wires, the pulse on open ports, and particles that belong to the board (sale floaters, sparks);
 //  - the bar layer (`#fx-bar`, made here, a strip over the top bar and a little below it): whatever
 //    has to be seen up there, such as a coin on the last stretch of its way to the credits counter;
-//  - the top layer (`#fx-top`, made here, above every panel): a small window, about the size of a
-//    celebration card, through which particles are seen above the HUD. A particle that asks to be
+//  - the top layer (`#fx-top`, made here, above every panel): a small window, a little larger than a
+//    celebration card (440 by 360 px), through which particles are seen above the HUD. A particle that asks to be
 //    on top is drawn there while it is inside the window and on the board or the strip once it has
 //    left, so a spark can start over the card and fly off across the board. The window is moved to
 //    wherever the next effect is whenever it is empty.
@@ -131,7 +131,7 @@ const BOARD = 0, TOP = 1, BAR = 2, AUTO = -1;
  * small moving shapes), and is this large at most, in CSS px.
  */
 const TOP_RATIO = 1;
-const TOP_W = 520, TOP_H = 420;
+const TOP_W = 440, TOP_H = 360;
 /** How far the bar layer reaches below the top bar, in px. */
 const BAR_SKIRT = 44;
 let appEl: HTMLElement | null = null;
@@ -252,8 +252,10 @@ const inTop = (x: number, y: number, m = 0) => !!top && x >= top.x - m && x <= t
  * How lively the wires look, 0..1. The feel module raises it in Flow State: dots then run a little
  * faster and a touch larger. It eases, so the change is felt rather than seen.
  */
-export function setMood(level: number) {
+export function setMood(level: number, atOnce = false) {
   moodTarget = Math.max(0, Math.min(1, level));
+  // (A reset: no easing. Behind the start screen no time passes, so there would be none anyway.)
+  if (atOnce) mood = moodTarget;
 }
 
 /** The wires to draw dots on. Call again whenever wires are added or removed. */
@@ -263,7 +265,13 @@ export function setFlows(list: Flow[]) {
   stale = true;
 }
 
+// The player has asked the system for less motion. Nothing then flies, sprays or swells, whoever
+// asks for it: burst(), ring() and pop() draw nothing, fly() delivers at once (its `onArrive` runs
+// straight away, so counters still pulse and sounds still play), and a floater appears where it was
+// asked for and fades without rising. Dots still travel along the wires: they are the game's display
+// of what is flowing, not decoration.
 const calm = typeof matchMedia === 'function' ? matchMedia('(prefers-reduced-motion: reduce)') : null;
+const isCalm = () => !!calm?.matches;
 
 /** A spot on the board that should pulse gently to invite a click (an output port with nothing attached). */
 export interface Beacon { x: number; y: number; r: number }
@@ -533,7 +541,7 @@ function kill(p: Particle) {
 /**
  * `top` draws above every panel instead of only on the board (where the HUD covers it).
  * Above the panels means: on the strip over the top bar when it is up there, and otherwise through
- * the top layer's window, about 520 by 420 px, which is centred on the first effect that uses it and
+ * the top layer's window, about 440 by 360 px, which is centred on the first effect that uses it and
  * stays there until it is empty again. Outside the window the particle is drawn on the board as usual.
  */
 export interface LayerOpt { top?: boolean }
@@ -556,15 +564,22 @@ export interface FlyOpts extends LayerOpt {
 export interface FloaterOpts extends LayerOpt { life?: number; rise?: number }
 export interface RingOpts extends LayerOpt { size?: number; life?: number }
 
-/** The layer value for a particle at this point, bringing the top layer's window here if it is wanted and free. */
+/**
+ * The layer value for a particle at this point, bringing the top layer's window here if it is wanted and free.
+ * Something that starts over the top bar is already above the panels on the bar's own strip: it
+ * never needs the big top layer (which would otherwise be woken for every "+12¢" under a counter
+ * whenever its window happened to be near, as it is on a short phone).
+ */
 function layerFor(o: LayerOpt | undefined, x: number, y: number): number {
   if (!o?.top) return BOARD;
-  if (!inBar(x, y)) aimTop(x, y);
+  if (inBar(x, y)) return AUTO;
+  aimTop(x, y);
   return TOP;
 }
 
 /** A spray of sparks. */
 export function burst(at: Pt, color: string, count = 10, o?: BurstOpts) {
+  if (isCalm()) return;
   const pw = o?.power ?? 1;
   const layer = layerFor(o, at.x, at.y);
   for (let i = 0; i < count; i++) {
@@ -593,6 +608,7 @@ export function burst(at: Pt, color: string, count = 10, o?: BurstOpts) {
  * could be sent), so it is safe to hang a counter update or a sound on it.
  */
 export function fly(from: Pt, to: Pt, color: string, count = 3, onArrive?: () => void, o?: FlyOpts) {
+  if (isCalm()) return void onArrive?.();
   const done = { fn: onArrive ?? null };
   const dx = to.x - from.x, dy = to.y - from.y;
   const dist = Math.hypot(dx, dy) || 1;
@@ -631,7 +647,7 @@ export function floater(at: Pt, text: string, color: string, size = 13, o?: Floa
   p.x = at.x;
   p.y = at.y;
   p.ttl = o?.life ?? 1.05;
-  p.vy = o?.rise ?? 34;
+  p.vy = isCalm() ? 0 : o?.rise ?? 34;
   p.size = size * TEXT_SCALE;
   p.color = color;
   p.text = text;
@@ -639,6 +655,7 @@ export function floater(at: Pt, text: string, color: string, size = 13, o?: Floa
 
 /** An expanding ring. */
 export function ring(at: Pt, color: string, o?: RingOpts) {
+  if (isCalm()) return;
   const p = spawn(RING, layerFor(o, at.x, at.y));
   if (!p) return;
   p.x = at.x;
@@ -650,6 +667,7 @@ export function ring(at: Pt, color: string, o?: RingOpts) {
 
 /** A disc of radius `r` that swells and fades: the after-image of something popping (a coin on a sale). */
 export function pop(at: Pt, color: string, r = 13, o?: LayerOpt) {
+  if (isCalm()) return;
   const p = spawn(POP, layerFor(o, at.x, at.y));
   if (!p) return;
   p.x = at.x;
@@ -657,6 +675,17 @@ export function pop(at: Pt, color: string, r = 13, o?: LayerOpt) {
   p.ttl = 0.3;
   p.size = r;
   p.color = color;
+}
+
+/**
+ * Take every particle away at once, without running what was waiting for a coin to land (the game
+ * was reset: whatever those were about is gone). The layers are wiped on the next frame.
+ */
+export function clearParticles() {
+  for (const p of pool) if (p.kind !== 0) kill(p);
+  liveBy[0] = liveBy[1] = liveBy[2] = 0;
+  splitBy[0] = splitBy[1] = splitBy[2] = 0;
+  stale = true;
 }
 
 const easeInOut = (u: number) => (u < 0.5 ? 2 * u * u : 1 - ((2 - 2 * u) * (2 - 2 * u)) / 2);
@@ -819,8 +848,8 @@ function drawOne(c: CanvasRenderingContext2D, p: Particle, ratio: number) {
       // dearest thing a canvas does, and a floater lives for sixty frames.
       const sp = textSprite(p.text, p.color, p.size, ratio);
       const rise = p.vy * (1 - (1 - u) * (1 - u));
-      // It pops in a little too big and settles, then rises.
-      const s = u < 0.1 ? 0.6 + u * 6 : u < 0.22 ? 1.2 - ((u - 0.1) / 0.12) * 0.2 : 1;
+      // It pops in a little too big and settles, then rises. (With less motion asked for: neither.)
+      const s = p.vy === 0 ? 1 : u < 0.1 ? 0.6 + u * 6 : u < 0.22 ? 1.2 - ((u - 0.1) / 0.12) * 0.2 : 1;
       c.globalAlpha = u < 0.65 ? 1 : 1 - (u - 0.65) / 0.35;
       c.drawImage(sp.canvas, p.x - (sp.w * s) / 2, p.y - rise - sp.base * s, sp.w * s, sp.h * s);
       break;
@@ -995,8 +1024,11 @@ function frameSurface(s: Surface, parts: number, list: Overlay[] | null, layer: 
 
 /** Numbers for tests and tuning. `width`, `height` and `dpr` describe the board layer. */
 export function fxStats() {
+  // Particles that travel or swell (everything but floating text): none while less motion is asked for.
+  let moving = 0;
+  for (const p of pool) if (p.kind !== 0 && p.kind !== TEXT) moving++;
   return {
-    dots: dotCount, particles: live, thin: +thin.toFixed(2), width: canvas?.width ?? 0, height: canvas?.height ?? 0, dpr,
+    dots: dotCount, particles: live, moving, pool: POOL, thin: +thin.toFixed(2), width: canvas?.width ?? 0, height: canvas?.height ?? 0, dpr,
     top: { particles: liveBy[TOP], width: top?.canvas.width ?? 0, height: top?.canvas.height ?? 0 },
     bar: { particles: liveBy[BAR], width: bar?.canvas.width ?? 0, height: bar?.canvas.height ?? 0 },
     mood: +mood.toFixed(2),
