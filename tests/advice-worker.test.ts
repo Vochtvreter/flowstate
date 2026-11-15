@@ -8,9 +8,11 @@
 // advice-core pours every copy into one long-lived game for that reason; the second test follows a wait
 // second by second, on the live game and through the core side by side.
 import { describe, expect, test } from 'vitest';
-import { Advice, advice, applyAdvice, waitInfo, waitKind } from '../src/advice';
-import { connect, upgrade } from '../src/actions';
+import { Advice, advice, adviceQuiet, applyAdvice, waitInfo, waitKind } from '../src/advice';
+import { connect, cutWire, upgrade } from '../src/actions';
+import { RULES } from '../src/content';
 import { research } from '../src/economy';
+import { activeGoal } from '../src/goals';
 import { Game, cloneGame } from '../src/state';
 import { AdviceAnswer, answer } from '../src/ui/advice-core';
 import { boardKey, builtRev } from '../src/ui/advice-client';
@@ -119,6 +121,99 @@ describe('the adviser through its worker code', () => {
   });
 });
 
+// The adviser as the last rules round left it keeps three things between calls. Two are in the game itself and
+// travel with every copy (Game.edits: the quiet after a change, and no repeat of what was just done). The
+// third hangs on the game OBJECT (which tip was on offer, which have left): it only works here because the
+// copies are poured into one long-lived game. Each is held to through the worker's code, as the page uses it.
+describe('what the adviser remembers, through its worker code', () => {
+  const reads = (a: Advice | null) => (a ? a.text.mouse.replace(/ \(\d+[¢αβγ]\)/g, '') : '');
+
+  test('the quiet after a change to the board: no tip for 20 s, and each answer stands only until the quiet is over', () => {
+    expect(RULES.tips.quiet).toBe(20);
+    // A board with a tip on offer, and a change the tip did not ask for.
+    const g = cloneGame(loose.find((x) => advice(cloneGame(x)!) && x.credits >= 80)!)!;
+    let id = 5000;
+    expect(post(g, id++, true).advice).not.toBeNull();
+    const well = g.nodes.find((n) => n.type === 'well')!;
+    expect(upgrade(g, well.id, 'speed')).toBe(true);
+    const at = g.time;
+    expect(g.edits![g.edits!.length - 1].at).toBe(at);
+    let quiet = 0;
+    for (let s = 0; s < 19; s++) {
+      const via = post(g, id++, false);
+      // (The copy carries the edit: the worker's game knows of it without being told.)
+      expect(via.advice, `${s} s after the change`).toBeNull();
+      expect(via.kind).toBe(waitKind(g));
+      expect(via.life).toBeCloseTo(Math.min(15, adviceQuiet(g)), 6);
+      expect(via.time + via.life).toBeLessThanOrEqual(at + 20 + 1e-6);
+      quiet++;
+      run(g, 1);
+      g.events.length = 0;
+    }
+    expect(quiet).toBe(19);
+    // Past the quiet the worker's game answers as the live game does (here: the tip is back, or another is on offer).
+    run(g, 1.5);
+    const a = advice(g);
+    expect(post(g, id++, false).advice).toEqual(a);
+    expect(adviceQuiet(g)).toBe(0);
+  });
+
+  test('a tip is said once on an untouched board; an adviser handed a new game each time would say it again and again', () => {
+    // The newcomer who follows tips and no lines, a minute into the wait for Assembly: "buy Speed on the Lab"
+    // and "build a second Lab" are about equally good here, and used to take turns on the card.
+    let n = 0;
+    let board: Game | null = null;
+    playByTheCard({
+      tips: true, seed: 1, meanwhile: false,
+      onIdle: (g) => {
+        if (board || !waitKind(g) || activeGoal(g)!.id !== 'make-glyph') return;
+        if (++n === 60) { board = cloneGame(g)!; board.rev = g.rev; }
+      },
+    });
+    expect(board).not.toBeNull();
+    const kept = cloneGame(board!)!;   // asked through the worker's code, as one game that lives on
+    const fresh = cloneGame(board!)!;  // asked as a new game every second
+    kept.rev = fresh.rev = board!.rev;
+    const through: string[] = [];
+    const forgetful: string[] = [];
+    let id = 6000;
+    for (let s = 0; s < 150 && !kept.goal.ready && waitKind(kept); s++) {
+      const a = reads(post(kept, id++, s === 0).advice);
+      if (through[through.length - 1] !== a) through.push(a);
+      const b = reads(advice(cloneGame(fresh)!));
+      if (forgetful[forgetful.length - 1] !== b) forgetful.push(b);
+      run(kept, 1);
+      run(fresh, 1);
+      kept.events.length = fresh.events.length = 0;
+    }
+    const tips = through.filter(Boolean);
+    expect(tips.length).toBeGreaterThanOrEqual(2);
+    expect(new Set(tips).size, through.map((x) => x || '—').join(' | ')).toBe(tips.length);
+    // (The control: without the memory the same two tips come back many times. If this ever stops being so, the board no longer tests anything.)
+    const again = forgetful.filter(Boolean);
+    expect(again.length - new Set(again).size).toBeGreaterThanOrEqual(5);
+  });
+
+  test('"the wait will not end without it" arrives as Infinity, a number, after the copy there and the copy back', () => {
+    // Saving for the Fabricator with every wire into a Market cut: nothing is sold, the wait would never end.
+    const g = cloneGame(real.find((x) => waitKind(x) === 'credits' && idOf(x) === 'build-fabricator')!)!;
+    const markets = new Set(g.nodes.filter((x) => x.type === 'market').map((x) => x.id));
+    for (const w of g.wires.filter((x) => markets.has(x.to)).map((x) => x.id)) expect(cutWire(g, w)).toBe(true);
+    g.edits = [];
+    run(g, 2);
+    g.events.length = 0;
+    // What the worker posts back is a structured clone of the answer.
+    const back = structuredClone(post(g, 7000, true));
+    expect(back.error).toBeUndefined();
+    expect(back.info!.eta).toBe(Infinity);
+    expect(back.advice).not.toBeNull();
+    expect(back.advice!.saves).toBe(Infinity);
+    expect(typeof back.advice!.saves).toBe('number');
+    // (Through JSON it would not: that is why the page and the worker never talk in JSON.)
+    expect(JSON.parse(JSON.stringify(back)).advice.saves).toBeNull();
+  });
+});
+
 const idOf = (g: Game) => ['wire-market', 'second-well', 'wire-all-wells', 'build-refiner', 'sell-shard', 'upgrade-well', 'feed-lab', 'research-murk', 'make-ink',
   'silt-exit', 'make-spark', 'first-order', 'route-lab', 'expand', 'make-glyph', 'hold-flow', 'study-glyph', 'make-mist', 'make-prism', 'three-orders',
   'build-fabricator', 'make-lens'][g.goal.i];
@@ -186,5 +281,19 @@ describe('times in words', () => {
     expect(aboutTime(218)).toBe('about 4 min');
     expect(aboutTime(3600)).toBe('over an hour');
     expect(aboutTime(Infinity)).toBe('');
+  });
+
+  test('what a move bought is said a little finer, to ten seconds under ten minutes', async () => {
+    const { aboutSpan, capFirst } = await import('../src/ui/hud-words');
+    expect(aboutSpan(3)).toBe('a few seconds');
+    expect(aboutSpan(17.5)).toBe('about 20 s');
+    expect(aboutSpan(55)).toBe('about 1 min');
+    expect(aboutSpan(78)).toBe('about 1 min 20 s');
+    expect(aboutSpan(122)).toBe('about 2 min');
+    expect(aboutSpan(214)).toBe('about 3 min 30 s');
+    expect(aboutSpan(599)).toBe('about 10 min');
+    expect(aboutSpan(912)).toBe('about 15 min');
+    expect(aboutSpan(Infinity)).toBe('');
+    expect(capFirst('the Fabricator')).toBe('The Fabricator');
   });
 });
