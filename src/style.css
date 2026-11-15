@@ -219,6 +219,8 @@ g.wire.new .glow { animation: wire-glow 0.25s ease-out; }
 #expand:not(.ok) { opacity: 0.78; }
 #expand.dock { background: #121a2b; border-style: solid; box-shadow: 0 8px 22px rgba(0, 0, 0, 0.45); }
 #expand.dock.ok { background: #221d12; }
+/* While a port is armed or a card is being placed, the docked button stands back: a press goes to the board under it. */
+#expand.dock.quiet { opacity: 0.3; pointer-events: none; }
 /* Docked and not asked for: one line, the plus, "Expand" and the price. */
 #expand.mini { width: auto; height: 36px; gap: 7px; padding: 0 12px 0 9px; border-radius: 11px; white-space: nowrap; }
 #expand.mini em, #expand.mini small { display: none; }

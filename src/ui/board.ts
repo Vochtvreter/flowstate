@@ -1986,6 +1986,9 @@ export function updateBoard(dt: number) {
   if (freshUntil && performance.now() >= freshUntil && syncChips()) layoutWires();
   if (glide) stepGlide(dt);
   if (ex.slide) drawExpand();
+  // Docked over the board while a port is armed or a card is being placed, the button stands back (faint,
+  // and a press goes through it to the board): the tap is meant for the spot under it, not for a new plot.
+  setClass(expandEl, 'quiet', ex.docked && (!!tapWire || !!ui.placing));
   if (settling.size) stepSettle(dt);
   if (drag) edgeScroll(dt);
   if (drag && (drag.kind === 'wire' || drag.kind === 'wireIn')) drawTemp(drag, dt);
