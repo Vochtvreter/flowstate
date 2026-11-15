@@ -2,11 +2,11 @@
 // Owned by the feel track. Nothing here is called by the board or the panels: it listens to the
 // hooks in ui.ts (simulation events, interface signals, the frame and the beat) and answers with
 // sound (audio.ts), particles (fx.ts), the big celebrations (celebrate.ts) and the hand (hand.ts).
-import { DATA_COLORS, DATA_NAMES, DataTier, MatId, NODE_DEFS, NodeType } from '../content';
+import { DATA_COLORS, DATA_NAMES, DataTier, MatId, NODE_DEFS, NodeType, TECHS } from '../content';
 import { materialsAt, nodeById } from '../actions';
 import { fmt } from '../economy';
 import { inFlowState } from '../flow';
-import { meanwhileOf } from '../goals';
+import { Meanwhile, activeGoal, goalView, meanwhileOf } from '../goals';
 import { graph } from '../sim';
 import { Game, GameEvent, GoalReward } from '../state';
 import {
@@ -15,7 +15,7 @@ import {
   resetAudio, saleLevel, saleStep, setDrone, setMuted,
 } from './audio';
 import { boardRect, toClient } from './board';
-import { celebrateEnd, celebrateFlow, celebrateGoal, cancelCelebrations, celebrating, initCelebrate } from './celebrate';
+import { celebrateEnd, celebrateFirstData, celebrateFlow, celebrateGoal, celebrateResearch, cancelCelebrations, celebrating, initCelebrate } from './celebrate';
 import { anchorPt, el, setAttr, setClass, setHTML } from './dom';
 import { FlyOpts, Overlay, addOverlay, burst, clearParticles, fly, pop, ring, setMood, textWidth } from './fx';
 import { Pt, bezierAt, matColor, nodeSize, outPorts, wireEnds } from './geom';
@@ -110,47 +110,51 @@ function popCounter(testid: string) {
 
 /**
  * Where "+12¢" may stand, as the middle of its left edge (and how large it is): beside the counter
- * when nothing else is there (it may lie over the counter's own Flow bonus); otherwise tucked under
- * the counter, against the foot of the bar. Never over another counter or a button, never past the
- * edge of the window. Reads layout: called once for each counter a payout lands on.
+ * when nothing else is there; else inside it, right of its number and of its rate line (over its own
+ * Flow bonus); otherwise just under the counter, below its rate line. It never covers the counter's
+ * number or rate, another counter or a button, and never goes past the edge of the window. Reads
+ * layout: called once for each counter a payout lands on.
  */
-function labelSpot(testid: string, text: string): { at: Pt; where: 'beside' | 'under'; w: number; h: number } | null {
+function labelSpot(testid: string, text: string): { at: Pt; where: 'beside' | 'inside' | 'under'; w: number; h: number } | null {
   const chip = counterEl(testid);
   const bar = document.getElementById('top');
   if (!chip || !bar) return null;
   const c = chip.getBoundingClientRect();
   if (!c.width || !c.height) return null;
   const w = Math.ceil(textWidth(text, LABEL_PX)) + LABEL_PAD * 2, h = LABEL_H;
-  const num = (chip.querySelector('.nums b') ?? chip).getBoundingClientRect();
+  // The counter's own figures: its number and, when it shows one, its rate line ("+11.5/s").
+  const own: DOMRect[] = [];
+  for (const e of [chip.querySelector('.nums b'), chip.querySelector('.nums i')]) {
+    const r = e?.getBoundingClientRect();
+    if (r && r.width && r.height) own.push(r);
+  }
   const others: DOMRect[] = [];
   for (const e of bar.querySelectorAll('.res, .datas, .techbtn, .ibtn')) {
     if (e === chip || chip.contains(e) || e.contains(chip)) continue;
     const r = e.getBoundingClientRect();
     if (r.width && r.height) others.push(r);
   }
-  // Clear of everything else by 3 px at rest, and not touching it while it pops in (a tenth wider on each side for a moment).
-  const m = Math.max(3, w * 0.1);
+  // Clear of everything by 3 px at rest, and not touching it while it pops in (a tenth larger each way for a moment).
+  const m = Math.max(3, w * 0.1), mv = Math.max(2, h * 0.1);
   const fits = (x: number) => x >= m && x + w <= window.innerWidth - m;
-  const clear = (x: number, y: number) => !others.some((r) => x < r.right + m && x + w > r.left - m && y - h / 2 < r.bottom && y + h / 2 > r.top);
+  const hits = (rs: DOMRect[], x: number, y: number) => rs.some((r) => x < r.right + m && x + w > r.left - m && y - h / 2 - mv < r.bottom && y + h / 2 + mv > r.top);
   // The Data counters of a narrow bar are lines of one block: "beside" and "under" are then beside and under the block.
   const block = chip.parentElement?.classList.contains('datas') ? chip.parentElement.getBoundingClientRect() : null;
   const box = block && block.height > c.height ? block : c;
-  // Beside: just outside the counter, level with its middle; or, when something else is there, just
-  // right of the number inside it (over the Flow bonus, which is the counter's own).
-  // (Never so near the top of the window that its pop-in, a tenth taller each way, is cut off.)
-  const y = Math.round(Math.max(h * 0.6 + 2, c.top + c.height / 2));
-  // (Inside the counter it keeps clear of the number as it is at the top of its pop, a fifth wider.)
-  for (const x of box === c ? [Math.round(c.right + 5), Math.round(num.right + num.width * 0.2 + 6)] : [Math.round(box.right + 5)]) {
-    if (fits(x) && clear(x, y)) return { at: { x, y }, where: 'beside', w, h };
+  // (Never so near the top of the window that its pop-in is cut off.)
+  const y = Math.round(Math.max(h / 2 + mv + 2, c.top + c.height / 2));
+  // Beside the counter, level with its middle.
+  const besideX = Math.round(box.right + 5);
+  if (fits(besideX) && !hits(others, besideX, y)) return { at: { x: besideX, y }, where: 'beside', w, h };
+  // Inside it, right of its figures (over the Flow bonus, which is the counter's own).
+  if (box === c && own.length) {
+    const x = Math.round(Math.max(...own.map((r) => r.right)) + m + 3);
+    if (fits(x) && !hits(others, x, y) && !hits(own, x, y)) return { at: { x, y }, where: 'inside', w, h };
   }
-  // Under: in the middle of the counter, its top a few px into the counter's foot (under the rate
-  // line); or just clear of the bar's row when that would touch anything else (another line of a
-  // Data block, a neighbour it is wider than).
+  // Under: centred under the counter, its top (at the height of its pop) just below the counter's foot,
+  // so its rate line stays readable.
   const x = Math.round(Math.max(m, Math.min(window.innerWidth - m - w, box.left + box.width / 2 - w / 2)));
-  const tucked = Math.round(box.bottom - 7 + h / 2);
-  // (Its own number counts too: the last line of a Data block reaches down to the block's foot.)
-  const free = clear(x, tucked) && !(x < num.right && x + w > num.left && tucked - h / 2 < num.bottom);
-  return { at: { x, y: free ? tucked : Math.round(box.bottom + 1 + h * 0.6) }, where: 'under', w, h };
+  return { at: { x, y: Math.round(box.bottom + 2 + mv + h / 2) }, where: 'under', w, h };
 }
 
 /** The amount standing at each counter right now: a second payout to the same counter adds to it instead of writing over it. */
@@ -196,6 +200,7 @@ function showAmount(testid: string, amount: number, unit: string, color: string)
  * appears beside the counter and fades, and the ticks play.
  */
 function payout(from: Pt, r: GoalReward) {
+  if (r.b) betaPaidAt = performance.now();
   let ticked = false;
   const at = (p: Pt) => `${Math.round(p.x)},${Math.round(p.y)}`;
   const sends: (() => void)[] = [];
@@ -287,6 +292,51 @@ function marketFor(g: Game, mat: MatId): number | null {
   return best;
 }
 
+// ---------- the end of a research wait ----------
+// The tech the goal card is saving for (its step names it) is worked out at the end of every frame in
+// which the goal or the board changed. When that tech is then researched, in the tree or by the queue,
+// it gets a small card of its own (celebrateResearch): the end of the longest waits in the game.
+
+/** The tech the active goal's step named at the end of the last frame, for this game. */
+let saving: { g: Game; key: string; tech: string | null } | null = null;
+
+function noteSaving(g: Game) {
+  const key = `${g.goal.i}|${g.goal.ready ? 1 : 0}|${g.rev}`;
+  if (saving && saving.g === g && saving.key === key) return;
+  const goal = activeGoal(g);
+  const step = goal && !g.goal.ready ? goal.step?.(g) ?? null : null;
+  saving = { g, key, tech: step && 'tech' in step ? step.tech : null };
+}
+
+/**
+ * The tech whose research now gets a card of its own (the one the goal card was saving for), or null.
+ * A toast about researching it would say what the card says: the toasts read this to stay quiet.
+ */
+export const researchCardTech = (): string | null => (saving && saving.g === ui.g ? saving.tech : null);
+
+// ---------- the first β ----------
+// The first whole β of a game (a Lab has studied a Tier 2 item; the counter in the top bar has just
+// turned from 0 to 1) gets the small card, unless a payout has just flown β to the counter, which says
+// it already. A game that has had β before (or owns a tech priced in it) never gets it.
+
+let betaSeen: { g: Game; seen: boolean } | null = null;
+let betaPaidAt = -1e9;
+
+const hasBeta = (g: Game) => g.data.b >= 1 || g.techs.some((t) => (TECHS[t]?.cost.b ?? 0) > 0);
+
+function tickBeta() {
+  const g = ui.g;
+  const had = hasBeta(g);
+  if (!betaSeen || betaSeen.g !== g) {
+    betaSeen = { g, seen: had };
+    return;
+  }
+  if (betaSeen.seen || !had) return;
+  betaSeen.seen = true;
+  if (performance.now() - betaPaidAt < 2500) return;
+  celebrateFirstData();
+}
+
 /** Everything the simulation raised this frame, together: a claim brings its unlocks with it, and they are one moment, not three. */
 function handleEvents(events: GameEvent[]) {
   // The Lens being made is a big moment in its own right: the goal turning ready beside it needs no sound of its own.
@@ -294,6 +344,12 @@ function handleEvents(events: GameEvent[]) {
   // The first surplus brings Market Lens with it ('tech', then 'surplus'): nobody pressed Research for
   // that one, so it gets no sparkle of its own.
   const surplus = events.some((e) => e.kind === 'surplus');
+  // The tech the goal card was saving for has been researched (not granted with a claim): its own card.
+  const goalTech = researchCardTech();
+  const researched = !!goalTech && !events.some((e) => e.kind === 'goal-claimed') && events.some((e) => e.kind === 'tech' && e.id === goalTech);
+  // β that comes with a claim is the claim's to announce, from the moment of the claim: a big card's payout
+  // only flies a second later, and by then the beat has seen the counter turn (see tickBeta).
+  if (events.some((e) => (e.kind === 'goal-claimed' || e.kind === 'order-claimed') && !!e.reward.b)) betaPaidAt = performance.now();
   let claimed: 'big' | 'small' | null = ended ? 'big' : null;
   for (const ev of events) {
     switch (ev.kind) {
@@ -319,8 +375,10 @@ function handleEvents(events: GameEvent[]) {
         smallCelebration('order', orderFrom(), ev.reward);
         break;
       case 'tech':
-        // Granted by the goal just claimed: part of that celebration. Researched: its own small one, where the player pressed.
-        if (!claimed && !(surplus && ev.id === 'C1')) smallCelebration('tech', lastPress ?? centre(), {}, DATA_COLORS.a);
+        // Granted by the goal just claimed: part of that celebration. The tech the goal was saving for: its
+        // own card. Any other research: a small sparkle where the player pressed.
+        if (researched && ev.id === goalTech) celebrateResearch(ev.id);
+        else if (!claimed && !(surplus && ev.id === 'C1')) smallCelebration('tech', lastPress ?? centre(), {}, DATA_COLORS.a);
         break;
       case 'surplus': {
         // Something sells over its demand for the first time in this game: two uneasy notes, and one amber
@@ -343,7 +401,8 @@ function handleEvents(events: GameEvent[]) {
         // The Claim button lighting up is the HUD's to show; this is only its sound. Straight after a claim
         // the chime is still ringing: a big one says enough, a small one gets its "ready" a beat later.
         if (claimed === 'big') break;
-        if (claimed) setTimeout(cueReady, 450);
+        // (Researching the goal's tech can finish the goal: the research card's run of bells goes first.)
+        if (claimed || researched) setTimeout(cueReady, researched ? 900 : 450);
         else cueReady();
         break;
       }
@@ -541,23 +600,44 @@ function onExpand(d: { deposits: number[]; stagger: number }) {
   });
 }
 
-// ---------- the goal card's "while you wait" line ----------
-// Looked at once a second. When the line of the goal on the card turns from not done to done, a small
-// cue says so (the card draws the tick). Not when the game is loaded or replaced, and not when the
-// goal changes: only a change seen on the same goal of the same game counts.
-let lineSeen: { g: Game; goal: number; done: boolean } | null = null;
+// ---------- the goal card's "while you wait" lines ----------
+// A goal may carry several lines, shown one at a time (goalView(g).meanwhile: the first not yet done, with
+// its `step` of `of`). Looked at twice a second: when a line of the goal on the card turns from not done to
+// done, a small cue says so (the card draws the tick), once for each line, keyed by the goal and the line's
+// step. The line on the card moving on to the next one is not itself a tick: what is checked is the line
+// that was on the card, by its own done(). Nothing plays when the game is loaded or replaced, when the
+// goal changes, or for a line that was already done when it first showed.
+let lineSeen: { g: Game; goal: number; line: Meanwhile; step: number; done: boolean } | null = null;
+/** The lines whose tick has played in this game, as "goal:step". */
+const linesTicked = new Set<string>();
 let lineBeat = 0;
 
+function lineTicked(goal: number, step: number) {
+  const key = `${goal}:${step}`;
+  if (linesTicked.has(key)) return;
+  linesTicked.add(key);
+  record('celebrate', 'line-done', key);
+  cueLineDone();
+  buzz('line', 8);
+}
+
 function tickLine() {
-  if (++lineBeat % 4) return;
+  if (++lineBeat % 2) return;
   const g = ui.g;
   const line = meanwhileOf(g);
-  const now = line ? { g, goal: g.goal.i, done: line.done(g) } : null;
-  if (now && lineSeen && lineSeen.g === g && lineSeen.goal === now.goal && !lineSeen.done && now.done) {
-    cueLineDone();
-    buzz('line', 8);
+  // (While the goal is ready to claim there is no line on the card: whatever was seen is kept for when it comes back.)
+  if (!line) {
+    if (lineSeen && (lineSeen.g !== g || lineSeen.goal !== g.goal.i)) lineSeen = null;
+    return;
   }
-  lineSeen = now;
+  const step = goalView(g)?.meanwhile?.step ?? 1;
+  const done = line.done(g);
+  const was = lineSeen;
+  lineSeen = { g, goal: g.goal.i, line, step, done };
+  if (!was || was.g !== g || was.goal !== g.goal.i) return;
+  // The line that was on the card has been done since the last look: on the card itself, or the card has
+  // already moved on to the next line because of it.
+  if (!was.done && (was.line === line ? done : was.line.done(g))) lineTicked(was.goal, was.step);
 }
 
 // ---------- Flow State ----------
@@ -577,6 +657,8 @@ let shimmer = SHIMMER;
 // The bright line along the board's edge, which swells and sinks while the soft glow behind it
 // (four still strips, feel.css) stays put. Drawn here because this canvas is redrawn every frame anyway.
 const edgeOverlay: Overlay = {
+  // (It stands still on the screen and changes slowly: a busy board may draw it about 30 times a second.)
+  slow: true,
   active: () => edgeOn || edgeLevel > 0.01 || shimmer < SHIMMER,
   draw(c, dt) {
     edgeLevel += ((edgeOn ? 1 : 0) - edgeLevel) * (1 - Math.exp(-dt / (edgeOn ? 0.5 : 0.9)));
@@ -717,6 +799,8 @@ export function initFeel() {
 
   onFrame(() => {
     if (batch.length) handleEvents(batch.splice(0));
+    // (After the events: what the goal is saving for as the frame ends, for a research in the next one.)
+    noteSaving(ui.g);
     if (sales.length) {
       cueSales(sales);
       sales.length = 0;
@@ -729,6 +813,7 @@ export function initFeel() {
   });
   onBeat(tickFlow);
   onBeat(tickLine);
+  onBeat(tickBeta);
   onNewGame(() => {
     // Back to the beginning: nothing waiting, nothing flying, nothing humming, nothing glowing.
     // (No beat runs behind the start screen, so Flow State's hum and glow are put out here.)
@@ -739,6 +824,9 @@ export function initFeel() {
     worldRings.length = 0;
     for (const t of expandTimers.splice(0)) clearTimeout(t);
     lineSeen = null;
+    linesTicked.clear();
+    saving = null;
+    betaSeen = null;
     for (const st of standing.values()) {
       clearTimeout(st.timer);
       st.el.remove();
@@ -776,6 +864,8 @@ export function initFeel() {
     if (!hook) return false;
     hook.feel ??= {
       log, audioState, hand: handState, celebrating, muted: isMuted, setMuted,
+      /** The tech whose research would get a card of its own right now (the one the goal card is saving for), or null. */
+      researchTech: researchCardTech,
       /** Raise an interface signal as the HUD would: emit('tip', { state: 'stale', at }), emit('showme', { wire: { from, to } }). */
       emit: signal,
       /** Render the loudest pile-up of cues offline and report its peak (see renderPeak in audio.ts). */

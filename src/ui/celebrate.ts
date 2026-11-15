@@ -6,30 +6,42 @@
 // moment it is made the factory takes a bow (a pulse runs along the wires from the Wells to the Lens,
 // lighting each card it passes) and then its card comes up.
 //
-// Nothing here ever takes input: every layer ignores the pointer, so a press during a celebration
-// lands on the game underneath, and it also sends the celebration on its way (the reward flies at
-// once and the card leaves). Everything added to the page is taken out again when it ends. The four
-// that follow a claim are over in about 2.5 s; the Lens, bow and all, in about 6.3 s, because the
-// summary screen opens 6.5 s after the Lens is made.
-import { DATA_COLORS, MATERIALS, RULES, TECHS } from '../content';
+// A press anywhere sends a celebration on its way (the reward flies at once and the card leaves).
+// A press on the card itself goes no further: it is what a newcomer does to put the card away, and
+// on a phone the board under the card would otherwise take it as a tap on a node or a wire and open
+// the inspector over half the screen. Everywhere else (the wash, the space around the card) ignores
+// the pointer, so a press there lands on the game underneath as well. Everything added to the page
+// is taken out again when it ends. The four that follow a claim are over in about 2.5 s; the Lens,
+// bow and all, stays until the summary screen opens 6.5 s after the Lens is made, and leaves with it.
+import { DATA_COLORS, MATERIALS, MatId, NODE_DEFS, NodeType, RULES, TECHS } from '../content';
 import { recipeOf } from '../economy';
 import { GOALS } from '../goals';
 import { graph, isMachine } from '../sim';
 import { GNode, GoalReward } from '../state';
-import { boardRect, fitView, toClient } from './board';
+import { boardRect, fitView, frameNodes, toClient } from './board';
 import { anchorPt } from './dom';
-import { Overlay, addOverlay, burst, fly, ring } from './fx';
+import { SUMMARY_DELAY } from './hud-screens';
+import { Overlay, addOverlay, burst, fly, holdFlows, ring } from './fx';
 import { Pt, bezierAt, nodeSize, wireEnds } from './geom';
-import { esc, matGlyph, nodeIcon } from './icons';
-import { Fanfare, buzz, cueBowNote, cueFanfare, cueWhoosh } from './audio';
+import { esc, icon, matGlyph, nodeIcon } from './icons';
+import { env } from './phone-env';
+import { Fanfare, buzz, cueBowNote, cueFanfare, cueResearch, cueWhoosh } from './audio';
 import { ui } from './ui';
 
 export type BigKind = Fanfare;
+/** The big cards, and the small one ('note') for the end of a research wait or the first β. */
+type CardKind = BigKind | 'note';
 
 interface Spec {
-  kind: BigKind;
+  kind: CardKind;
+  /** A word or two above the title (the small card: "Researched"). */
+  kicker?: string;
   title: string;
   line: string;
+  /** What the log calls it (big:<kind> unless given). */
+  logAs?: string;
+  /** The sound it opens with (the kind's fanfare unless given). */
+  cue?: () => void;
   /** HTML of the large glyph. */
   glyph: string;
   color: string;
@@ -44,6 +56,11 @@ interface Spec {
   leaving?: () => void;
   /** Runs when it ends, however it ends. */
   done?: () => void;
+  /**
+   * The Lens at the end of the demo: no press or key sends it away (a press on the card itself still
+   * goes no further), and it leaves when the summary screen opens, as the summary fades in over it.
+   */
+  holds?: boolean;
 }
 
 /**
@@ -53,8 +70,10 @@ interface Spec {
  */
 const MIN_SHOWN_MS = 400;
 /** How far the middle of the glyph is above the middle of the card, in px, for each size of card. */
-const GLYPH_RISE: Record<BigKind, number> = { shard: 36, lab: 37, spark: 36, glyph: 41, flow: 36, prism: 36, lens: 47 };
+const GLYPH_RISE: Record<CardKind, number> = { shard: 36, lab: 37, spark: 36, glyph: 41, flow: 36, prism: 36, lens: 47, note: 38 };
 const OUT_MS = 320;
+/** How long the dots hold still under the Lens card, which stays until the summary (see start). */
+const LENS_HOLD_MS = 1500;
 
 let app: HTMLElement;
 let record: (kind: 'celebrate', name: string, detail?: string | number) => void = () => {};
@@ -76,7 +95,7 @@ export function initCelebrate(hooks: { record: typeof record; payout: typeof pay
   const dismiss = () => {
     if (bow && !bow.revealed) return void revealLens();
     const c = current;
-    if (!c || c.leaving) return;
+    if (!c || c.leaving || c.spec.holds) return;
     const wait = MIN_SHOWN_MS - (performance.now() - c.shownAt);
     if (wait <= 0) leave();
     else c.timers.push(window.setTimeout(() => current === c && leave(), wait));
@@ -85,16 +104,22 @@ export function initCelebrate(hooks: { record: typeof record; payout: typeof pay
   window.addEventListener('keydown', (e) => {
     if (e.key === 'Escape' || e.key === 'Enter' || e.key === ' ') dismiss();
   }, true);
-  // The summary screen (and the start screen) are never shared with a celebration: whatever is still
-  // up when one of them opens is taken down on the spot. The Lens is timed to be gone by then; this
-  // is for a page that was held up (a background tab, a long frame).
+  // The summary screen is never shared with a celebration for long. The Lens card is waiting for it: it
+  // leaves as the summary fades in over it (the two take about the same 0.3 s). Anything else still up
+  // when the summary opens (a page that was held up: a background tab, a long frame) is taken down on
+  // the spot.
   if (typeof MutationObserver !== 'undefined') {
     const watch = new MutationObserver(() => {
       const summary = document.getElementById('summary');
-      if (summary && !summary.hasAttribute('hidden') && celebrating()) {
-        record('celebrate', 'cut', 'summary');
-        cancelCelebrations();
+      if (!summary || summary.hasAttribute('hidden') || !celebrating()) return;
+      if (current?.spec.holds && !queue.length) {
+        record('celebrate', 'leave', 'summary');
+        endBow();
+        leave();
+        return;
       }
+      record('celebrate', 'cut', 'summary');
+      cancelCelebrations();
     });
     const summary = document.getElementById('summary');
     if (summary) watch.observe(summary, { attributes: true, attributeFilter: ['hidden'] });
@@ -120,9 +145,11 @@ function start(spec: Spec) {
     return;
   }
   const calm = reduced();
-  record('celebrate', 'big:' + spec.kind, spec.title);
+  const small = spec.kind === 'note';
+  record('celebrate', spec.logAs ?? 'big:' + spec.kind, spec.title);
   let wash: HTMLElement | null = null;
-  if (!calm) {
+  // (The small card has no wash: it is a note, not a scene.)
+  if (!calm && !small) {
     wash = document.createElement('div');
     wash.className = `cel-wash k-${spec.kind}`;
     wash.style.setProperty('--c', spec.color);
@@ -132,7 +159,15 @@ function start(spec: Spec) {
   wrap.className = `cel k-${spec.kind}${calm ? ' calm' : ''}`;
   wrap.setAttribute('data-testid', 'celebration');
   wrap.style.setProperty('--c', spec.color);
-  wrap.innerHTML = `<div class="cel-card" role="status"><div class="cel-glyph">${spec.glyph}</div><div class="cel-words"><div class="cel-title">${esc(spec.title)}</div><div class="cel-line">${esc(spec.line)}</div></div></div>`;
+  const kicker = spec.kicker ? `<div class="cel-kicker">${esc(spec.kicker)}</div>` : '';
+  wrap.innerHTML = `<div class="cel-card" role="status"><div class="cel-glyph">${spec.glyph}</div><div class="cel-words">${kicker}<div class="cel-title">${esc(spec.title)}</div><div class="cel-line">${esc(spec.line)}</div></div></div>`;
+  // A press on the card is for the card: it sends it away (the window's listener, in initCelebrate, has
+  // already seen to that) and goes no further, and nor does the click that follows it. (Nor does a right
+  // press bring up the browser's menu, which the board under the card keeps away too.)
+  const card = wrap.firstElementChild as HTMLElement;
+  card.addEventListener('pointerdown', swallow);
+  card.addEventListener('click', swallow);
+  card.addEventListener('contextmenu', swallow);
   app.appendChild(wrap);
   const timers: number[] = [];
   // The glyph sits a little above the middle of the card, which is in the middle of the window; on a
@@ -143,6 +178,15 @@ function start(spec: Spec) {
     ? { x: window.innerWidth / 2 - Math.min(FLAT.width, window.innerWidth - 32) / 2 + FLAT.glyphX, y: window.innerHeight / 2 + FLAT.down }
     : { x: window.innerWidth / 2, y: window.innerHeight / 2 - GLYPH_RISE[spec.kind] };
   const c: Card = (current = { spec, wash, wrap, timers, raf: 0, leaving: false, shownAt: performance.now(), at, paid: false });
+  // A big card covers the middle of the board: the dots there hold still until it has gone, which saves
+  // redrawing the whole board layer while the card, its wash and its sparks are on screen. Not under the
+  // Flow State card, whose news is that everything is running flat out (it has no sparks and costs
+  // little). The Lens card stays for five seconds or more, until the summary: there they hold for its
+  // opening only, as a factory standing still that long at its finest moment reads as one that has stopped.
+  if (!small && spec.kind !== 'flow') {
+    holdFlows(true);
+    if (spec.holds) timers.push(window.setTimeout(() => current === c && holdFlows(false), LENS_HOLD_MS));
+  }
   timers.push(window.setTimeout(leave, spec.life));
   if (spec.reward) timers.push(window.setTimeout(() => pay(c), spec.payAt ?? 700));
   // The rest of the opening is spread over the next three frames, one piece each, so that no single
@@ -159,8 +203,10 @@ function start(spec: Spec) {
       }, washLife(spec) + 60));
     },
     () => {
-      cueFanfare(spec.kind);
-      buzz('big', spec.kind === 'lens' ? [30, 60, 30, 60, 60] : spec.kind === 'glyph' ? [20, 50, 30] : spec.kind === 'spark' ? [10, 30, 30] : [20, 40, 20]);
+      if (spec.cue) spec.cue();
+      else if (!small) cueFanfare(spec.kind as BigKind);
+      if (small) buzz('note', [10, 30, 15]);
+      else buzz('big', spec.kind === 'lens' ? [30, 60, 30, 60, 60] : spec.kind === 'glyph' ? [20, 50, 30] : spec.kind === 'spark' ? [10, 30, 30] : [20, 40, 20]);
     },
     () => !calm && spec.show?.(at, spec),
   ];
@@ -170,6 +216,13 @@ function start(spec: Spec) {
     c.raf = steps.length ? requestAnimationFrame(next) : 0;
   };
   c.raf = requestAnimationFrame(next);
+}
+
+/** A press or click on a card: it stops there. (The press has already sent the card on its way.) */
+function swallow(e: Event) {
+  e.preventDefault();
+  e.stopPropagation();
+  if (e.type === 'pointerdown') record('celebrate', 'press', 'card');
 }
 
 /**
@@ -220,6 +273,7 @@ function remove() {
   c.wrap.remove();
   c.wash?.remove();
   current = null;
+  holdFlows(false);
   c.spec.done?.();
   const next = queue.shift();
   if (next) start(next);
@@ -303,7 +357,8 @@ export function celebrateGoal(goalId: string, reward: GoalReward) {
         life: 2200, show: converge, reward, payAt: 1150,
       });
     case 'make-lens':
-      return lensCard(reduced() ? 4500 : 2600);
+      // (A Lens made in an earlier session: no summary is on its way, so the card keeps its own time.)
+      return lensCard(reduced() ? 4500 : 2600, false);
     default: {
       // A big goal this file has not met: celebrate it at the smallest size, with the goal's own words
       // (the Shard's fanfare and sparks, in gold, under a star).
@@ -393,6 +448,58 @@ function converge(at: Pt, spec: Spec) {
   fly(right, at, MATERIALS.spark.color, 22, undefined, { ...opts, shape: 'star' });
 }
 
+// ---------- the small card ----------
+// The end of a long wait for Data: the tech the goal card was saving for has been researched. Not a
+// fanfare (the goal is not done yet, and the next step is waiting on the card): a small card with the
+// tech's name and what it opens up, one spray and one ring, a short rising cue, and no reward.
+// The first β gets the same card, and a ring then closes on its counter.
+
+/** How the small card for a tech looks: the raw material it reveals, else the machine it unlocks, else the tree. */
+function techLook(id: string): { glyph: string; color: string } {
+  for (const m of Object.keys(MATERIALS) as MatId[]) {
+    if (MATERIALS[m].tier === 0 && MATERIALS[m].tech === id) return { glyph: matGlyph(m, 52), color: MATERIALS[m].color };
+  }
+  for (const t of Object.keys(NODE_DEFS) as NodeType[]) {
+    if (NODE_DEFS[t].tech === id) return { glyph: nodeIcon(t, 50), color: '#9DB8FF' };
+  }
+  return { glyph: icon('tree', 46), color: DATA_COLORS.a };
+}
+
+/** What a tech opens up, in a line: "Murk Wells and Void unlocked", or its first new recipe when that is all it brings. */
+export function researchLine(id: string): string {
+  const t = TECHS[id];
+  if (!t) return '';
+  const things = t.unlocks.filter((u) => !u.startsWith('Recipe:')).map((u) => u.replace(/ node$/, ''));
+  if (things.length) return `${list(things)} unlocked`;
+  const recipe = t.unlocks.find((u) => u.startsWith('Recipe:'));
+  return recipe ? `New recipe: ${recipe.slice(7).trim()}` : 'Researched';
+}
+
+/** Sparks for the small card: one spray and one ring. */
+const note = (at: Pt, spec: Spec) => {
+  burst(at, spec.color, 14, { top: true, power: 1.1, shape: 'diamond' });
+  burst(at, '#ffffff', 4, { top: true, power: 0.8 });
+  ring(at, spec.color, { top: true, size: 84, life: 0.6 });
+};
+
+/** The tech the goal card was saving for has just been researched. */
+export function celebrateResearch(id: string) {
+  const t = TECHS[id];
+  if (!t) return;
+  const { glyph, color } = techLook(id);
+  start({ kind: 'note', kicker: 'Researched', title: t.name, line: researchLine(id), glyph, color, life: 1700, show: note, logAs: 'research:' + id, cue: () => cueResearch('tech') });
+}
+
+/** The first β has reached its counter: the same small card, and a ring closes on the counter as it leaves. */
+export function celebrateFirstData() {
+  const color = DATA_COLORS.b;
+  start({
+    kind: 'note', kicker: 'New Data', title: 'First β', line: 'Tier 2 Data · spend it in the Tech tree',
+    glyph: `<span class="cel-sym">β</span>`, color, life: 1700, show: note, logAs: 'first-beta', cue: () => cueResearch('data'),
+    leaving: () => leadTo('data-b', '[data-testid="data-b"]', color),
+  });
+}
+
 /** The first Flow State: no sparks, only slow rings widening from the middle, like breath on glass. */
 export function celebrateFlow() {
   const bonus = Math.round(RULES.flow.bonus * 100);
@@ -410,10 +517,20 @@ export function celebrateFlow() {
 
 const RAINBOW = ['shard', 'ink', 'spark', 'mist', 'glyph', 'prism'] as const;
 
-function lensCard(life: number) {
+/**
+ * The Lens card made at the end of the demo stays until the summary screen opens (SUMMARY_DELAY after
+ * the Lens is made) and leaves with it. Its own time runs out SUMMARY_GRACE later: the summary opening
+ * is what normally sends it, and the timer is for a page where no summary comes (`?nosummary`).
+ */
+const SUMMARY_GRACE = 400;
+/** When the Lens was made (performance.now()), for the time left until the summary. */
+let endAt = 0;
+const untilSummary = () => Math.max(900, endAt + SUMMARY_DELAY * 1000 + SUMMARY_GRACE - performance.now());
+
+function lensCard(life: number, holds = true) {
   start({
     kind: 'lens', title: 'First Lens', line: 'Demo complete · free play is open', glyph: matGlyph('lens', 80), color: MATERIALS.lens.color,
-    life,
+    life, holds,
     show: (at) => {
       // Three waves, each in the colours of what the factory makes on the way to a Lens.
       for (let wave = 0; wave < 3; wave++) {
@@ -445,11 +562,6 @@ let bow: { t0: number; step: number; rows: number; wires: BowWire[]; nodes: BowN
 const BOW_SEGS = 18;
 /** The light may take this long (s) to run from the Wells to the Lens, however deep the factory is. */
 const BOW_MAX = 2.6;
-/**
- * The Lens card starts to leave this long (ms) after the Lens was made, whatever happened before:
- * 5.9 s, plus its exit, is 6.2 s, and the summary screen opens at 6.5 (SUMMARY_DELAY in hud-screens.ts).
- */
-const END_BY = 5900;
 /** After the light has reached the Lens the factory stays lit this long (ms), then fades over BOW_FADE. */
 const BOW_HOLD = 700;
 const BOW_FADE = 500;
@@ -465,7 +577,7 @@ function startBow() {
   const g = ui.g;
   const gr = graph(g);
   const lens = g.nodes.find((n) => n.recipe === RULES.capstone && n.cycles > 0) ?? g.nodes.find((n) => n.recipe === RULES.capstone);
-  if (!lens) return lensCard(2600);
+  if (!lens) return lensCard(untilSummary());
   // Everything upstream of the Lens, with its row: the longest way there from a node that nothing feeds.
   const depth = new Map<number, number>();
   const visiting = new Set<number>();
@@ -506,13 +618,18 @@ function startBow() {
       wires.push({ pts, from: depth.get(wire.from)! * step, to: d * step, color: ends.mat ? MATERIALS[ends.mat].color : '#9DB8FF' });
     }
   }
-  // Bring the whole line into view if part of it is off screen.
+  // Bring the line into view if part of it is off screen. On a phone, Fit: its overview (every card an
+  // icon) is how a phone shows the whole factory, and the Lens moment uses it. Elsewhere, as little camera
+  // movement as it takes, among the cards (the board's frameNodes, the Wells first and the Lens last, so
+  // that the Lens is the one shown when they cannot all be): Fit drops a large factory into the overview
+  // there too, and turning every card into an icon at once was the longest frame of the whole moment.
   const r = boardRect();
   const off = [...nodes, ...(lensBox ? [lensBox] : [])].some((b) => {
     const p = toClient({ x: b.x + b.w / 2, y: b.y + b.h / 2 });
     return p.x < r.left + 20 || p.x > r.right - 20 || p.y < r.top + 20 || p.y > r.bottom - 20;
   });
-  if (off) fitView();
+  if (off && env.phone) fitView();
+  else if (off) frameNodes([...depth.keys()].sort((a, b) => depth.get(a)! - depth.get(b)!));
   const t0 = performance.now();
   const timers: number[] = [];
   bow = { t0, step, rows, wires, nodes, lens: lensBox, revealAt: (rows - 1) * step + 0.3, revealed: false, fadeFrom: Infinity, timers };
@@ -543,8 +660,8 @@ function revealLens() {
     ring(at, '#ffffff', { size: 120, life: 0.7 });
     ring(at, MATERIALS.lens.color, { size: 70, life: 0.5 });
   }
-  // The card arrives a moment after the flash and stays until just before the summary screen.
-  b.timers.push(window.setTimeout(() => lensCard(Math.max(900, END_BY - (performance.now() - b.t0))), 350));
+  // The card arrives a moment after the flash and stays until the summary screen opens.
+  b.timers.push(window.setTimeout(() => lensCard(untilSummary()), 350));
   // The lit wires and outlines have done their work once the card is up: they fade soon after, so
   // that for most of the card's stay nothing extra is being drawn on the board.
   b.timers.push(window.setTimeout(() => bow === b && endBow(), BOW_HOLD));
@@ -641,9 +758,11 @@ const bowOverlay: Overlay = {
 
 /**
  * The first Lens has just been made and the demo is complete: the factory takes its bow, then the
- * Lens card. All of it is over within 6.3 seconds, because the summary screen opens at 6.5.
+ * Lens card, which stays until the summary screen opens 6.5 s after this (SUMMARY_DELAY) and leaves
+ * as it fades in. Call in the frame the 'demo-end' event arrives: the summary counts from the same one.
  */
 export function celebrateEnd() {
-  if (reduced()) return lensCard(4500);
+  endAt = performance.now();
+  if (reduced()) return lensCard(untilSummary());
   startBow();
 }

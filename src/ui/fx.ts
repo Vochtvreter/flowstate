@@ -9,7 +9,8 @@
 //    inside the window and on the board or the strip once it has left, so a spark can start over the
 //    card and fly off across the board. The window is moved to wherever the next effect is whenever
 //    it is empty.
-// Nothing here touches the DOM after init, and nothing here knows about the game: the board hands
+// Nothing here touches the DOM after init but to move the top layer's window and to hide the board
+// layer while there is nothing on it, and nothing here knows about the game: the board hands
 // over wire geometry as `Flow` objects, everyone else calls the particle functions or adds an
 // overlay (a function that draws its own thing each frame).
 //
@@ -19,9 +20,12 @@
 // Why three canvases rather than one big one. Wire dots must stay under the goal card, the build
 // menu and the phone's sheets, while coins must fly over the top bar: one canvas cannot be both.
 // And a canvas costs by its size on every frame it changes (the browser hands the whole of it to
-// the compositor each time; measured, that is the largest single cost in a frame here). The board
-// layer changes every frame anyway (the dots), a strip hardly costs at all, and the top layer is
-// kept to a small window that is only touched for the second or two of a celebration.
+// the compositor each time; measured, that is the largest single cost in a frame here). A strip
+// hardly costs at all, and the top layer is kept to a small window that is only touched for the
+// second or two of a celebration. The board layer is the big one, and on a large factory it is
+// most of what a frame costs on a slow machine, so it is changed as seldom as looks right (see
+// BUSY_WIRES): about 30 times a second while the camera is still, not at all for its dots while
+// the camera moves, and with the dots held still while a celebration card is up.
 
 export interface Pt { x: number; y: number }
 
@@ -124,6 +128,8 @@ interface Surface {
   /** Canvas pixels per CSS pixel. */
   ratio: number;
   blank: boolean;
+  /** It is on screen (it is hidden while there is nothing on it). */
+  shown: boolean;
 }
 /** Layer numbers. A particle is on one of them, or on AUTO: wherever it happens to be this frame. */
 const BOARD = 0, TOP = 1, BAR = 2, AUTO = -1;
@@ -159,6 +165,38 @@ let dotCount = 0;
 let mood = 0;
 let moodTarget = 0;
 
+// How often the board layer is redrawn. On a factory of more than BUSY_WIRES wires:
+//  - While the camera is still, the board layer is redrawn about 30 times a second (every other frame
+//    of a 60 Hz screen), with the dots moved on by the whole time since the last redraw. Dots, port
+//    pulses, floating figures and coins from sales read the same at that rate; anything that must keep
+//    up with the eye (sparks, rings, the coins of a reward, the hand's wire, a wire being connected) is
+//    drawn on every frame as before, while it lasts.
+//  - While the camera moves (a pan, a pinch, the wheel, a glide: seen here as a view that differs from
+//    the last frame's), the dots and port pulses are not drawn at all, and they fade back in once the
+//    camera has been still for SETTLE. Redrawn at 30 Hz they would lag behind the wires they belong
+//    to; not drawn, the board layer costs nothing while the camera moves.
+// On a smaller factory every frame is drawn, as it is cheap there.
+// Whatever the size, the dots and pulses hold still while a celebration card is up (holdFlows).
+/** More wires than this and the board layer is redrawn as described above. */
+const BUSY_WIRES = 30;
+/** Least time between two redraws of a busy board's layer, in seconds: a little under a 30 Hz frame, so a 60 Hz screen draws every other frame. */
+const BUSY_GAP = 0.028;
+/** The camera counts as still once the view has not changed for this long, in seconds. */
+const SETTLE = 0.12;
+/** Once the camera is still, the dots fade back in over this long, in seconds. */
+const DOTS_IN = 0.22;
+/** The view on the last frame, and how long it has stayed the same (s). */
+let camX = NaN, camY = NaN, camK = NaN, stillFor = 0;
+/** Seconds since the board layer was last drawn, and the time its dots have to catch up on. */
+let sinceDraw = 0, flowDue = 0;
+/** 0..1: how far the dots have faded back in after the camera stopped. */
+let dotsIn = 1;
+/** A celebration card is up: dots and port pulses hold still (see holdFlows). */
+let held = false;
+/** Redraws of the board layer since the page loaded, and whether its dots are left out right now because the camera is moving (for tests). */
+let boardDraws = 0;
+let boardHidden = false;
+
 function makeSurface(id: string, z: number): Surface {
   const c = document.createElement('canvas');
   c.id = id;
@@ -166,7 +204,7 @@ function makeSurface(id: string, z: number): Surface {
   // Inline, so the layer can never take input or push the layout about even if a stylesheet is missing.
   c.style.cssText = `position:absolute;left:0;top:0;pointer-events:none;z-index:${z}`;
   appEl!.appendChild(c);
-  return { canvas: c, ctx: c.getContext('2d'), x: 0, y: 0, w: 0, h: 0, ratio: 1, blank: true };
+  return { canvas: c, ctx: c.getContext('2d'), x: 0, y: 0, w: 0, h: 0, ratio: 1, blank: true, shown: true };
 }
 
 export function initFx(c: HTMLCanvasElement) {
@@ -273,8 +311,20 @@ const inTop = (x: number, y: number, m = 0) => !!top && x >= top.x - m && x <= t
  */
 export function setMood(level: number, atOnce = false) {
   moodTarget = Math.max(0, Math.min(1, level));
-  // (A reset: no easing. Behind the start screen no time passes, so there would be none anyway.)
-  if (atOnce) mood = moodTarget;
+  // (A reset: no easing. Behind the start screen no time passes, so there would be none anyway. With less
+  // motion asked for, never any easing: see isCalm.)
+  if (atOnce || isCalm()) mood = moodTarget;
+}
+
+/**
+ * Hold the dots and the port pulses still (a celebration card is up and covers the middle of the
+ * board), or let them go again. While held, the board layer is only redrawn for what still moves
+ * on it (particles, overlays), and the dots are drawn where they stopped.
+ */
+export function holdFlows(on: boolean) {
+  if (held === on) return;
+  held = on;
+  stale = true;
 }
 
 /** The wires to draw dots on. Call again whenever wires are added or removed. */
@@ -287,8 +337,11 @@ export function setFlows(list: Flow[]) {
 // The player has asked the system for less motion. Nothing then flies, sprays or swells, whoever
 // asks for it: burst(), ring() and pop() draw nothing, fly() delivers at once (its `onArrive` runs
 // straight away, so counters still pulse and sounds still play), and a floater appears where it was
-// asked for and fades without rising. Dots still travel along the wires: they are the game's display
-// of what is flowing, not decoration.
+// asked for and fades without rising. The dots on the wires stand still: the board passes `paused`
+// to frameFx and lays each wire's dots out evenly at the spacing its rate gives, so how densely they
+// lie still shows what is flowing. The mood (Flow State) is then set at once rather than eased, so
+// the dots never grow while the player watches, and the port pulses are a steady ring. The dots of a
+// busy board fade back in after the camera moves (an opacity change only, which is allowed there).
 const calm = typeof matchMedia === 'function' ? matchMedia('(prefers-reduced-motion: reduce)') : null;
 const isCalm = () => !!calm?.matches;
 
@@ -491,6 +544,10 @@ function drawFlows(c: CanvasRenderingContext2D, view: { x: number; y: number; k:
 // One pool for all three layers. Positions are kept in client pixels and shifted to the layer when drawn.
 
 const SPARK = 1, COIN = 2, TEXT = 3, RING = 4, POP = 5;
+/** Text only: it neither pops in nor rises (less motion was asked for when it was made). */
+const F_STILL = 1;
+/** It moves quickly or matters now (a spark, a ring, a reward's coin): drawn on every frame wherever it is. */
+const F_FAST = 2;
 const POOL = 360;
 /**
  * Floating text is drawn this much larger than asked (moving text reads smaller than still text of
@@ -518,7 +575,7 @@ interface Particle {
   cx: number; cy: number; tx: number; ty: number;
   size: number; color: string; text: string;
   shape: DotShape | '';
-  /** Text only: F_STILL. */
+  /** F_FAST; and for text, F_STILL. */
   flags: number;
   /** Text only: seconds it takes to fade at the end of its life. */
   fade: number;
@@ -534,6 +591,8 @@ let live = 0;
 /** Particles to draw on each layer this frame, and how many of those are shared with the top layer's window. */
 const liveBy = [0, 0, 0];
 const splitBy = [0, 0, 0];
+/** Of the particles on the board layer this frame, those with F_FAST. */
+let fastOnBoard = 0;
 let cursor = 0;
 
 function spawn(kind: number, layer: number): Particle | null {
@@ -547,7 +606,8 @@ function spawn(kind: number, layer: number): Particle | null {
       p.mask = 0;
       p.t = 0;
       p.shape = '';
-      p.flags = 0;
+      // Sparks, rings and anything above the panels are drawn on every frame, even on a busy board.
+      p.flags = layer === TOP || kind === SPARK || kind === RING ? F_FAST : 0;
       p.fade = 0;
       p.done = null;
       live++;
@@ -686,8 +746,6 @@ export function fly(from: Pt, to: Pt, color: string, count = 3, onArrive?: () =>
   if (!sent && onArrive) onArrive();
 }
 
-/** Text only: it neither pops in nor rises (less motion was asked for when it was made). */
-const F_STILL = 1;
 const FONT = (size: number) => `700 ${size}px "Space Grotesk", Inter, system-ui, sans-serif`;
 
 /**
@@ -703,7 +761,7 @@ export function floater(at: Pt, text: string, color: string, size = 13, o?: Floa
   p.ttl = o?.life ?? 1.05;
   p.vy = calmNow ? 0 : o?.rise ?? 34;
   p.fade = Math.min(p.ttl, o?.fade ?? p.ttl * 0.35);
-  p.flags = calmNow ? F_STILL : 0;
+  if (calmNow) p.flags |= F_STILL;
   p.size = o?.exact ? size : size * TEXT_SCALE;
   p.color = color;
   p.text = text;
@@ -751,6 +809,7 @@ export function clearParticles() {
   for (const p of pool) if (p.kind !== 0) kill(p);
   liveBy[0] = liveBy[1] = liveBy[2] = 0;
   splitBy[0] = splitBy[1] = splitBy[2] = 0;
+  fastOnBoard = 0;
   stale = true;
 }
 
@@ -762,6 +821,7 @@ const EDGE = 12;
 function stepParticles(dt: number) {
   liveBy[0] = liveBy[1] = liveBy[2] = 0;
   splitBy[0] = splitBy[1] = splitBy[2] = 0;
+  fastOnBoard = 0;
   for (const p of pool) {
     if (p.kind === 0) continue;
     p.t += dt;
@@ -809,7 +869,7 @@ function stepParticles(dt: number) {
     }
     p.mask = m;
     const shared = m & B_TOP;
-    if (m & B_BOARD) { liveBy[BOARD]++; if (shared) splitBy[BOARD]++; }
+    if (m & B_BOARD) { liveBy[BOARD]++; if (shared) splitBy[BOARD]++; if (p.flags & F_FAST) fastOnBoard++; }
     if (m & B_TOP) liveBy[TOP]++;
     if (m & B_BAR) { liveBy[BAR]++; if (shared) splitBy[BAR]++; }
   }
@@ -952,11 +1012,12 @@ function drawOne(c: CanvasRenderingContext2D, p: Particle, ratio: number) {
  * Draw the particles that are on this layer this frame. A particle that is also showing through the
  * top layer's window is drawn here with the window cut out, so the two halves meet without overlapping.
  */
-function drawParticles(c: CanvasRenderingContext2D, layer: number, ratio: number) {
+function drawParticles(c: CanvasRenderingContext2D, layer: number, ratio: number, fastOnly = false) {
   const bit = 1 << layer;
   const split = layer !== TOP && splitBy[layer] > 0 && top;
+  const need = fastOnly ? F_FAST : 0;
   for (const p of pool) {
-    if (p.kind === 0 || !(p.mask & bit) || p.t < 0) continue;
+    if (p.kind === 0 || !(p.mask & bit) || p.t < 0 || (p.flags & need) !== need) continue;
     if (split && p.mask & B_TOP) continue;
     drawOne(c, p, ratio);
   }
@@ -967,7 +1028,7 @@ function drawParticles(c: CanvasRenderingContext2D, layer: number, ratio: number
     c.rect(-1e5, -1e5, 2e5, 2e5);
     c.rect(top!.x, top!.y, top!.w, top!.h);
     c.clip('evenodd');
-    for (const p of pool) if (p.kind !== 0 && p.mask & bit && p.mask & B_TOP && p.t >= 0) drawOne(c, p, ratio);
+    for (const p of pool) if (p.kind !== 0 && p.mask & bit && p.mask & B_TOP && p.t >= 0 && (p.flags & need) === need) drawOne(c, p, ratio);
     c.restore();
   }
   c.globalAlpha = 1;
@@ -982,17 +1043,43 @@ function drawParticles(c: CanvasRenderingContext2D, layer: number, ratio: number
 export interface Overlay {
   active(): boolean;
   draw(c: CanvasRenderingContext2D, dt: number): void;
+  /**
+   * It changes slowly and stands still on the screen (the Flow State glow along the board's edge): on a
+   * busy board it may be drawn about 30 times a second, like the dots. Anything else is drawn on every
+   * frame while it is active. `dt` is then the time since it was last drawn.
+   */
+  slow?: boolean;
 }
 
 const overlays: [Overlay[], Overlay[]] = [[], []];
+/** For each overlay on the board layer, the time since it was last drawn (s): what its next draw is given as `dt`. */
+const overlayDue: number[] = [];
 
 /** Register an overlay on the board layer (under the HUD), or with `onTop` on the top layer above everything. */
 export function addOverlay(o: Overlay, onTop = false) {
   overlays[onTop ? TOP : BOARD].push(o);
+  if (!onTop) overlayDue.push(0);
+}
+
+/** Draw the board layer's active overlays (only those that cannot wait, with `urgentOnly`), each with the time since it was last drawn. */
+function drawBoardOverlays(c: CanvasRenderingContext2D, urgentOnly: boolean) {
+  const list = overlays[BOARD];
+  for (let i = 0; i < list.length; i++) {
+    const o = list[i];
+    if ((urgentOnly && o.slow) || !o.active()) continue;
+    o.draw(c, overlayDue[i]);
+    overlayDue[i] = 0;
+  }
 }
 
 const anyActive = (list: Overlay[]) => {
   for (const o of list) if (o.active()) return true;
+  return false;
+};
+
+/** An overlay is active that must be drawn on every frame. */
+const anyUrgent = (list: Overlay[]) => {
+  for (const o of list) if (!o.slow && o.active()) return true;
   return false;
 };
 
@@ -1017,8 +1104,12 @@ export function frameFx(dt: number, view: { x: number; y: number; k: number }, p
   if (sizeDirty) resize();
   const pdt = Math.min(dt, 0.1);
   if (mood !== moodTarget) {
-    mood += (moodTarget - mood) * (1 - Math.exp(-pdt / MOOD_EASE));
+    // (With less motion asked for the dots do not grow by degrees: the mood is simply where it should be.)
+    if (isCalm()) mood = moodTarget;
+    else mood += (moodTarget - mood) * (1 - Math.exp(-pdt / MOOD_EASE));
     if (Math.abs(moodTarget - mood) < 0.003) mood = moodTarget;
+    // (Still dots are drawn again at their new size.)
+    stale = true;
   }
   if (live) stepParticles(pdt);
   frameBoard(ctx, canvas, dt, pdt, view, paused, covered);
@@ -1026,51 +1117,124 @@ export function frameFx(dt: number, view: { x: number; y: number; k: number }, p
   if (bar && bar.h > 0) frameSurface(bar, liveBy[BAR], null, BAR, pdt);
 }
 
+/** The board layer is on screen (it is hidden while it has nothing on it: see frameBoard). */
+let boardShown = true;
+
+function showBoardLayer(cv: HTMLCanvasElement, on: boolean) {
+  if (boardShown === on) return;
+  boardShown = on;
+  cv.style.visibility = on ? '' : 'hidden';
+}
+
 function frameBoard(c: CanvasRenderingContext2D, cv: HTMLCanvasElement, dt: number, pdt: number, view: { x: number; y: number; k: number }, paused: boolean, covered: boolean) {
-  const total = covered ? 0 : stepFlows(dt, view, paused);
-  beaconClock += pdt;
-  let pulsing = false;
-  if (!covered) {
-    for (const b of beacons) {
-      if (onScreen(b, view)) {
-        pulsing = true;
-        break;
-      }
-    }
-  }
-  const over = !covered && anyActive(overlays[BOARD]);
+  // Is the camera moving? (A pan, a pinch, the wheel or a glide: the board moves it, and it shows here
+  // as a view that differs from the last frame's.)
+  if (view.x !== camX || view.y !== camY || view.k !== camK) {
+    camX = view.x; camY = view.y; camK = view.k;
+    stillFor = 0;
+  } else stillFor += dt;
+  const list = overlays[BOARD];
+  // (An overlay that is not active has nothing to catch up on: the first draw of one that has just started,
+  // a wire's light streak or a ring, is one frame's worth, or it would open a quarter of a second in.)
+  for (let i = 0; i < list.length; i++) overlayDue[i] = list[i].active() ? Math.min(0.25, overlayDue[i] + pdt) : 0;
+  const busy = flows.length > BUSY_WIRES;
+  // Dots that do not travel this frame: the game is paused (or less motion is asked for), or a card is up.
+  const still = paused || held;
+  if (!held) beaconClock += pdt;
+  sinceDraw += dt;
+  // (The time the dots move on by when next drawn: none while they are held, so they pick up where they
+  // stopped rather than jumping on by the length of the pause; and none while the board is covered, so a
+  // minute in the tech tree does not run every dot off its wire and leave the wires empty when it closes.)
+  flowDue = still || covered ? 0 : flowDue + dt;
+  const over = !covered && anyActive(list);
   const parts = covered ? 0 : liveBy[BOARD];
   // The frame after the last particle or overlay has gone must be drawn once more, or (while paused,
   // when nothing else asks for a redraw) its last image would stay on the canvas.
   const extras = over || parts > 0;
   if (boardExtras && !extras) stale = true;
   boardExtras = extras;
-  if (!total) dotCount = 0;
-  if (!total && !parts && !pulsing && !over) {
+  const wipeAll = () => {
     if (!wasBlank) {
       c.setTransform(1, 0, 0, 1, 0, 0);
       c.clearRect(0, 0, cv.width, cv.height);
       wasBlank = true;
+      // An empty canvas the size of the board still costs the browser a full-screen blend on every frame
+      // in which anything else on screen changes (measured: a pan on a large factory ran 8 fps faster with
+      // it hidden), so it is put out of sight until there is something to draw on it again.
+      showBoardLayer(cv, false);
     }
-    stale = false;
     lastKey = '';
+  };
+  if (covered) {
+    dotCount = 0;
+    stale = false;
+    return wipeAll();
+  }
+  // What cannot wait for the next slot of a busy board: a spark, a ring, a reward's coin, or an overlay
+  // that follows the camera or the hand.
+  const urgentOver = over && anyUrgent(list);
+  const urgent = fastOnBoard > 0 || urgentOver;
+  if (busy && stillFor < SETTLE) {
+    // A busy board while the camera moves: only what cannot wait is drawn, and the dots, the port pulses,
+    // the floating figures and the coins of sales come back (fading in) once it has stopped.
+    boardHidden = true;
+    dotsIn = 0;
+    flowDue = 0;
+    dotCount = 0;
+    if (!urgent) return wipeAll();
+    boardDraws++;
+    wasBlank = false;
+    showBoardLayer(cv, true);
+    lastKey = '';
+    sinceDraw = 0;
+    c.setTransform(dpr, 0, 0, dpr, 0, 0);
+    c.clearRect(0, 0, W, H);
+    c.setTransform(dpr, 0, 0, dpr, -originX * dpr, -originY * dpr);
+    if (urgentOver) drawBoardOverlays(c, true);
+    if (fastOnBoard) drawParticles(c, BOARD, dpr, true);
     return;
   }
-  // Paused with nothing moving: the last frame is still right unless the view or the wires changed.
-  // (Beacons keep breathing while paused, so they count as movement.)
+  boardHidden = false;
+  if (dotsIn < 1) dotsIn = Math.min(1, dotsIn + dt / DOTS_IN);
+  // A busy board otherwise waits for its next slot, about 30 times a second.
+  if (busy && !urgent && sinceDraw < BUSY_GAP) return;
+  const total = stepFlows(flowDue, view, still);
+  flowDue = 0;
+  let pulsing = false;
+  for (const b of beacons) {
+    if (onScreen(b, view)) {
+      pulsing = true;
+      break;
+    }
+  }
+  if (!total) dotCount = 0;
+  if (!total && !parts && !pulsing && !over) {
+    stale = false;
+    sinceDraw = 0;
+    return wipeAll();
+  }
+  // Still dots with nothing else moving: the last frame is still right unless the view or the wires
+  // changed, or the dots are still fading back in. (Port pulses keep breathing while paused, so they count
+  // as movement; while a card is up they hold still too.)
   const key = `${view.x}|${view.y}|${view.k}`;
-  if (paused && !parts && !pulsing && !over && !stale && key === lastKey) return;
+  if (still && !parts && !(pulsing && !held) && !over && !stale && key === lastKey && dotsIn >= 1) return;
   lastKey = key;
   stale = false;
   wasBlank = false;
+  showBoardLayer(cv, true);
+  sinceDraw = 0;
+  boardDraws++;
   c.setTransform(dpr, 0, 0, dpr, 0, 0);
   c.clearRect(0, 0, W, H);
+  // (Fading back in after the camera moved: an opacity change only.)
+  if (dotsIn < 1) c.globalAlpha = dotsIn * dotsIn * (3 - 2 * dotsIn);
   if (pulsing) drawBeacons(c, view);
   if (total) drawFlows(c, view);
+  c.globalAlpha = 1;
   if (!over && !parts) return;
   // Overlays and particles work in client pixels: shift so that the canvas corner is where it is on screen.
   c.setTransform(dpr, 0, 0, dpr, -originX * dpr, -originY * dpr);
-  if (over) for (const o of overlays[BOARD]) if (o.active()) o.draw(c, pdt);
+  if (over) drawBoardOverlays(c, false);
   if (parts) drawParticles(c, BOARD, dpr);
 }
 
@@ -1085,7 +1249,16 @@ function frameSurface(s: Surface, parts: number, list: Overlay[] | null, layer: 
       c.clearRect(0, 0, s.canvas.width, s.canvas.height);
       s.blank = true;
     }
+    // (Out of sight while empty, like the board layer: an empty canvas on screen is still blended on every frame.)
+    if (s.shown) {
+      s.shown = false;
+      s.canvas.style.visibility = 'hidden';
+    }
     return;
+  }
+  if (!s.shown) {
+    s.shown = true;
+    s.canvas.style.visibility = '';
   }
   s.blank = false;
   c.setTransform(s.ratio, 0, 0, s.ratio, -s.x * s.ratio, -s.y * s.ratio);
@@ -1104,6 +1277,12 @@ export function fxStats() {
     top: { particles: liveBy[TOP], width: top?.canvas.width ?? 0, height: top?.canvas.height ?? 0 },
     bar: { particles: liveBy[BAR], width: bar?.canvas.width ?? 0, height: bar?.canvas.height ?? 0 },
     mood: +mood.toFixed(2),
+    /**
+     * The board layer: redraws since the page loaded; whether the factory is big enough to be drawn at about
+     * 30 Hz (`busy`); whether its dots are left out because the camera is moving (`hidden`); whether they
+     * are held still for a celebration card (`held`).
+     */
+    draws: boardDraws, busy: flows.length > BUSY_WIRES, wires: flows.length, hidden: boardHidden, held,
   };
 }
 
