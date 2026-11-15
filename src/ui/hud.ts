@@ -27,9 +27,9 @@
 //    that the game is paused (a pill that resumes it), or a problem on the board: the one the goal on the card
 //    meets first, else the worst off (alertPick in status.ts). The problem is left out while the card's hint,
 //    line or tip is about the same node, and a press on it puts it away until the problem is another one.
-//  - #hud-strip carries `has-order`, `has-alert`, `stuck` (an order none of which is sold) and `aiming` (a
-//    port armed, a wire being drawn, a node being placed): classes for the stylesheet, which would otherwise
-//    need has() selectors.
+//  - #hud-strip carries `has-order`, `has-alert`, `stuck` (an order none of which is sold), `paused` (the alert
+//    slot holds the Paused pill) and `aiming` (a port armed, a wire being drawn, a node being placed): classes for
+//    the stylesheet, which would otherwise need has() selectors.
 import { materialsAt, nodeById } from '../actions';
 import type { Advice } from '../advice';
 import { DATA_COLORS, DATA_NAMES, DataTier, MATERIALS, MatId, NODE_DEFS, RECIPES, TECHS } from '../content';
@@ -699,6 +699,8 @@ function renderHud(force: boolean) {
   const order = !orderEl.hasAttribute('hidden'), alert = !alertEl.hasAttribute('hidden');
   setClass(stripEl, 'has-order', order);
   setClass(stripEl, 'has-alert', alert);
+  // (The Paused pill stays in sight where the alert slot would otherwise wait out of sight: a phone on its side with a sheet open.)
+  setClass(stripEl, 'paused', alert && alertEl.dataset.kind === 'paused');
   setClass(stripEl, 'stuck', order && orderEl.dataset.stuck === '1');
   // The keyboard belongs to the tree while it is open (Enter researches there): nothing in the strip keeps the
   // focus under it. The slim bar over the tree is not under it: its Claim may hold the focus and answer a key.

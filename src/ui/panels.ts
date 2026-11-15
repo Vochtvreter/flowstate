@@ -401,6 +401,8 @@ function buildTop() {
       setClass(pauseBtn, 'on', g.paused);
       label(pauseBtn, g.paused ? 'Resume' : 'Pause', 'P');
       setHTML(pauseBtn, icon(g.paused ? 'play' : 'pause'));
+      // (Nothing comes in while paused: the bar's "+x/s" rates are dimmed, hud.css.)
+      setClass(topEl, 'paused', g.paused);
     },
   });
   addTopItem('actions', { el: el(`<span class="sep t-sep"></span>`), update() {} });
