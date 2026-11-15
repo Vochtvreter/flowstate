@@ -1483,10 +1483,12 @@ interface Followed { name: string; tips: { at: number; text: string; kind: Advic
 /** A board in the middle of one of the long waits, as a player who reads only hints and tips has it. */
 interface Mid { g: Game; from: string }
 
-function collect(): { cases: Case[]; runs: Followed[]; mids: Mid[] } {
+function collect(): { cases: Case[]; runs: Followed[]; mids: Mid[]; studying: Game[] } {
   const cases: Case[] = [];
   const followed: Followed[] = [];
   const mids: Mid[] = [];
+  /** The card players' boards at the first idle second of "Study Glyph for β" (the Glyph wire just made). */
+  const studying: Game[] = [];
   const seen = new Set<string>();
   const runs: { tips: boolean; seed: number; hands?: number; studyAll?: boolean; meanwhile?: boolean }[] = [
     { tips: true, seed: 0 }, { tips: true, seed: 1 }, { tips: true, seed: 2 }, { tips: true, seed: 3, hands: 10 }, { tips: false, seed: 4 },
@@ -1497,10 +1499,15 @@ function collect(): { cases: Case[]; runs: Followed[]; mids: Mid[] } {
     let idle = 0;
     const name = `${o.meanwhile === false ? 'hints' : 'cards'}${o.tips ? '+tips' : ''}/${o.seed}`;
     const waited = new Map<number, number>();
+    let study = false;
     const r = playByTheCard({
       ...o,
       wall: 30 * 60, // with the hints alone a wait can take a quarter of an hour
       onIdle: (g) => {
+        if (!study && o.meanwhile !== false && !o.hands && activeGoal(g)!.id === 'study-glyph') {
+          study = true;
+          studying.push(cloneGame(g)!);
+        }
         // The board 20 s and 60 s into the waits for Assembly, Breeze Deposits and the Fabricator, from the two
         // players who follow tips and no lines: where two near-equal tips once took turns on the card.
         if (o.tips && o.meanwhile === false && !o.hands && waitKind(g) && ['make-glyph', 'make-mist', 'build-fabricator'].includes(activeGoal(g)!.id)) {
@@ -1520,11 +1527,11 @@ function collect(): { cases: Case[]; runs: Followed[]; mids: Mid[] } {
     });
     followed.push({ name, tips: r.tips.map((t) => ({ at: t.at, text: t.text, kind: t.kind, saves: t.saves })) });
   }
-  return { cases, runs: followed, mids };
+  return { cases, runs: followed, mids, studying };
 }
 
 describe('every tip on a real board is affordable, can be done, and is true', () => {
-  const { cases, runs, mids } = collect();
+  const { cases, runs, mids, studying } = collect();
   const what = (a: Advice) => (a.cut ? 'cut' : a.favour ? 'favour' : a.research ? 'research' : a.build ? `build ${a.build}` : a.upgrade ? (a.all ? 'upgrade all' : 'upgrade') : 'wire');
 
   it('there are plenty of them, of every kind and for most of the repertoire', () => {
@@ -1559,6 +1566,75 @@ describe('every tip on a real board is affordable, can be done, and is true', ()
       expect(new Set(tips).size, `${from}: ${seen.map((x) => x || '—').join(' | ')}`).toBe(tips.length);
     }
     expect(said).toBeGreaterThanOrEqual(3); // (the adviser did have things to say on them)
+  });
+
+  it('"Study Glyph for β" with raw Wells crowding the one Lab: Glyph starves, and within half a minute the adviser says what ends it', () => {
+    // A Lab studies one item a second and takes what arrived first. A player who wired their raw Wells into
+    // the Lab of goal 7 (instead of giving each a Lab of its own, or on top of that) and then wires the Glyph
+    // in, as this card says, gets next to no β: the Wells keep the Lab full. The rule stands; what is tested
+    // is that the game says so in time. The boards are the card players' own at this goal, bent two ways.
+    expect(studying.length).toBe(4);
+    const typeOf = (g: Game, id: number) => g.nodes.find((n) => n.id === id)!.type;
+    const crowd: Record<string, (g: Game, lab: number) => void> = {
+      // "A Well and a Lab built from its port" misread: the new Wells go into the Lab that stands, and no Lab is built.
+      'no Lab of their own': (g, lab) => {
+        for (const other of g.nodes.filter((n) => n.type === 'lab' && n.id !== lab)) {
+          const fed = g.wires.filter((w) => w.to === other.id).map((w) => w.from);
+          expect(deleteNode(g, other.id)).toBe(true);
+          for (const from of fed) connect(g, from, 0, lab);
+        }
+      },
+      // Every Well wired to the Lab as well as wherever it went (the adviser's own "Glint is 1 α each in a Lab", taken as a rule).
+      'every Well into the Lab too': (g, lab) => {
+        for (const w of g.nodes.filter((n) => n.type === 'well')) connect(g, w.id, 0, lab);
+      },
+    };
+    const report: string[] = [];
+    for (const [i, board] of studying.entries()) {
+      for (const [how, make] of Object.entries(crowd)) {
+        const g = cloneGame(board)!;
+        const from = `board ${i}, ${how}`;
+        const lab = g.nodes.find((n) => n.type === 'lab')!;
+        const glyph = g.nodes.find((n) => n.recipe === 'glyph')!;
+        // Back to the moment before the hint was followed; the Wells went in first.
+        expect(cutWire(g, g.wires.find((w) => w.from === glyph.id && w.to === lab.id)!.id), from).toBe(true);
+        make(g, lab.id);
+        expect(g.wires.filter((w) => w.to === lab.id && typeOf(g, w.from) === 'well').length, from).toBeGreaterThanOrEqual(2);
+        g.edits = [];
+        run(g, 30);
+        g.data.b = 0;
+        // "Drag from the Assembler's port to a Lab."
+        expect(connect(g, glyph.id, 0, lab.id), from).not.toBeNull();
+        run(g, 5);
+        expect(waitKind(g)).toBe('data');
+        expect(waitInfo(g)).toMatchObject({ unit: 'β', need: RULES.goals.studyBeta });
+        expect(advice(g), from).toBeNull(); // the quiet after the player's own change
+        run(g, 16);
+        // 21 s after the wire, 9 s before the half minute is up: the one thing that ends it, by name.
+        const a = advice(g)!;
+        expect(a, from).not.toBeNull();
+        expect(a.text.mouse, from).toMatch(/^Build a Lab from the Glyph Assembler's port \(\d+¢\): the Lab you have is full\.$/);
+        expect(a).toMatchObject({ kind: 'data', build: 'lab', node: glyph.id, port: 0, steps: 1 });
+        expect(a.cost!).toBeLessThanOrEqual(g.credits);
+        expect(a.saves!, from).toBeGreaterThanOrEqual(60);
+        checkWording(a);
+        // Left alone, four more minutes do not bring the 40 β.
+        const idle = cloneGame(g)!;
+        run(idle, 240);
+        expect(idle.goal.ready, from).toBe(false);
+        // Followed: Glyph has a Lab of its own, and the goal is done within the minute after.
+        expect(applyAdvice(g, a), from).toBe(true);
+        let took = 0;
+        while (!g.goal.ready && took < 200) {
+          run(g, 1);
+          took++;
+        }
+        report.push(`${from}: β after four idle minutes ${idle.data.b.toFixed(0)} of 40; with the tip, done ${took} s later`);
+        expect(took, from).toBeLessThanOrEqual(60);
+        clearHistory();
+      }
+    }
+    console.info(`"Study Glyph for β" on a crowded Lab:\n  ${report.join('\n  ')}`);
   });
 
   it('affordable, worded properly, worth 15 s, and never against a goal card', () => {
