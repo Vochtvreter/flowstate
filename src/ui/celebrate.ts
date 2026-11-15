@@ -6,12 +6,14 @@
 // moment it is made the factory takes a bow (a pulse runs along the wires from the Wells to the Lens,
 // lighting each card it passes) and then its card comes up.
 //
-// Nothing here ever takes input: every layer ignores the pointer, so a press during a celebration
-// lands on the game underneath, and it also sends the celebration on its way (the reward flies at
-// once and the card leaves). Everything added to the page is taken out again when it ends. The four
-// that follow a claim are over in about 2.5 s; the Lens, bow and all, in about 6.3 s, because the
-// summary screen opens 6.5 s after the Lens is made.
-import { DATA_COLORS, MATERIALS, RULES, TECHS } from '../content';
+// A press anywhere sends a celebration on its way (the reward flies at once and the card leaves).
+// A press on the card itself goes no further: it is what a newcomer does to put the card away, and
+// on a phone the board under the card would otherwise take it as a tap on a node or a wire and open
+// the inspector over half the screen. Everywhere else (the wash, the space around the card) ignores
+// the pointer, so a press there lands on the game underneath as well. Everything added to the page
+// is taken out again when it ends. The four that follow a claim are over in about 2.5 s; the Lens,
+// bow and all, stays until the summary screen opens 6.5 s after the Lens is made, and leaves with it.
+import { DATA_COLORS, MATERIALS, MatId, NODE_DEFS, NodeType, RULES, TECHS } from '../content';
 import { recipeOf } from '../economy';
 import { GOALS } from '../goals';
 import { graph, isMachine } from '../sim';
@@ -20,16 +22,24 @@ import { boardRect, fitView, toClient } from './board';
 import { anchorPt } from './dom';
 import { Overlay, addOverlay, burst, fly, holdFlows, ring } from './fx';
 import { Pt, bezierAt, nodeSize, wireEnds } from './geom';
-import { esc, matGlyph, nodeIcon } from './icons';
-import { Fanfare, buzz, cueBowNote, cueFanfare, cueWhoosh } from './audio';
+import { esc, icon, matGlyph, nodeIcon } from './icons';
+import { Fanfare, buzz, cueBowNote, cueFanfare, cueResearch, cueWhoosh } from './audio';
 import { ui } from './ui';
 
 export type BigKind = Fanfare;
+/** The big cards, and the small one ('note') for the end of a research wait or the first β. */
+type CardKind = BigKind | 'note';
 
 interface Spec {
-  kind: BigKind;
+  kind: CardKind;
+  /** A word or two above the title (the small card: "Researched"). */
+  kicker?: string;
   title: string;
   line: string;
+  /** What the log calls it (big:<kind> unless given). */
+  logAs?: string;
+  /** The sound it opens with (the kind's fanfare unless given). */
+  cue?: () => void;
   /** HTML of the large glyph. */
   glyph: string;
   color: string;
@@ -53,7 +63,7 @@ interface Spec {
  */
 const MIN_SHOWN_MS = 400;
 /** How far the middle of the glyph is above the middle of the card, in px, for each size of card. */
-const GLYPH_RISE: Record<BigKind, number> = { shard: 36, lab: 37, spark: 36, glyph: 41, flow: 36, prism: 36, lens: 47 };
+const GLYPH_RISE: Record<CardKind, number> = { shard: 36, lab: 37, spark: 36, glyph: 41, flow: 36, prism: 36, lens: 47, note: 38 };
 const OUT_MS = 320;
 
 let app: HTMLElement;
@@ -120,9 +130,11 @@ function start(spec: Spec) {
     return;
   }
   const calm = reduced();
-  record('celebrate', 'big:' + spec.kind, spec.title);
+  const small = spec.kind === 'note';
+  record('celebrate', spec.logAs ?? 'big:' + spec.kind, spec.title);
   let wash: HTMLElement | null = null;
-  if (!calm) {
+  // (The small card has no wash: it is a note, not a scene.)
+  if (!calm && !small) {
     wash = document.createElement('div');
     wash.className = `cel-wash k-${spec.kind}`;
     wash.style.setProperty('--c', spec.color);
@@ -132,7 +144,13 @@ function start(spec: Spec) {
   wrap.className = `cel k-${spec.kind}${calm ? ' calm' : ''}`;
   wrap.setAttribute('data-testid', 'celebration');
   wrap.style.setProperty('--c', spec.color);
-  wrap.innerHTML = `<div class="cel-card" role="status"><div class="cel-glyph">${spec.glyph}</div><div class="cel-words"><div class="cel-title">${esc(spec.title)}</div><div class="cel-line">${esc(spec.line)}</div></div></div>`;
+  const kicker = spec.kicker ? `<div class="cel-kicker">${esc(spec.kicker)}</div>` : '';
+  wrap.innerHTML = `<div class="cel-card" role="status"><div class="cel-glyph">${spec.glyph}</div><div class="cel-words">${kicker}<div class="cel-title">${esc(spec.title)}</div><div class="cel-line">${esc(spec.line)}</div></div></div>`;
+  // A press on the card is for the card: it sends it away (the window's listener, in initCelebrate, has
+  // already seen to that) and goes no further, and nor does the click that follows it.
+  const card = wrap.firstElementChild as HTMLElement;
+  card.addEventListener('pointerdown', swallow);
+  card.addEventListener('click', swallow);
   app.appendChild(wrap);
   const timers: number[] = [];
   // The glyph sits a little above the middle of the card, which is in the middle of the window; on a
@@ -143,9 +161,9 @@ function start(spec: Spec) {
     ? { x: window.innerWidth / 2 - Math.min(FLAT.width, window.innerWidth - 32) / 2 + FLAT.glyphX, y: window.innerHeight / 2 + FLAT.down }
     : { x: window.innerWidth / 2, y: window.innerHeight / 2 - GLYPH_RISE[spec.kind] };
   const c: Card = (current = { spec, wash, wrap, timers, raf: 0, leaving: false, shownAt: performance.now(), at, paid: false });
-  // The card covers the middle of the board: the dots there hold still until it has gone, which saves
+  // A big card covers the middle of the board: the dots there hold still until it has gone, which saves
   // redrawing the whole board layer while the card, its wash and its sparks are on screen.
-  holdFlows(true);
+  if (!small) holdFlows(true);
   timers.push(window.setTimeout(leave, spec.life));
   if (spec.reward) timers.push(window.setTimeout(() => pay(c), spec.payAt ?? 700));
   // The rest of the opening is spread over the next three frames, one piece each, so that no single
@@ -162,8 +180,10 @@ function start(spec: Spec) {
       }, washLife(spec) + 60));
     },
     () => {
-      cueFanfare(spec.kind);
-      buzz('big', spec.kind === 'lens' ? [30, 60, 30, 60, 60] : spec.kind === 'glyph' ? [20, 50, 30] : spec.kind === 'spark' ? [10, 30, 30] : [20, 40, 20]);
+      if (spec.cue) spec.cue();
+      else if (!small) cueFanfare(spec.kind as BigKind);
+      if (small) buzz('note', [10, 30, 15]);
+      else buzz('big', spec.kind === 'lens' ? [30, 60, 30, 60, 60] : spec.kind === 'glyph' ? [20, 50, 30] : spec.kind === 'spark' ? [10, 30, 30] : [20, 40, 20]);
     },
     () => !calm && spec.show?.(at, spec),
   ];
@@ -173,6 +193,13 @@ function start(spec: Spec) {
     c.raf = steps.length ? requestAnimationFrame(next) : 0;
   };
   c.raf = requestAnimationFrame(next);
+}
+
+/** A press or click on a card: it stops there. (The press has already sent the card on its way.) */
+function swallow(e: Event) {
+  e.preventDefault();
+  e.stopPropagation();
+  if (e.type === 'pointerdown') record('celebrate', 'press', 'card');
 }
 
 /**
@@ -395,6 +422,58 @@ function converge(at: Pt, spec: Spec) {
     ring(at, '#ffffff', { top: true, size: 80, life: 0.5 });
   }, { ...opts, shape: 'square' });
   fly(right, at, MATERIALS.spark.color, 22, undefined, { ...opts, shape: 'star' });
+}
+
+// ---------- the small card ----------
+// The end of a long wait for Data: the tech the goal card was saving for has been researched. Not a
+// fanfare (the goal is not done yet, and the next step is waiting on the card): a small card with the
+// tech's name and what it opens up, one spray and one ring, a short rising cue, and no reward.
+// The first β gets the same card, and a ring then closes on its counter.
+
+/** How the small card for a tech looks: the raw material it reveals, else the machine it unlocks, else the tree. */
+function techLook(id: string): { glyph: string; color: string } {
+  for (const m of Object.keys(MATERIALS) as MatId[]) {
+    if (MATERIALS[m].tier === 0 && MATERIALS[m].tech === id) return { glyph: matGlyph(m, 52), color: MATERIALS[m].color };
+  }
+  for (const t of Object.keys(NODE_DEFS) as NodeType[]) {
+    if (NODE_DEFS[t].tech === id) return { glyph: nodeIcon(t, 50), color: '#9DB8FF' };
+  }
+  return { glyph: icon('tree', 46), color: DATA_COLORS.a };
+}
+
+/** What a tech opens up, in a line: "Murk Wells and Void unlocked", or its first new recipe when that is all it brings. */
+export function researchLine(id: string): string {
+  const t = TECHS[id];
+  if (!t) return '';
+  const things = t.unlocks.filter((u) => !u.startsWith('Recipe:')).map((u) => u.replace(/ node$/, ''));
+  if (things.length) return `${list(things)} unlocked`;
+  const recipe = t.unlocks.find((u) => u.startsWith('Recipe:'));
+  return recipe ? `New recipe: ${recipe.slice(7).trim()}` : 'Researched';
+}
+
+/** Sparks for the small card: one spray and one ring. */
+const note = (at: Pt, spec: Spec) => {
+  burst(at, spec.color, 14, { top: true, power: 1.1, shape: 'diamond' });
+  burst(at, '#ffffff', 4, { top: true, power: 0.8 });
+  ring(at, spec.color, { top: true, size: 84, life: 0.6 });
+};
+
+/** The tech the goal card was saving for has just been researched. */
+export function celebrateResearch(id: string) {
+  const t = TECHS[id];
+  if (!t) return;
+  const { glyph, color } = techLook(id);
+  start({ kind: 'note', kicker: 'Researched', title: t.name, line: researchLine(id), glyph, color, life: 1700, show: note, logAs: 'research:' + id, cue: () => cueResearch('tech') });
+}
+
+/** The first β has reached its counter: the same small card, and a ring closes on the counter as it leaves. */
+export function celebrateFirstData() {
+  const color = DATA_COLORS.b;
+  start({
+    kind: 'note', kicker: 'New Data', title: 'First β', line: 'Tier 2 Data · spend it in the Tech tree',
+    glyph: `<span class="cel-sym">β</span>`, color, life: 1700, show: note, logAs: 'first-beta', cue: () => cueResearch('data'),
+    leaving: () => leadTo('data-b', '[data-testid="data-b"]', color),
+  });
 }
 
 /** The first Flow State: no sparks, only slow rings widening from the middle, like breath on glass. */

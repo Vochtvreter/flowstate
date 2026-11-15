@@ -8,8 +8,10 @@
    56  .feel-amount  "+12¢" beside a counter after a payout (feel.ts)
    56  #feel-hand  the guiding hand (hand.ts)
    55  .cel-lead   a ring closing on something in the HUD as a card leaves
-   All of it is under the modal (60), the summary (70) and the start screen (80), and none of it ever
-   takes input: a press during a celebration, or where the hand is pointing, lands on the game underneath.
+   All of it is under the modal (60), the summary (70) and the start screen (80), and none of it takes
+   input but the celebration card itself: a press on the card puts it away and goes no further
+   (celebrate.ts); a press anywhere else during a celebration, or where the hand is pointing, lands on
+   the game underneath.
    A note on cost: every element here that fades or moves is kept small on purpose. The browser
    blends each such layer over the page on every frame it is visible, and that work grows with the
    layer's area (shadows count: they make a card's layer bigger than the card), so the wash is a
@@ -106,7 +108,7 @@ g.wire.sat .base { stroke-opacity: 0.58; }
 @keyframes cel-wash-breathe { 0% { opacity: 0; } 24% { opacity: var(--peak); } 50% { opacity: calc(var(--peak) * 0.45); } 74% { opacity: var(--peak); } 100% { opacity: 0; } }
 
 .cel { position: absolute; inset: 0; z-index: 55; display: flex; align-items: center; justify-content: center; padding: 16px; pointer-events: none; }
-.cel-card { display: flex; flex-direction: column; align-items: center; gap: 6px; min-width: 240px; max-width: min(440px, 100%); padding: 22px 30px 20px; border-radius: 22px; text-align: center; background: rgba(13, 18, 30, 0.9); border: 1.5px solid color-mix(in srgb, var(--c) 55%, #27324a); box-shadow: 0 10px 24px rgba(0, 0, 0, 0.5), 0 0 20px color-mix(in srgb, var(--c) 26%, transparent); animation: cel-in 0.42s cubic-bezier(0.2, 1.5, 0.4, 1) both; will-change: transform, opacity; }
+.cel-card { pointer-events: auto; cursor: pointer; -webkit-tap-highlight-color: transparent; touch-action: none; user-select: none; -webkit-user-select: none; display: flex; flex-direction: column; align-items: center; gap: 6px; min-width: 240px; max-width: min(440px, 100%); padding: 22px 30px 20px; border-radius: 22px; text-align: center; background: rgba(13, 18, 30, 0.9); border: 1.5px solid color-mix(in srgb, var(--c) 55%, #27324a); box-shadow: 0 10px 24px rgba(0, 0, 0, 0.5), 0 0 20px color-mix(in srgb, var(--c) 26%, transparent); animation: cel-in 0.42s cubic-bezier(0.2, 1.5, 0.4, 1) both; will-change: transform, opacity; }
 .cel.out .cel-card { animation: cel-out 0.32s ease-in both; }
 @keyframes cel-in { from { transform: translateY(14px) scale(0.72); opacity: 0; } }
 @keyframes cel-out { to { transform: translateY(-16px) scale(0.97); opacity: 0; } }
@@ -123,6 +125,15 @@ g.wire.sat .base { stroke-opacity: 0.58; }
 @keyframes cel-lead { 0% { opacity: 0; transform: scale(1.3); } 22% { opacity: 1; } 55% { opacity: 1; transform: none; } 100% { opacity: 0; transform: none; } }
 .cel-lead.calm { animation-name: cel-lead-calm; }
 @keyframes cel-lead-calm { 0% { opacity: 0; } 22% { opacity: 1; } 60% { opacity: 1; } 100% { opacity: 0; } }
+
+/* The small card: the end of a research wait, the first β. No wash, a smaller card, a word above the title. */
+.k-note .cel-card { min-width: 220px; max-width: min(380px, 100%); padding: 16px 24px 14px; gap: 4px; }
+.k-note .cel-glyph { width: 76px; height: 76px; margin-bottom: 4px; }
+.k-note .cel-title { font-size: 26px; }
+.k-note .cel-line { font-size: 14px; }
+.cel-kicker { font-family: var(--disp); font-size: 11px; font-weight: 700; line-height: 1.2; letter-spacing: 0.14em; text-transform: uppercase; color: color-mix(in srgb, var(--c) 70%, #fff); }
+.cel-sym { font-family: var(--disp); font-size: 44px; font-weight: 700; line-height: 1; animation: cel-pop 0.5s cubic-bezier(0.2, 1.6, 0.4, 1) 0.12s both; }
+.cel.calm .cel-sym { animation: none; }
 
 /* Escalation: each is a little larger than the last. */
 .k-lab .cel-title { font-size: 36px; }
@@ -152,6 +163,8 @@ g.wire.sat .base { stroke-opacity: 0.58; }
 #app.phone .k-glyph .cel-title { font-size: 34px; }
 #app.phone .k-lens .cel-title { font-size: 38px; }
 #app.phone .k-lens .cel-glyph { width: 116px; height: 116px; }
+#app.phone .k-note .cel-card { width: min(300px, 100%); padding: 14px 16px 12px; }
+#app.phone .k-note .cel-title { font-size: 24px; }
 /* A screen too short for the card (a phone on its side): the card lies flat, glyph on the left and
    words on the right, about 74 px high, so it fits in the strip of board that is left between the
    goal card above it and the Claim button below. Its width is fixed because celebrate.ts works out
@@ -163,7 +176,7 @@ g.wire.sat .base { stroke-opacity: 0.58; }
   #app .cel .cel-card { flex-direction: row; align-items: center; gap: 14px; width: 400px; min-width: 0; max-width: 100%; min-height: 68px; padding: 8px 16px; border-radius: 18px; text-align: left; }
   #app .cel .cel-card > .cel-glyph { flex: none; width: 52px; height: 52px; margin: 0; }
   #app .cel .cel-card .cel-glyph > svg { width: 34px; height: 34px; }
-  #app .cel .cel-card .cel-star { font-size: 30px; }
+  #app .cel .cel-card .cel-star, #app .cel .cel-card .cel-sym { font-size: 30px; }
   #app .cel .cel-card .cel-title { font-size: 22px; }
   #app .cel .cel-card .cel-line { font-size: 12px; line-height: 1.3; }
   #app .cel .cel-card .cel-words { display: flex; flex-direction: column; gap: 3px; min-width: 0; }

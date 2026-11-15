@@ -2,11 +2,11 @@
 // Owned by the feel track. Nothing here is called by the board or the panels: it listens to the
 // hooks in ui.ts (simulation events, interface signals, the frame and the beat) and answers with
 // sound (audio.ts), particles (fx.ts), the big celebrations (celebrate.ts) and the hand (hand.ts).
-import { DATA_COLORS, DATA_NAMES, DataTier, MatId, NODE_DEFS, NodeType } from '../content';
+import { DATA_COLORS, DATA_NAMES, DataTier, MatId, NODE_DEFS, NodeType, TECHS } from '../content';
 import { materialsAt, nodeById } from '../actions';
 import { fmt } from '../economy';
 import { inFlowState } from '../flow';
-import { meanwhileOf } from '../goals';
+import { activeGoal, meanwhileOf } from '../goals';
 import { graph } from '../sim';
 import { Game, GameEvent, GoalReward } from '../state';
 import {
@@ -15,7 +15,7 @@ import {
   resetAudio, saleLevel, saleStep, setDrone, setMuted,
 } from './audio';
 import { boardRect, toClient } from './board';
-import { celebrateEnd, celebrateFlow, celebrateGoal, cancelCelebrations, celebrating, initCelebrate } from './celebrate';
+import { celebrateEnd, celebrateFirstData, celebrateFlow, celebrateGoal, celebrateResearch, cancelCelebrations, celebrating, initCelebrate } from './celebrate';
 import { anchorPt, el, setAttr, setClass, setHTML } from './dom';
 import { FlyOpts, Overlay, addOverlay, burst, clearParticles, fly, pop, ring, setMood, textWidth } from './fx';
 import { Pt, bezierAt, matColor, nodeSize, outPorts, wireEnds } from './geom';
@@ -196,6 +196,7 @@ function showAmount(testid: string, amount: number, unit: string, color: string)
  * appears beside the counter and fades, and the ticks play.
  */
 function payout(from: Pt, r: GoalReward) {
+  if (r.b) betaPaidAt = performance.now();
   let ticked = false;
   const at = (p: Pt) => `${Math.round(p.x)},${Math.round(p.y)}`;
   const sends: (() => void)[] = [];
@@ -287,6 +288,51 @@ function marketFor(g: Game, mat: MatId): number | null {
   return best;
 }
 
+// ---------- the end of a research wait ----------
+// The tech the goal card is saving for (its step names it) is worked out at the end of every frame in
+// which the goal or the board changed. When that tech is then researched, in the tree or by the queue,
+// it gets a small card of its own (celebrateResearch): the end of the longest waits in the game.
+
+/** The tech the active goal's step named at the end of the last frame, for this game. */
+let saving: { g: Game; key: string; tech: string | null } | null = null;
+
+function noteSaving(g: Game) {
+  const key = `${g.goal.i}|${g.goal.ready ? 1 : 0}|${g.rev}`;
+  if (saving && saving.g === g && saving.key === key) return;
+  const goal = activeGoal(g);
+  const step = goal && !g.goal.ready ? goal.step?.(g) ?? null : null;
+  saving = { g, key, tech: step && 'tech' in step ? step.tech : null };
+}
+
+/**
+ * The tech whose research now gets a card of its own (the one the goal card was saving for), or null.
+ * A toast about researching it would say what the card says: the toasts read this to stay quiet.
+ */
+export const researchCardTech = (): string | null => (saving && saving.g === ui.g ? saving.tech : null);
+
+// ---------- the first β ----------
+// The first whole β of a game (a Lab has studied a Tier 2 item; the counter in the top bar has just
+// turned from 0 to 1) gets the small card, unless a payout has just flown β to the counter, which says
+// it already. A game that has had β before (or owns a tech priced in it) never gets it.
+
+let betaSeen: { g: Game; seen: boolean } | null = null;
+let betaPaidAt = -1e9;
+
+const hasBeta = (g: Game) => g.data.b >= 1 || g.techs.some((t) => (TECHS[t]?.cost.b ?? 0) > 0);
+
+function tickBeta() {
+  const g = ui.g;
+  const had = hasBeta(g);
+  if (!betaSeen || betaSeen.g !== g) {
+    betaSeen = { g, seen: had };
+    return;
+  }
+  if (betaSeen.seen || !had) return;
+  betaSeen.seen = true;
+  if (performance.now() - betaPaidAt < 2500) return;
+  celebrateFirstData();
+}
+
 /** Everything the simulation raised this frame, together: a claim brings its unlocks with it, and they are one moment, not three. */
 function handleEvents(events: GameEvent[]) {
   // The Lens being made is a big moment in its own right: the goal turning ready beside it needs no sound of its own.
@@ -294,6 +340,9 @@ function handleEvents(events: GameEvent[]) {
   // The first surplus brings Market Lens with it ('tech', then 'surplus'): nobody pressed Research for
   // that one, so it gets no sparkle of its own.
   const surplus = events.some((e) => e.kind === 'surplus');
+  // The tech the goal card was saving for has been researched (not granted with a claim): its own card.
+  const goalTech = researchCardTech();
+  const researched = !!goalTech && !events.some((e) => e.kind === 'goal-claimed') && events.some((e) => e.kind === 'tech' && e.id === goalTech);
   let claimed: 'big' | 'small' | null = ended ? 'big' : null;
   for (const ev of events) {
     switch (ev.kind) {
@@ -319,8 +368,10 @@ function handleEvents(events: GameEvent[]) {
         smallCelebration('order', orderFrom(), ev.reward);
         break;
       case 'tech':
-        // Granted by the goal just claimed: part of that celebration. Researched: its own small one, where the player pressed.
-        if (!claimed && !(surplus && ev.id === 'C1')) smallCelebration('tech', lastPress ?? centre(), {}, DATA_COLORS.a);
+        // Granted by the goal just claimed: part of that celebration. The tech the goal was saving for: its
+        // own card. Any other research: a small sparkle where the player pressed.
+        if (researched && ev.id === goalTech) celebrateResearch(ev.id);
+        else if (!claimed && !(surplus && ev.id === 'C1')) smallCelebration('tech', lastPress ?? centre(), {}, DATA_COLORS.a);
         break;
       case 'surplus': {
         // Something sells over its demand for the first time in this game: two uneasy notes, and one amber
@@ -343,7 +394,8 @@ function handleEvents(events: GameEvent[]) {
         // The Claim button lighting up is the HUD's to show; this is only its sound. Straight after a claim
         // the chime is still ringing: a big one says enough, a small one gets its "ready" a beat later.
         if (claimed === 'big') break;
-        if (claimed) setTimeout(cueReady, 450);
+        // (Researching the goal's tech can finish the goal: the research card's run of bells goes first.)
+        if (claimed || researched) setTimeout(cueReady, researched ? 900 : 450);
         else cueReady();
         break;
       }
@@ -719,6 +771,8 @@ export function initFeel() {
 
   onFrame(() => {
     if (batch.length) handleEvents(batch.splice(0));
+    // (After the events: what the goal is saving for as the frame ends, for a research in the next one.)
+    noteSaving(ui.g);
     if (sales.length) {
       cueSales(sales);
       sales.length = 0;
@@ -731,6 +785,7 @@ export function initFeel() {
   });
   onBeat(tickFlow);
   onBeat(tickLine);
+  onBeat(tickBeta);
   onNewGame(() => {
     // Back to the beginning: nothing waiting, nothing flying, nothing humming, nothing glowing.
     // (No beat runs behind the start screen, so Flow State's hum and glow are put out here.)
@@ -741,6 +796,8 @@ export function initFeel() {
     worldRings.length = 0;
     for (const t of expandTimers.splice(0)) clearTimeout(t);
     lineSeen = null;
+    saving = null;
+    betaSeen = null;
     for (const st of standing.values()) {
       clearTimeout(st.timer);
       st.el.remove();
@@ -778,6 +835,8 @@ export function initFeel() {
     if (!hook) return false;
     hook.feel ??= {
       log, audioState, hand: handState, celebrating, muted: isMuted, setMuted,
+      /** The tech whose research would get a card of its own right now (the one the goal card is saving for), or null. */
+      researchTech: researchCardTech,
       /** Raise an interface signal as the HUD would: emit('tip', { state: 'stale', at }), emit('showme', { wire: { from, to } }). */
       emit: signal,
       /** Render the loudest pile-up of cues offline and report its peak (see renderPeak in audio.ts). */

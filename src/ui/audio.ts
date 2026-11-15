@@ -679,6 +679,24 @@ export function cueExpandPops(count: number, gap: number) {
   for (let i = 0; i < n; i++) sExpandPop(g, t + i * gap, i);
 }
 
+function sResearch(g: Graph, t: number, kind: 'tech' | 'data') {
+  // Three bells straight up a major chord, quick, and a soft fifth under them: about 0.9 s. The first β
+  // is the same a fourth higher, with a fourth bell on top.
+  const root = kind === 'data' ? 81 : 76;
+  [0, 4, 7].forEach((step, i) => bell(g, hz(root + step), t + i * 0.075, 0.075, 0.55));
+  if (kind === 'data') bell(g, hz(root + 12), t + 0.24, 0.05, 0.7);
+  pad(g, [root - 12, root - 5], t, 0.028, 0.05, 0.8);
+}
+
+/**
+ * The tech a goal was saving for has been researched (`tech`), or the first β has arrived (`data`):
+ * a short rising run of bells, brighter than the ready chime and much smaller than a fanfare.
+ */
+export function cueResearch(kind: 'tech' | 'data' = 'tech') {
+  const g = admit('research-' + kind, 1500, true);
+  if (g) sResearch(g, soon(g, 0.01), kind);
+}
+
 // ---------- celebrations ----------
 
 export type Fanfare = 'shard' | 'lab' | 'spark' | 'glyph' | 'flow' | 'prism' | 'lens';
@@ -947,7 +965,7 @@ const ALL_CUES: ((g: Graph, t: number) => void)[] = [
   (g, t) => sConnect(g, t, 0), (g, t) => sPlace(g, t), (g, t) => sClaim(g, t), (g, t) => sAfford(g, t), (g, t) => sError(g, t),
   (g, t) => sReady(g, t), (g, t) => sPayout(g, t, 10), (g, t) => sTip(g, t), (g, t) => sWhoosh(g, t), (g, t) => sFlowIn(g, t),
   (g, t) => sBowNote(g, t, 5, 6), (g, t) => sStart(g, t), (g, t) => sLineDone(g, t), (g, t) => sSurplus(g, t), (g, t) => sExpand(g, t),
-  (g, t) => [0, 1, 2, 3].forEach((i) => sExpandPop(g, t + i * 0.08, i)),
+  (g, t) => [0, 1, 2, 3].forEach((i) => sExpandPop(g, t + i * 0.08, i)), (g, t) => sResearch(g, t, 'tech'),
   // One second's sales at their loudest: three ticks together, at the top of their figure.
   (g, t) => [4, 7, 11].forEach((step, i) => tick(g, step, t + i * SALE_GAP, SALE_PEAK)),
 ];
@@ -1018,6 +1036,7 @@ const SOLO: Record<string, (g: Graph, t: number) => void> = {
   connect: (g, t) => sConnect(g, t, 0), place: sPlace, claim: sClaim, afford: sAfford, error: sError, ready: sReady,
   payout: (g, t) => sPayout(g, t, 10), tip: sTip, start: sStart, 'line-done': sLineDone, surplus: sSurplus, expand: sExpand,
   'expand-pop': (g, t) => sExpandPop(g, t, 0), whoosh: sWhoosh, 'flow-in': sFlowIn,
+  'research-tech': (g, t) => sResearch(g, t, 'tech'), 'research-data': (g, t) => sResearch(g, t, 'data'),
   drone: (g) => void (makeDrone(g).gain.gain.value = DRONE_LEVEL),
   ...Object.fromEntries(FANFARES.map((k) => ['fanfare-' + k, (g: Graph, t: number) => sFanfare(g, t, k)])),
 };
