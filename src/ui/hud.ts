@@ -326,10 +326,11 @@ let justUntil = 0;
  * claimed ones filled, the current one lit. In free play the 22 are all filled and four more follow, one
  * for each free-play goal, so the strip goes on saying how much is left.
  */
-function pipsHtml(g: Game, at = g.goal.i): string {
+function pipsHtml(g: Game, ending = false): string {
   const now = performance.now();
-  // (`at`: the goal shown as the current one. The ending's card shows the demo's goals all done, and no more.)
-  const upTo = at >= MAIN_GOALS && at === g.goal.i ? GOALS.length : MAIN_GOALS;
+  // (The ending's card shows the demo's goals all done, and no more.)
+  const at = ending ? MAIN_GOALS : g.goal.i;
+  const upTo = !ending && at >= MAIN_GOALS ? GOALS.length : MAIN_GOALS;
   let out = '';
   for (let i = 0; i < upTo; i++) {
     const state = i < at ? ' done' : i === at ? ' now' : '';
@@ -422,7 +423,7 @@ function goalHtml(g: Game, v: GoalView, rows: string, prog: string): string {
 function endedHtml(g: Game): string {
   const goal = GOALS[MAIN_GOALS - 1];
   const gh = ghostsHtml(performance.now());
-  return `<div class="gc-main">${pipsHtml(g, MAIN_GOALS)}<div class="gc-body${rises ? ` rise${rises % 2}` : ''}" data-key="body"><div class="gc-head"><span class="gc-step">Goal ${MAIN_GOALS} / ${MAIN_GOALS}</span><span class="gc-done">${icon('check', 12)}Done</span></div>
+  return `<div class="gc-main">${pipsHtml(g, true)}<div class="gc-body${rises ? ` rise${rises % 2}` : ''}" data-key="body"><div class="gc-head"><span class="gc-step">Goal ${MAIN_GOALS} / ${MAIN_GOALS}</span><span class="gc-done">${icon('check', 12)}Done</span></div>
       <h3 class="gc-title">${esc(goal.title)}</h3>
       <div class="gc-rewards"><span class="rw new">Demo complete</span></div></div>${gh.card}</div>${gh.press}`;
 }
