@@ -1047,6 +1047,25 @@ export function goalFocus(g: Game): number[] {
   return out;
 }
 
+/**
+ * The free deposit the active goal's hint asks for a Well on, while that is its next gesture (goalFocus is then
+ * empty: a deposit is not a node): the Glint deposit of "Place a second Well", and the Murk, Ember or Breeze
+ * deposit of a raw line ("Place a Well on the Murk deposit, then..."), once its research is done. null otherwise.
+ */
+export function goalDeposit(g: Game): number | null {
+  const goal = activeGoal(g);
+  if (!goal || g.goal.ready) return null;
+  const raw: Partial<Record<string, [MatId, string | null]>> = {
+    'second-well': ['glint', null], 'make-ink': ['murk', 'P2'], 'make-spark': ['ember', 'P3'], 'make-mist': ['breeze', 'P5'],
+  };
+  const want = raw[goal.id];
+  if (!want || (want[1] && !has(g, want[1]))) return null;
+  // (A Well already on that material: the hint has moved on to the Refiner, which goalFocus names.)
+  if (goal.id !== 'second-well' && g.nodes.some((n) => n.type === 'well' && n.material === want[0])) return null;
+  const used = new Set(g.nodes.map((n) => n.depositId));
+  return g.deposits.find((d) => d.mat === want[0] && !used.has(d.id))?.id ?? null;
+}
+
 /** The nodes the hint's next gesture is about, by goal (see goalFocus). */
 function hintFocus(g: Game, id: string): number[] {
   const c = graph(g);

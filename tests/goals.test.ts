@@ -2,7 +2,7 @@ import { describe, expect, it } from 'vitest';
 import { claimGoal, connect, cutWire, expandBoard, favour, placeNode, redo, setMode, setWeight, undo, upgrade, upgradeAll } from '../src/actions';
 import { RULES, TECHS } from '../src/content';
 import { has, nodeCost, research } from '../src/economy';
-import { GOALS, MAIN_GOALS, activeGoal, goalAge, goalById, goalView, rewardText, routerFavoursLab } from '../src/goals';
+import { GOALS, MAIN_GOALS, activeGoal, goalAge, goalById, goalDeposit, goalView, rewardText, routerFavoursLab } from '../src/goals';
 import { Game, deserialize, serialize } from '../src/state';
 import { fresh, market, rich, run, take, well } from './helpers';
 
@@ -873,6 +873,28 @@ describe('"Hold 95% Flow": the bar, and the valve for a board nobody can fix', (
     expect(old.goal.ready).toBe(false);
     run(old, 2);
     expect(old.goal.ready).toBe(true);
+  });
+});
+
+describe('goalDeposit: the free deposit a goal asks for a Well on (the board frames it when a game opens)', () => {
+  it('names the deposit while placing the Well is the next gesture, and nothing once it stands or before the research', () => {
+    const g = rich();
+    g.techs = ['P1', 'R1', 'L1'];
+    at(g, 'second-well');
+    expect(goalDeposit(g)).toBe(2); // the free Glint deposit
+    at(g, 'make-ink');
+    expect(goalDeposit(g)).toBeNull(); // Murk Deposits not researched: the card's next gesture is in the tech tree
+    g.techs.push('P2');
+    expect(goalDeposit(g)).toBe(3); // the Murk deposit
+    placeNode(g, 'well', 0, 0, { depositId: 3 });
+    expect(goalDeposit(g)).toBeNull(); // the Well stands: the hint has moved on to its Refiner (goalFocus names it)
+    at(g, 'make-spark');
+    g.techs.push('P3');
+    expect(goalDeposit(g)).toBe(4); // the Ember deposit
+    g.goal.ready = true;
+    expect(goalDeposit(g)).toBeNull();
+    at(g, 'hold-flow');
+    expect(goalDeposit(g)).toBeNull();
   });
 });
 

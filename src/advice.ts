@@ -1699,6 +1699,18 @@ function feedsLab(g: Game, p: Port, seen = new Set<number>()): boolean {
 }
 
 /**
+ * The place the next step of the card's line is about when it is not a node, whether or not it can be paid for
+ * yet: the free deposit it wants a Well on, or the expansion. null when its step is about nodes, or there is none.
+ */
+export function lineSpot(g: Game): { deposit: number } | { expand: true } | null {
+  const c = lineStep(g, true);
+  if (!c) return null;
+  if (c.act.t === 'build' && c.act.deposit != null) return { deposit: c.act.deposit };
+  if (c.act.t === 'expand') return { expand: true };
+  return null;
+}
+
+/**
  * The nodes the next step of the card's line is about, in the order the gesture meets them (the port it starts
  * from, then where it goes; for a Flow fix, the short producer and then what feeds it), whether or not the step
  * can be paid for yet. For goalFocus in src/goals.ts. Empty when there is no step.

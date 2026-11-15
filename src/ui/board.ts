@@ -20,8 +20,8 @@ import {
   expansionCost, fmt, fmtRate, labRate, matUnlocked, nodeCost, nodeUnlocked, recipeOf, recipeUnlocked,
 } from '../economy';
 import { bagTotal, graph, isMachine, isSink, outPortCount } from '../sim';
-import { lineAdvice } from '../advice';
-import { GOALS, activeGoal, goalFocus } from '../goals';
+import { lineAdvice, lineSpot } from '../advice';
+import { GOALS, activeGoal, goalDeposit, goalFocus } from '../goals';
 import { GRID, Game, GNode, Wire, snap } from '../state';
 import { anchorPt, cachedRect, el, invalidateLayout, setAttr, setClass, setHTML, setHidden, setStyle, setText, svgEl } from './dom';
 import {
@@ -666,6 +666,18 @@ function openView() {
   syncHints(g);
   const d = wholeAtFloor(fitTarget(box, true));
   if (d) return go(d);
+  // Too big for that, and the goal names no node, but a place (as Show me frames it, advice-show.ts): the free
+  // deposit the card's line wants a Well on, or the hint's own ("Place a Well on the Murk deposit"), at a
+  // readable zoom; or, where the card asks for the expansion, the plot's lower edge, under which the Expand
+  // button stands, with the factory around it at the floor.
+  const spot = lineSpot(g);
+  const depId = spot && 'deposit' in spot ? spot.deposit : goalDeposit(g);
+  const dep = depId != null ? g.deposits.find((x) => x.id === depId) : undefined;
+  if (dep) return go(fitTarget({ x0: dep.x - 12, y0: dep.y - 12, x1: dep.x + 184, y1: dep.y + 84 }, true, 1));
+  if ((spot && 'expand' in spot) || (activeGoal(g)?.id === 'expand' && !g.goal.ready)) {
+    const w = EXPAND_W * 1.4, mid = g.board.w / 2;
+    return go(fitTarget({ x0: mid - w, y0: g.board.h - 200, x1: mid + w, y1: g.board.h + 18 + EXPAND_H + 12 }, true, floor));
+  }
   go(t);
 }
 
