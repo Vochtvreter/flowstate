@@ -118,6 +118,8 @@ export interface Order {
   lastProgress: number;
   /** Filled and waiting for claimOrder(). */
   ready: boolean;
+  /** Since when it has looked out of reach (src/orders.ts, RULES.orders.retire), if it does. */
+  slowSince?: number;
 }
 
 export interface Stats {
@@ -208,6 +210,8 @@ export interface Game {
    * the bar the "hold Flow" goal also accepts once it has been on the card for RULES.flow.valveAfter seconds.
    */
   flowNear: number;
+  /** The same for "all but two producers flowing" (nearShare(producers, 2)), the valve's second step (RULES.flow.valveAfter2). */
+  flowNear2?: number;
   // --- goals and orders ---
   /** Active goal: index into GOALS (GOALS.length when all are claimed) and whether it is waiting for claimGoal(). */
   goal: { i: number; ready: boolean };
@@ -307,7 +311,7 @@ export function newGame(): Game {
     paused: false, time: 0, savedAt: Date.now(),
     creditRate: 0, dataRate: { a: 0, b: 0, g: 0 },
     madeAt: { glint: 0 }, demandLeft: {},
-    flow: 0, flowOn: false, flowStreak: 0, flowBest: 0, flowHold: 0, flowNear: 0,
+    flow: 0, flowOn: false, flowStreak: 0, flowBest: 0, flowHold: 0, flowNear: 0, flowNear2: 0,
     goal: { i: 0, ready: false }, goalAt: { i: 0, t: 0 },
     ordersOn: false, order: null, orderSeed: RULES.orders.seed >>> 0,
     ended: false, seenSurplus: false,
@@ -374,6 +378,7 @@ function loadOrder(o: Partial<Order> | null | undefined): Order | null {
     // A reward can never take anything away.
     reward: { credits: pos(r.credits), a: pos(r.a), b: pos(r.b), g: pos(r.g) },
     created: num(o.created, 0), lastProgress: num(o.lastProgress, 0), ready: !!o.ready,
+    ...(typeof o.slowSince === 'number' && isFinite(o.slowSince) ? { slowSince: o.slowSince } : {}),
   };
 }
 
@@ -442,6 +447,7 @@ export function deserialize(json: string): Game | null {
     g.flowBest = num(raw.flowBest, 0);
     g.flowHold = num(raw.flowHold, 0);
     g.flowNear = pos(raw.flowNear);
+    g.flowNear2 = pos(raw.flowNear2);
     g.orderSeed = num(raw.orderSeed, base.orderSeed) >>> 0;
     g.order = loadOrder(raw.order);
     // A save from before the `ended` flag that already has a Lens is past the demo.

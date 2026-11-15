@@ -79,7 +79,7 @@ import {
   claimGoal, claimOrder, clearHistory, connect, cutWire, deleteNode, expandBoard, favour, freeDeposits, materialsAt, placeNode, setMode,
   setWeight, upgrade, upgradeAll, upgradeWire,
 } from '../src/actions';
-import { ADVICE, Advice, advice, adviceTrials, applyAdvice, waitInfo, waitKind } from '../src/advice';
+import { ADVICE, Advice, advice, adviceTrials, applyAdvice, lineAdvice, waitInfo, waitKind } from '../src/advice';
 import {
   cycleTime, demandRate, expansionCost, flowMult, fmt, has, maxLevel, maxPipeTier, nodeCost, pipeCap, readyTechs, recipeOf, recipeUnlocked, research,
   saturation, techAffordable, techAvailable, techEta, trackAvailable, upgradeCost, upgradeCostAt, valueOf, wellRate,
@@ -231,8 +231,8 @@ export const CFG = {
   lineDelay: 0,
   tipEvery: 1,
   tipFirst: 1,
-  /** For tests: called when a card player is about to make the first gesture of a goal's "while you wait" line, with the game as it stands. */
-  onLine: null as ((g: Game, goal: string) => void) | null,
+  /** For tests: called when a card player is about to make the first gesture of one of a goal's "while you wait" lines, with the game as it stands. */
+  onLine: null as ((g: Game, goal: string, line: string) => void) | null,
   /** --trials: record what the adviser weighed whenever a wait begins with no tip on offer. */
   trials: false,
   deadStretch: 45, // seconds with free hands and nothing useful to do, listed in the report
@@ -439,6 +439,15 @@ export class Bot {
   flowAtUnlock: { t: number; flow: number; producers: number; flowing: number; slow: string[] } | null = null;
   marks: { t: number; what: string; credits: number; income: number; a: number; b: number }[] = [];
   surplusAt: { t: number; goal: number; mat: MatId } | null = null;
+  /**
+   * "Nothing to do": seconds in which the player's hands are free, the goal is not ready, no order is ready to
+   * claim, and no step of the card's "while you wait" line can be done right now (lineAdvice(g) is null, which it
+   * is when the line is done, does not apply, or its step cannot be paid for yet). Up to the first Lens: in all,
+   * per goal (by index), and every stretch.
+   */
+  nothing = { total: 0, perGoal: {} as Record<number, number>, stretches: [] as { from: number; to: number; goal: number }[] };
+  nothingSince: number | null = null;
+  nothingGoal = 0;
 
   constructor(policy: Policy, seed: number, minutes: number) {
     this.P = policy;
@@ -969,6 +978,10 @@ export class Bot {
       const n = g.nodes.find((x) => x.type === 'well');
       if (n) W.push({ cls: 'new', kind: 'upgrade', cost: upgradeCost(n, 'speed'), novel: true, settle: [n.id], label: `upgrade ${this.name(n)} speed (goal)`, run: () => upgrade(g, n.id, 'speed') });
     }
+    if (goal?.id === 'bulk-upgrade') {
+      const n = g.nodes.find((x) => x.type === 'well' && x.lv.speed < maxLevel(g, 'speed'));
+      if (n) W.push({ cls: 'new', kind: 'upgrade', bulk: true, cost: upgradeCost(n, 'speed'), novel: true, label: 'upgrade ALL Wells: speed (goal)', run: () => upgradeAll(g, 'well', 'speed') > 0 });
+    }
     return this.bulked(W);
   }
 
@@ -1098,7 +1111,12 @@ export class Bot {
         return wireIf(ink, 0, market) ?? (this.outs(ink, 1).length ? null : from(ink, 1, 'void'));
       }
       case 'make-spark': return rawLine('P3', 'ember', 'spark');
-      case 'first-order': case 'three-orders': return tendOrder();
+      case 'first-order': return tendOrder();
+      case 'bulk-upgrade': {
+        // "Select a Well and press Upgrade all beside Speed."
+        const w = g.nodes.find((n) => n.type === 'well' && n.lv.speed < maxLevel(g, 'speed'));
+        return w ? { cls: 'new', kind: 'upgrade', bulk: true, cost: upgradeCost(w, 'speed'), label: 'card: press Upgrade all on the Wells\' Speed', run: () => upgradeAll(g, 'well', 'speed') > 0 } : null;
+      }
       case 'route-lab': {
         const router = g.nodes.find((n) => n.type === 'router') ?? null;
         const spark = this.maker('spark');
@@ -1144,78 +1162,46 @@ export class Bot {
     }
   }
 
-  /** The Well placed for a "while you wait" line that has not been given its Lab yet. */
-  lineWell: number | null = null;
-
   /**
    * The card's "while you wait" line, read the way cardStep reads a hint: the next gesture it asks for. null
-   * when the goal has no line, the line does not apply to this board, or it has been done.
+   * when the goal has no line, the line does not apply to this board, or it has been done. The lines come one at
+   * a time (meanwhileOf); the gesture is the one the card's "Show me" acts out (lineAdvice in src/advice.ts),
+   * which tests/meanwhile.test.ts holds to the line's own words.
    */
   meanwhileStep(): Want | null {
     const want = this.lineStep();
-    const id = activeGoal(this.g)?.id;
-    if (want && id && !this.linesBegun.has(id)) {
-      this.linesBegun.add(id);
-      CFG.onLine?.(this.g, id);
+    const g = this.g;
+    const id = activeGoal(g)?.id;
+    const line = meanwhileOf(g);
+    const key = id && line ? `${id}/${line.id}` : null;
+    if (want && id && key && !this.linesBegun.has(key)) {
+      this.linesBegun.add(key);
+      CFG.onLine?.(g, id, line!.id);
     }
     return want;
   }
 
-  /** Goals whose line this player has begun to follow. */
+  /** Lines (goal/line) this player has begun to follow. */
   linesBegun = new Set<string>();
 
   lineStep(): Want | null {
     const g = this.g;
     const line = CFG.meanwhile ? meanwhileOf(g) : null;
     const goal = activeGoal(g);
-    if (!line || !goal || line.done(g) || CFG.skipLines.includes(goal.id)) return null;
+    if (!line || !goal || line.done(g) || CFG.skipLines.includes(goal.id) || CFG.skipLines.includes(line.id)) return null;
     // --lineDelay: a person who reads the line late.
     if (CFG.lineDelay > 0 && (this.lineSeen?.goal !== g.goal.i || g.time - this.lineSeen.t < CFG.lineDelay)) return null;
-    const lab = g.nodes.find((n) => n.type === 'lab') ?? null;
-    switch (goal.id) {
-      case 'make-spark': {
-        // "Drag from the Ink Refiner's Ink port to the Lab too."
-        const ink = this.maker('ink');
-        if (!ink || !lab || this.wired(ink, 0, lab)) return null;
-        return { cls: 'fix', kind: 'wire', cost: 0, label: `card, meanwhile: wire ${this.name(ink)} → Lab`, run: () => !!connect(g, ink.id, 0, lab.id) };
-      }
-      case 'make-glyph': case 'make-mist': {
-        // "Give each new deposit a Well and a Lab built from its port": one deposit after the other, a Well and
-        // then its Lab. On "Make your first Mist" the board has to grow first: "Expand the board again, then
-        // give a new deposit a Well and a Lab of its own."
-        const placed = this.lineWell != null ? g.nodes.find((n) => n.id === this.lineWell && !this.outs(n).length) ?? null : null;
-        if (placed) {
-          return {
-            cls: 'new', kind: 'build', cost: nodeCost(g, 'lab'), label: `card, meanwhile: build Lab from ${this.name(placed)}`,
-            run: () => {
-              const n = this.buildFrom({ n: placed, port: 0 }, 'lab');
-              if (n) this.lineWell = null;
-              return !!n;
-            },
-          };
-        }
-        const d = freeDeposits(g)[0];
-        if (!d && goal.id === 'make-mist') return { cls: 'new', kind: 'expand', cost: expansionCost(g), label: 'card, meanwhile: expand the board again', run: () => expandBoard(g) };
-        return !d ? null : {
-          cls: 'new', kind: 'build', cost: nodeCost(g, 'well'), label: `card, meanwhile: place ${MATERIALS[d.mat].name} Well on a free deposit`,
-          run: () => {
-            const n = placeNode(g, 'well', d.x, d.y, { depositId: d.id });
-            if (n) {
-              this.noteNode('well');
-              this.lineWell = n.id;
-            }
-            return !!n;
-          },
-        };
-      }
-      case 'build-fabricator': {
-        // "Cut the wire from the Glyph Assembler to the Lab."
-        const id = line.cuts?.(g)[0];
-        const w = id == null ? null : g.wires.find((x) => x.id === id) ?? null;
-        return !w ? null : { cls: 'fix', kind: 'cut', cost: 0, label: `card, meanwhile: cut wire ${this.name(this.node(w.from))} → ${this.name(this.node(w.to))}`, run: () => cutWire(g, w.id) };
-      }
-      default: return null;
-    }
+    const a = lineAdvice(g);
+    if (!a) return null;
+    const kind: Kind = a.expand ? 'expand' : a.cut ? 'cut' : a.upgrade ? 'upgrade' : a.build ? 'build' : 'wire';
+    return {
+      cls: a.build || a.expand ? 'new' : 'fix', kind, cost: a.cost ?? 0, label: `card, meanwhile (${line.id}): ${a.text.mouse}`,
+      run: () => {
+        if (!applyAdvice(g, a)) return false;
+        if (a.build) this.noteNode(a.build as NodeType, a.recipe ?? null);
+        return true;
+      },
+    };
   }
 
   /** One decision of the newcomer: claim, then the card, then (in a wait) a tip that has been on offer long enough. */
@@ -1572,7 +1558,7 @@ export class Bot {
         this.goalClaimedAt[ev.goal] = g.time;
         this.goalClaimAt = Infinity;
         pay(ev.reward);
-        if (ev.goal === 'three-orders') this.mark('"Build a Fabricator" becomes the goal');
+        if (ev.goal === 'bulk-upgrade') this.mark('"Build a Fabricator" becomes the goal');
         this.markNew(`goal ${ev.index + 1} claimed`);
         this.log(`★ goal ${ev.index + 1} claimed${ev.big ? ' (BIG)' : ''}: ${rewardText(ev.reward)}`);
       } else if (ev.kind === 'order-new') {
@@ -1641,6 +1627,7 @@ export class Bot {
       this.drainEvents();
       this.trackStatus();
       this.step();
+      this.noteNothing();
       if (g.time >= nextSecond - 1e-9) {
         for (const k of TIERS) this.earnedLog[k].push(this.earned[k]);
         nextSecond += 1;
@@ -1666,6 +1653,30 @@ export class Bot {
     }
     this.endTipless();
     this.endIdle('(still waiting when the session ended)');
+    this.endNothing();
+  }
+
+  /** One tick of the "nothing to do" measure (see `nothing`). */
+  noteNothing() {
+    const g = this.g;
+    const before = !g.ended;
+    const none = before && this.idleSince != null && !this.dawdling && !g.goal.ready && !g.order?.ready && !lineAdvice(g);
+    if (!none) {
+      this.endNothing();
+      return;
+    }
+    if (this.nothingSince == null) {
+      this.nothingSince = g.time - CFG.dt;
+      this.nothingGoal = g.goal.i;
+    }
+    this.nothing.total += CFG.dt;
+    this.nothing.perGoal[g.goal.i] = (this.nothing.perGoal[g.goal.i] ?? 0) + CFG.dt;
+  }
+
+  endNothing() {
+    if (this.nothingSince == null) return;
+    this.nothing.stretches.push({ from: this.nothingSince, to: this.g.time - CFG.dt, goal: this.nothingGoal });
+    this.nothingSince = null;
   }
 }
 
@@ -1718,6 +1729,11 @@ interface Result {
   /** Seconds on "Hold Flow", and the actions taken while it was the goal. */
   flowGoal: { seconds: number; actions: string[] } | null;
   surplusAt: Bot['surplusAt'];
+  /**
+   * "Nothing to do" up to the first Lens (Bot.nothing): seconds in all, their share of the time to the Lens, the
+   * longest stretch and the goal it fell in, and the seconds on each goal (by index).
+   */
+  nothing: { total: number; share: number; longest: number; longestGoal: string; perGoal: Record<number, number> };
 }
 
 function measure(bot: Bot): Result {
@@ -1764,6 +1780,13 @@ function measure(bot: Bot): Result {
       ? { seconds: hold.spent, actions: bot.timeline.filter((e) => e.t >= hold.activeAt && e.t < (hold.readyAt ?? hold.claimedAt!) && !/^[·★!]/.test(e.text)).map((e) => e.text) }
       : null,
     surplusAt: bot.surplusAt,
+    nothing: (() => {
+      const long = bot.nothing.stretches.reduce((m, x) => (x.to - x.from > m.to - m.from ? x : m), { from: 0, to: 0, goal: 0 });
+      return {
+        total: bot.nothing.total, share: bot.nothing.total / Math.max(1, lens ?? end), longest: long.to - long.from,
+        longestGoal: GOALS[long.goal]?.title ?? '—', perGoal: { ...bot.nothing.perGoal },
+      };
+    })(),
     policy: bot.P, seed: bot.seed, minutes: bot.minutes,
     firstMachine: bot.firstNode.refiner ?? null,
     lab: bot.firstNode.lab ?? null,
@@ -2082,6 +2105,17 @@ function summary(results: Result[]): string {
     P('  when they were followed; "(n ∞)" of them were steps without which the wait would not have ended (they have no number).');
     P();
   }
+  P('== NOTHING TO DO, up to the first Lens: free hands, goal not ready, no order to claim, no step of the card\'s line that can be done now ==');
+  P(`policy      seed    Lens  nothing   share  longest stretch                        seconds on each goal with nothing to do (goal: s, 10 s or more)`);
+  for (const r of results) {
+    const x = r.nothing;
+    const per = Object.entries(x.perGoal).filter(([, s]) => s >= 10).map(([i, s]) => `${Number(i) + 1}: ${Math.round(s)}`).join(' · ');
+    P([
+      padR(r.policy.name, 11), pad(r.seed, 4), ' ', pad(mmss(r.lens), 6), pad(Math.round(x.total) + 's', 8), pad(Math.round(x.share * 100) + '%', 7), ' ',
+      padR(`${Math.round(x.longest)}s ${x.longestGoal}`.slice(0, 38), 38), ' ', per,
+    ].join(' '));
+  }
+  P();
   const misses = results.reduce((n, r) => n + checks(r).filter((c) => !c.ok).length, 0);
   P(misses ? `${misses} target(s) missed.` : 'Every target met.');
   P();
@@ -2137,6 +2171,7 @@ function main() {
     else if (k === 'noTips') CFG.tips = false;
     else if (k === 'noMeanwhile') CFG.meanwhile = false;
     else if (k === 'minShare' && v) ADVICE.minShare = Number(v);
+    else if (k === 'lineReserve' && v) ADVICE.lineReserve = v !== '0';
     else if (k === 'skipLine' && v) CFG.skipLines = v.split(',');
     else if (k === 'lineDelay' && v) CFG.lineDelay = Number(v);
     else if (k === 'tipDelay' && v) {
