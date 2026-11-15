@@ -6,7 +6,7 @@ import { DATA_COLORS, DATA_NAMES, DataTier, MatId, NODE_DEFS, NodeType, TECHS } 
 import { materialsAt, nodeById } from '../actions';
 import { fmt } from '../economy';
 import { inFlowState } from '../flow';
-import { activeGoal, meanwhileOf } from '../goals';
+import { Meanwhile, activeGoal, goalView, meanwhileOf } from '../goals';
 import { graph } from '../sim';
 import { Game, GameEvent, GoalReward } from '../state';
 import {
@@ -597,23 +597,44 @@ function onExpand(d: { deposits: number[]; stagger: number }) {
   });
 }
 
-// ---------- the goal card's "while you wait" line ----------
-// Looked at once a second. When the line of the goal on the card turns from not done to done, a small
-// cue says so (the card draws the tick). Not when the game is loaded or replaced, and not when the
-// goal changes: only a change seen on the same goal of the same game counts.
-let lineSeen: { g: Game; goal: number; done: boolean } | null = null;
+// ---------- the goal card's "while you wait" lines ----------
+// A goal may carry several lines, shown one at a time (goalView(g).meanwhile: the first not yet done, with
+// its `step` of `of`). Looked at twice a second: when a line of the goal on the card turns from not done to
+// done, a small cue says so (the card draws the tick), once for each line, keyed by the goal and the line's
+// step. The line on the card moving on to the next one is not itself a tick: what is checked is the line
+// that was on the card, by its own done(). Nothing plays when the game is loaded or replaced, when the
+// goal changes, or for a line that was already done when it first showed.
+let lineSeen: { g: Game; goal: number; line: Meanwhile; step: number; done: boolean } | null = null;
+/** The lines whose tick has played in this game, as "goal:step". */
+const linesTicked = new Set<string>();
 let lineBeat = 0;
 
+function lineTicked(goal: number, step: number) {
+  const key = `${goal}:${step}`;
+  if (linesTicked.has(key)) return;
+  linesTicked.add(key);
+  record('celebrate', 'line-done', key);
+  cueLineDone();
+  buzz('line', 8);
+}
+
 function tickLine() {
-  if (++lineBeat % 4) return;
+  if (++lineBeat % 2) return;
   const g = ui.g;
   const line = meanwhileOf(g);
-  const now = line ? { g, goal: g.goal.i, done: line.done(g) } : null;
-  if (now && lineSeen && lineSeen.g === g && lineSeen.goal === now.goal && !lineSeen.done && now.done) {
-    cueLineDone();
-    buzz('line', 8);
+  // (While the goal is ready to claim there is no line on the card: whatever was seen is kept for when it comes back.)
+  if (!line) {
+    if (lineSeen && (lineSeen.g !== g || lineSeen.goal !== g.goal.i)) lineSeen = null;
+    return;
   }
-  lineSeen = now;
+  const step = goalView(g)?.meanwhile?.step ?? 1;
+  const done = line.done(g);
+  const was = lineSeen;
+  lineSeen = { g, goal: g.goal.i, line, step, done };
+  if (!was || was.g !== g || was.goal !== g.goal.i) return;
+  // The line that was on the card has been done since the last look: on the card itself, or the card has
+  // already moved on to the next line because of it.
+  if (!was.done && (was.line === line ? done : was.line.done(g))) lineTicked(was.goal, was.step);
 }
 
 // ---------- Flow State ----------
@@ -800,6 +821,7 @@ export function initFeel() {
     worldRings.length = 0;
     for (const t of expandTimers.splice(0)) clearTimeout(t);
     lineSeen = null;
+    linesTicked.clear();
     saving = null;
     betaSeen = null;
     for (const st of standing.values()) {
