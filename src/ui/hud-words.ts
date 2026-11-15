@@ -39,6 +39,21 @@ export function aboutSpan(seconds: number): string {
   return `about ${Math.floor(s / 60)} min${rest ? ` ${rest} s` : ''}`;
 }
 
+/** A small count in words, as the card says it: "one", "two" … "five"; from six on, the figure. */
+export const countWord = (k: number) => ['zero', 'one', 'two', 'three', 'four', 'five'][k] ?? String(k);
+
+/**
+ * What the Flow goal's card says once its valve has opened. `slack`: how many producers may be short and the goal
+ * still counts (FlowGoalView.slack, a whole number from 0 up to the producers' count minus one); `short`: how many
+ * are short right now. Nothing before the valve opens or while none is short; "Close enough: all but two are
+ * running" while no more are short than may be; else "All but three running is enough now".
+ */
+export function valveWords(slack: number, short: number): string {
+  if (slack <= 0 || short <= 0) return '';
+  if (short <= slack) return `Close enough: all but ${countWord(short)} ${short === 1 ? 'is' : 'are'} running`;
+  return `All but ${countWord(slack)} running is enough now`;
+}
+
 /** The same string with a capital first letter: names from the rules come as "the Fabricator". */
 export const capFirst = (s: string) => s.charAt(0).toUpperCase() + s.slice(1);
 

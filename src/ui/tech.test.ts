@@ -65,7 +65,7 @@ describe('tech tree: what is shown', () => {
     for (const id of ['L3', 'L4', 'L2', 'S1', 'C2']) expect(byId(g, id)).toBeUndefined();
     g.techs.push('L1', 'C1');
     for (const id of ['L3', 'L4', 'L2', 'S1', 'C2']) expect(byId(g, id)?.veiled).toBe(false);
-    // Bulk Upgrade is itself a goal reward ("Fill three orders"): it says so, and Auto-balance behind it stays out.
+    // Bulk Upgrade is itself a goal reward ("Assemble your first Prism"): it says so, and Auto-balance behind it stays out.
     expect(byId(g, 'S1')?.state).toBe('goal');
     expect(byId(g, 'S3')).toBeUndefined();
     // Once that goal has paid it out, Auto-balance is one step ahead: it still needs Priority Routing.

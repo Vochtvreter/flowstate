@@ -46,7 +46,7 @@ import { Panel, anchorPt, makePanel, setAnchor, setAttr, setClass, setHidden, se
 import { initFlowRing, updateFlowRing } from './hud-flow';
 import { isStarted } from './hud-screens';
 import { toastFor } from './hud-toasts';
-import { aboutTime, calmMotion, isTouch } from './hud-words';
+import { aboutTime, calmMotion, isTouch, valveWords } from './hud-words';
 import { esc, icon, matGlyph } from './icons';
 import { onPanels, renderPanels } from './panels';
 import { alertPick, diagnose, matName } from './status';
@@ -296,14 +296,11 @@ function flowHtml(f: FlowGoalView, p: GoalProgress | null): string {
   const count = f.of > 0 ? `${f.running} of ${f.of} running` : 'nothing wired up counts yet';
   const holding = !!p && p[2] === 's' && p[0] > 0;
   const left = p ? Math.max(0, Math.ceil(p[1] - p[0] - 1e-6)) : 0;
-  // How many may be short and the goal still counts: 1 once the valve has opened, 2 once it has opened further.
-  const slack = Math.max(0, Math.min(f.of - 1, f.slack ?? (f.valve ? 1 : 0)));
+  // How many may be short and the goal still counts: 1 once the valve has opened, more each time it opens further
+  // (any whole number up to the producers' count minus one; hud-words.ts words it).
+  const slack = Math.max(0, Math.min(f.of - 1, Math.floor(f.slack ?? (f.valve ? 1 : 0))));
   const short = f.of - f.running;
-  const word = (k: number) => (k === 1 ? 'one' : k === 2 ? 'two' : String(k));
-  let valve = '';
-  if (slack > 0 && short > 0) {
-    valve = short <= slack ? `Close enough: all but ${word(short)} ${short === 1 ? 'is' : 'are'} running` : `All but ${word(slack)} running is enough now`;
-  }
+  const valve = valveWords(slack, short);
   return `<div class="fl-bar${slack > 0 ? ' valve' : ''}" data-slack="${slack}">${bar(f.pct, '#5ce1ff')}<i class="fl-mark" style="left:${need}%"></i></div>
     <span class="gc-num" data-testid="goal-flow">Flow <b class="mono">${pct}%</b><span class="fl-count"> · ${count}</span></span>${
     holding ? `<span class="gc-eta gc-hold" data-testid="goal-hold"><b class="mono">${left}s</b> to go</span>` : ''}${
