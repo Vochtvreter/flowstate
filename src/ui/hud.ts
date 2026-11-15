@@ -24,9 +24,9 @@
 //  - Outside the phone layout the strip is laid out in the same box whether the inspector is open or not
 //    (hud.css, "the strip and the inspector"): the card and its Claim do not move when it opens or closes.
 //  - The alert slot (#hud-alert) says, in this order: that the game is open in another tab (setElsewhere),
-//    that the game is paused (a pill that resumes it), or the board's worst problem. The problem is left out
-//    while the card's hint, line or tip is about the same node, and a press on it puts it away until the
-//    problem is another one.
+//    that the game is paused (a pill that resumes it), or a problem on the board: the one the goal on the card
+//    meets first, else the worst off (alertPick in status.ts). The problem is left out while the card's hint,
+//    line or tip is about the same node, and a press on it puts it away until the problem is another one.
 //  - #hud-strip carries `has-order`, `has-alert`, `stuck` (an order none of which is sold) and `aiming` (a
 //    port armed, a wire being drawn, a node being placed): classes for the stylesheet, which would otherwise
 //    need has() selectors.
@@ -49,7 +49,7 @@ import { toastFor } from './hud-toasts';
 import { aboutTime, calmMotion, isTouch } from './hud-words';
 import { esc, icon, matGlyph } from './icons';
 import { onPanels, renderPanels } from './panels';
-import { diagnose, matName } from './status';
+import { alertPick, diagnose, matName } from './status';
 import { env } from './phone-env';
 import { delegate, onFrame, onGame, onNewGame, touch, ui } from './ui';
 
@@ -567,28 +567,21 @@ const problemKey = (g: Game, n: GNode) => {
 };
 
 /**
- * The single worst root-cause problem on the board, or null. Nothing is flagged before the first wire. `skip`: a
- * problem the player has put away (problemKey), which is passed over for the others.
+ * The problem the chip names, or null: the one the goal on the card meets first, else the one named last while it
+ * lasts, else the worst off (alertPick in status.ts, which also keeps quiet about what the card is about in a goal's
+ * first seconds, and about everything while the card's own machine stands idle). Nothing is flagged before the first
+ * wire. A problem the player has put away (alertPut) is passed over for the others.
  */
-function worstProblem(g: Game, skip = ''): { n: GNode; text: string } | null {
-  if (!g.wires.length && g.stats.wiresMade === 0) return null;
-  // Two machines that are about as badly off would otherwise swap places four times a second.
-  const held = alertNode >= 0 ? nodeById(g, alertNode) : null;
-  const heldText = held ? problemText(g, held) : null;
-  if (held && heldText && (!skip || problemKey(g, held) !== skip)) return { n: held, text: heldText };
-  let worst: { n: GNode; text: string } | null = null;
-  for (const n of g.nodes) {
-    if (worst && worst.n.util <= n.util) continue;
-    const text = problemText(g, n);
-    if (text && (!skip || problemKey(g, n) !== skip)) worst = { n, text };
-  }
+function pickProblem(g: Game): { n: GNode; text: string } | null {
+  const worst = !g.wires.length && g.stats.wiresMade === 0 ? null
+    : alertPick(g, alertNode, (n) => (alertPut && problemKey(g, n) === alertPut ? null : problemText(g, n)));
   alertNode = worst ? worst.n.id : -1;
   return worst;
 }
 
 // ---------- the alert slot ----------
-// One chip under the card, saying one thing: that the game is open in another tab, that it is paused, or the
-// board's worst problem, in that order.
+// One chip under the card, saying one thing: that the game is open in another tab, that it is paused, or a
+// problem on the board (pickProblem), in that order.
 
 /** Another tab has written the save: this one no longer saves (main.ts), and the slot says so for good. */
 let elsewhere = false;
@@ -655,7 +648,7 @@ function renderAlert(g: Game, force: boolean) {
       else if (putGone < 0) putGone = g.time;
       else if (g.time - putGone > ALERT_CALM) alertPut = '';
     }
-    const worst = worstProblem(g, alertPut);
+    const worst = pickProblem(g);
     const key = worst ? problemKey(g, worst.n) : '';
     alertKey = key;
     const left = !worst ? undefined : cardSays(g, worst.n) ? 'card' : undefined;

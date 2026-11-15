@@ -1,6 +1,6 @@
 // What is wrong with a node, and where the cause lies: the inspector's status box, the board's pill and the
 // HUD's alert chip all read diagnose().
-import { MATERIALS, MatId, NODE_DEFS, RULES } from '../content';
+import { MATERIALS, MatId, NODE_DEFS } from '../content';
 import { materialsAt } from '../actions';
 import { recipeOf } from '../economy';
 import { activeGoal, goalAge, goalFocus } from '../goals';
@@ -50,19 +50,17 @@ function supplier(g: Game, id: number, m: MatId, depth = 0): GNode | null {
 }
 
 /**
- * Between the first Lens and free play (the ending's celebration and its summary), a machine that makes nothing
- * but the capstone has done what the demo asked of it: its Lens with nowhere to go, or its next one short of
- * Glyph, is no trouble to show at the victory moment (rev-consultant F7).
+ * Between the first Lens and free play (the ending's celebration, the bow and the summary) the board is the ending's
+ * picture: the demo has been done, and no machine is in trouble in it (rev-consultant F7). Nothing is reported for
+ * any node, so no pill, no alert and no problem in the inspector, until the player goes on into free play (Keep
+ * playing, a save that had already left the summary, or at once under `?nosummary`: freePlay() in hud-screens.ts).
+ * The board draws a node's ring from this too: no problem, no warning colour.
  */
-function resting(g: Game, n: GNode): boolean {
-  if (!g.ended || !isMachine(n) || freePlay()) return false;
-  const r = recipeOf(n);
-  return !!r && r.outputs.length > 0 && r.outputs.every(([m]) => m === RULES.capstone);
-}
+export const victoryQuiet = (g: Game): boolean => g.ended && !freePlay();
 
 export function diagnose(g: Game, n: GNode): Diagnosis {
   const none: Diagnosis = { problem: null, victim: false, mat: null, culprit: null, openPort: false };
-  if (n.status === 'working' || resting(g, n)) return none;
+  if (n.status === 'working' || victoryQuiet(g)) return none;
   if (n.type === 'well') {
     if (n.status !== 'blocked') return none;
     const wired = (graph(g).outs.get(n.id)?.[0]?.length ?? 0) > 0;
@@ -116,7 +114,12 @@ function cardIsAbout(g: Game, n: GNode, focus: number[]): boolean {
  *     places four times a second);
  *  3. the worst off of the rest.
  * For the first ALERT_QUIET seconds of a goal it says nothing about what the card is about: the card's hint
- * is saying it already (goals 3 and 5, rev-consultant F9).
+ * is saying it already (goals 3 and 5, rev-consultant F9). A node the card is about that is in trouble then, or
+ * at any time stands idle (nothing wired into it yet: getting it going is what the card is asking for) or is still
+ * settling after the player changed it (its grace: the simulation calls it working until it can judge), is the
+ * card's to speak of, and the alert names nothing at all meanwhile: at goal 22 it sent the player to the Mist
+ * Refiner while the card asked for the Fabricator's wires (rev-consultant F1). (Once the opening seconds are over,
+ * a node in trouble is itself named; the HUD leaves out what the card already says, so the slot stays empty then too.)
  */
 export function alertPick(
   g: Game, held: number, textOf: (n: GNode) => string | null, focus: number[] = goalFocus(g),
@@ -126,8 +129,10 @@ export function alertPick(
   const byId = graph(g).byId;
   for (const id of focus) {
     const n = byId.get(id);
-    const text = n ? say(n) : null;
-    if (n && text) return { n, text };
+    if (!n) continue;
+    const text = textOf(n);
+    if (text) return quiet ? null : { n, text };
+    if (n.status === 'idle' || n.grace > 0) return null;
   }
   const h = held >= 0 ? byId.get(held) : undefined;
   const heldText = h ? say(h) : null;
