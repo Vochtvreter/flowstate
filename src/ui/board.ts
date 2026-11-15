@@ -43,6 +43,9 @@ import { delegate, onPress, onSignal, select, signal, toast, touch, ui } from '.
 
 let boardEl: HTMLElement;
 let worldEl: HTMLElement;
+let gridEl: HTMLElement;
+/** The grid's cell size as last written (it changes only with the zoom). */
+let gridCell = 0;
 let plotEl: HTMLElement;
 let plotLabel: HTMLElement;
 let depositsEl: HTMLElement;
@@ -281,8 +284,14 @@ function applyView() {
   clampView();
   const { x, y, k } = ui.view;
   worldEl.style.transform = `translate(${x}px, ${y}px) scale(${k})`;
-  boardEl.style.backgroundSize = `${24 * k}px ${24 * k}px`;
-  boardEl.style.backgroundPosition = `${x}px ${y}px`;
+  // The dotted grid: resized only when the zoom changes, otherwise only moved (by less than one cell).
+  const cell = 24 * k;
+  if (cell !== gridCell) {
+    gridCell = cell;
+    gridEl.style.backgroundSize = `${cell}px ${cell}px`;
+  }
+  const mod = (a: number) => ((a % cell) + cell) % cell;
+  gridEl.style.transform = `translate(${(mod(x + 48) - cell).toFixed(2)}px, ${(mod(y + 48) - cell).toFixed(2)}px)`;
   const floor = zoomFloor();
   const wasOver = over, wasBig = big, wasLean = lean, wasStep = ovStep;
   over = wasOver ? k < floor - 1e-6 : k < floor * OVER_BELOW;
@@ -1366,6 +1375,7 @@ function drawExpand() {
 export function initBoard(root: HTMLElement) {
   boardEl = root;
   boardEl.innerHTML = `
+    <div id="grid"></div>
     <div id="world">
       <div id="plot"><span id="plot-label"></span></div>
       <div id="deposits"></div>
@@ -1378,6 +1388,7 @@ export function initBoard(root: HTMLElement) {
     <button id="expand" data-testid="expand" style="transform:translate(-9999px,0)"></button>
     <div id="radial"></div>`;
   worldEl = boardEl.querySelector('#world')!;
+  gridEl = boardEl.querySelector('#grid')!;
   plotEl = boardEl.querySelector('#plot')!;
   plotLabel = boardEl.querySelector('#plot-label')!;
   depositsEl = boardEl.querySelector('#deposits')!;
@@ -1413,6 +1424,7 @@ export function initBoard(root: HTMLElement) {
   }, { passive: false });
   boardEl.addEventListener('wheel', (e) => {
     e.preventDefault();
+    wheelAt = performance.now();
     if (radial) closeRadial();
     zoomBy(Math.exp(-e.deltaY * 0.0015), e.clientX, e.clientY);
   }, { passive: false });
@@ -2329,8 +2341,12 @@ function updateWires(g: Game) {
 export function updateSlow(part?: 'nodes' | 'wires') {
   const g = ui.g;
   lively = performance.now() < livelyUntil;
-  if (part !== 'wires') updateNodes(g);
-  if (part !== 'nodes') updateWires(g);
+  // While the camera moves (a pan, a pinch, the wheel, a glide), the cards' text is left as it is: each
+  // change would repaint the whole board layer under a moving camera, on a slow machine a frame lost. It
+  // catches up at the first slow beat after the camera comes to rest. (Called with no argument, it always runs.)
+  const still = !part || !cameraMoving();
+  if (still && part !== 'wires') updateNodes(g);
+  if (still && part !== 'nodes') updateWires(g);
   const cost = expansionCost(g);
   if (cost !== expandCost) {
     expandCost = cost;
@@ -2382,6 +2398,12 @@ function syncHints(g: Game, measure = true) {
   }
   if (setHidden(hintsEl, under)) ex.stale = true;
 }
+
+/** When the wheel last turned (performance.now). */
+let wheelAt = 0;
+/** The camera is being moved by the player or is gliding. */
+const cameraMoving = () =>
+  !!glide || performance.now() - wheelAt < 250 || drag?.kind === 'pinch' || (drag?.kind === 'pan' && drag.moved);
 
 let gainTimer = 0;
 /** Under this (items a second) a wire counts as carrying nothing, for its still dots. */
