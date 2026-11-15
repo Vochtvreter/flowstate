@@ -5,7 +5,7 @@ import { BRANCHES, TECHS } from '../content';
 import { research, techAvailable, techHidden } from '../economy';
 import { GOALS } from '../goals';
 import { Game, newGame } from '../state';
-import { Tile, goalTech, techTiles } from './tech';
+import { Tile, goalTech, teasedSlot, techTiles } from './tech';
 
 const show = (g: Game) => Object.fromEntries(techTiles(g).map((x) => [x.t.id, x.veiled ? 'veil' : x.state]));
 const ids = (g: Game) => techTiles(g).map((x) => x.t.id).sort();
@@ -154,5 +154,65 @@ describe('tech tree: the tech the goal asks for', () => {
     const done = newGame();
     done.goal = { i: GOALS.length, ready: false };
     expect(goalTech(done)).toBeNull();
+  });
+});
+
+describe('build bar: the one locked slot on show', () => {
+  const at = (goalId: string, techs: string[]) => {
+    const g = newGame();
+    g.goal = { i: GOALS.findIndex((x) => x.id === goalId), ready: false };
+    g.techs = techs;
+    return g;
+  };
+  const slot = (g: Game) => {
+    const s = teasedSlot(g);
+    return s ? `${s.type}:${s.tech.name}${s.goal ? ' (goal)' : ''}` : null;
+  };
+
+  it('nothing is teased before the goal that pays out Refining is on the card', () => {
+    expect(slot(at('wire-market', []))).toBeNull();
+    expect(slot(at('second-well', []))).toBeNull();
+  });
+
+  it('the Refiner shows as a silhouette while its goal is on the card, and it cannot be opened in the tree', () => {
+    const g = at('wire-all-wells', []);
+    expect(GOALS[g.goal.i].reward.techs).toContain('P1');
+    expect(slot(g)).toBe('refiner:Refining (goal)');
+  });
+
+  it('the Assembler waits until Assembly can be researched', () => {
+    expect(slot(at('build-refiner', ['P1']))).toBeNull();
+    expect(slot(at('make-spark', ['P1', 'R1', 'P2']))).toBeNull();
+    expect(slot(at('make-spark', ['P1', 'R1', 'P2', 'P3']))).toBe('assembler:Assembly');
+    expect(slot(at('make-glyph', ['P1', 'R1', 'P2', 'P3', 'L1']))).toBe('assembler:Assembly');
+  });
+
+  it('the Fabricator waits until Fabrication can be researched; then nothing is left to tease', () => {
+    const upTo = ['P1', 'R1', 'P2', 'P3', 'L1', 'P4'];
+    expect(slot(at('make-mist', upTo))).toBeNull();
+    expect(slot(at('make-prism', [...upTo, 'P5']))).toBe('fabricator:Fabrication');
+    expect(slot(at('make-lens', [...upTo, 'P5', 'P7']))).toBeNull();
+  });
+
+  it('a goal that names the research brings the silhouette even when the research is a step away', () => {
+    // "Build a Fabricator: Research Fabrication, then..." with Breeze Deposits (its requirement) not owned.
+    const g = at('build-fabricator', ['P1', 'R1', 'P2', 'P3', 'L1', 'P4']);
+    expect(techAvailable(g, TECHS.P7)).toBe(false);
+    expect(slot(g)).toBe('fabricator:Fabrication');
+  });
+
+  it('only machines are ever teased, and never with a price', () => {
+    for (let i = 0; i < GOALS.length; i++) {
+      for (const techs of [[], ['P1', 'R1'], ['P1', 'R1', 'P2', 'P3', 'L1'], ['P1', 'R1', 'P2', 'P3', 'L1', 'P4', 'P5']]) {
+        const g = newGame();
+        g.goal = { i, ready: false };
+        g.techs = techs;
+        const s = teasedSlot(g);
+        if (!s) continue;
+        expect(['refiner', 'assembler', 'fabricator']).toContain(s.type);
+        expect(g.techs).not.toContain(s.tech.id);
+        expect(s.tech.name).not.toMatch(/[0-9¢αβγ]/);
+      }
+    }
   });
 });

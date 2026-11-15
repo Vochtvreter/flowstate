@@ -11,7 +11,7 @@
 // Refresh: main.ts calls renderTech() twice a second while the tree is open, and a press inside the tree
 // refreshes it at once. The HTML is patched in place by makePanel(), which also holds off while a finger
 // is down or a list is still scrolling.
-import { BRANCHES, Branch, DATA_COLORS, DATA_NAMES, DataTier, TECHS, Tech } from '../content';
+import { BRANCHES, Branch, DATA_COLORS, DATA_NAMES, DataTier, NODE_DEFS, NodeType, TECHS, Tech } from '../content';
 import { fmtInt, fmtRate, research, techAffordable, techAvailable, techEta, techHidden, techProgress } from '../economy';
 import { GOALS } from '../goals';
 import { Game } from '../state';
@@ -93,6 +93,25 @@ export function goalTech(g: Game): string | null {
     if (!best || t.name.length > best.name.length) best = t;
   }
   return best && !g.techs.includes(best.id) ? best.id : null;
+}
+
+/** The machines of the goal chain's spine, in the order it unlocks them. */
+const SPINE: NodeType[] = ['refiner', 'assembler', 'fabricator'];
+
+/**
+ * The one locked slot the build bar shows, as a dim silhouette with what unlocks it: the next machine of the
+ * spine that is still locked, once what unlocks it is in sight. That is when its research can be done now (the
+ * tree shows it in full), or when the goal on the card asks for that research or pays it out as its reward
+ * (the card names it). Everything else that is locked stays out of the bar until the player has it.
+ * `goal` = it comes with a goal and cannot be researched: there is nothing to open in the tree for it.
+ */
+export function teasedSlot(g: Game): { type: NodeType; tech: Tech; goal: boolean } | null {
+  const type = SPINE.find((t) => !g.techs.includes(NODE_DEFS[t].tech ?? ''));
+  const tech = type ? TECHS[NODE_DEFS[type].tech ?? ''] : null;
+  if (!type || !tech) return null;
+  const reward = !!GOALS[g.goal.i]?.reward.techs?.includes(tech.id);
+  if (reward || techAvailable(g, tech) || goalTech(g) === tech.id) return { type, tech, goal: !!tech.auto };
+  return null;
 }
 
 const ORDER: Record<TileState, number> = { rdy: 0, sav: 1, goal: 3, lck: 4, own: 5 };

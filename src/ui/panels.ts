@@ -14,7 +14,6 @@ import {
   TRACK_INFO, costText, cycleTime, dataYield, fmt, fmtInt, fmtRate, has, labRate, maxLevel, maxPipeTier,
   nodeCost, nodeUnlocked, readyTechs, recipeOf, techAvailable, trackAvailable, upgradeCost, wellRate,
 } from '../economy';
-import { activeGoal } from '../goals';
 import { graph, isMachine, passCap } from '../sim';
 import { Game, GNode, RouterMode, Wire } from '../state';
 import { isMuted, setMuted } from './audio';
@@ -28,7 +27,7 @@ import { isTouch, withKey } from './hud-words';
 import { esc, icon, matGlyph, nodeIcon } from './icons';
 import { env } from './phone-env';
 import { diagnose, matName } from './status';
-import { goalTech } from './tech';
+import { teasedSlot } from './tech';
 import { delegate, select, signal, toast, touch, ui } from './ui';
 
 let topEl: HTMLElement;
@@ -466,25 +465,6 @@ const outOfReach = new Map<NodeType, boolean>();
 const affordUntil = new Map<NodeType, number>();
 let hotGame: Game | null = null;
 
-/** The machines of the goal chain's spine, in the order it unlocks them. */
-const SPINE: NodeType[] = ['refiner', 'assembler', 'fabricator'];
-
-/**
- * The one locked slot the bar shows, as a dim silhouette with what unlocks it: the next machine of the spine
- * that is still locked, once what unlocks it is in sight. That is when its research can be done now (the tree
- * shows it in full), or when the goal on the card asks for that research or pays it out as its reward (the
- * card names it). Everything else that is locked stays out of the bar until the player has it.
- * `goal` = it comes with the goal on the card and cannot be researched: there is nothing to open in the tree.
- */
-export function teasedSlot(g: Game): { type: NodeType; tech: Tech; goal: boolean } | null {
-  const type = SPINE.find((t) => !nodeUnlocked(g, t));
-  const tech = type ? TECHS[NODE_DEFS[type].tech ?? ''] : null;
-  if (!type || !tech) return null;
-  const reward = !!activeGoal(g)?.reward.techs?.includes(tech.id);
-  if (reward || techAvailable(g, tech) || goalTech(g) === tech.id) return { type, tech, goal: !!tech.auto };
-  return null;
-}
-
 /** One hotbar slot's height with the gap under it, and the bar's own padding (style.css): for "is there room for the Delete tip". */
 const HOT_SLOT = 68;
 const HOT_PAD = 16;
@@ -819,8 +799,17 @@ function renderMini() {
   ctx.strokeRect(ox + (-ui.view.x / ui.view.k) * s, oy + (-ui.view.y / ui.view.k) * s, (r.width / ui.view.k) * s, (r.height / ui.view.k) * s);
 }
 
+let fitBtn: HTMLElement | null | undefined;
+
 function renderZoom() {
   setText(zoomLabel, `${Math.round(ui.view.k * 100)}%`);
+  // The Fit button names its key only to someone with a keyboard.
+  fitBtn ??= zoomEl.querySelector<HTMLElement>('[data-act="fit"]');
+  if (fitBtn) {
+    const label = withKey('Fit board', 'F');
+    setAttr(fitBtn, 'aria-label', label);
+    setAttr(fitBtn, 'title', label);
+  }
 }
 
 /**
