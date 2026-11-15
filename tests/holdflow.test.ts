@@ -9,10 +9,10 @@ import { claimGoal, claimOrder, clearHistory, connect, expandBoard, favour, plac
 import { advice, applyAdvice, lineAdvice } from '../src/advice';
 import { RULES } from '../src/content';
 import { nodeCost } from '../src/economy';
-import { countsForFlow, isFlowing } from '../src/flow';
+import { countsForFlow, isFlowing, worstProducer } from '../src/flow';
 import { activeGoal, goalAge, goalView } from '../src/goals';
 import { tick } from '../src/sim';
-import { Game, GNode, cloneGame, deserialize } from '../src/state';
+import { Game, GNode, cloneGame, deserialize, nodeNoun } from '../src/state';
 import { playByTheCard } from './cardPlayer';
 import { PUBLIC_BOARD } from './fixtures/public-version';
 
@@ -108,6 +108,31 @@ describe('Hold 95% Flow with a second Glyph Assembler built ahead', () => {
     expect(goalAge(g)).toBeGreaterThanOrEqual(RULES.flow.valveAfter2 + RULES.flow.valveEvery + RULES.flow.holdSeconds - 0.01);
     expect(goalAge(g)).toBeLessThan(RULES.flow.valveAfter2 + RULES.flow.valveEvery + RULES.flow.holdSeconds + 5);
     expect(goalView(g)!.flow).toMatchObject({ valve: true, slack: 3 });
+  }, 120_000);
+
+  it('the line names the node its step acts on, which is not the producer the Flow ring jumps to (the rules review\'s board)', () => {
+    const { g } = builtAhead();
+    // A moment for the second Assembler to count and for the rates to settle.
+    for (let i = 0; i < 20 * 30; i++) tick(g, 0.05);
+    const step = lineAdvice(g)!;
+    expect(step.upgrade).toBe('speed');
+    const acts = g.nodes.find((n) => n.id === step.node)!;
+    const ring = worstProducer(g)!;
+    // The ring jumps to a Glyph Assembler; the step is Speed on the Ember Well (for the Spark Refiner).
+    expect(nodeNoun(ring)).toBe('Glyph Assembler');
+    expect(nodeNoun(acts)).toBe('Ember Well');
+    for (const touch of [false, true]) {
+      const text = goalView(g, touch)!.meanwhile!.text;
+      // (Two Ember Wells stand on this board, one with a Lab of its own: the line says which, "its".)
+      expect(text).toBe('The Spark Refiner needs more Ember: buy Speed on its Ember Well.');
+      expect(text).not.toContain('Glyph Assembler');
+    }
+    // Its Show me is the same step, in the same words with the price: it selects that Ember Well and points at its
+    // Speed button (src/ui/advice-show.ts).
+    expect(step.text.mouse).toMatch(/^The Spark Refiner needs more Ember: buy Speed on its Ember Well \(\d+¢\)\.$/);
+    // Once everything flows, the line is done and reads its own words.
+    applyAdvice(g, step);
+    clearHistory();
   }, 120_000);
 
   it('a save from the public version, played on by the tips alone, passes the Flow goal at the valve\'s third step', () => {

@@ -26,7 +26,7 @@ import { graph, isMachine, isPass } from './graph';
 import { startOrders } from './orders';
 import { Game, GNode, GoalReward, Wire, isLookahead, nodeNoun } from './state';
 import { clearHistory } from './actions';
-import { lineFocus, waitKind } from './advice';
+import { flowLineWords, lineFocus, waitKind } from './advice';
 
 /** [current, target, unit]. Unit '¢' means "saving up credits"; 'α' / 'β' / 'γ' mean saving up Data. */
 export type GoalProgress = [current: number, target: number, unit: string];
@@ -74,6 +74,11 @@ export interface Meanwhile {
   id: string;
   /** One sentence, worded for mouse and keyboard and for touch: at most 90 characters each. */
   text: { mouse: string; touch: string };
+  /**
+   * The sentence as it reads on this board, when it names what is on it (the Flow goal's line names the node its
+   * step acts on): goalView shows it in place of `text`. null: `text` it is. At most 90 characters each.
+   */
+  say?(g: Game): { mouse: string; touch: string } | null;
   /** It has been done: the card ticks the line off. */
   done(g: Game): boolean;
   /** Does the line apply right now? Absent = for as long as the goal is the active one. While it does not, the card leaves it out. */
@@ -762,16 +767,18 @@ export const GOALS: Goal[] = [
     ),
     done: (g) => flowHeld(g) >= RULES.flow.holdSeconds,
     progress: (g) => [Math.min(flowHeld(g), RULES.flow.holdSeconds), RULES.flow.holdSeconds, 's'],
-    // What the ring leads to, named: the producer that is short, and the one change that puts it right (a level
-    // of Speed on the maker that feeds it, or a wire to the Market). Shown only while there is such a change;
-    // a board short in a way this cannot see has the valve.
+    // The one change that puts a short producer right, named: a level of Speed on the Well or machine that feeds
+    // it, or its port wired to the Market (flowFix; the line's words name the node the step acts on, which is not
+    // always the producer the Flow ring jumps to). Shown only while there is such a change; a board short in a
+    // way this cannot see has the valve. Its own words below are for the line once it is done.
     meanwhile: [
       {
         id: 'flow-fix',
         text: hint(
-          'Click the Flow ring, then give the machine it picks what it lacks: input, or a Market.',
-          'Tap the Flow ring, then give the machine it picks what it lacks: input, or a Market.',
+          'Click the Flow ring to find what holds Flow back, and give it what it lacks.',
+          'Tap the Flow ring to find what holds Flow back, and give it what it lacks.',
         ),
+        say: flowLineWords,
         done: (g) => { const f = flowCount(g); return f.of > 0 && f.running === f.of; },
         when: (g) => { const f = flowCount(g); return (f.of > 0 && f.running === f.of) || !!flowFix(g); },
       },
@@ -975,7 +982,7 @@ export function goalView(g: Game, touch = false): GoalView | null {
   const inputs = goal.id === 'make-lens' && !g.goal.ready ? lensFeeds(g) : null;
   return {
     ...(goal.id === 'hold-flow' ? { flow: flowGoalView(g) } : {}),
-    ...(at ? { meanwhile: { text: touch ? at.line.text.touch : at.line.text.mouse, done: at.line.done(g), ...(at.of > 1 ? { step: at.step, of: at.of } : {}) } } : {}),
+    ...(at ? { meanwhile: { text: lineText(g, at.line, touch), done: at.line.done(g), ...(at.of > 1 ? { step: at.step, of: at.of } : {}) } } : {}),
     ...(inputs ? { inputs } : {}),
     goal,
     number: free ? g.goal.i - MAIN_GOALS + 1 : g.goal.i + 1,
@@ -987,6 +994,12 @@ export function goalView(g: Game, touch = false): GoalView | null {
     reward: goal.reward,
     big: !!goal.big,
   };
+}
+
+/** A line's sentence as the card shows it: its words for this board (Meanwhile.say), else its own. */
+function lineText(g: Game, line: Meanwhile, touch: boolean): string {
+  const t = line.say?.(g) ?? line.text;
+  return touch ? t.touch : t.mouse;
 }
 
 /**
