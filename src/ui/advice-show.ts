@@ -194,10 +194,11 @@ const BOARD_FRAMES = ['frame', 'Nodes'].join('');
  */
 function frameNodes(nodes: GNode[], room = 0) {
   // (Looked up by name at run time: this file is built against boards with and without it.)
-  const byBoard = (board as unknown as Record<string, unknown>)[BOARD_FRAMES] as ((ids: number[]) => void) | undefined;
+  const byBoard = (board as unknown as Record<string, unknown>)[BOARD_FRAMES] as ((ids: number[], readable?: boolean) => void) | undefined;
   // (The board's own: when they cannot all be seen together it shows the last one named. Here the first is
-  // where the gesture starts, so they are named back to front.)
-  if (byBoard) return byBoard(nodes.map((n) => n.id).reverse());
+  // where the gesture starts, so they are named back to front. `readable`: ports are about to be pointed
+  // at, so from its overview, which shows none, the board comes back in among the cards.)
+  if (byBoard) return byBoard(nodes.map((n) => n.id).reverse(), true);
   frame(nodes.map((n, i) => {
     const b = boxOf(n);
     return i === 0 ? { ...b, w: b.w + room } : b;
