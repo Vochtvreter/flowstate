@@ -12,7 +12,7 @@
 // The board is drawn in two tiers (see `applyView`). From the zoom floor up, cards are cards. Below it
 // is the overview: every card is its icon and status ring, nothing has to be read, and the whole
 // factory fits the screen. Fit goes there when the factory is too big for the floor.
-import { MATERIALS, MatId, NODE_DEFS, NodeType, PIPES, RECIPES, Recipe, TECHS } from '../content';
+import { DATA_COLORS, DATA_NAMES, DataTier, MATERIALS, MatId, NODE_DEFS, NodeType, PIPES, RECIPES, Recipe, TECHS } from '../content';
 import {
   act, canConnect, connect, cutWires, expandBoard, freeDeposits, materialsAt, nodeById, placeNode, recipesFor, splice,
 } from '../actions';
@@ -20,23 +20,26 @@ import {
   expansionCost, fmt, fmtRate, labRate, matUnlocked, nodeCost, nodeUnlocked, recipeOf, recipeUnlocked,
 } from '../economy';
 import { bagTotal, graph, isMachine, isSink, outPortCount } from '../sim';
-import { GOALS } from '../goals';
+import { lineAdvice } from '../advice';
+import { GOALS, activeGoal } from '../goals';
 import { GRID, Game, GNode, Wire, snap } from '../state';
-import { anchorPt, cachedRect, el, invalidateLayout, pulseAnchor, setAttr, setClass, setHTML, setHidden, setStyle, setText, svgEl } from './dom';
+import { anchorPt, cachedRect, el, invalidateLayout, setAttr, setClass, setHTML, setHidden, setStyle, setText, svgEl } from './dom';
 import {
   Beacon, Flow, floater, flowPoint, fly, frameFx, invalidateFx, makeFlow, setBeacons, setFlowPath, setFlows,
 } from './fx';
 import {
-  Box, CARD_GAP, Card, NODE_W, Port, Pt, View, ZOOM, bezierAt, boxUnion, centreView, fadeColor, fitBox, fitZoom, frameBox,
-  freeSpot as nearestSpot, inPorts, matColor, nodeSize, outPorts, pathD, pinchView, roomFor, segmentsCross, separate, wireEnds,
+  Box, CARD_GAP, Card, NODE_W, Port, Pt, View, ZOOM, bezierAt, boxClear, boxUnion, centreView, dockSpot, fadeColor, fitBox, fitZoom,
+  frameBox, freeSpot as nearestSpot, heldRate, inPorts, matColor, nodeSize, outPorts, pathD, pinchView, roomFor, segmentsCross, separate,
+  wholeGain, wireEnds,
 } from './geom';
 import { screenOpen } from './hud-screens';
 import { isTouch, pressWord, withKey } from './hud-words';
 import { esc, icon, matGlyph, matShape, nodeIcon } from './icons';
 import { tidy, tidyInput } from './layout';
+import { shortNum } from './panels';
 import { env } from './phone-env';
 import { diagnose } from './status';
-import { delegate, onPress, select, signal, toast, touch, ui } from './ui';
+import { delegate, onPress, onSignal, select, signal, toast, touch, ui } from './ui';
 
 let boardEl: HTMLElement;
 let worldEl: HTMLElement;
@@ -81,6 +84,8 @@ interface WireRefs {
   dim: boolean;
   /** Until when (performance.now) the wire counts as just made: its chip shows and it is never dimmed. */
   fresh: number;
+  /** With less motion asked for: the zoom the wire's still dots were last laid out at. */
+  stillK?: number;
   /** The wire's material colour (its dots are drawn in a faded version of it while the wire is dim). */
   cColor: string; cWidth: number; cFlowing: boolean | null; cSat: boolean | null;
   /** What the chip should read, and what its element reads now (only a chip on show is written to). */
@@ -266,7 +271,7 @@ function applyView() {
   }
   if (big !== wasBig) boardEl.classList.toggle('big', big);
   if (lean !== wasLean) boardEl.classList.toggle('lean', lean);
-  placeExpand();
+  placeExpand(true);
   if (!renderedGame) return;
   // Back in among the cards by the player's own hand: Fit has nothing left to return to.
   if (wasOver && !over) fitBack = fitAt = null;
@@ -713,64 +718,202 @@ export function refreshBoard() {
 }
 
 // ---------- the Expand button ----------
-// It stands in the world, under the plot. Controls that float over the bottom of the stage (the key
-// hints, the zoom buttons and the minimap, the phone's Fit and Undo) must never lie over it, so it
-// slides along the plot's edge, out from under them.
+// Its natural place is in the world, just under the plot, and while that place can be seen and nothing
+// lies over it, that is where the button stands, at the scale of everything else on the board. But the
+// goal card sends the player to it ("Expand board at the edge of the map"), and a camera that frames
+// the factory seldom shows the edge of the map. So whenever its place is off screen, or under the goal
+// card, a sheet or a floating control, the button docks: it comes to rest at life size in the free part
+// of the stage, as near to its place as it can (the rule is `dockSpot` in geom.ts), in a one-line form
+// unless the goal card is asking for it. It slides from one place to the other.
+//
+// The element is a child of the board, not of the world, and is placed by a transform in stage pixels.
 
 let hintsEl: HTMLElement | null = null;
 let fabsEl: HTMLElement | null = null;
-const hintsRect = cachedRect(() => hintsEl);
-const fabsRect = cachedRect(() => fabsEl);
-const tidyFabRect = cachedRect(() => fabsEl?.querySelector('[data-testid="fab-tidy"]:not([hidden])') ?? null);
+let toastsEl: HTMLElement | null = null;
 const EXPAND_W = 260, EXPAND_H = 64;
 /**
- * How much larger than life the button is drawn at each step of the overview (--ovx in the stylesheet),
- * so that it can still be found and pressed: 64 px tall, it is never under 44 px on screen.
+ * How much larger than life the button is drawn in its natural place at each step of the overview, so
+ * that it can still be found and pressed there: 64 px tall, it is never under 44 px on screen.
  */
 const OV_SCALE = [1, 1.5, 1.9, 2.8];
+/** Docked, the button keeps this far from the edge of what the player can see, and from every control. */
+const DOCK_EDGE = 10, DOCK_GAP = 10;
+/** In its natural place it may come this close to the edge of the stage and to a control before it docks. */
+const HOME_EDGE = 4, HOME_GAP = 6;
+/** Once docked it goes back only when its place is this much further in the clear, so it cannot flicker on the line. */
+const DOCK_STICK = 8;
+/** On a phone the thumb row is the Claim button's seat (with the floating buttons): room for it is kept whether Claim is showing or not. */
+const CLAIM_SEAT = 70;
+/** The slide from one place to the other, in ms. */
+const DOCK_MS = 220;
+/** A docked button follows its place along the edge as the camera moves; a step longer than this (px) is slid. */
+const DOCK_JUMP = 24;
+/** After an expansion the button takes no press for this long: docked, it stays under the pointer, and a second press would buy a second plot. */
+const EXPAND_REST = 700;
 
-function placeExpand() {
+/** Where the middle of the button is on the stage, and the scale it is drawn at. */
+interface Stand { x: number; y: number; s: number }
+const ex = {
+  /** It is docked, in its one-line form, and the goal card is asking for it (and the player can pay). */
+  docked: false, mini: false, call: false,
+  /** The size of the element as laid out in its present form (before the scale), and what that was measured for. */
+  w: EXPAND_W, h: EXPAND_H, sized: '',
+  /** Where it belongs now, where it is drawn, and the slide between the two when there is one. */
+  target: null as Stand | null, drawn: null as Stand | null,
+  slide: null as { from: Stand; t0: number } | null,
+  /** What it must keep clear of, in stage pixels: measured again when `stale` (see `measureExpand`). */
+  blocks: [] as Box[], stale: true,
+  /** The goal card is sending the player to it (see `expandAsked`), and when that was last looked at. */
+  asked: false, askedKey: '', askedAt: 0,
+  /** No press counts before this (performance.now). */
+  restUntil: 0,
+  /** The docked button as a world box: wire dots are not drawn over it (the first four numbers of every flow's `occ`). */
+  occ: [0, 0, 0, 0],
+};
+
+/**
+ * The goal card is asking for the expansion: the goal is "Expand the board", or the next step of the
+ * goal's "while you wait" line is to expand (which the line only asks for when it can be paid for).
+ */
+function expandAsked(g: Game): boolean {
+  const goal = activeGoal(g);
+  if (!goal) return false;
+  return goal.id === 'expand' || (!!goal.meanwhile && !!lineAdvice(g)?.expand);
+}
+
+/** What stands on the stage that the button must keep clear of. Reads layout: only when something may have changed. */
+function measureExpand() {
+  ex.stale = false;
+  const r = rectOf();
+  const out: Box[] = [];
+  const add = (e: Element | null | undefined) => {
+    const b = e?.getBoundingClientRect();
+    if (b && b.width > 1 && b.height > 1) out.push({ x0: b.left - r.left, y0: b.top - r.top, x1: b.right - r.left, y1: b.bottom - r.top });
+  };
+  if (env.phone) {
+    // (The strip, an open sheet and the thumb row are left out of the area itself: see `dockArea`.)
+    // Tidy stands above the thumb row; toasts come up under the strip.
+    add(fabsEl?.querySelector('[data-testid="fab-tidy"]:not([hidden])'));
+    if (toastsEl?.childElementCount) add(toastsEl);
+  } else {
+    // The goal card with the order beside it, over the middle of the top edge, and room under it for the
+    // alert chip whether it is showing or not.
+    const s = env.strip();
+    if (s) out.push({ x0: s.x0, y0: -1e6, x1: s.x1, y1: Math.max(s.bottom, s.goalBottom + ALERT_ROOM) });
+    // The zoom buttons and the minimap: everything right of and below their corner.
+    const c = env.corner();
+    if (c) out.push({ x0: c.x0, y0: c.y0, x1: 1e6, y1: 1e6 });
+    add(hintsEl);
+    // (For a finger on a wide screen the "tap where..." line shows under the strip.)
+    add(document.getElementById('tap-hint'));
+    // Toasts are not in the list: outside the phone layout they step up above the button themselves (hud-toasts.ts).
+  }
+  ex.blocks = out;
+}
+
+/** The part of the stage the docked button may stand in. */
+function dockArea(): Box {
+  const r = rectOf();
+  if (!env.phone) return { x0: DOCK_EDGE, y0: DOCK_EDGE, x1: r.width - DOCK_EDGE, y1: r.height - DOCK_EDGE };
+  // Under the strip, beside or above an open sheet, and above the thumb row.
+  const c = env.cover();
+  const x0 = c.left + DOCK_EDGE, y0 = c.top + DOCK_EDGE;
+  return { x0, y0, x1: Math.max(x0 + 40, r.width - c.right - DOCK_EDGE), y1: Math.max(y0 + 40, r.height - c.bottom - Math.max(c.row, CLAIM_SEAT) - 2) };
+}
+
+/**
+ * Work out where the button belongs and in which form, and put it there. `byCamera`: the view has just
+ * changed (the button's natural place moves with the board, and is followed exactly); otherwise
+ * something about the stage or the game may have changed, and a new place is slid to.
+ */
+function placeExpand(byCamera = false) {
   const g = ui.g;
   if (!g || !expandEl) return;
-  const { x: vx, y: vy, k } = ui.view;
-  const sc = OV_SCALE[ovStep];
-  const w = EXPAND_W * sc * k, h = EXPAND_H * sc * k;
-  // Where it would stand left alone: centred under the plot (it grows from the middle of its top edge).
-  const home = (g.board.w / 2) * k + vx - w / 2;
-  const top = (g.board.h + 18) * k + vy;
   const r = rectOf();
-  // What floats over the foot of the stage, in stage pixels.
-  const over: Box[] = [];
-  const gap = 12;
-  const add = (b: DOMRect) => {
-    if (b.width > 1 && b.height > 1) over.push({ x0: b.left - r.left - gap, y0: b.top - r.top - gap, x1: b.right - r.left + gap, y1: b.bottom - r.top + gap });
-  };
-  if (hintsEl) add(hintsRect());
-  if (fabsEl && env.phone) {
-    add(fabsRect());
-    // (Tidy stands above the row, outside the row's own box.)
-    add(tidyFabRect());
+  if (r.width < 2 || r.height < 2) return;
+  if (ex.stale) measureExpand();
+  const { x: vx, y: vy, k } = ui.view;
+  // Its natural place: centred under the plot, at the board's scale (larger in the overview).
+  const hs = OV_SCALE[ovStep] * k;
+  const hw = EXPAND_W * hs, hh = EXPAND_H * hs;
+  const home: Stand = { x: (g.board.w / 2) * k + vx, y: (g.board.h + 18) * k + vy + hh / 2, s: hs };
+  const area = dockArea();
+  const stick = ex.docked ? DOCK_STICK : 0;
+  const by = DOCK_EDGE - HOME_EDGE - stick;
+  const seen = boxClear(
+    { x0: home.x - hw / 2, y0: home.y - hh / 2, x1: home.x + hw / 2, y1: home.y + hh / 2 },
+    { x0: area.x0 - by, y0: area.y0 - by, x1: area.x1 + by, y1: area.y1 + by }, ex.blocks, HOME_GAP + stick,
+  );
+  const docked = !seen;
+  const afford = g.credits + 1e-6 >= expansionCost(g);
+  const call = ex.asked && afford;
+  const mini = docked && !call;
+  setClass(expandEl, 'dock', docked);
+  setClass(expandEl, 'mini', mini);
+  setClass(expandEl, 'call', call);
+  // The element's own size changes with its form (and the price in it): measured once for each.
+  const sized = `${mini ? 1 : 0}${docked ? 1 : 0}|${expandCost}|${isTouch() ? 1 : 0}|${boardEl.classList.contains('big') ? 1 : 0}`;
+  if (sized !== ex.sized) {
+    ex.sized = sized;
+    ex.w = mini ? expandEl.offsetWidth || 150 : EXPAND_W;
+    ex.h = mini ? expandEl.offsetHeight || 36 : EXPAND_H;
   }
-  const c = env.corner();
-  if (c) over.push({ x0: c.x0 - gap, y0: c.y0 - gap, x1: r.width + 1e6, y1: r.height + 1e6 });
-  // The stretches of the x axis that are taken at the button's height; it goes to the nearest free place.
-  const taken = over.filter((b) => top < b.y1 && top + h > b.y0).map((b) => [b.x0 - w, b.x1] as [number, number]).sort((a, b) => a[0] - b[0]);
-  let left = home;
-  const blocked = (x: number) => taken.some(([a, b]) => x > a && x < b);
-  if (blocked(home)) {
-    let best = Infinity;
-    for (const [a, b] of taken) {
-      for (const x of [a, b]) {
-        if (x < -1e5 || x > 1e5 || blocked(x)) continue;
-        if (Math.abs(x - home) < Math.abs(best - home)) best = x;
-      }
+  let target = home;
+  if (docked) {
+    const p = dockSpot({ home, w: ex.w, h: ex.h, area, blocks: ex.blocks, gap: DOCK_GAP });
+    target = { x: p.x + ex.w / 2, y: p.y + ex.h / 2, s: 1 };
+  }
+  // A change of place is slid: from one place to the other, to a docked place that jumped, and to any new
+  // place the camera did not cause. (Not while the board is being opened, nor when motion is reduced.)
+  const was = ex.target;
+  if (was && ex.drawn && renderedGame && !env.calm && performance.now() >= openingUntil) {
+    const step = Math.hypot(target.x - was.x, target.y - was.y);
+    if (docked !== ex.docked || (byCamera ? docked && step > DOCK_JUMP : step > 0.5 || Math.abs(target.s - was.s) > 0.002)) {
+      ex.slide = { from: { ...ex.drawn }, t0: performance.now() };
     }
-    if (best < Infinity) left = best;
+  } else ex.slide = null;
+  ex.docked = docked;
+  ex.mini = mini;
+  ex.call = call;
+  ex.target = target;
+  drawExpand();
+}
+
+/** Put the button where it belongs, or where it has got to on its way there. */
+function drawExpand() {
+  const t = ex.target;
+  if (!t) return;
+  let d = t;
+  const sl = ex.slide;
+  if (sl) {
+    const u = Math.min(1, (performance.now() - sl.t0) / DOCK_MS);
+    const e = 1 - (1 - u) * (1 - u) * (1 - u);
+    d = { x: sl.from.x + (t.x - sl.from.x) * e, y: sl.from.y + (t.y - sl.from.y) * e, s: sl.from.s + (t.s - sl.from.s) * e };
+    if (u >= 1) ex.slide = null;
   }
-  // (Written as the left edge of the unscaled button: the scale is about the middle of its top edge.)
-  const wx = (left + w / 2 - vx) / k - EXPAND_W / 2;
-  setStyle(expandEl, 'left', wx.toFixed(1) + 'px');
-  setStyle(expandEl, 'top', g.board.h + 18 + 'px');
+  ex.drawn = d;
+  const left = d.x - (ex.w * d.s) / 2, top = d.y - (ex.h * d.s) / 2;
+  setStyle(expandEl, 'transform', `translate(${left.toFixed(1)}px, ${top.toFixed(1)}px) scale(${d.s.toFixed(4)})`);
+  // Wire dots are drawn above everything on the board: a docked button is one more thing they keep off.
+  const { x: vx, y: vy, k } = ui.view;
+  const o = ex.occ;
+  const x0 = ex.docked ? (left - 2 - vx) / k : 0, y0 = ex.docked ? (top - 2 - vy) / k : 0;
+  const x1 = ex.docked ? (left + ex.w * d.s + 2 - vx) / k : 0, y1 = ex.docked ? (top + ex.h * d.s + 2 - vy) / k : 0;
+  if (x0 === o[0] && y0 === o[1] && x1 === o[2] && y1 === o[3]) return;
+  o[0] = x0;
+  o[1] = y0;
+  o[2] = x1;
+  o[3] = y1;
+  for (const refs of wireEls.values()) {
+    const occ = refs.flow.occ;
+    if (occ.length < 4) continue;
+    occ[0] = x0;
+    occ[1] = y0;
+    occ[2] = x1;
+    occ[3] = y1;
+  }
+  invalidateFx();
 }
 
 // ---------- init ----------
@@ -786,8 +929,8 @@ export function initBoard(root: HTMLElement) {
       <div id="chips"></div>
       <svg id="overlay" width="1" height="1"><path id="temp-wire"></path><circle id="temp-end" r="5"></circle><line id="knife"></line></svg>
       <div id="ghost"></div>
-      <button id="expand" data-testid="expand"></button>
     </div>
+    <button id="expand" data-testid="expand" style="transform:translate(-9999px,0)"></button>
     <div id="radial"></div>`;
   worldEl = boardEl.querySelector('#world')!;
   plotEl = boardEl.querySelector('#plot')!;
@@ -804,6 +947,7 @@ export function initBoard(root: HTMLElement) {
   knifeLine = boardEl.querySelector('#knife')!;
   appEl = boardEl.closest<HTMLElement>('#app');
   hintsEl = document.getElementById('hints');
+  toastsEl = document.getElementById('toasts');
   buildEl = el(`<div id="build-sheet" role="dialog" aria-label="Build menu"></div>`);
   (boardEl.parentElement ?? boardEl).appendChild(buildEl);
 
@@ -830,6 +974,9 @@ export function initBoard(root: HTMLElement) {
   boardEl.addEventListener('contextmenu', (e) => e.preventDefault());
   window.addEventListener('keydown', onTidyKey);
   onPress(expandEl, expand);
+  onSignal('showme', (d) => {
+    shownWire = d.wire ? { ...d.wire } : null;
+  });
   delegate(radialEl, (a, args) => {
     if (a === 'pick') pickRadial(Number(args[0]));
   });
@@ -841,6 +988,7 @@ export function initBoard(root: HTMLElement) {
   if (typeof ResizeObserver !== 'undefined') {
     new ResizeObserver(() => {
       invalidateLayout();
+      ex.stale = true;
       touch();
     }).observe(boardEl);
   }
@@ -864,12 +1012,14 @@ let popTimer = 0;
  */
 function expand() {
   const g = ui.g;
+  if (performance.now() < ex.restUntil) return;
   const had = new Set(g.deposits.map((d) => d.id));
   const old = { w: g.board.w, h: g.board.h };
   if (!expandBoard(g)) {
     toast(`Expanding costs <b>${fmt(expansionCost(g))}¢</b>`, 'bad');
     return;
   }
+  ex.restUntil = performance.now() + EXPAND_REST;
   const fresh = g.deposits.filter((d) => !had.has(d.id)).map((d) => d.id);
   if (env.calm) toast('Board expanded. New deposits revealed.', 'good');
   else {
@@ -1639,57 +1789,91 @@ export function updateSlow(part?: 'nodes' | 'wires') {
   const cost = expansionCost(g);
   if (cost !== expandCost) {
     expandCost = cost;
-    expandEl.innerHTML = `${icon('plus', 20)}<span><b>Expand board <i class="mono">${fmt(cost)}¢</i></b><small>New plot · reveals deposits</small></span>`;
+    // (Docked in its one-line form, the button shows only the plus, "Expand" and the price: see `.mini`.)
+    expandEl.innerHTML = `${icon('plus', 20)}<span><b>Expand<em> board</em> <i class="mono">${fmt(cost)}¢</i></b><small>New plot · reveals deposits</small></span>`;
   }
   setClass(expandEl, 'ok', g.credits >= cost);
+  // Whether the goal card is sending the player to it: looked at twice a second at most.
+  const now = performance.now();
+  if (now - ex.askedAt > 500) {
+    ex.askedAt = now;
+    ex.asked = expandAsked(g);
+  }
+  // What the button keeps clear of (the goal card, an open sheet or inspector, toasts...) is measured
+  // again here, a few times a second, not every frame.
+  ex.stale = true;
+  placeExpand();
   if (ui.placing) updateGhost();
   if (radial) refreshBuildSheet();
 }
 
 let gainTimer = 0;
+/** Under this (items a second) a wire counts as carrying nothing, for its still dots. */
+const STILL_MIN = 0.015;
+/**
+ * What each Market and Lab has earned and not yet floated (always under one unit of each kind): what
+ * floats is whole units, and the fractions are kept until they make one (`wholeGain` in geom.ts).
+ */
+const gainCarry = new Map<number, { c: number; a: number; b: number; g: number }>();
+/** The credits colour as the top bar draws it (the stylesheet's --credits), read once. */
+let creditsColor = '';
+const DATA_TIERS: DataTier[] = ['a', 'b', 'g'];
 
-/** Once a second: show what each Market and Lab earned, and send a few coins to the credits counter. */
+/**
+ * Once a second: float what each Market and Lab earned, in whole units and in the colour of what it is
+ * (credits as the top bar's credits, each kind of Data as its counter in the top bar), and send a few
+ * coins from each Market towards the credits counter. (The counter itself is not moved here: only the
+ * effects layer pops it, as a claim pays out.) Each earning Market also sends the 'sale' signal, every
+ * second, with what it earned, whether or not a whole credit floats.
+ */
 function showGains() {
   const g = ui.g;
   const r = rectOf();
-  const size = Math.max(11, Math.min(15, 9 + 5 * ui.view.k));
+  // Out in the overview a card is only its icon: the figures are drawn small enough to sit beside it.
+  const size = ovStep > 0 ? 9 : Math.max(11, Math.min(15, 9 + 5 * ui.view.k));
+  if (!creditsColor) creditsColor = getComputedStyle(document.documentElement).getPropertyValue('--credits').trim() || '#FFC857';
   const counter = anchorPt('credits');
   let coins = 6;
-  let landed = false;
-  const land = () => {
-    // One pulse per second at most, however many Markets paid out.
-    if (!landed) pulseAnchor('credits');
-    landed = true;
-  };
   const visible = (p: Pt) => p.x > r.left - 30 && p.x < r.right + 30 && p.y > r.top - 30 && p.y < r.bottom + 30;
+  const live = new Set<number>();
   for (const n of g.nodes) {
-    if (n.type === 'market' && n.gain >= 0.05) {
-      const { w, h } = nodeSize(n);
-      const top = toClient({ x: n.x + w / 2 + (Math.random() * 30 - 15), y: n.y - 4 });
-      signal('sale', { id: n.id, amount: n.gain, at: top });
-      if (visible(top) && !ui.techOpen) {
-        floater(top, `+${fmt(n.gain)}¢`, '#FFC857', size);
+    if (n.type !== 'market' && n.type !== 'lab') {
+      n.gain = 0;
+      continue;
+    }
+    live.add(n.id);
+    let carry = gainCarry.get(n.id);
+    if (!carry) gainCarry.set(n.id, (carry = { c: 0, a: 0, b: 0, g: 0 }));
+    const { w, h } = nodeSize(n);
+    const top = toClient({ x: n.x + w / 2 + (Math.random() * 30 - 15), y: n.y - 4 });
+    const shown = visible(top) && !ui.techOpen;
+    if (n.type === 'market') {
+      if (n.gain >= 0.05) signal('sale', { id: n.id, amount: n.gain, at: top });
+      const whole = wholeGain(carry.c, n.gain);
+      carry.c = whole.carry;
+      if (whole.show > 0 && shown) {
+        floater(top, `+${shortNum(whole.show, 1000)}¢`, creditsColor, size);
         if (counter && coins > 0) {
-          const count = Math.min(coins, n.gain >= 20 ? 3 : n.gain >= 2 ? 2 : 1);
+          const count = Math.min(coins, whole.show >= 20 ? 3 : whole.show >= 2 ? 2 : 1);
           coins -= count;
-          fly(toClient({ x: n.x + 29, y: n.y + h / 2 }), counter, '#FFC857', count, land);
+          fly(toClient({ x: n.x + 29, y: n.y + h / 2 }), counter, creditsColor, count);
         }
       }
-    }
-    n.gain = 0;
-    if (n.type === 'lab') {
-      const parts: string[] = [];
-      if ((n.gainB.a ?? 0) >= 0.05) parts.push(`+${fmt(n.gainB.a!)}α`);
-      if ((n.gainB.b ?? 0) >= 0.05) parts.push(`+${fmt(n.gainB.b!)}β`);
-      if ((n.gainB.g ?? 0) >= 0.05) parts.push(`+${fmt(n.gainB.g!)}γ`);
-      if (parts.length && !ui.techOpen) {
-        const { w } = nodeSize(n);
-        const top = toClient({ x: n.x + w / 2 + (Math.random() * 30 - 15), y: n.y - 4 });
-        if (visible(top)) floater(top, parts.join(' '), '#C4A1FF', size);
+    } else {
+      let lift = 0;
+      for (const k of DATA_TIERS) {
+        const whole = wholeGain(carry[k], n.gainB[k] ?? 0);
+        carry[k] = whole.carry;
+        if (whole.show <= 0 || !shown) continue;
+        // (A Lab making more than one kind of Data floats each in its own colour, one above the other.)
+        floater({ x: top.x, y: top.y - lift }, `+${shortNum(whole.show, 1000)}${DATA_NAMES[k]}`, DATA_COLORS[k], size);
+        lift += size * 1.5;
       }
       n.gainB = {};
     }
+    n.gain = 0;
   }
+  for (const id of gainCarry.keys()) if (!live.has(id)) gainCarry.delete(id);
 }
 
 export function updateBoard(dt: number) {
@@ -1703,13 +1887,32 @@ export function updateBoard(dt: number) {
     renderedUi = ui.uiRev;
     syncUi();
   }
+  // With less motion asked for, the dots stand still (see `frameFx` below) and show the rate by how
+  // densely they lie: each wire's pattern is laid again, evenly, when its rate starts, stops or really
+  // changes (`heldRate`), and a wire that carries nothing has no dots at all.
+  const calm = env.calm;
   for (const w of g.wires) {
     const refs = wireEls.get(w.id);
-    if (refs) refs.flow.rate = w.rate;
+    if (!refs) continue;
+    if (!calm) {
+      refs.flow.rate = w.rate;
+      continue;
+    }
+    const rate = w.rate > STILL_MIN ? w.rate : 0;
+    const held = heldRate(refs.flow.rate, rate);
+    if (held !== refs.flow.rate || refs.stillK !== ui.view.k) {
+      refs.flow.rate = held;
+      refs.stillK = ui.view.k;
+      // (Laid out cold: evenly along the whole wire, at the spacing this rate has.)
+      refs.flow.dots.length = 0;
+      refs.flow.cold = true;
+      invalidateFx();
+    }
   }
   // A wire stopped being new: its chip goes, and it may dim with the rest.
   if (freshUntil && performance.now() >= freshUntil && syncChips()) layoutWires();
   if (glide) stepGlide(dt);
+  if (ex.slide) drawExpand();
   if (settling.size) stepSettle(dt);
   if (drag) edgeScroll(dt);
   if (drag && (drag.kind === 'wire' || drag.kind === 'wireIn')) drawTemp(drag, dt);
@@ -1721,8 +1924,9 @@ export function updateBoard(dt: number) {
       showGains();
     }
   }
-  // The tech tree covers the whole board, so wire dots are not drawn behind it.
-  frameFx(dt, ui.view, g.paused, ui.techOpen);
+  // The tech tree covers the whole board, so wire dots are not drawn behind it. With less motion asked
+  // for, the dots do not travel: the effects layer is told the board is paused (particles still run).
+  frameFx(dt, ui.view, g.paused || calm, ui.techOpen);
 }
 
 // ---------- placement ----------
@@ -2139,6 +2343,44 @@ function arm(d: WireDrag) {
   // The inspector would sit over half the board on a phone; the player is choosing a target now.
   if (env.phone && ui.sel) select(null);
   else touch();
+}
+
+// ----- the far end of a wire armed by a tap -----
+// A finger cannot drag a wire past the edge of the screen, and on a phone the two ends of a wire seldom
+// fit on it together: "Show me" frames the port to start from. So once a finger has armed a port, the
+// camera brings the other end into view: the node "Show me" last asked this wire to go to, or else, if
+// no card that can take the wire is in view, the nearest one that can (within the detailed tier, and
+// keeping the armed port in view too when both fit). Never while a finger is down, never for a mouse.
+
+/** The wire "Show me" last acted out (the 'showme' signal), if it was a wire. */
+let shownWire: { from: number; to: number; port?: number } | null = null;
+
+/** Some of this card can be seen, clear of whatever covers the board's edges. */
+function cardInView(n: GNode): boolean {
+  const b = cardBox(n), a = freeArea(true);
+  const { x: vx, y: vy, k } = ui.view;
+  const cx = ((b.x0 + b.x1) / 2) * k + vx, cy = ((b.y0 + b.y1) / 2) * k + vy;
+  return cx > a.x0 && cx < a.x1 && cy > a.y0 && cy < a.y1;
+}
+
+/** A port has just been armed by a tap: bring a node the wire can go to into view (see above). */
+function followArmed(touchy: boolean) {
+  const g = ui.g;
+  const t = tapWire;
+  if (!t || !touchy || fingers.size > 0) return;
+  const src = nodeById(g, t.from);
+  if (!src) return;
+  const sw = shownWire;
+  const asked = sw && sw.from === t.from && (sw.port == null || sw.port === t.port) ? nodeById(g, sw.to) : null;
+  if (asked && wireOk(g, t.from, t.port, asked.id)) {
+    if (!cardInView(asked)) frameNodes([t.from, asked.id], true);
+    return;
+  }
+  const can = g.nodes.filter((n) => n.id !== t.from && wireOk(g, t.from, t.port, n.id));
+  if (!can.length || can.some(cardInView)) return;
+  const d = (n: GNode) => Math.hypot(n.x - src.x, n.y - src.y);
+  const near = can.reduce((a, b) => (d(b) < d(a) ? b : a));
+  frameNodes([t.from, near.id], true);
 }
 
 /** Arm a port that was tapped near rather than on. */
@@ -2768,6 +3010,7 @@ function onUp(e: PointerEvent) {
       } else if (d.near) {
         endDrag();
         armPort(d.near.id, d.near.port);
+        followArmed(e.pointerType !== 'mouse');
         return;
       } else if (ui.sel) select(null);
       break;
@@ -2788,6 +3031,7 @@ function onUp(e: PointerEvent) {
         else {
           endDrag();
           arm(d);
+          followArmed(e.pointerType !== 'mouse');
           return;
         }
       } else if (d.target != null) makeWire(d.from, d.port, d.target, d.tp);

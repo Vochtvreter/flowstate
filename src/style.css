@@ -212,6 +212,21 @@ g.wire.new .glow { animation: wire-glow 0.25s ease-out; }
 #expand.ok i { color: var(--credits); }
 #expand.ok { border-color: var(--credits); background: rgba(255, 200, 87, 0.07); }
 #expand small { font-size: 11px; color: var(--muted); }
+/* It stands on the board's own layer, placed by board.ts with a transform in stage pixels: in the world's
+   place under the plot, or docked at life size in the free part of the stage (class `dock`). */
+#expand { left: 0; top: 0; z-index: 6; transform-origin: 0 0; will-change: transform; }
+#expand em { font-style: normal; }
+#expand:not(.ok) { opacity: 0.78; }
+#expand.dock { background: #121a2b; border-style: solid; box-shadow: 0 8px 22px rgba(0, 0, 0, 0.45); }
+#expand.dock.ok { background: #221d12; }
+/* Docked and not asked for: one line, the plus, "Expand" and the price. */
+#expand.mini { width: auto; height: 36px; gap: 7px; padding: 0 12px 0 9px; border-radius: 11px; white-space: nowrap; }
+#expand.mini em, #expand.mini small { display: none; }
+#expand.mini b { font-size: 13px; }
+html[data-input='touch'] #expand.mini { height: 44px; }
+/* The goal card is asking for it and it can be paid for: it shows itself with a gentle pulse. */
+#expand.call { animation: expand-call 1.6s ease-in-out infinite; }
+@keyframes expand-call { 0%, 100% { box-shadow: 0 0 0 0 rgba(255, 200, 87, 0.5); } 50% { box-shadow: 0 0 0 9px rgba(255, 200, 87, 0); } }
 
 /* ---------- board: rate chips, focus, what a wire may go to, the overview, expanding ---------- */
 
@@ -255,9 +270,8 @@ g.wire.dim:hover .base { stroke-opacity: 0.6; }
 #board.ov .deposit { justify-content: center; padding: 0; }
 #board.ov .deposit > div { display: none; }
 #board.ov .deposit > svg { transform: scale(var(--ovs)); }
-/* The Expand button is drawn larger too (--ovx; board.ts knows the same numbers), so that it can still be
-   found and pressed from out here: it is never under 44 px tall on screen. */
-#board.ov #expand { transform: scale(var(--ovx)); transform-origin: 50% 0; }
+/* (The Expand button is drawn larger out here too, so that it can still be found and pressed: board.ts
+   scales it by OV_SCALE, the same numbers as --ovx. It is never under 44 px tall on screen.) */
 
 /* Expanding the board: each deposit it reveals pops in at its turn (the delay is set inline). */
 .deposit.pop { animation: deposit-pop 0.42s cubic-bezier(0.2, 1.5, 0.4, 1) backwards; }
@@ -274,6 +288,11 @@ html[data-input='touch'] #hints { display: none; }
 @media (prefers-reduced-motion: reduce) {
   .node .ring { transition: none; }
   .deposit.pop { animation: none; }
+  /* Nothing on the board grows, swells or slides in: a new card or wire is simply there. */
+  .node.pop, g.wire.new .base, g.wire.new .glow { animation: none; }
+  .node .txt, #board.ov .node .txt, .slot { transition: none; }
+  /* Asked for, the Expand button wears a steady ring instead of a pulse. */
+  #expand.call { animation: none; box-shadow: 0 0 0 3px rgba(255, 200, 87, 0.55); }
 }
 
 /* radial */

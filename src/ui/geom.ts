@@ -306,3 +306,95 @@ export function fadeColor(hex: string, alpha: number, over = '#0b0f17'): string 
   if (a.some(Number.isNaN)) return hex;
   return '#' + a.map((c, i) => Math.round(c * alpha + b[i] * (1 - alpha)).toString(16).padStart(2, '0')).join('');
 }
+
+// ---------- where the Expand button stands ----------
+
+/** True when a screen box lies wholly inside `area` and keeps `gap` clear of every block. */
+export function boxClear(b: Box, area: Box, blocks: Box[], gap = 0): boolean {
+  if (b.x0 < area.x0 - 0.01 || b.y0 < area.y0 - 0.01 || b.x1 > area.x1 + 0.01 || b.y1 > area.y1 + 0.01) return false;
+  for (const o of blocks) if (b.x0 < o.x1 + gap && b.x1 > o.x0 - gap && b.y0 < o.y1 + gap && b.y1 > o.y0 - gap) return false;
+  return true;
+}
+
+export interface DockQuery {
+  /** The middle of the button's natural place under the plot, in stage pixels. It may be far off screen. */
+  home: Pt;
+  /** The size the docked button has on screen. */
+  w: number; h: number;
+  /** The part of the stage it may stand in: what the player can see, less a margin. */
+  area: Box;
+  /** What it must keep clear of in there (the goal card, the corner controls, the key hints...), in stage pixels. */
+  blocks: Box[];
+  /** Clear space kept between the button and each block. */
+  gap: number;
+}
+
+/**
+ * Where the Expand button comes to rest when its natural place cannot be seen: the top left corner of
+ * the place inside `area`, `gap` clear of every block, whose middle is nearest to `home`. (So it sits at
+ * the edge of what the player sees, on the side where the plot's edge lies, and follows it along.)
+ *
+ * The nearest free place is either the natural one pushed straight into the area, or it touches the
+ * side of a block or of the area on at least one axis: those are the only places tried. When there is
+ * no free place at all (a stage smaller than the controls on it), the place inside the area that lies
+ * over the least of them is given instead.
+ */
+export function dockSpot(q: DockQuery): Pt {
+  const { home, w, h, area, blocks, gap } = q;
+  // (An area smaller than the button: the button keeps its top left corner in it.)
+  const maxX = Math.max(area.x0, area.x1 - w), maxY = Math.max(area.y0, area.y1 - h);
+  const inX = (x: number) => Math.max(area.x0, Math.min(maxX, x)), inY = (y: number) => Math.max(area.y0, Math.min(maxY, y));
+  const xs = new Set<number>([inX(home.x - w / 2), area.x0, maxX]);
+  const ys = new Set<number>([inY(home.y - h / 2), area.y0, maxY]);
+  for (const o of blocks) {
+    for (const x of [o.x0 - gap - w, o.x1 + gap]) if (x >= area.x0 - 0.01 && x <= maxX + 0.01) xs.add(x);
+    for (const y of [o.y0 - gap - h, o.y1 + gap]) if (y >= area.y0 - 0.01 && y <= maxY + 0.01) ys.add(y);
+  }
+  let best: Pt | null = null;
+  let bestD = Infinity, bestOver = Infinity;
+  for (const y of ys) {
+    for (const x of xs) {
+      // How much of the blocks (with their gap) this place would lie over: none, for a free one.
+      let over = 0;
+      for (const o of blocks) {
+        const ox = Math.min(x + w, o.x1 + gap) - Math.max(x, o.x0 - gap), oy = Math.min(y + h, o.y1 + gap) - Math.max(y, o.y0 - gap);
+        if (ox > 0.01 && oy > 0.01) over += ox * oy;
+      }
+      const d = (x + w / 2 - home.x) ** 2 + (y + h / 2 - home.y) ** 2;
+      if (over < bestOver - 1e-6 || (Math.abs(over - bestOver) <= 1e-6 && d < bestD)) {
+        bestOver = over;
+        bestD = d;
+        best = { x, y };
+      }
+    }
+  }
+  return best ?? { x: area.x0, y: area.y0 };
+}
+
+// ---------- what floats over a Market or a Lab ----------
+
+/**
+ * Earnings come in fractions of a unit; what floats over a Market or a Lab is whole units. `carry` is
+ * what the node has earned and not yet shown (always under one unit), `earned` what it earned since.
+ * Returns how many whole units to show now and what is carried on, so that nothing is lost and nothing
+ * invented: over any stretch of time, what was shown is what was earned, less the under-one-unit rest.
+ */
+export function wholeGain(carry: number, earned: number): { show: number; carry: number } {
+  const total = Math.max(0, carry) + Math.max(0, earned);
+  // (A sum of fractions that should come to a whole number may fall a hair short of it.)
+  const show = Math.floor(total + 1e-6);
+  return { show, carry: Math.max(0, total - show) };
+}
+
+// ---------- a wire's flow, shown without movement ----------
+
+/**
+ * The rate a wire's still pattern of dots is drawn for (when the player has asked for less motion).
+ * A reading never quite sits still, and every change redraws the pattern, so the rate on show is held:
+ * it is replaced only when the reading starts or stops, or has moved away from it by more than `by`
+ * (a fifth) of the larger of the two.
+ */
+export function heldRate(held: number, rate: number, by = 0.2): number {
+  if (held <= 0 || rate <= 0) return Math.max(0, rate);
+  return Math.abs(rate - held) > by * Math.max(rate, held) ? rate : held;
+}
