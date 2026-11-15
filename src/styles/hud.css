@@ -424,6 +424,7 @@ html[data-input='touch'] #app:not(.phone) #hud #toasts { right: 228px; bottom: c
 .gc-inputs { display: inline-flex; align-items: center; gap: 6px; }
 .gi { display: inline-flex; align-items: center; gap: 4px; font-weight: 600; color: var(--text); }
 .gi svg:last-child { flex: none; }
+.gi .ic { stroke-width: 3; }
 .gi.ok svg:last-child { color: #4ade80; }
 .gi.no { color: #fcd34d; }
 .gi.no svg:last-child { color: #f87171; }
@@ -667,6 +668,9 @@ html[data-input='mouse'] #hud-strip.tight .claim.sm { height: 32px; }
   #app.phone div.gc-rewards { grid-area: prog; margin: 0; flex-wrap: nowrap; }
   #app.phone .gc-hint { grid-area: hint; padding: 2px 0 1px; }
   #app.phone .gc-line { grid-area: line; }
+  /* (A line row on its way out, as the next line opens in its place, lies under it, in the tip's row: there is no
+     tip on a card this narrow while a line holds it, and two rows in one cell would make the card dip.) */
+  #app.phone .gc-line.out { grid-area: tip; }
   #app.phone .gc-line > .gc-in { margin-top: 1px; padding-top: 3px; }
   /* (The label runs in before the sentence, as on a squeezed desktop stage: see "run in" above.) */
   #app.phone .gc-linehead { display: inline; height: auto; white-space: normal; }

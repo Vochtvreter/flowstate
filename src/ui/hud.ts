@@ -392,7 +392,7 @@ type Inputs = { mat: MatId; name: string; fed: boolean }[];
 /** The Fabricator's inputs, wired or not: "Prism ✓ · Glyph ✗", on a bar of how many are wired. */
 function inputsHtml(inputs: Inputs): string {
   const fed = inputs.filter((x) => x.fed).length;
-  const parts = inputs.map((x) => `<span class="gi ${x.fed ? 'ok' : 'no'}" data-mat="${x.mat}">${matGlyph(x.mat, 13)}${esc(x.name)}${icon(x.fed ? 'check' : 'close', 11)}</span>`);
+  const parts = inputs.map((x) => `<span class="gi ${x.fed ? 'ok' : 'no'}" data-mat="${x.mat}">${matGlyph(x.mat, 13)}${esc(x.name)}${icon(x.fed ? 'check' : 'close', 12)}</span>`);
   return `${bar(inputs.length ? fed / inputs.length : 0, '#7AA2FF')}<span class="gc-num gc-inputs" data-testid="goal-inputs" aria-label="${esc(inputs.map((x) => `${x.name} ${x.fed ? 'wired' : 'not wired'}`).join(', '))}">${parts.join('<i class="gi-sep">·</i>')}</span>`;
 }
 

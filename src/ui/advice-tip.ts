@@ -412,8 +412,11 @@ interface Line {
 let line: Line | null = null;
 /** The goal the card was last drawn for: a line that comes up for the same goal has come up in the middle of it. */
 let cardGoal = -1;
-/** The line's row on its way out, as for the tip. */
-let lineOut: { html: string; until: number } | null = null;
+/**
+ * The line's row on its way out, as for the tip. `swap`: another line is opening in its place at the same moment,
+ * and the two move on the same curve, so that the card's height goes from the one to the other without a bump.
+ */
+let lineOut: { html: string; until: number; swap?: boolean } | null = null;
 let lineInner = '';
 /** Was the line's row on the card at the last refresh? */
 let lineWasOn = false;
@@ -477,8 +480,8 @@ function lineGone() {
   lineNag = 0;
 }
 
-function closeLine() {
-  lineOut = lineInner && !calmMotion() ? { html: inert(lineInner), until: performance.now() + TIP.row } : null;
+function closeLine(swap = false) {
+  lineOut = lineInner && !calmMotion() ? { html: inert(lineInner), until: performance.now() + TIP.row, ...(swap ? { swap } : {}) } : null;
 }
 
 /** The card's view of the goal's line, as a Line: a row that opens (`openedAt`, real time) or one that came with the card (0). */
@@ -502,7 +505,7 @@ const freshGain = () => ({ sum: 0, ends: false, open: null, known: true });
  */
 function swapLine(g: Game, mw: NonNullable<GoalView['meanwhile']>, now: number) {
   const old = line;
-  if (lineWasOn) closeLine();
+  if (lineWasOn) closeLine(true);
   lineGone();
   line = newLine(g, mw, now);
   // (A line that was done by the same move as the one before it is shown done, and leaves a narrow card when that one would have.)
@@ -640,7 +643,7 @@ function lineBought(g: Game): string {
 export function lineHtml(g: Game, narrow: boolean): string {
   // (A row on its way out lies under the one that takes its place: the card is patched in place by position, and
   // the row that stays keeps its element this way.)
-  const out = lineOut ? `<div class="gc-line gc-row out" data-key="line-out" aria-hidden="true"><div class="gc-in">${lineOut.html}</div></div>` : '';
+  const out = lineOut ? `<div class="gc-line gc-row out${lineOut.swap ? ' swap' : ''}" data-key="line-out" aria-hidden="true"><div class="gc-in">${lineOut.html}</div></div>` : '';
   if (!line || !lineOn(g, narrow)) return out;
   const now = performance.now();
   const bought = lineBought(g);
