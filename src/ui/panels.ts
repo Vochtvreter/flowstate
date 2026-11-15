@@ -72,8 +72,8 @@ export function initPanels(refs: {
     const g = ui.g;
     // Whatever is chosen from the gear menu, the menu closes behind it.
     if (a !== 'menu' && ui.menuOpen && el.closest('.menu')) { ui.menuOpen = false; touch(); }
-    if (a === 'undo') undo(g);
-    else if (a === 'redo') redo(g);
+    if (a === 'undo') { if (!ui.techOpen) undo(g); }
+    else if (a === 'redo') { if (!ui.techOpen) redo(g); }
     else if (a === 'pause') { g.paused = !g.paused; touch(); }
     else if (a === 'sound') setMuted(!isMuted());
     // The Tech button opens the tree, and closes it again: on a desktop the top bar stays in view above it.
@@ -376,11 +376,13 @@ function buildTop() {
     setAttr(b, 'aria-label', full);
     setAttr(b, 'title', full);
   };
+  // (While the tech tree is open the board behind it is out of reach: Undo and Redo wait until it closes, as their
+  // keys do in main.ts.)
   const undoBtn = el(`<button class="ibtn t-undo" data-act="undo">${icon('undo')}</button>`);
   addTopItem('actions', {
     el: undoBtn,
     update() {
-      setAttr(undoBtn, 'disabled', canUndo() ? null : '');
+      setAttr(undoBtn, 'disabled', canUndo() && !ui.techOpen ? null : '');
       label(undoBtn, 'Undo', 'Ctrl+Z');
     },
   });
@@ -388,7 +390,7 @@ function buildTop() {
   addTopItem('actions', {
     el: redoBtn,
     update() {
-      setAttr(redoBtn, 'disabled', canRedo() ? null : '');
+      setAttr(redoBtn, 'disabled', canRedo() && !ui.techOpen ? null : '');
       label(redoBtn, 'Redo', 'Ctrl+Shift+Z');
     },
   });
@@ -455,8 +457,8 @@ function buildTop() {
       say(mSound, 'Sound', muted ? 'Off' : 'On');
       setAttr(mSound, 'aria-checked', muted ? 'false' : 'true');
       setClass(mSound, 'off', muted);
-      setAttr(mUndo, 'disabled', canUndo() ? null : '');
-      setAttr(mRedo, 'disabled', canRedo() ? null : '');
+      setAttr(mUndo, 'disabled', canUndo() && !ui.techOpen ? null : '');
+      setAttr(mRedo, 'disabled', canRedo() && !ui.techOpen ? null : '');
     },
   });
 }

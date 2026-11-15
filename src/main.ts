@@ -228,8 +228,15 @@ function onKey(e: KeyboardEvent) {
   if (screenOpen()) return;
   const mod = e.ctrlKey || e.metaKey;
   const k = e.key.toLowerCase();
+  const edit = mod && (k === 'z' || k === 'y' || k === 'd');
+  // While the tech tree is open the board behind it is out of reach: undo, redo and duplicate wait until it closes
+  // (the top bar's Undo and Redo are disabled meanwhile, panels.ts).
+  if (edit && ui.techOpen) {
+    e.preventDefault();
+    return;
+  }
   // Before a key changes the board, a node still being dragged is dropped, so the two cannot tangle.
-  if ((mod && (k === 'z' || k === 'y' || k === 'd')) || k === 'delete' || k === 'backspace') settleGesture();
+  if (edit || k === 'delete' || k === 'backspace') settleGesture();
   if (mod && k === 'z') {
     e.preventDefault();
     if (e.shiftKey) redo(g);
