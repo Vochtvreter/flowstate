@@ -2,7 +2,7 @@
 
 Every number in the pitch build, as tuned with the pacing bot (`npm run pacing`). The source of truth is the code: tables and `RULES` in `src/content.ts`, goals in `src/goals.ts`, the adviser's own tunables in `ADVICE` (`src/advice.ts`). The rules these numbers plug into are in [PITCH_PLAN.md](./PITCH_PLAN.md) section 2, as amended by the decisions noted below (fan-out, Flow, orders, the adviser). `DESIGN.md` and `README.md` still describe the older build.
 
-**State of the tuning:** tuned for the newcomer who does what the goal cards say, their "while you wait" lines included. The adviser's tips are few (two or three in a demo) and each is worth at least 15 s. Every target holds on order seeds 0–14 for all five players of the pacing tool, and `tests/pacing.test.ts` pins them on seeds 0–3; the last section has the numbers.
+**State of the tuning:** tuned for the newcomer who does what the goal cards say, their "while you wait" lines included. The adviser's tips are few (two in a demo for the newcomer who follows the cards) and each is worth at least 15 s. Every target holds on order seeds 0–14 for all five players of the pacing tool, and `tests/pacing.test.ts` pins them on seeds 0–3; the last section has the numbers.
 
 ## Materials
 
@@ -29,7 +29,7 @@ Every number in the pitch build, as tuned with the pacing bot (`npm run pacing`)
 
 The first time a material keeps selling over its demand for 3 seconds, the game sets `seenSurplus` (saved) and raises a one-off `surplus` event naming it, so the demand gauge can be introduced when the rule first bites. It rarely bites during the demo: in 45 pacing runs of the three card players (order seeds 0–14) nothing sold over demand before the first Lens, the save for the Fabricator included. A fast player first sells over demand between 14:43 and 21:52 (Shard or Ink, in every one of 30 runs now that Wider Demand cannot be bought before it is needed), and in 2 of those 30 runs that is before their first Lens. When it does happen during a wait for credits, the adviser's sentence says so and Wider Demand joins its candidates.
 
-**Demand is not shown until then.** The Commerce branch is hidden from the tech tree until `seenSurplus` is true (`Tech.needsSurplus`, `techHidden`), and `demandShown(g)` tells the interface whether to draw demand at all. Market Lens is not a goal reward any more: it is granted at that same moment (a `tech` event for C1 comes just before the `surplus` event), and Wider Demand, Luxury Buyers and Exports appear with it. A save from an older build that owns Market Lens or Wider Demand keeps them and sees the branch; one that has seen a surplus without owning Market Lens is given it on load.
+**Demand is not shown until then.** The Commerce branch is hidden from the tech tree until `seenSurplus` is true (`Tech.needsSurplus`, `techHidden`), and `demandShown(g)` tells the interface whether to draw demand at all. Market Lens is not a goal reward any more: it is granted at that same moment (a `tech` event for C1 comes just before the `surplus` event), and Wider Demand, Luxury Buyers and Exports appear with it. A save from an older build that owns Market Lens or Wider Demand keeps them and sees the branch; one that has seen a surplus without owning Market Lens is given it on load. Nothing else a player reads names demand before that moment (`tests/rules.test.ts` goes through the goal cards, the node blurbs and the techs in view): the Market's blurb says "Sells anything for credits. Takes any number of wires.", and the adviser takes no notice of a glut until `demandShown(g)`, so the few seconds between a material first selling over its demand and the `surplus` event cannot produce a tip that says "over demand".
 
 ## Recipes
 
@@ -116,7 +116,7 @@ Wells and machines count once they are at least 20 s old and some path of wires 
 
 **The Flow goal asks for 95% for 10 seconds** (`RULES.flow.holdShare`, `holdSeconds`). On a board of fewer than nineteen producers that is every one of them. It has to be earned: when the meter unlocks, a card player usually has one or two producers short. The Spark Refiner is short of Ember (an Ember Well makes 0.8/s, the Refiner wants 1), and on most seeds the Ink Refiner is short of Murk. Each is one fix, named by the adviser ("The Spark Refiner needs more Ember: buy Speed on the Ember Well (50¢)."). The first Flow State arrives with the goal. At the old 75% the goal completed with no action in every run; at 90% it still did for a newcomer with ten producers. A fast player has usually fixed everything already and passes in a quarter of a minute.
 
-**The valve.** Once the goal has been on the card for 90 s (`RULES.flow.valveAfter`; `goalAge(g)`, from the saved `Game.goalAt`), all but one producer flowing, held for the same 10 s, also completes it. The bar itself does not move. The valve is for the board with one producer nobody can honestly fix: a machine fed through a Router that favours a Lab (goal 13's card asked for that Router, and no tip turns it back) dips under 90% however its Wells are upgraded. The adviser says nothing about such a board, because a Flow tip has to get the producer it names flowing and keep it so; the valve passes it at 90 s (tested in `tests/advice.test.ts` and `tests/goals.test.ts`). It is also what carries a player who never follows a tip: the pacing tool's card-only player has nine of ten producers flowing when the meter unlocks and spends 98–108 s on the goal.
+**The valve.** Once the goal has been on the card for 90 s (`RULES.flow.valveAfter`; `goalAge(g)`, from the saved `Game.goalAt`), all but one producer flowing, held for the same 10 s, also completes it. The bar itself does not move. The valve is for the board with one producer nobody can honestly fix: a machine fed through a Router that favours a Lab (goal 13's card asked for that Router, and no tip turns it back) dips under 90% however its Wells are upgraded. The adviser says nothing about such a board, because a Flow tip has to get the producer it names flowing and keep it so; the valve passes it at 90 s (tested in `tests/advice.test.ts` and `tests/goals.test.ts`). It is also what carries a player who never follows a tip: the pacing tool's card-only player has nine of ten producers flowing when the meter unlocks, on all fifteen seeds, and spends 98–108 s on the goal doing nothing. The valve is "all but one" and no more: with two producers short (five of nine flowing was tried for 400 s) the goal waits for a fix, and a player who takes no tip then has only the Flow ring to go by. The 90 s run on game time, so a pause or time away does not open it, and they are saved with the game: a save made at second 80 completes 10 s after it is loaded; a save from before this rule starts its 90 s when it is loaded.
 
 **What the card can show.** `goalView(g).flow` is `{ pct, running, of, need }` while the Flow goal is active: the smoothed Flow, how many producers are flowing out of how many counted, and the share needed right now (0.95, or "all but one" once the valve is open).
 
@@ -173,16 +173,20 @@ One goal at a time; a finished goal waits for Claim. Rewards are the only source
 
 Four goals have a wait of minutes. Each carries one standing line for that wait (`Goal.meanwhile`; `goalView(g, touch).meanwhile` is `{ text, done }`, absent when the goal has none, is ready to claim, or the line does not apply to the board right now; `meanwhileOf(g)` is the same for code). A line is at most 90 characters (`RULES.tips.maxLength`), is true in the real game on the card player's own board, and nothing it asks for is undone by a later card or by a tip (`tests/meanwhile.test.ts`).
 
-| Goal | Line | Done when | Worth, on the card player's board |
-|---|---|---|---|
-| 11 Make Spark | "Drag from the Ink Refiner's Ink port to the Lab too: studied Ink is 3 α each." (touch: "Tap the Ink Refiner's Ink port, then tap the Lab too: studied Ink is 3 α each.") | the Ink port is wired to a Lab | 101 s of the wait |
-| 15 Make Glyph | "Give each new deposit a Well and a Lab built from its port: each pair is 1 α a second." | two Labs fed only by Wells | 106–136 s |
-| 18 Make Mist | "Expand the board again, then give a new deposit a Well and a Lab of its own." | three Labs fed only by Wells | 23–38 s |
-| 21 Build a Fabricator | "You have the β you need: remove the wire from the Glyph Assembler to the Lab." | no wire from a Glyph Assembler into a Lab | 12–47 s |
+| Goal | Line | Done when | Worth to the tests' card player | Worth to the pacing tool's card-only player |
+|---|---|---|---|---|
+| 11 Make Spark | "Drag from the Ink Refiner's Ink port to the Lab too: studied Ink is 3 α each." (touch: "Tap the Ink Refiner's Ink port, then tap the Lab too: studied Ink is 3 α each.") | the Ink port is wired to a Lab | 101 s of the wait | 92–100 s |
+| 15 Make Glyph | "Give each new deposit a Well and a Lab built from its port: each pair is 1 α a second." | two Labs fed only by Wells | 106–136 s | 100–145 s |
+| 18 Make Mist | "Expand the board again, then give a new deposit a Well and a Lab of its own." | a deposit of the second expansion (or a later one) has a Well with a Lab of its own, or three Labs are fed only by Wells | 23–38 s | 14–48 s |
+| 21 Build a Fabricator | "You have the β you need: remove the wire from the Glyph Assembler to the Lab." | no wire from a Glyph Assembler into a Lab | 28–47 s | 10–31 s |
+
+The two columns are two players and two ways of measuring. The tests' card player (`tests/cardPlayer.ts`) claims at once; from the board it has when a line comes up, the wait is timed in the real game with the line done and with it left alone (two order sequences). The pacing tool's card-only player claims 8–16 s late and is the one the targets judge; its column is the time on that goal in a whole run with the line and in one that leaves it out (`npm run pacing -- --policies=cardonly --skipLine=make-glyph`), on order seeds 0–14. Every line is worth something to that player on every seed. `tests/meanwhile.test.ts` holds both.
 
 - **A Well gets a Lab of its own.** A Lab studies one item a second and takes its inbox in the order the materials first arrived there. A raw material wired into the Lab the player already has pushes the dearer Shard and Ink out of it, and a late arrival can be starved for a quarter of an hour (Glyph, in one trial). A Well with its own Lab is a plain 1 α a second.
 - **The lines were found from data, not written from taste:** every single move a card could ask for was tried on the card player's board at the start of each long wait, then every pair of the best ones (360 combinations). What limits that player's α is Lab capacity and the crowding above, not Wells or Speed.
-- **The Glyph line is the only place a wire into a Lab is removed, and it is the card that says so.** It shows only while Fabrication's β is covered, no Fabricator stands and the credits for one are short (`Meanwhile.when`); `Meanwhile.cuts(g)` names the wires. The adviser removes a wire into a Lab only from that list.
+- **The Glyph line is the only place a wire into a Lab is removed, and it is the card that says so.** It shows only while Fabrication's β is covered, no Fabricator stands and the credits for one are short (`Meanwhile.when`); `Meanwhile.cuts(g)` names the wires. The adviser removes a wire into a Lab only from that list. The line trades study for credits, so it is only true for a player whose wait is for the Fabricator's price and not for Fabrication's α: that is what Fabrication's price is set by (below).
+- **After the demo the β is needed again.** Dynamo and Paradox cost 300 and 500 β. A player who has taken the Glyph wire away and runs out of β there is told "Wire the Glyph Assembler's port to a Lab: Glyph is 5 β each in a Lab." (a wait that would never end is never met with silence). That is the one tip that goes against a card's line, and only in free play.
+- **A line read late or left out** costs what the table says and no more: the card-only player who gets to each line a minute after it appears reaches the Lens at 20:49–22:17, two minutes late at 22:08–23:35; leaving out the Spark line alone gives 22:36–24:04, the Glyph line alone 24:02–25:10 (and 322–365 s on that goal), the Mist line 20:46–22:28, the Fabricator line 20:19–21:34. Leaving out all four is the game without lines: 46:11–52:45.
 - The card players (`tests/cardPlayer.ts`, the pacing tool's newcomers) follow a line like a hint, one gesture at a time, before any tip.
 
 ## Tech tree
@@ -195,7 +199,7 @@ Four goals have a wait of minutes. Each carries one standing line for that wait 
 | P3 | Ember Deposits | 215α | P2 | Ember Wells, Spark |
 | P4 | Assembly | 1,140α | P3 | Assembler, Glyph |
 | P5 | Breeze Deposits | 1,420α | P4 | Breeze Wells, Mist, Prism |
-| P7 | Fabrication | 900α + 100β | P5 | Fabricator, Lens |
+| P7 | Fabrication | 720α + 100β | P5 | Fabricator, Lens |
 | P6 | Reclamation | 300α + 25γ | P4 | Clay, Coil |
 | P8 | Dynamo | 1,200α + 300β + 100γ | P6, P7 | Dynamo |
 | P9 | Paradox | 2,500α + 500β + 450γ | P8 | Paradox |
@@ -227,7 +231,7 @@ Four goals have a wait of minutes. Each carries one standing line for that wait 
 How the prices are meant to work:
 
 - **The spine (P2 → P3 → P4 → P5 → P7)** is what the goal chain asks for, and it is priced for the newcomer who does what the cards say, their "while you wait" lines included: each of its waits is three to three and a half minutes for that player and never four. The lines are what makes that player's α (the Ink studied, then three Wells each with a Lab of its own); the adviser's tips add about a minute over the whole demo. Without the lines the same prices are far too dear: the hints alone reach the Lens at 46:40.
-- **Fabrication is 900α, below the curve** (it was 1,180α; its 100β are unchanged). By then the Assemblers take most of the Shard, Ink and Spark the Labs lived on, and a card player's α income drops. At 1,180α the last wait of the demo was for α, and the card's line for that wait (stop studying Glyph, sell it) would not have been true. At 900α the wait is for the Fabricator's 7,100¢, which is what the line helps with. Ember Deposits, Assembly, Breeze Deposits and the Fabricator's price were left alone: lowering any of them brings a fast player's Lens toward the 14:30 limit.
+- **Fabrication is 720α, below the curve** (it was 1,180α; its 100β are unchanged). By then the Assemblers take most of the Shard, Ink and Spark the Labs lived on, and a card player's α income drops. The card's line for the last wait (stop studying Glyph, sell it) is only true when that wait is for the Fabricator's 7,100¢, and what a wait is for depends on who is playing. At 1,180α it was for α for every card player. At 900α it was for credits for the tests' card player and for the newcomer who takes tips, but the pacing tool's card-only player held 7,565–8,466¢ when the research came through, on all fifteen seeds: from the board that player had when the line came up, taking the wire away ended the wait sooner in 10 of 45 trials, at the same moment in 32 and later in 3. At 720α it ends sooner in 45 of 45 for the card-only player (11–32 s) and for the newcomer (15–48 s). The fast players research Fabrication with 1,000–3,500¢ in hand and wait for credits whatever it costs: over 30 order seeds their Lens is 14:49–17:00 at 720α and 14:42–16:51 at 900α. Ember Deposits, Assembly, Breeze Deposits and the Fabricator's price were left alone: lowering any of them brings a fast player's Lens toward the 14:30 limit.
 - **Efficiency Tuning needs Assembly** (P1 and P4): it is priced in β, and before Assembly there is no β to pay with, so it only stood in the tree as something that could not be bought.
 - **Ember Deposits is the cheap one** because a fast player has nothing else to do while saving for it: above about 220α their hands are idle for more than a minute, which the plan does not allow before minute 10.
 - **Side techs are impulse buys.** Each is small next to the spine tech it competes with, so every kind of player picks them up along the way: α for what helps before the first Glyph (Lab Speed, Merger, Pipes Mk II: 150α together), β after it. Wider Demand is β for that reason: nothing sells over demand before the first Glyph, and at 200α it cost a fast player most of a minute there (it is hidden until the first surplus now). Luxury Buyers is the exception: dearer than Fabrication's β, so it comes after.
@@ -235,7 +239,7 @@ How the prices are meant to work:
 
 ## The adviser
 
-`src/advice.ts`. When the active goal is a wait, the adviser may name one thing worth doing meanwhile. It is measured, not assumed: each candidate is tried on a copy of the game against an untouched copy, with the real rules, and tips are ranked by the seconds they save. The structural advice is on the goal cards now ("While you wait" above), so the adviser says little: the newcomer who follows the cards is offered two or three tips in the whole demo, one of them on the Flow goal. Silence is its normal state.
+`src/advice.ts`. When the active goal is a wait, the adviser may name one thing worth doing meanwhile. It is measured, not assumed: each candidate is tried on a copy of the game against an untouched copy, with the real rules, and tips are ranked by the seconds they save. The structural advice is on the goal cards now ("While you wait" above), so the adviser says little: the newcomer who follows the cards is offered two tips in the whole demo, one of them on the Flow goal. Silence is its normal state.
 
 - **A wait** is a goal whose next step is a purchase the player cannot pay for yet (credits or Data), the Flow goal, or an order goal whose order is still filling. `waitInfo(g)` gives `{ unit, have, need, eta, name }` for the first kind (`name` is what is being saved for: "Assembly", "the Fabricator"); `waitKind(g)` names any of them.
 - **A research and the machine after it are one wait.** Where the card asks for both (goals 11, 15, 18, 21), the wait is for whichever is further off, the Data or the credits, and `waitInfo` and the tips are about that one.
@@ -251,7 +255,9 @@ How the prices are meant to work:
 - **Flow tips fix one producer at a time.** A Flow tip names the Well or machine that holds Flow back (`Advice.culprit`) and what to do about it (`Advice.node`). It is true when that producer flows with the fix, stays flowing, and would not have without it; `saves` is how much sooner the goal completes (it can be 0 on a board with more than one thing wrong, which takes a tip for each). A fix after which the goal would complete later than by doing nothing is dropped; where no fix passes, the goal's valve does.
 - **What it never says:** anything the player cannot afford, anything that does not pass the tests above, or anything for a wait that ends within 12 s anyway. When something sells over demand the tip says so, and making more of that material is never worth saying because it is measured at the surplus price.
 - **In the copies nobody plays,** but orders still pay. Nothing is bought; the order the game has is claimed 10 s after it fills (`claimAfter`); no new order is rolled. From then on the copy is paid what the orders to come are worth on its own sales (`ordersWorth` in `src/orders.ts`: the first three candidates at 55/30/15%, sized from what the copy sells). Before this, a tip that sold less looked better than it is and one that sold more looked worse: orders are a third of a card player's α in a long wait.
-- **Measured against the real game** (orders rolling, claimed 10 s late; every tip the tests' card player is offered on order seeds 0–14, each timed with and without it). The newcomer who follows the cards: 30 tips timed, 30 better, none the same, none worse, no flip; they delivered 90–96% of the saving promised, 18 s at the least. A player who ignores the lines and follows only hints and tips is offered far more (7 followed a run): 202 timings, 202 better, none worse, no flip, median 34 s; but 33 of them delivered under 15 s and 13 under half of what was promised. Order pay comes in lumps, and in a wait of five minutes or more the same tip on the same board four seconds apart has measured anywhere from 40 s worse to 113 s better: for that player a promise is an average, not a guarantee.
+- **Measured against the real game.** Every tip a card player is offered on order seeds 0–14 is replayed in a plain copy of the game (orders rolling and claimed 10–12 s late) with the tip done and with nothing done, when it first appears and every 5 s while it stays on the card; a Flow tip is timed to the goal completing. Two independent harnesses did this, one on the tests' card player and one on the pacing tool's players.
+  - *The players the targets judge* (the pacing tool's newcomer; the same at 10 s an action; the same following a tip only after 45 s): 30 tips come on offer in fifteen runs, and 420, 168 and 412 timings (four or two order sequences each) are all better: none the same, none worse. No tip left the card and came back on an untouched board, none appeared within 20 s of a change, none promised under 15 s; they delivered 78% of the promise at the least (13–15 s against 15–18 promised) and 92–94% at the median. On the tests' card player: 30 timed, 30 better.
+  - *A player who ignores the lines* and follows hints and tips is offered far more: 138 tips in fifteen runs, seven followed a run, one about every 36 s through the Mist wait (20 s of quiet, then 15 s on offer), and the Lens at 22:13–26:21. Timed under two order sequences: 846 timings, 845 better, one the same, none worse; for the same player at 10 s an action, 680 timings, 671 better and 9 worse, by 1 to 20 s in waits of three to nine minutes (six of the nine are one tip, a Glint Well wired into the Lab the player already has, the move the Glyph card's line avoids); under four sequences, 5 of 1,692 and 12 of 1,392 were worse. About one timing in seven delivered under 15 s. Order pay comes in lumps, the look-ahead pays the copy their average, and which order comes next is luck: for that player a promise is an average, not a guarantee. It cannot be made exact without changing how orders pay.
 - **Cost:** a fresh verdict takes 14–17 ms at the median, 37–48 ms at the 90th percentile and up to 155 ms on a card player's boards (measured in Node on a deserialised copy, 1,685 verdicts). It is kept for 15 game seconds while the board does not change, and for no more than 15% of the wait it was worked out for (`ADVICE.refresh`, `refreshShare`), so every other call is free. That cache, and the memory of tips that left the card, belong to the Game object asked: a caller that hands over a freshly deserialised copy each time gets neither (the quiet and the 60 s rule still hold, they are in the game).
 
 ## Time away
@@ -274,42 +280,59 @@ Every target holds on all fifteen seeds. Measured (seeds 0–3, then the range o
 | First machine / Lab / research | 0:21–0:22 / 0:39–0:40 / 1:05–1:06 | 0:21–0:23 / 0:37–0:40 / 1:03–1:07 | by 0:45 / 1:30 / 2:30 |
 | Longest wait in the first 2 min | 6–8 s | 6–8 s | 10 s |
 | First Glyph | 6:37–7:26 | 6:42–7:41 | 6:00–8:00 |
-| First Lens | 15:15–16:05 | 15:01–16:19 | 14:30–19:00 |
-| Time on "Build a Fabricator" | 187–261 s | 169–270 s | 300 s |
-| First Paradox | 25:07–27:12 (one run: not within 30:00) | 24:44–28:21 | not before 24:00 |
-| Longest stretch with free hands before 10:00 / before the Lens | 47–52 s / 53–92 s | 46–52 s / 49–79 s | 60 s / 120 s |
-| Credits from sales and orders at the Lens | 81–83% | 80–85% | 65% |
-| Presses of an Upgrade button before the Lens | 24–31, of them 1–2 "Upgrade all" | 23–54 | — |
+| First Lens | 15:03–17:00 | 14:55–16:24 | 14:30–19:00 |
+| Time on "Build a Fabricator" | 161–281 s | 169–271 s | 300 s |
+| First Paradox | 25:41–28:27 | 25:00–29:07 | not before 24:00 |
+| Longest stretch with free hands before 10:00 / before the Lens | 47–52 s / 48–82 s | 46–52 s / 49–85 s | 60 s / 120 s |
+| Credits from sales and orders at the Lens | 81–85% | 80–85% | 65% |
+| Presses of an Upgrade button before the Lens | 25–42, of them 1–2 "Upgrade all" | 23–54 | — |
 
 | The card players (4 + 11 runs each) | Seeds 0–3 | Seeds 4–14 | Target |
 |---|---|---|---|
-| **newcomer:** first Lens | 19:29–19:44 | 19:12–20:39 | 18:30–23:00 |
+| **newcomer:** first Lens | 19:29–19:44 | 19:12–20:15 | 18:30–23:00 |
 | longest time on any one goal | 197–215 s (Glyph) | 194–220 s | 240 s |
-| time on "Build a Fabricator" | 137–157 s | 136–174 s | 240 s |
-| tips offered / followed in a run | 2–3 / 2 | 2 / 1–2 | — |
+| time on "Build a Fabricator" | 136–157 s | 127–171 s | 240 s |
+| tips offered / followed in a run | 2 / 2 | 2 / 1–2 | — |
 | smallest / median saving of the tips followed | 16 s / 41–54 s | 15–56 s / 49–56 s | at least 15 s |
-| longest stretch with free hands | 76–103 s | 69–131 s | — |
+| longest stretch with free hands | 73–103 s | 64–108 s | — |
 | credits from sales and orders at the Lens | 77% | 77–78% | 65% |
-| **newcomer10:** first Lens | 21:53–22:23 | 21:56–22:43 | by 30:00 |
+| **newcomer10:** first Lens | 21:27–21:50 | 21:38–21:58 | by 30:00 |
 | longest time on any one goal | 217–241 s | 218–242 s | 300 s |
-| **cardonly:** first Lens | 20:22–21:22 | 20:49–22:13 | by 32:00 |
+| **cardonly:** first Lens | 20:04–20:37 | 20:24–21:22 | by 32:00 |
 | longest time on any one goal | 208–230 s (Glyph) | 212–226 s | 360 s |
-| time on "Build a Fabricator" | 141–192 s | 146–201 s | (360 s) |
+| time on "Build a Fabricator" | 114–141 s | 107–151 s | (360 s) |
 | time on the Flow goal (no tip: the valve) | 98–106 s | 99–108 s | (360 s) |
-| longest stretch with free hands | 90–118 s | 89–146 s | — |
+| longest stretch with free hands | 90–118 s | 89–144 s | — |
 
 Where the time goes (seed 0, seconds on each goal):
 
 | | goals 1–10 | Spark | first order | Router | expand | Glyph | Flow | β | Mist | Prism | three orders | Fabricator | Lens |
 |---|---|---|---|---|---|---|---|---|---|---|---|---|---|
-| newcomer | 3:49 | 111 | 56 | 35 | 16 | 213 | 54 | 96 | 158 | 38 | 9 | 137 | 38 |
-| cardonly | 3:49 | 130 | 56 | 36 | 16 | 230 | 106 | 68 | 149 | 38 | 9 | 192 | 38 |
+| newcomer | 3:49 | 111 | 56 | 35 | 16 | 213 | 54 | 96 | 158 | 38 | 9 | 136 | 39 |
+| cardonly | 3:49 | 130 | 56 | 36 | 16 | 230 | 106 | 68 | 149 | 38 | 9 | 141 | 40 |
 
 The newcomer's two tips on seed 0: "Wire a Glint Well's port to the Lab: Glint is 1 α each in a Lab." during the Spark wait (16 s promised) and "The Spark Refiner needs more Ember: buy Speed on the Ember Well (50¢)." on the Flow goal.
 
 Things to know before changing a number:
 
-- **The cards carry the game.** With hints alone (no "while you wait" lines, no tips) the tests' card player reaches the Lens at 46:40; with the lines at 19:48; with lines and tips at 18:35–18:55 (`tests/playthrough.test.ts`, which claims after one action instead of 8–16 s late; `npm run baseline`). That player still takes the one fix the Flow ring leads to even when it follows no other tip; the pacing tool's `cardonly` takes none at all. `npm run pacing -- --noMeanwhile` measures the cards without their lines.
+- **The cards carry the game, and most of that is their lines.** With hints alone (no "while you wait" lines, no tips) the tests' card player reaches the Lens at 44:13; with the lines at 19:21; with lines and tips at 18:35–18:55 (`tests/playthrough.test.ts`, which claims after one action instead of 8–16 s late; `npm run baseline`). That player still takes the one fix the Flow ring leads to even when it follows no other tip; the pacing tool's `cardonly` takes none at all, and without the lines reaches the Lens at 46:11–52:45 (`npm run pacing -- --policies=cardonly --noMeanwhile --minutes=75`). The lines are worth what the tips used to be worth: a player who reads the hint and never the line under it is back at three quarters of an hour.
+- **The card players are obedient, and the tool can make them less so.** They follow a line the moment the hint has nothing left to ask, completely, and a tip exactly 15 s after it appears. What a less obedient person gets (seeds 0–14; none of this has a target):
+
+  | Player | First Lens | Longest goal |
+  |---|---|---|
+  | cardonly, as judged | 20:04–21:22 | 208–230 s |
+  | cardonly at 10 s per action (`--hands=10`) | 21:36–22:28 | 213–242 s |
+  | cardonly, gets to each line 60 s late (`--lineDelay=60`) | 20:49–22:17 | 234–260 s |
+  | cardonly, 120 s late | 22:08–23:35 | 259–278 s |
+  | cardonly, leaves out the Glyph line (`--skipLine=make-glyph`) | 24:02–25:10 | 322–365 s |
+  | cardonly, no lines at all (`--noMeanwhile`) | 46:11–52:45 | 765–1,019 s |
+  | newcomer, as judged | 19:12–20:15 | 194–220 s |
+  | newcomer, follows a tip after 45 s (`--tipDelay=45`) | 19:52–20:43 | 208–230 s |
+  | newcomer, follows every second tip (`--tipEvery=2`, `--tipEvery=2,1`) | 19:46–20:49, 19:42–20:31 | 194–230 s |
+  | newcomer10, follows a tip after 45 s | 21:18–22:33 | 213–242 s |
+
+  Tips now move the Lens by about a minute, whoever follows them and however late.
 - **The window is narrow by construction.** A fast player may not be kept from the first Glyph past 8:00 (which caps Ember Deposits and Assembly) nor reach the Lens before 14:30 (which keeps Assembly, Breeze Deposits and the Fabricator's price where they are), and no goal may take the newcomer four minutes. The Glyph wait is the newcomer's longest, 194–220 s, with both card lines followed.
-- **Free hands are normal now.** The target of never more than 60 s without a tip is gone with the small tips. The longest stretch in which the card asks nothing and no tip is on offer is 69–131 s for the newcomer, at the end of the Mist wait or of the Glyph wait; the cards' lines are done by then and nothing the adviser can honestly offer saves 15 s.
+- **The fast players are noisy.** Their habits (bank half while saving, upgrade with the rest) make a run's Lens move by a minute for no reason a person would notice: with Fabrication 180α cheaper, mainline on seed 1 researches it 22 s sooner and builds the Fabricator 58 s later. Over 30 order seeds the range is what counts (Lens 14:49–17:00, Fabricator goal 161–281 s, one run of 60 with free hands over 120 s before the Lens, at 720α and at 900α alike); a margin of under half a minute on one seed is inside that noise.
+- **Free hands are normal now.** The target of never more than 60 s without a tip is gone with the small tips. The longest stretch in which the card asks nothing and no tip is on offer is 64–108 s for the newcomer, at the end of the Mist wait or of the Glyph wait; the cards' lines are done by then and nothing the adviser can honestly offer saves 15 s.
 - **The fast players' free hands before the Lens** were at 120–157 s on a few seeds once Commerce was hidden (they used to research Wider Demand on impulse while saving for the Fabricator, and the order generator then asked for things sold at a trickle). `RULES.orders.marketRate` is what brought it back under 92 s.
