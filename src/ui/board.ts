@@ -478,9 +478,10 @@ function fabBoxes(gap = FAB_CLEAR): Box[] {
  * Everything that lies over the board where a card cannot be seen or reached, in stage pixels: the strip
  * (the goal card with the order and the alert), an open sheet, the corner controls, the key hints, the
  * "tap where…" line, and on a phone the floating buttons (with room around them) and a Claim button
- * seated in the thumb row. Reads layout: for moments when the camera may move, not for every frame.
+ * seated in the thumb row. Reads layout: for moments when the camera may move, not for every frame. `fabGap`: the
+ * room kept round the floating buttons.
  */
-function coverBoxes(): Box[] {
+function coverBoxes(fabGap = FAB_CLEAR): Box[] {
   const out: Box[] = [];
   const push = (b: Box | null) => void (b && out.push(b));
   const r = rectOf();
@@ -489,7 +490,7 @@ function coverBoxes(): Box[] {
     if (c.top) out.push({ x0: -1e6, y0: -1e6, x1: 1e6, y1: c.top });
     if (c.bottom) out.push({ x0: -1e6, y0: r.height - c.bottom, x1: 1e6, y1: 1e6 });
     if (c.right) out.push({ x0: r.width - c.right, y0: -1e6, x1: 1e6, y1: 1e6 });
-    out.push(...fabBoxes());
+    out.push(...fabBoxes(fabGap));
     push(stageBoxOf(document.querySelector('#hud [data-testid="claim"]'), 8));
   } else {
     const s = env.strip();
@@ -843,20 +844,38 @@ export function nodeInClear(id: number, v: View = viewAhead()): boolean {
  * uncovered; otherwise the least move that brings them, or the last one named, into the free part of the stage.
  */
 export function frameBoxes(boxes: Box[], readable = false): void {
+  const plan = framePlan(boxes, readable);
+  if (plan.view && !sameView(plan.view, viewAhead())) moveView(plan.view.x, plan.view.y, plan.view.k, true, FRAME_MS);
+}
+
+/** On a phone, the height of the band under the strip where the "tap where…" line stands when it moves up (phone.ts). */
+const HINT_BAND = 60;
+
+/**
+ * Where `frameBoxes` takes the camera: `view` is null when nothing has to move; `all` is false when the boxes
+ * cannot all be shown together, and only the last one named is. `least`: how far out the camera may pull back for
+ * them (the floor of the detailed tier unless said). `hintRoom`: on a phone, the band under the strip where the
+ * "tap where…" line moves to when its own place would hide what it asks for is kept clear too, whether the line
+ * stands there yet or not (it is shown, and placed, a frame after a port is armed).
+ */
+function framePlan(boxes: Box[], readable: boolean, opts: { least?: number; hintRoom?: boolean } = {}): { view: View | null; all: boolean } {
   let box: Box | null = null;
   let last: Box | null = null;
   for (const b of boxes) {
     last = b;
     box = boxUnion(box, b);
   }
-  if (!box || !last) return;
+  if (!box || !last) return { view: null, all: true };
   const floor = zoomFloor();
+  const least = Math.min(floor, opts.least ?? floor);
   const now = viewAhead();
+  const band: Box | null = opts.hintRoom && env.phone ? { x0: -1e6, y0: env.cover().top, x1: 1e6, y1: env.cover().top + HINT_BAND } : null;
   // Already in view and under nothing: the camera holds still. (From the overview a caller that wants
   // ports to point at still comes back in among the cards.)
   if (!(readable && now.k < floor)) {
     const covers = coverBoxes();
-    if (boxes.every((b) => inClear(onStage(b, now), covers))) return;
+    if (band) covers.push(band);
+    if (boxes.every((b) => inClear(onStage(b, now), covers))) return { view: null, all: true };
   }
   // (Coming in from the overview: start from 100% on the middle of the nodes, and pull back from there as needed.)
   const cur = readable && now.k < floor ? centreView(box, { x0: 0, y0: 0, x1: rectOf().width, y1: rectOf().height }, READ_ZOOM) : now;
@@ -866,6 +885,8 @@ export function frameBoxes(boxes: Box[], readable = false): void {
   const blocks: Box[] = [];
   if (env.phone) {
     const free = freeArea(true);
+    // (Room for the "tap where…" line under the strip, when asked: the boxes go below it.)
+    if (band) free.y0 = Math.min(Math.max(free.y0, band.y1), free.y1 - 80);
     // Tidy stands above the thumb row, in the corner: nothing is framed under it either.
     const fab = fabsEl?.querySelector('[data-testid="fab-tidy"]:not([hidden])')?.getBoundingClientRect();
     const r = rectOf();
@@ -909,7 +930,7 @@ export function frameBoxes(boxes: Box[], readable = false): void {
       let bestCost = Infinity;
       for (const area of areas) {
         if (area.x1 - area.x0 < 80 || area.y1 - area.y0 < 60) continue;
-        const v = frameBox(cur, b, area, floor);
+        const v = frameBox(cur, b, area, least);
         const sx0 = b.x0 * v.k + v.x, sy0 = b.y0 * v.k + v.y, sx1 = b.x1 * v.k + v.x, sy1 = b.y1 * v.k + v.y;
         // All of it has to be inside the area (a box too big for the area at the floor is not), under nothing.
         if (sx0 < area.x0 - 0.5 || sy0 < area.y0 - 0.5 || sx1 > area.x1 + 0.5 || sy1 > area.y1 + 0.5) continue;
@@ -925,15 +946,14 @@ export function frameBoxes(boxes: Box[], readable = false): void {
     }
     return null;
   };
-  const next = tryBox(box) ?? tryBox(last);
+  const whole = tryBox(box);
+  const next = whole ?? tryBox(last);
   if (!next) {
     // No room for even one card clear of everything (a very small stage): show its top left corner.
     const tier = tiers[tiers.length - 1];
-    const v = frameBox(cur, last, tier[tier.length - 1], floor);
-    if (!sameView(v, now)) moveView(v.x, v.y, v.k, true, FRAME_MS);
-    return;
+    return { view: frameBox(cur, last, tier[tier.length - 1], least), all: false };
   }
-  if (!sameView(next, now)) moveView(next.x, next.y, next.k, true, FRAME_MS);
+  return { view: next, all: !!whole || boxes.length < 2 };
 }
 
 /**
@@ -3312,72 +3332,109 @@ function arm(d: WireDrag) {
 }
 
 // ----- the far end of a wire armed by a tap -----
-// A finger cannot drag a wire past the edge of the screen, and on a phone the two ends of a wire seldom
-// fit on it together: "Show me" frames the port to start from. So once a finger has armed a port, the
-// camera brings the other end into view: the node "Show me" last asked this wire to go to, or else, if
-// no card that can take the wire is in view, the nearest one that can (within the detailed tier, and
-// keeping the armed port in view too when both fit). Never while a finger is down, never for a mouse.
+// A finger cannot drag a wire past the edge of the screen, and on a phone the two ends of a wire seldom fit on it
+// together. So once a finger has armed a port, the camera may bring the other end into view, at once (a move that
+// came later would take the target from under a finger already on its way to it). It moves only when the player
+// could not tap what they are looking for as things stand:
+//  - never when the card asks for something to be built from this port: the player is about to tap an empty spot;
+//  - on a phone, where the strip hides a third of the board, the far end the card names (the node "Show me" acted
+//    the wire out to, the line's wire, or the node the goal is about) comes first: the camera moves when that node
+//    cannot be tapped, whatever else could be;
+//  - otherwise only when no end at all can be tapped.
+// It then frames the armed port together with the end the card names, or else the nearest Market (where most wires
+// go), or else the nearest end: at a readable zoom when the two fit there, and otherwise out in the overview, where
+// both can still be tapped. Every move keeps clear of the strip, a sheet and the floating controls (`frameNodes`).
+// Never while a finger is down, and never for a mouse (it can hover, and pan with a drag).
 
 /** The wire "Show me" last acted out (the 'showme' signal), if it was a wire. */
 let shownWire: { from: number; to: number; port?: number } | null = null;
 
-/** Some of this card can be seen, clear of whatever covers the board's edges (`v`: as seen from this view). */
-function cardInView(n: GNode, v: View = ui.view): boolean {
-  const b = cardBox(n), a = freeArea(true);
-  const cx = ((b.x0 + b.x1) / 2) * v.k + v.x, cy = ((b.y0 + b.y1) / 2) * v.k + v.y;
-  return cx > a.x0 && cx < a.x1 && cy > a.y0 && cy < a.y1;
-}
+/**
+ * What lies over the board where a finger cannot tap, in stage pixels: `coverBoxes`, with the floating buttons as
+ * they are drawn (no room round them).
+ */
+const tapCovers = () => coverBoxes(0);
 
-/** The general pull-back waits this long after the tap (ms): a player who already knows where to tap is not moved. */
-const PULL_WAIT = 650;
-let pullTimer = 0;
-
-/** A port has just been armed by a tap: bring a node the wire can go to into view (see above). */
-function followArmed(touchy: boolean) {
-  clearTimeout(pullTimer);
-  const g = ui.g;
-  const t = tapWire;
-  if (!t || !touchy || fingers.size > 0) return;
-  const sw = shownWire;
-  const asked = sw && sw.from === t.from && (sw.port == null || sw.port === t.port) ? nodeById(g, sw.to) : null;
-  if (asked && wireOk(g, t.from, t.port, asked.id)) {
-    // "Show me" asked for this wire: its far end, at once.
-    if (!cardInView(asked)) frameNodes([t.from, asked.id], true);
-    return;
+/**
+ * Enough of this card can be seen and tapped from view `v`: at least half of it (sampled on a grid of 6 by 3)
+ * lies on the stage, under nothing in `covers`.
+ */
+function reachable(n: GNode, covers: Box[], v: View = viewAhead()): boolean {
+  const { w, h } = nodeSize(n);
+  const r = rectOf();
+  let ok = 0;
+  for (let i = 0; i < 6; i++) {
+    for (let j = 0; j < 3; j++) {
+      const x = (n.x + (w * (i + 0.5)) / 6) * v.k + v.x, y = (n.y + (h * (j + 0.5)) / 3) * v.k + v.y;
+      if (x < 0 || y < 0 || x > r.width || y > r.height) continue;
+      if (!covers.some((c) => x >= c.x0 && x <= c.x1 && y >= c.y0 && y <= c.y1)) ok++;
+    }
   }
-  const armed = { from: t.from, port: t.port };
-  pullTimer = window.setTimeout(() => pullBack(armed), PULL_WAIT);
+  return ok >= 9;
 }
 
 /**
- * No card that can take the armed wire is in view: pull back, about the armed port, until one is (not
- * past the floor of the detailed tier). If even the floor does not show one, the nearest is framed
- * together with the port, or alone if they do not fit (the prompt at the top still says what is armed).
- * Not when the port is no longer armed, nor while a finger is on the board or something else moves it.
+ * The far end the card names for a wire from this port, if any: the node "Show me" acted this wire out to, the far
+ * end of the line's next wire, or, when the goal is about this port's node (goalFocus), the first other node it is
+ * about that the wire can go to ("Wire the Well to the Market", "...wire it to the Market").
  */
-function pullBack(armed: { from: number; port: number }) {
+function namedEnd(g: Game, from: number, port: number): GNode | null {
+  const end = (id: number | undefined) => {
+    const n = id == null || id === from ? null : nodeById(g, id);
+    return n && wireOk(g, from, port, n.id) ? n : null;
+  };
+  const sw = shownWire;
+  const shown = sw && sw.from === from && (sw.port == null || sw.port === port) ? end(sw.to) : null;
+  if (shown) return shown;
+  const step = lineAdvice(g);
+  const line = step?.wire && step.wire.from === from && (step.wire.port ?? 0) === port ? end(step.wire.to) : null;
+  if (line) return line;
+  const focus = goalFocus(g);
+  if (!focus.includes(from)) return null;
+  for (const id of focus) {
+    const n = end(id);
+    if (n) return n;
+  }
+  return null;
+}
+
+/** The card asks for something to be built from this port, and the build menu from it offers that: see `wantedType`. */
+function buildsFrom(g: Game, from: number, port: number): boolean {
+  const want = wantedType(g, from);
+  return !!want && consumeOptions(g, materialsAt(g, from, port), from).some((o) => o.type === want && !o.locked);
+}
+
+/** A port has just been armed by a tap: bring its wire's far end into view, when the player could not tap it otherwise (see above). */
+function followArmed(touchy: boolean) {
   const g = ui.g;
   const t = tapWire;
-  if (!t || t.from !== armed.from || t.port !== armed.port || fingers.size > 0 || drag || glide || radial || ui.placing) return;
+  if (!t || !touchy || fingers.size > 0) return;
   const src = nodeById(g, t.from);
-  if (!src) return;
+  if (!src || buildsFrom(g, t.from, t.port)) return;
   const can = g.nodes.filter((n) => n.id !== t.from && wireOk(g, t.from, t.port, n.id));
-  if (!can.length || can.some((n) => cardInView(n))) return;
-  const now = ui.view;
-  const floor = zoomFloor();
-  // The armed port stays where it is on screen while the camera pulls back.
-  const fp = toScreen(t.a);
-  for (let k = now.k; k > floor; ) {
-    k = Math.max(floor, k * 0.94);
-    const v: View = { x: fp.x - t.a.x * k, y: fp.y - t.a.y * k, k };
-    if (can.some((n) => cardInView(n, v))) {
-      moveView(v.x, v.y, v.k, true, FRAME_MS);
-      return;
-    }
+  if (!can.length) return;
+  const covers = tapCovers();
+  const named = namedEnd(g, t.from, t.port);
+  if (named && env.phone) {
+    if (!reachable(named, covers)) frameTogether(src, named);
+    return;
   }
+  if (can.some((n) => reachable(n, covers))) return;
   const d = (n: GNode) => Math.hypot(n.x - src.x, n.y - src.y);
-  const near = can.reduce((a, b) => (d(b) < d(a) ? b : a));
-  frameNodes([t.from, near.id], true);
+  const markets = can.filter((n) => n.type === 'market');
+  frameTogether(src, named ?? (markets.length ? markets : can).reduce((a, b) => (d(b) < d(a) ? b : a)));
+}
+
+/**
+ * Frame two cards together: at a readable zoom when they fit there (the least move, see `frameNodes`), otherwise in
+ * the overview, as far out as it takes. From the overview the zoom is kept when they fit at it.
+ */
+function frameTogether(a: GNode, b: GNode) {
+  const boxes = [cardBox(a), cardBox(b)];
+  const readable = !over;
+  let plan = framePlan(boxes, readable, { hintRoom: true });
+  if (!plan.all) plan = framePlan(boxes, false, { least: ZOOM.least, hintRoom: true });
+  if (plan.view && !sameView(plan.view, viewAhead())) moveView(plan.view.x, plan.view.y, plan.view.k, true, FRAME_MS);
 }
 
 /** Arm a port that was tapped near rather than on. */
@@ -3740,8 +3797,6 @@ function fingerGone(id: number): boolean {
 }
 
 function onDown(e: PointerEvent) {
-  // (A new gesture is the player getting on with it: an armed port's pull-back is not wanted any more.)
-  clearTimeout(pullTimer);
   const t = e.target as HTMLElement;
   const onControl = !!(t.closest('#radial') || t.closest('#expand'));
   // A press on the board takes the camera over from whatever move was under way. (Not a press on a
