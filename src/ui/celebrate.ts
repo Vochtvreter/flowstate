@@ -340,7 +340,8 @@ const SPECTRUM = ['spark', 'ember', 'glint', 'shard', 'breeze', 'ink', 'murk'] a
 function refract(at: Pt, spec: Spec) {
   const flat = window.innerHeight < FLAT.below;
   const reach = Math.min(window.innerWidth * 0.42, flat ? 150 : 200);
-  const ray = { top: true, jitter: 0, bend: 0, shape: 'diamond' as const };
+  // (Seen through the window around the card wherever they end: a ray that ends over the top bar would otherwise start out under the card.)
+  const ray = { top: true, topAtStart: true, jitter: 0, bend: 0, shape: 'diamond' as const };
   fly({ x: at.x - reach, y: at.y }, at, '#ffffff', 8, () => {
     SPECTRUM.forEach((m, i) => {
       const u = (i - (SPECTRUM.length - 1) / 2) / ((SPECTRUM.length - 1) / 2);

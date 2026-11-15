@@ -342,6 +342,21 @@ function onScreen(p: Plan): boolean {
 }
 
 /**
+ * The gesture as it can be shown right now, or null. A wire ends on its target's card, a little in
+ * from the card's left edge; when something lies over that part of the card (on a phone the "tap
+ * where..." line can) the fingertip lands further along the card instead.
+ */
+function inView(p: Plan): Plan | null {
+  if (onScreen(p)) return p;
+  if (!p.card) return null;
+  for (const along of [0.5, 0.8]) {
+    const moved = { ...p, b: world({ x: p.card.x + p.card.w * along, y: p.b.y }) };
+    if (onScreen(moved)) return moved;
+  }
+  return null;
+}
+
+/**
  * A wire whose two ends cannot be seen together (a long line on a phone, at the closest the board
  * lets the camera stand back): the start of the gesture, which can. With a finger that is the first
  * tap, on the port, with the wire it would make reaching off toward the target. With a mouse it is
@@ -402,7 +417,7 @@ function evaluate() {
     const a = act;
     const whole = resolve(g, a);
     // All of it when all of it can be seen; failing that, once the camera has had time to settle, its start.
-    const p = !whole || whole === 'done' || onScreen(whole) ? whole : now - a.born > HALF_MS ? firstHalf(whole) : null;
+    const p = !whole || whole === 'done' ? whole : inView(whole) ?? (now - a.born > HALF_MS ? firstHalf(whole) : null);
     if (p === 'done') {
       drop('done');
       hide('done');
@@ -420,9 +435,10 @@ function evaluate() {
   const want = wanted(g);
   const idle = now - lastInput >= IDLE_MS;
   // (On a phone the inspector is a sheet over the board; a paused factory is not being played.)
-  const busy = !want || !idle || blockedOnBoard() || g.paused || (!!ui.sel && env.phone) || !onScreen(want);
-  if (busy) return hide(want ? 'busy' : 'done');
-  show(want!);
+  const busy = !want || !idle || blockedOnBoard() || g.paused || (!!ui.sel && env.phone);
+  const seen = busy ? null : inView(want!);
+  if (!seen) return hide(want ? 'busy' : 'done');
+  show(seen);
 }
 
 function input() {

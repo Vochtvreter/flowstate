@@ -36,7 +36,7 @@
    1.2 times their size and settle back in 120 ms: a transform on those two, so the chip keeps its
    box, nothing beside it moves and the bar is not laid out again. Each coin restarts the jump; that
    is what `pop2`, flipped with every coin, is for (the same keyframes under a second name). */
-.res.pop .sym, .res.pop .nums b { animation: feel-pop-a 0.12s cubic-bezier(0.3, 0, 0.6, 1); }
+.res.pop .sym, .res.pop .nums b { animation: feel-pop-a 0.12s cubic-bezier(0.3, 0, 0.6, 1); will-change: transform; }
 .res.pop.pop2 .sym, .res.pop.pop2 .nums b { animation-name: feel-pop-b; }
 .res.pop .nums b { transform-origin: 0 50%; }
 @keyframes feel-pop-a { from { transform: scale(var(--feel-pop, 1.2)); } to { transform: none; } }
