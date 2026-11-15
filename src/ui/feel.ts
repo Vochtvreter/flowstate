@@ -10,7 +10,7 @@ import { meanwhileOf } from '../goals';
 import { graph } from '../sim';
 import { Game, GameEvent, GoalReward } from '../state';
 import {
-  audioState, buzz, cueAfford, cueClaim, cueConnect, cueError, cueExpand, cueExpandPop, cueFlowIn, cueLineDone, cuePayout, cuePlace,
+  audioState, buzz, cueAfford, cueClaim, cueConnect, cueError, cueExpand, cueExpandPops, cueFlowIn, cueLineDone, cuePayout, cuePlace,
   cueReady, cueSales, cueStart, cueSurplus, cueTip, freshenSales, initAudio, isMuted, onMuteChange, renderCue, renderPeak, renderSales,
   resetAudio, saleLevel, saleStep, setDrone, setMuted,
 } from './audio';
@@ -137,7 +137,8 @@ function labelSpot(testid: string, text: string): { at: Pt; where: 'beside' | 'u
   const box = block && block.height > c.height ? block : c;
   // Beside: just outside the counter, level with its middle; or, when something else is there, just
   // right of the number inside it (over the Flow bonus, which is the counter's own).
-  const y = Math.round(Math.max(h / 2 + 2, c.top + c.height / 2));
+  // (Never so near the top of the window that its pop-in, a tenth taller each way, is cut off.)
+  const y = Math.round(Math.max(h * 0.6 + 2, c.top + c.height / 2));
   // (Inside the counter it keeps clear of the number as it is at the top of its pop, a fifth wider.)
   for (const x of box === c ? [Math.round(c.right + 5), Math.round(num.right + num.width * 0.2 + 6)] : [Math.round(box.right + 5)]) {
     if (fits(x) && clear(x, y)) return { at: { x, y }, where: 'beside', w, h };
@@ -149,7 +150,7 @@ function labelSpot(testid: string, text: string): { at: Pt; where: 'beside' | 'u
   const tucked = Math.round(box.bottom - 7 + h / 2);
   // (Its own number counts too: the last line of a Data block reaches down to the block's foot.)
   const free = clear(x, tucked) && !(x < num.right && x + w > num.left && tucked - h / 2 < num.bottom);
-  return { at: { x, y: free ? tucked : Math.round(box.bottom + 1 + h / 2) }, where: 'under', w, h };
+  return { at: { x, y: free ? tucked : Math.round(box.bottom + 1 + h * 0.6) }, where: 'under', w, h };
 }
 
 /** The amount standing at each counter right now: a second payout to the same counter adds to it instead of writing over it. */
@@ -525,16 +526,18 @@ const expandTimers: number[] = [];
 function onExpand(d: { deposits: number[]; stagger: number }) {
   for (const t of expandTimers.splice(0)) clearTimeout(t);
   record('celebrate', 'expand', d.deposits.join(','));
+  const stagger = Math.max(0, d.stagger);
   cueExpand();
+  // (The pops are put on the audio clock here and now, `stagger` apart: a busy frame cannot make them late.)
+  cueExpandPops(d.deposits.length, stagger / 1000);
   buzz('expand', 15);
   const g = ui.g;
   d.deposits.forEach((id, i) => {
     expandTimers.push(window.setTimeout(() => {
       if (ui.g !== g) return;
-      cueExpandPop(i);
       const dep = g.deposits.find((x) => x.id === id);
       if (dep) worldRing({ x: dep.x + 86, y: dep.y + 36 }, '#ffffff', 70, 0.55, `deposit ${id}`);
-    }, i * Math.max(0, d.stagger)));
+    }, i * stagger));
   });
 }
 

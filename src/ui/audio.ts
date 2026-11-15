@@ -667,10 +667,16 @@ function sExpandPop(g: Graph, t: number, i: number) {
   tone(g, 'triangle', f * 2, t, 0.02, 0.002, 0.05);
 }
 
-/** A new deposit pops up: a small bubble of a note, a step higher for each one (`i` counts from 0). */
-export function cueExpandPop(i: number) {
-  const g = admit('expand-pop', 30, true, i);
-  if (g) sExpandPop(g, soon(g), i);
+/**
+ * New deposits pop up one after another, `gap` seconds apart: a small bubble of a note for each, a
+ * step higher each time. All of them are scheduled now, on the audio clock.
+ */
+export function cueExpandPops(count: number, gap: number) {
+  const n = Math.max(0, Math.min(8, Math.round(count)));
+  const g = n ? admit('expand-pop', 200, true, n) : null;
+  if (!g) return;
+  const t = soon(g, 0.006);
+  for (let i = 0; i < n; i++) sExpandPop(g, t + i * gap, i);
 }
 
 // ---------- celebrations ----------
