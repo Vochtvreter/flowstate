@@ -870,9 +870,10 @@ export function renderTech(force = false) {
     seen.set(x.t.id, x.state);
   }
 
+  // (A tab's dot invites like the top bar's badge: a tech that would put the goal off does not light it.)
   const tabs = phone
     ? groups.map(({ branch, list }) => `<button class="ttab${branch.id === tab ? ' on' : ''}" data-key="${branch.id}" data-act="tab:${branch.id}" data-testid="tab-${branch.id}" role="tab" aria-selected="${branch.id === tab}">`
-      + `${esc(branch.name)}${list.some((x) => x.state === 'rdy') ? '<i class="dot" title="Something is ready here"></i>' : ''}</button>`).join('')
+      + `${esc(branch.name)}${list.some((x) => x.state === 'rdy' && !x.slows) ? '<i class="dot" title="Something is ready here"></i>' : ''}</button>`).join('')
     : '';
   // Inside a branch, what can still be done comes first; what is already owned follows as a quieter group.
   const sections = groups.filter(({ branch }) => !phone || branch.id === tab).map(({ branch, list }) => {
