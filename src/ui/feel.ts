@@ -577,6 +577,8 @@ let shimmer = SHIMMER;
 // The bright line along the board's edge, which swells and sinks while the soft glow behind it
 // (four still strips, feel.css) stays put. Drawn here because this canvas is redrawn every frame anyway.
 const edgeOverlay: Overlay = {
+  // (It stands still on the screen and changes slowly: a busy board may draw it about 30 times a second.)
+  slow: true,
   active: () => edgeOn || edgeLevel > 0.01 || shimmer < SHIMMER,
   draw(c, dt) {
     edgeLevel += ((edgeOn ? 1 : 0) - edgeLevel) * (1 - Math.exp(-dt / (edgeOn ? 0.5 : 0.9)));

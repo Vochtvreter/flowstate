@@ -18,7 +18,7 @@ import { graph, isMachine } from '../sim';
 import { GNode, GoalReward } from '../state';
 import { boardRect, fitView, toClient } from './board';
 import { anchorPt } from './dom';
-import { Overlay, addOverlay, burst, fly, ring } from './fx';
+import { Overlay, addOverlay, burst, fly, holdFlows, ring } from './fx';
 import { Pt, bezierAt, nodeSize, wireEnds } from './geom';
 import { esc, matGlyph, nodeIcon } from './icons';
 import { Fanfare, buzz, cueBowNote, cueFanfare, cueWhoosh } from './audio';
@@ -143,6 +143,9 @@ function start(spec: Spec) {
     ? { x: window.innerWidth / 2 - Math.min(FLAT.width, window.innerWidth - 32) / 2 + FLAT.glyphX, y: window.innerHeight / 2 + FLAT.down }
     : { x: window.innerWidth / 2, y: window.innerHeight / 2 - GLYPH_RISE[spec.kind] };
   const c: Card = (current = { spec, wash, wrap, timers, raf: 0, leaving: false, shownAt: performance.now(), at, paid: false });
+  // The card covers the middle of the board: the dots there hold still until it has gone, which saves
+  // redrawing the whole board layer while the card, its wash and its sparks are on screen.
+  holdFlows(true);
   timers.push(window.setTimeout(leave, spec.life));
   if (spec.reward) timers.push(window.setTimeout(() => pay(c), spec.payAt ?? 700));
   // The rest of the opening is spread over the next three frames, one piece each, so that no single
@@ -220,6 +223,7 @@ function remove() {
   c.wrap.remove();
   c.wash?.remove();
   current = null;
+  holdFlows(false);
   c.spec.done?.();
   const next = queue.shift();
   if (next) start(next);
