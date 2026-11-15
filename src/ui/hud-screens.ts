@@ -8,14 +8,15 @@
 //  - `?play` in the URL skips the start screen, also after a reset. Scripts rely on it.
 //  - The summary opens SUMMARY_DELAY seconds after the 'demo-end' event; the celebration plays in
 //    between. `?nosummary` keeps it shut (for benchmarks that build a finished factory).
-import { MATERIALS, MatId, RULES } from '../content';
-import { EndStats, demandShown, endStats, fmt, fmtTime } from '../economy';
+import { MATERIALS, MatId, RULES, TECHS } from '../content';
+import { EndStats, demandShown, endStats, fmt, fmtTime, has, offlineCap } from '../economy';
 import { GOALS, activeGoal, claimGoal } from '../goals';
 import { AwayGains } from '../sim';
 import { Game } from '../state';
 import { initToastDock } from './hud-toasts';
+import { isTouch } from './hud-words';
 import { esc, icon, matGlyph } from './icons';
-import { onFrame, onGame, onNewGame, touch, ui } from './ui';
+import { onFrame, onGame, onNewGame, select, touch, ui } from './ui';
 
 export const SUMMARY_DELAY = 6.5;
 
@@ -40,7 +41,9 @@ let summaryOpen = false;
 let modalOpen = false;
 /** performance.now() at which the summary opens, or 0. */
 let summaryDue = 0;
-let pendingAway: { seconds: number; gains: AwayGains } | null = null;
+let pendingAway: { seconds: number; gains: AwayGains; away: number } | null = null;
+/** The start screen offered Continue (a save was loaded), not Start. */
+let resuming = false;
 
 // ---------- what the HUD remembers outside the save ----------
 // One flag: the player has seen the summary and chosen to keep playing. It lives next to the save
@@ -127,10 +130,10 @@ export function initScreens(h: ScreenHooks) {
   startEl.addEventListener('click', (e) => {
     const b = (e.target as HTMLElement).closest<HTMLElement>('[data-do]');
     if (!b) return;
-    if (b.dataset.do === 'start') begin();
+    if (b.dataset.do === 'start') begin(true);
     else if (b.dataset.do === 'new' && confirm('Start a new game? Your saved supply line will be erased.')) {
       hooks.reset();
-      begin();
+      begin(true);
     }
   });
   summaryEl.addEventListener('click', (e) => {
@@ -145,7 +148,11 @@ export function initScreens(h: ScreenHooks) {
   });
 
   onGame((ev) => {
-    if (ev.kind === 'demo-end' && !NO_SUMMARY) summaryDue = performance.now() + SUMMARY_DELAY * 1000;
+    if (ev.kind !== 'demo-end') return;
+    if (!NO_SUMMARY) summaryDue = performance.now() + SUMMARY_DELAY * 1000;
+    // The ending is the factory and its first Lens, framed whole: no inspector over it, nothing selected (a
+    // Fabricator left selected would show "Blocked: Lens output is full" behind the summary).
+    if (ui.sel) select(null);
   });
   onFrame(() => {
     if (!summaryDue || !started || performance.now() < summaryDue) return;
@@ -174,9 +181,10 @@ export function logoMark(size: number, run = false): string {
 
 /** Show the start screen: "Continue" when a save was loaded, otherwise "Start". Under `?play` the game begins at once. */
 export function showStart(hasSave: boolean) {
+  resuming = hasSave;
   if (SKIP_START) {
     startEl.hidden = true;
-    begin();
+    begin(false);
     return;
   }
   started = false;
@@ -194,8 +202,16 @@ export function showStart(hasSave: boolean) {
   startEl.querySelector<HTMLElement>('.start-go')!.focus({ preventScroll: true });
 }
 
-function begin() {
+/**
+ * The game starts. `pressed`: by the player's press on Start or Continue (not `?play`). A save that was paused
+ * when it was left comes back running when the player presses Continue: they came back to play, and a frozen
+ * board whose rates look alive reads as broken (rev-robust F3). Time away is not credited for it (main.ts):
+ * the line was paused all along.
+ */
+function begin(pressed = true) {
   if (started) return;
+  // How long the save has been away for real, before anything saves it again (the cap may shorten what is paid).
+  const awayFor = resuming ? Math.max(0, (Date.now() - ui.g.savedAt) / 1000) : 0;
   started = true;
   app.classList.add('started');
   if (!startEl.hidden) {
@@ -207,7 +223,10 @@ function begin() {
     }, START_FADE);
   }
   if (document.activeElement instanceof HTMLElement && startEl.contains(document.activeElement)) document.activeElement.blur();
-  pendingAway = hooks.begin();
+  const earned = hooks.begin();
+  pendingAway = earned ? { ...earned, away: Math.max(awayFor, earned.seconds) } : null;
+  if (pressed && resuming && ui.g.paused) ui.g.paused = false;
+  if (pressed && !resuming) suggestUpright();
   // A save that reached the end but never dismissed the summary shows it now; the time away follows it.
   if (ui.g.ended && !summaryDone() && !NO_SUMMARY) openSummary();
   else flushAway();
@@ -387,18 +406,41 @@ function keepPlaying() {
 function flushAway() {
   const a = pendingAway;
   pendingAway = null;
-  if (a) showAway(a.seconds, a.gains);
+  if (a) showAway(a.seconds, a.gains, a.away);
 }
 
-/** "While you were away". Shown only when something was actually earned. */
-export function showAway(seconds: number, gains: AwayGains) {
+/** A long time in a word or two: "45 minutes", "5 hours", "1 day", "3 days". */
+export function awayText(seconds: number): string {
+  const min = Math.round(seconds / 60);
+  if (min < 90) return `${Math.max(1, min)} minute${min === 1 ? '' : 's'}`;
+  const h = Math.round(seconds / 3600);
+  if (h < 20) return `${h} hours`;
+  const d = Math.round(seconds / 86400);
+  return `${d} day${d === 1 ? '' : 's'}`;
+}
+
+/**
+ * What the time-away card says about the time. When the line ran for its whole limit (the player was away
+ * longer than the cap), it says how long they were away and that the line stopped at its limit, and how to
+ * raise the limit while there is a way to.
+ */
+export function awayLine(g: Game, seconds: number, away: number): string {
+  const cap = offlineCap(g);
+  if (away < cap + 60 || seconds < cap - 60) return `Your supply line kept running for <b>${fmtTime(seconds)}</b>.`;
+  const hours = Math.round(cap / 3600);
+  const more = !has(g, 'R4') && TECHS.R4 ? ` ${esc(TECHS.R4.name)} in the tech tree raises it to ${RULES.away.capHoursLong} hours.` : '';
+  return `You were away for <b>${awayText(away)}</b>. Your supply line ran for its <b>${hours}-hour</b> limit.${more}`;
+}
+
+/** "While you were away". Shown only when something was actually earned. `away`: how long the player was gone (at least `seconds`). */
+export function showAway(seconds: number, gains: AwayGains, away = seconds) {
   if (gains.credits < 1 && gains.a < 1 && gains.b < 1 && gains.g < 1) return;
   const parts: string[] = [];
   if (gains.credits >= 1) parts.push(`<span style="color:#FFC857">+${fmt(gains.credits)}¢</span>`);
   if (gains.a >= 1) parts.push(`<span style="color:#5EEAD4">+${fmt(gains.a)}α</span>`);
   if (gains.b >= 1) parts.push(`<span style="color:#C4A1FF">+${fmt(gains.b)}β</span>`);
   if (gains.g >= 1) parts.push(`<span style="color:#FF8FB1">+${fmt(gains.g)}γ</span>`);
-  modalEl.innerHTML = `<div class="card"><h2>While you were away</h2><p>Your supply line kept running for <b>${fmtTime(seconds)}</b>.</p>
+  modalEl.innerHTML = `<div class="card" data-testid="away"><h2>While you were away</h2><p>${awayLine(ui.g, seconds, away)}</p>
     <div class="gains mono">${parts.join('')}</div><button id="collect">Collect</button></div>`;
   modalEl.classList.add('open');
   modalOpen = true;
@@ -431,12 +473,57 @@ export function backToStart() {
   showStart(false);
 }
 
+// ---------- a phone held sideways ----------
+
+/** Set once the suggestion below has been made: it is never made again, not even after a new game. */
+const UPRIGHT_KEY = 'flowstate-upright-v1';
+/** How long the line stays if nobody dismisses it. */
+const UPRIGHT_MS = 9000;
+
+/**
+ * A phone held sideways gives the board a strip a few cards high (rev-wide F2). A newcomer who starts that way
+ * is told once, as the game begins, that it plays better upright: one short line under the card, with a way to
+ * dismiss it. It goes by itself after a few seconds, or as soon as the phone is turned.
+ */
+function suggestUpright() {
+  const sideways = app.classList.contains('phone') && window.innerWidth > window.innerHeight;
+  if (!sideways || !isTouch()) return;
+  try {
+    if (localStorage.getItem(UPRIGHT_KEY)) return;
+    localStorage.setItem(UPRIGHT_KEY, '1');
+  } catch {
+    return; // (no storage: it could not be kept to once, so it is not said at all)
+  }
+  const host = document.getElementById('toasts');
+  if (!host) return;
+  const line = document.createElement('div');
+  line.className = 'toast info upright';
+  line.setAttribute('data-testid', 'upright');
+  line.innerHTML = `<svg class="ic" viewBox="0 0 24 24" width="18" height="18" aria-hidden="true"><rect x="7" y="3" width="10" height="18" rx="2"/><path d="M3 14a8 8 0 0 0 4 5M21 10a8 8 0 0 0-4-5"/></svg>`
+    + `<span>Best played upright: turn your phone for more room.</span><button class="up-x" aria-label="Dismiss">${icon('close', 16)}</button>`;
+  let gone = false;
+  const go = () => {
+    if (gone) return;
+    gone = true;
+    window.removeEventListener('resize', turned);
+    line.classList.add('out');
+    setTimeout(() => line.remove(), 300);
+  };
+  const turned = () => {
+    if (window.innerHeight > window.innerWidth) go();
+  };
+  line.querySelector('button')!.addEventListener('click', go);
+  window.addEventListener('resize', turned);
+  setTimeout(go, UPRIGHT_MS);
+  host.appendChild(line);
+}
+
 /** For scripts (window.flowstate.hud). */
 export const screensApi = {
   isStarted,
   screenOpen,
   /** Press Start for the player. */
-  start: begin,
+  start: () => begin(true),
   openSummary,
   keepPlaying,
   /** The two lines "Copy result" puts on the clipboard. */

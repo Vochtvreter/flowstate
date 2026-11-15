@@ -92,6 +92,15 @@ export function initPanels(refs: {
     touch();
   }, true);
 
+  hotEl.addEventListener('scroll', hotMoreSoon, { passive: true });
+  window.addEventListener('resize', hotMoreSoon);
+  // The web fonts arrive after the first frames (they do not hold up the first paint): widths measured with
+  // the fallback font are measured again.
+  document.fonts?.addEventListener?.('loadingdone', () => {
+    roomKey = '';
+    hotMoreSoon();
+    touch();
+  });
   delegate(hotEl, (a, args) => {
     if (a === 'place') startPlacing(args[0] as never);
     else if (a === 'locked') hooks.openTech(args[0]);
@@ -408,9 +417,7 @@ function buildTop() {
       setAttr(techBtn, 'data-ready', String(ready));
       setText(badgeNum, String(ready));
       setAttr(techBtn, 'aria-label', ready ? `Tech tree, ${ready} ready to research` : 'Tech tree');
-      // Early on, a phone's bar has room for the word (the goal card says "Tap Tech"). Once the Flow
-      // bonus or a second kind of Data has joined the bar it has not, and by then the button is familiar.
-      setClass(topEl, 'roomy', !g.flowOn && !dataShown.b && !dataShown.g);
+      fitTechWord(g);
     },
   });
 
@@ -454,6 +461,34 @@ function buildTop() {
 function renderTop() {
   const g = ui.g;
   for (const item of topItems) item.update(g);
+}
+
+/** What decides whether the phone's bar has room for the word "Tech": its width and how long its numbers are. */
+let roomKey = '';
+
+/**
+ * On a phone the Tech button carries its word while the bar has room for it (`#top.roomy`, phone.css): at
+ * 390 px it has, with the Flow bonus and all three kinds of Data on show; at 360 px it has not once those have
+ * joined the bar. Measured, with the word in, whenever something that changes the bar's widths has changed (the
+ * window, the Flow bonus, a kind of Data, a number growing a digit): the word stays out if it would touch the
+ * numbers to its left.
+ */
+function fitTechWord(g: Game) {
+  if (!env.phone) {
+    roomKey = '';
+    return;
+  }
+  const res = topSlots.res!;
+  let lens = '';
+  for (const e of Array.from(res.querySelectorAll('.nums b, .nums i, .flowpct'))) lens += `${e.textContent?.length ?? 0},`;
+  const key = `${window.innerWidth}|${g.flowOn ? 1 : 0}|${dataShown.a ? 1 : 0}${dataShown.b ? 1 : 0}${dataShown.g ? 1 : 0}|${lens}`;
+  if (key === roomKey) return;
+  roomKey = key;
+  setClass(topEl, 'roomy', true);
+  let right = 0;
+  for (const e of Array.from(res.children) as HTMLElement[]) if (e.offsetWidth) right = Math.max(right, e.getBoundingClientRect().right);
+  const left = topSlots.actions!.getBoundingClientRect().left;
+  setClass(topEl, 'roomy', right + 6 <= left);
 }
 
 // ---------- hotbar ----------
@@ -518,7 +553,7 @@ function renderHot(force: boolean) {
   // (And only where the rail has room for it under the slots: on a short window a full bar takes it all.)
   const room = env.phone || hotRect().height >= slots * HOT_SLOT + HOT_PAD + HOT_SLOT;
   const tip = touchy || !room ? '' : `<div class="grow"></div><div class="hb tip" title="Select a node and press Delete. Everything is refunded in full.">${icon('trash')}<span class="p">Del = refund</span></div>`;
-  hotPanel.render(items + tip, force);
+  if (hotPanel.render(items + tip, force)) hotMore();
   for (const type of became) {
     const btn = hotEl.querySelector<HTMLElement>(`[data-testid="hot-${type}"]`);
     if (!btn) continue;
@@ -526,6 +561,26 @@ function renderHot(force: boolean) {
     signal('afford', { type, at: { x: r.left + r.width / 2, y: r.top + r.height / 2 } });
   }
 }
+
+/**
+ * On a phone the build bar scrolls sideways once it holds more than fits (Market, Lab and Void went off its
+ * right edge unseen: rev-phone F6). It says so: `more-r` while there is more to the right, `more-l` to the left
+ * (phone.css fades that edge and puts a chevron on it). Looked at when its slots change, when it scrolls and when
+ * the window does.
+ */
+function hotMore() {
+  const phone = env.phone;
+  const more = phone && hotEl.scrollWidth > hotEl.clientWidth + 2;
+  setClass(hotEl, 'more-r', more && hotEl.scrollLeft + hotEl.clientWidth < hotEl.scrollWidth - 4);
+  setClass(hotEl, 'more-l', more && hotEl.scrollLeft > 4);
+}
+let hotMoreFrame = 0;
+const hotMoreSoon = () => {
+  if (!hotMoreFrame) hotMoreFrame = requestAnimationFrame(() => {
+    hotMoreFrame = 0;
+    hotMore();
+  });
+};
 
 /** Hotbar node types in key order (unlocked only). */
 export function hotbarTypes(g: Game) {

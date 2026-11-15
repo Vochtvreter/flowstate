@@ -360,6 +360,10 @@ html[data-input='touch'] #insp .step::after, html[data-input='touch'] #insp .fil
 html[data-input='touch'] #app:not(.phone) #hud #toasts { right: 228px; bottom: calc(16px + var(--toast-up, 0px)); }
 #app:not(.phone) .toast { text-align: left; }
 #toasts .toast:nth-last-child(n + 4) { display: none; }
+/* The one-off "Best played upright" line on a phone held sideways (hud-screens.ts): it can be dismissed. */
+.toast.upright { padding-right: 4px; }
+.toast.upright > svg { flex: none; color: #9db8ff; }
+.toast.upright .up-x { flex: none; pointer-events: auto; width: 44px; height: 44px; margin: -8px 0; padding: 0; border: 0; border-radius: 50%; background: transparent; color: #9db8ff; display: flex; align-items: center; justify-content: center; }
 @media (max-width: 900px) {
   /* (No key hints at this width.) */
   #app:not(.phone) #hud #toasts { bottom: calc(16px + var(--toast-up, 0px)); }
