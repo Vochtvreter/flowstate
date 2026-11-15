@@ -285,6 +285,11 @@ export interface FlowGoalView {
   need: number;
   /** The valve is open: the bar has come down to "all but one running" because the goal has been up a while. */
   valve?: boolean;
+  /**
+   * How many producers may be short right now and the goal still counts: absent or 0 before the valve opens,
+   * 1 once it has ("all but one running"), more if the valve opens further later on. The card words it.
+   */
+  slack?: number;
 }
 
 function flowGoalView(g: Game): FlowGoalView {
@@ -646,6 +651,17 @@ export function meanwhileOf(g: Game): Meanwhile | null {
   const line = activeGoal(g)?.meanwhile;
   if (!line || g.goal.ready || (line.when && !line.when(g))) return null;
   return line;
+}
+
+/**
+ * The nodes the active goal's hint is about right now, in the order a player meets them: for "Drag from the
+ * Refiner's port to an empty spot and pick Lab", the Refiner; for "Wire the Glyph Assembler's port to the
+ * Fabricator", the Glyph Assembler and then the Fabricator. The interface brings them into view when a goal
+ * comes up and after a sheet closes, if they are not in view already. Empty when the hint names no node on
+ * the board, or the goal is ready to claim.
+ */
+export function goalFocus(_g: Game): number[] {
+  return [];
 }
 
 /** Short text for a reward, e.g. "Refining + 50¢". */
