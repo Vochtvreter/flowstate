@@ -607,8 +607,14 @@ export interface GoalView {
   /**
    * The goal's "while you wait" line, for the input in use, and whether it has been done. Absent when the goal
    * has none, is ready to claim, or the line does not apply to this board right now.
+   *
+   * A goal may carry several lines, shown one at a time in order: this is the first one not yet done that
+   * applies (or, once every one is done, the last one, with `done: true`). `step` is its 1-based place among
+   * the goal's lines and `of` how many the goal has, so the card can read "While you wait · 2 of 3". Both are
+   * absent (read as 1 of 1) for a goal with a single line. lineAdvice(g) in src/advice.ts always gives the next
+   * step of the line shown here.
    */
-  meanwhile?: { text: string; done: boolean };
+  meanwhile?: { text: string; done: boolean; step?: number; of?: number };
 }
 
 /** Everything the goal card shows. null when every goal has been claimed. */
