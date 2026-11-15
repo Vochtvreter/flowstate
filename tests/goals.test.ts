@@ -1,8 +1,8 @@
 import { describe, expect, it } from 'vitest';
-import { claimGoal, connect, cutWire, expandBoard, favour, placeNode, setMode, setWeight, undo, upgrade, upgradeAll } from '../src/actions';
+import { claimGoal, connect, cutWire, expandBoard, favour, placeNode, redo, setMode, setWeight, undo, upgrade, upgradeAll } from '../src/actions';
 import { RULES, TECHS } from '../src/content';
 import { has, nodeCost, research } from '../src/economy';
-import { GOALS, MAIN_GOALS, activeGoal, goalAge, goalById, goalView, rewardText, routerFavoursLab } from '../src/goals';
+import { GOALS, MAIN_GOALS, activeGoal, goalAge, goalById, goalDeposit, goalView, rewardText, routerFavoursLab } from '../src/goals';
 import { Game, deserialize, serialize } from '../src/state';
 import { fresh, market, rich, run, take, well } from './helpers';
 
@@ -270,6 +270,50 @@ describe('goal chain: ready, claim, skip ahead', () => {
     expect(activeGoal(back)!.id).toBe('bulk-upgrade');
     expect(back.goal.ready).toBe(true);
     expect(claimGoal(back)).toBe(true);
+  });
+
+  it('"Upgrade all your Wells at once" counts a press on the Wells only, and an undo of that press takes its Claim back', () => {
+    const g = rich();
+    g.techs = ['P1', 'R1', 'L1', 'S1'];
+    g.credits = 5000;
+    placeNode(g, 'well', 0, 0, { depositId: 2 });
+    placeNode(g, 'refiner', 300, 100, { recipe: 'shard' });
+    placeNode(g, 'refiner', 300, 300, { recipe: 'shard' });
+    placeNode(g, 'lab', 500, 100);
+    at(g, 'bulk-upgrade');
+    run(g, 1);
+    // Upgrade all on another kind is not what the card asks for (it was taken as the goal's press).
+    expect(upgradeAll(g, 'refiner', 'speed')).toBe(2);
+    expect(upgradeAll(g, 'lab', 'speed')).toBe(1);
+    run(g, 0.5);
+    expect(g.goal.ready).toBe(false);
+    // On the Wells it is.
+    const before = g.credits;
+    expect(upgradeAll(g, 'well', 'speed')).toBe(2);
+    run(g, 0.1);
+    expect(g.goal.ready).toBe(true);
+    // Undone, the press is refunded and the goal is not met any more: no reward for a press given back...
+    expect(undo(g)).toBe(true);
+    expect(g.credits).toBe(before);
+    run(g, 0.5);
+    expect(g.goal.ready).toBe(false);
+    expect(claimGoal(g)).toBe(false);
+    // ...and redone, it is met again.
+    expect(redo(g)).toBe(true);
+    run(g, 0.1);
+    expect(g.goal.ready).toBe(true);
+    // An undo of the Refiners' press, made before, leaves the Wells' press standing (it came later: it goes first).
+    expect(undo(g)).toBe(true); // the Wells' press
+    expect(undo(g)).toBe(true); // the Lab's
+    run(g, 0.1);
+    expect(g.goal.ready).toBe(false);
+    expect(redo(g)).toBe(true); // the Lab's again
+    run(g, 0.1);
+    expect(g.goal.ready).toBe(false);
+    expect(redo(g)).toBe(true); // the Wells' again
+    run(g, 0.1);
+    expect(g.goal.ready).toBe(true);
+    expect(claimGoal(g)).toBe(true);
   });
 
   it('unlocks Orders, the Flow meter and the end of the demo', () => {
@@ -727,6 +771,68 @@ describe('"Hold 95% Flow": the bar, and the valve for a board nobody can fix', (
     expect(fine.goal.ready).toBe(false);
     run(fine, 2);
     expect(fine.goal.ready).toBe(true);
+    // A lone producer that does not flow is not passed by the later steps either: the slack stays at none.
+    const alone = rich();
+    alone.flowOn = true;
+    connect(alone, placeNode(alone, 'refiner', 400, 100, { recipe: 'spark' })!.id, 0, market(alone).id);
+    run(alone, 30);
+    at(alone, 'hold-flow');
+    run(alone, 700);
+    expect(goalView(alone)!.flow).toMatchObject({ of: 1, running: 0, need: 0.95, valve: true, slack: 0 });
+    expect(alone.goal.ready).toBe(false);
+  });
+
+  it('after all but two, one more may be short every 120 s, up to all but one: a board on which one producer flows passes in the end', () => {
+    // One Well that sells and five Refiners wired to the Market with nothing to work on: one of six flows.
+    const g = rich();
+    g.flowOn = true;
+    connect(g, well(g).id, 0, market(g).id);
+    for (let i = 0; i < 5; i++) connect(g, placeNode(g, 'refiner', 400, 100 + 140 * i, { recipe: 'spark' })!.id, 0, market(g).id);
+    run(g, 30);
+    at(g, 'hold-flow');
+    expect(RULES.flow.valveEvery).toBe(120);
+    run(g, 0.05);
+    const seen: Record<number, number> = {};
+    while (!g.goal.ready && goalAge(g) < 900) {
+      run(g, 0.5);
+      const v = goalView(g)!.flow!;
+      expect(v).toMatchObject({ of: 6, running: 1 });
+      // A whole number, never more than all but one.
+      expect(Number.isInteger(v.slack ?? 0)).toBe(true);
+      expect(v.slack ?? 0).toBeLessThanOrEqual(5);
+      seen[v.slack ?? 0] ??= Math.round(goalAge(g));
+    }
+    // The steps, at 90 and 180 s and then every 120 s, to all but five of six (one flowing is enough) at 540 s...
+    expect(seen).toEqual({ 0: 1, 1: 90, 2: 180, 3: 300, 4: 420, 5: 540 });
+    // ...and its ten seconds are held from that moment.
+    expect(g.goal.ready).toBe(true);
+    expect(goalAge(g)).toBeGreaterThanOrEqual(550);
+    expect(goalAge(g)).toBeLessThan(552);
+    expect(goalView(g)!.flow!.need).toBeCloseTo(1 / 6, 9);
+  });
+
+  it('a board three short passes ten seconds after the third step opens (all but three, at 300 s), and a save keeps the count', () => {
+    const g = flowBoard(6, 3); // 6 Glint Wells and 3 Ember Wells flow, 3 Spark Refiners never can: 9 of 12
+    run(g, 0.05);
+    run(g, 299);
+    expect(g.goal.ready).toBe(false);
+    expect(goalView(g)!.flow).toMatchObject({ of: 12, running: 9, valve: true, slack: 2 });
+    expect(g.flowNearLate).toBe(0); // the third step is not open yet: nothing counts toward it
+    run(g, 1.5);
+    expect(goalView(g)!.flow).toMatchObject({ slack: 3 });
+    expect(goalView(g)!.flow!.need).toBeCloseTo(9 / 12, 9);
+    // Nine of twelve has been the case all along: the ten seconds count from the step's opening, not before.
+    expect(g.goal.ready).toBe(false);
+    run(g, 4);
+    const mid = deserialize(serialize(g))!;
+    expect(mid.flowNearLate).toBeCloseTo(g.flowNearLate!, 9);
+    expect(goalView(mid)!.progress![0]).toBeCloseTo(goalView(g)!.progress![0], 6);
+    run(mid, 4);
+    expect(mid.goal.ready).toBe(false);
+    run(mid, 1.6);
+    expect(mid.goal.ready).toBe(true);
+    expect(goalAge(mid)).toBeGreaterThanOrEqual(310);
+    expect(goalAge(mid)).toBeLessThan(311);
   });
 
   it('the time on the goal is counted from its claim, survives a save, and starts afresh in a save from before the valve', () => {
@@ -767,6 +873,28 @@ describe('"Hold 95% Flow": the bar, and the valve for a board nobody can fix', (
     expect(old.goal.ready).toBe(false);
     run(old, 2);
     expect(old.goal.ready).toBe(true);
+  });
+});
+
+describe('goalDeposit: the free deposit a goal asks for a Well on (the board frames it when a game opens)', () => {
+  it('names the deposit while placing the Well is the next gesture, and nothing once it stands or before the research', () => {
+    const g = rich();
+    g.techs = ['P1', 'R1', 'L1'];
+    at(g, 'second-well');
+    expect(goalDeposit(g)).toBe(2); // the free Glint deposit
+    at(g, 'make-ink');
+    expect(goalDeposit(g)).toBeNull(); // Murk Deposits not researched: the card's next gesture is in the tech tree
+    g.techs.push('P2');
+    expect(goalDeposit(g)).toBe(3); // the Murk deposit
+    placeNode(g, 'well', 0, 0, { depositId: 3 });
+    expect(goalDeposit(g)).toBeNull(); // the Well stands: the hint has moved on to its Refiner (goalFocus names it)
+    at(g, 'make-spark');
+    g.techs.push('P3');
+    expect(goalDeposit(g)).toBe(4); // the Ember deposit
+    g.goal.ready = true;
+    expect(goalDeposit(g)).toBeNull();
+    at(g, 'hold-flow');
+    expect(goalDeposit(g)).toBeNull();
   });
 });
 

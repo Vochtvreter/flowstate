@@ -20,8 +20,8 @@ import {
   expansionCost, fmt, fmtRate, labRate, matUnlocked, nodeCost, nodeUnlocked, recipeOf, recipeUnlocked,
 } from '../economy';
 import { bagTotal, graph, isMachine, isSink, outPortCount } from '../sim';
-import { lineAdvice } from '../advice';
-import { GOALS, activeGoal, goalFocus } from '../goals';
+import { lineAdvice, lineSpot } from '../advice';
+import { GOALS, activeGoal, goalDeposit, goalFocus } from '../goals';
 import { GRID, Game, GNode, Wire, snap } from '../state';
 import { anchorPt, cachedRect, el, invalidateLayout, setAttr, setClass, setHTML, setHidden, setStyle, setText, svgEl } from './dom';
 import {
@@ -32,7 +32,7 @@ import {
   frameBox, freeSpot as nearestSpot, heldRate, inPorts, matColor, nodeSize, outPorts, pathD, pinchView, roomFor, segmentsCross, separate,
   wholeGain, wireEnds,
 } from './geom';
-import { screenOpen } from './hud-screens';
+import { isStarted, screenOpen } from './hud-screens';
 import { isTouch, pressWord, withKey } from './hud-words';
 import { esc, icon, matGlyph, matShape, nodeIcon } from './icons';
 import { tidy, tidyInput } from './layout';
@@ -517,6 +517,8 @@ function builtBox(): Box | null {
 const STRIP_GAP = 14;
 /** How far under the goal card the alert chip reaches when it shows (outside the phone layout). */
 const ALERT_ROOM = 46;
+/** On a phone held upright the alert chip is a row of its own under the card: its height with the gap above it. */
+const PHONE_ALERT_ROOM = 40;
 
 /**
  * The camera that shows a world box in the part of the stage nothing covers: clear of the strip, an
@@ -664,6 +666,18 @@ function openView() {
   syncHints(g);
   const d = wholeAtFloor(fitTarget(box, true));
   if (d) return go(d);
+  // Too big for that, and the goal names no node, but a place (as Show me frames it, advice-show.ts): the free
+  // deposit the card's line wants a Well on, or the hint's own ("Place a Well on the Murk deposit"), at a
+  // readable zoom; or, where the card asks for the expansion, the plot's lower edge, under which the Expand
+  // button stands, with the factory around it at the floor.
+  const spot = lineSpot(g);
+  const depId = spot && 'deposit' in spot ? spot.deposit : goalDeposit(g);
+  const dep = depId != null ? g.deposits.find((x) => x.id === depId) : undefined;
+  if (dep) return go(fitTarget({ x0: dep.x - 12, y0: dep.y - 12, x1: dep.x + 184, y1: dep.y + 84 }, true, 1));
+  if ((spot && 'expand' in spot) || (activeGoal(g)?.id === 'expand' && !g.goal.ready)) {
+    const w = EXPAND_W * 1.4, mid = g.board.w / 2;
+    return go(fitTarget({ x0: mid - w, y0: g.board.h - 200, x1: mid + w, y1: g.board.h + 18 + EXPAND_H + 12 }, true, floor));
+  }
   go(t);
 }
 
@@ -1043,6 +1057,8 @@ function stageResized() {
 let hintsEl: HTMLElement | null = null;
 let fabsEl: HTMLElement | null = null;
 let toastsEl: HTMLElement | null = null;
+/** The time-away card ("While you were away", hud-screens.ts): up while it has the class `open`. */
+let modalEl: HTMLElement | null = null;
 const EXPAND_W = 260, EXPAND_H = 64;
 /**
  * How much larger than life the button is drawn in its natural place at each step of the overview, so
@@ -1069,6 +1085,14 @@ const EXPAND_REST = 700;
  * opens, the camera eases), and that tap must not buy a plot. (A mouse pointer can be seen: a click counts.)
  */
 const MOVE_REST = 40;
+/**
+ * A finger that comes down on the button where it already stood this long before (ms) was aimed at it: its tap
+ * counts even if the button has moved a little since, or is moving (a sheet opened, the alert chip came in under
+ * the card and pushed it down). One that comes down where the button has only just arrived was not.
+ */
+const AIM_MS = 250;
+/** Docked over the board and in the way of what has just grown or moved beside it, the button waits this long (ms) for its surroundings to stop changing, then changes place once. */
+const SETTLE_MS = 160;
 
 /** Where the middle of the button is on the stage, and the scale it is drawn at. */
 interface Stand { x: number; y: number; s: number }
@@ -1102,6 +1126,14 @@ const ex = {
   shown: false,
   /** The button stood back (see `expandQuiet`) when the last press anywhere began. */
   quietAtDown: false,
+  /** The last press began on the button where it had already stood a moment before (see `aimedAt`). */
+  aimedAtDown: false,
+  /** Where it has been drawn of late (stage pixels; an empty box while hidden), newest last: see `aimedAt`. */
+  seats: [] as { t: number; x0: number; y0: number; x1: number; y1: number }[],
+  /** What it keeps clear of and where it may stand, as last placed (a signature), and when that last changed. */
+  around: '', aroundAt: 0,
+  /** It has been left where it was for its surroundings to settle (SETTLE_MS), and is placed again then. */
+  settling: false,
   /** What the last measurement was taken for (see `expandKey`), and when. */
   key: '', measuredAt: 0,
 };
@@ -1159,11 +1191,15 @@ function measureExpand() {
     for (const b of fabsEl?.querySelectorAll('.fab:not([hidden])') ?? []) add(b);
     if (toastsEl?.childElementCount) add(toastsEl);
     // The strip as it is laid out this moment (an alert chip that has just come in makes it taller
-    // before the cover is measured again).
+    // before the cover is measured again). Held upright, the strip takes the alert chip as one more row under the
+    // card: room is kept for it whether it is showing or not (as away from a phone, ALERT_ROOM), or the button
+    // docked under the card is pushed down the moment a problem is named, under a finger on its way to it.
     const strip = document.getElementById('hud-strip');
     if (strip && !strip.hidden) {
       const b = strip.getBoundingClientRect();
-      if (b.height > 1) out.push({ x0: -1e6, y0: -1e6, x1: 1e6, y1: b.bottom - r.top });
+      const upright = r.height > r.width;
+      const room = upright && document.getElementById('hud-alert')?.hidden ? PHONE_ALERT_ROOM : 0;
+      if (b.height > 1) out.push({ x0: -1e6, y0: -1e6, x1: 1e6, y1: b.bottom - r.top + room });
     }
     // Its seat in the thumb row, beside Fit, or beside Claim or the "tap where…" line when one of those stands
     // in the row: a place that costs no working board. None while the build menu is open (the floating
@@ -1251,6 +1287,7 @@ function placeExpand(byCamera = false) {
   const r = rectOf();
   if (r.width < 2 || r.height < 2) return;
   if (ex.stale) measureExpand();
+  ex.settling = false;
   ex.shown = expandShown(g);
   if (!ex.shown) {
     hideExpand();
@@ -1304,7 +1341,27 @@ function placeExpand(byCamera = false) {
       const b = onStage(cardBox(n), ui.view);
       if (b.x1 + pad > area.x0 && b.x0 - pad < area.x1 && b.y1 + pad > area.y0 && b.y0 - pad < area.y1) cards.push({ x0: b.x0 - pad, y0: b.y0, x1: b.x1 + pad, y1: b.y1 });
     }
-    const p = dockSpot({ home, w: ex.w, h: ex.h, area, blocks: cards.length < 40 ? ex.blocks.concat(cards) : ex.blocks, gap: DOCK_GAP });
+    const blocks = cards.length < 40 ? ex.blocks.concat(cards) : ex.blocks;
+    // Where it stands docked over the board it stays, for as long as that place is clear, unless the player is
+    // moving the board: when what moved was a sheet, a toast or the strip, or the camera gliding by itself (to
+    // keep the selected card in view as the strip grows), a button that changes place while a finger is on its way
+    // to it is a button that cannot be pressed. (As the player pans, it follows its place along the edge.)
+    // And when it has to move, it waits for its surroundings to settle and then moves once: the strip, the cover
+    // the phone shell reports, the sheet and the floating buttons above it each take their new place a frame or
+    // more apart (the alert chip coming in under the card moved it three times in 60 ms).
+    const at = ex.target;
+    const kept = (!byCamera || !!glide) && at && ex.docked && ex.mini === mini && !env.calm ? { x: at.x - ex.w / 2, y: at.y - ex.h / 2 } : null;
+    const sig = `${Math.round(area.x0)},${Math.round(area.y0)},${Math.round(area.x1)},${Math.round(area.y1)}|${ex.blocks.map((b) => `${Math.round(b.x0)},${Math.round(b.y0)},${Math.round(b.x1)},${Math.round(b.y1)}`).join(' ')}`;
+    if (sig !== ex.around) {
+      ex.around = sig;
+      ex.aroundAt = performance.now();
+    }
+    let p: { x: number; y: number };
+    if (kept && boxClear({ x0: kept.x, y0: kept.y, x1: kept.x + ex.w, y1: kept.y + ex.h }, area, blocks, DOCK_GAP)) p = kept;
+    else if (kept && performance.now() - ex.aroundAt < SETTLE_MS) {
+      p = kept;
+      ex.settling = true;
+    } else p = dockSpot({ home, w: ex.w, h: ex.h, area, blocks, gap: DOCK_GAP });
     target = { x: p.x + ex.w / 2, y: p.y + ex.h / 2, s: 1 };
     overCard = cards.some((b) => p.x < b.x1 && p.x + ex.w > b.x0 && p.y < b.y1 && p.y + ex.h > b.y0);
   }
@@ -1323,14 +1380,17 @@ function placeExpand(byCamera = false) {
     const step = Math.hypot(target.x - was.x, target.y - was.y);
     if (docked !== ex.docked || (byCamera ? docked && step > DOCK_JUMP : step > 2)) ex.movedAt = performance.now();
   }
-  if (was && ex.drawn && renderedGame && !env.calm && performance.now() >= openingUntil) {
+  // (Docked over the board in the same form before and after, pushed by what grew beside it, it changes place at
+  // once: a button on its way somewhere for a fifth of a second is a button whose taps do not count, see `aimedAt`.)
+  const pushed = !byCamera && docked && ex.docked && rowX == null && !ex.slide && mini === ex.mini;
+  if (was && ex.drawn && renderedGame && !env.calm && performance.now() >= openingUntil && !pushed) {
     const step = Math.hypot(target.x - was.x, target.y - was.y);
     if (docked !== ex.docked || (byCamera ? docked && step > DOCK_JUMP : step > 0.5 || Math.abs(target.s - was.s) > 0.002)) {
       ex.slide = { from: { ...ex.drawn }, t0: performance.now() };
     }
     // The way there must not pass under a floating control: then it just changes place.
     if (ex.slide && !slideClear(ex.drawn, target)) ex.slide = null;
-  } else ex.slide = null;
+  } else if (!pushed) ex.slide = null;
   ex.docked = docked;
   ex.mini = mini;
   ex.call = call;
@@ -1368,6 +1428,7 @@ function rowSeat(row: { x1: number; y: number }): number | null {
 
 /** Off the board for now: hidden, and no longer a place wire dots keep away from. */
 function hideExpand() {
+  noteSeat(0, 0, 0, 0);
   setHidden(expandEl, true);
   ex.target = ex.drawn = null;
   ex.slide = null;
@@ -1405,6 +1466,37 @@ function slideClear(a: Stand, b: Stand): boolean {
   return true;
 }
 
+/** Remember where the button is drawn now (stage pixels; all zero: hidden), for `aimedAt`. Kept for a second. */
+function noteSeat(x0: number, y0: number, x1: number, y1: number) {
+  const now = performance.now();
+  const log = ex.seats;
+  const last = log[log.length - 1];
+  if (last && last.x0 === x0 && last.y0 === y0 && last.x1 === x1 && last.y1 === y1) return;
+  log.push({ t: now, x0, y0, x1, y1 });
+  // (The newest entry older than the window stays: it says where the button stood when the window began.)
+  while (log.length > 2 && log[1].t < now - 1000) log.shift();
+}
+
+/**
+ * Was a press at this client point aimed at the button? It was if the button is under it now and was under it
+ * AIM_MS ago, wherever it has been in between: it had been on show there for longer than a finger takes to set
+ * off for it. A button that has slid or jumped under a finger on its way to a port or a card was not there then.
+ */
+function aimedAt(cx: number, cy: number): boolean {
+  if (!ex.shown || expandEl.hidden) return false;
+  const r = rectOf();
+  const x = cx - r.left, y = cy - r.top;
+  const log = ex.seats;
+  const now = performance.now();
+  const inside = (b: { x0: number; y0: number; x1: number; y1: number }) => b.x1 > b.x0 && x >= b.x0 && x <= b.x1 && y >= b.y0 && y <= b.y1;
+  const cur = log[log.length - 1];
+  if (!cur || !inside(cur)) return false;
+  // Where it stood AIM_MS ago: the newest entry from before then.
+  let then = null;
+  for (let i = log.length - 1; i >= 0; i--) if (log[i].t <= now - AIM_MS) { then = log[i]; break; }
+  return !!then && inside(then);
+}
+
 /** Put the button where it belongs, or where it has got to on its way there. */
 function drawExpand() {
   const t = ex.target;
@@ -1419,6 +1511,7 @@ function drawExpand() {
   }
   ex.drawn = d;
   const left = d.x - (ex.w * d.s) / 2, top = d.y - (ex.h * d.s) / 2;
+  noteSeat(left, top, left + ex.w * d.s, top + ex.h * d.s);
   // (While it slides it takes no press; the rest is counted from the end of the slide.)
   if (sl) ex.movedAt = performance.now();
   setStyle(expandEl, 'transform', `translate(${left.toFixed(1)}px, ${top.toFixed(1)}px) scale(${d.s.toFixed(4)})`);
@@ -1475,6 +1568,7 @@ export function initBoard(root: HTMLElement) {
   appEl = boardEl.closest<HTMLElement>('#app');
   hintsEl = document.getElementById('hints');
   toastsEl = document.getElementById('toasts');
+  modalEl = document.getElementById('modal');
   buildEl = el(`<div id="build-sheet" role="dialog" aria-label="Build menu"></div>`);
   (boardEl.parentElement ?? boardEl).appendChild(buildEl);
 
@@ -1505,8 +1599,9 @@ export function initBoard(root: HTMLElement) {
   // A finger's tap acts on the click that follows it, and by then the board may have answered the tap (a card
   // placed, the build menu closed) and woken the button up under that finger. Whether it stood back is
   // therefore taken when the finger comes down: a tap that began while it did was meant for the board.
-  window.addEventListener('pointerdown', () => {
+  window.addEventListener('pointerdown', (e) => {
     ex.quietAtDown = expandQuiet() || expandEl.classList.contains('quiet');
+    ex.aimedAtDown = aimedAt(e.clientX, e.clientY);
   }, true);
   onSignal('showme', (d) => {
     shownWire = d.wire ? { ...d.wire } : null;
@@ -1562,9 +1657,10 @@ let popTimer = 0;
 function expand(ev?: Event) {
   const g = ui.g;
   if (performance.now() < ex.restUntil || !ex.shown || expandQuiet()) return;
-  // (A finger cannot see where the button is going: a tap on it while it slides is a tap meant for the board.)
+  // (A finger cannot see where the button is going: a tap on it while it slides is a tap meant for the board,
+  // unless the finger came down where the button had already been standing: then it was aimed at it.)
   const finger = (ev as PointerEvent | undefined)?.pointerType === 'touch' || (ev as PointerEvent | undefined)?.pointerType === 'pen';
-  if (finger && (performance.now() - ex.movedAt < MOVE_REST || ex.quietAtDown)) return;
+  if (finger && (ex.quietAtDown || (performance.now() - ex.movedAt < MOVE_REST && !ex.aimedAtDown))) return;
   const had = new Set(g.deposits.map((d) => d.id));
   const old = { w: g.board.w, h: g.board.h };
   if (!expandBoard(g)) {
@@ -1621,22 +1717,29 @@ export function tidyBoard(): boolean {
   settleGesture();
   cancelGesture();
   if (tidyJob && tidyJob.g === g) return true;
-  // What the player is looking at now: the cards whose middle is in view.
+  // What the player is looking at now: the cards whose middle is in view, and the one nearest the middle of it.
   const v = viewAhead();
   const f = freeArea();
+  const mx = (f.x0 + f.x1) / 2, my = (f.y0 + f.y1) / 2;
+  let centre = -1, near = Infinity;
   const seen = g.nodes.filter((n) => {
     const b = cardBox(n);
     const x = ((b.x0 + b.x1) / 2) * v.k + v.x, y = ((b.y0 + b.y1) / 2) * v.k + v.y;
+    const d = (x - mx) ** 2 + (y - my) ** 2;
+    if (d < near) {
+      near = d;
+      centre = n.id;
+    }
     return x > f.x0 && x < f.x1 && y > f.y0 && y < f.y1;
   }).map((n) => n.id);
-  tidyJob = { id: ++tidySeq, g, rev: g.rev, tries: 0, seen };
+  tidyJob = { id: ++tidySeq, g, rev: g.rev, tries: 0, seen, centre };
   setTidyBusy(true);
   askTidy(tidyJob);
   return true;
 }
 
 /** The layout being worked out, and the board it is for (`rev`: as it was when asked). */
-interface TidyJob { id: number; g: Game; rev: number; tries: number; seen: number[] }
+interface TidyJob { id: number; g: Game; rev: number; tries: number; seen: number[]; centre: number }
 let tidyJob: TidyJob | null = null;
 let tidySeq = 0;
 /** The Worker that lays boards out: made on first use; null where one cannot be made (then the page does it). */
@@ -1722,6 +1825,16 @@ function tidyAnswer(id: number, moves: Map<number, Pt>) {
   if (!box) return;
   const now = viewAhead();
   const t = fitTarget(box, true, now.k >= zoomFloor() ? Math.max(zoomFloor(), Math.min(1, now.k)) : 1);
+  // Where they have spread too far apart to be seen together at that zoom (a phone, a big board: the two cards
+  // in view went to opposite ends, and the camera on the middle of them showed neither), the card the view was
+  // centred on stays in view: the least move from there that brings it in, clear of what covers the board.
+  const mid = nodeById(g, job.centre);
+  if (mid) {
+    const b = cardBox(mid), a = inset(freeArea(), 12);
+    const x0 = b.x0 * t.k + t.x, x1 = b.x1 * t.k + t.x, y0 = b.y0 * t.k + t.y, y1 = b.y1 * t.k + t.y;
+    if (x1 - x0 <= a.x1 - a.x0) t.x += x0 < a.x0 ? a.x0 - x0 : x1 > a.x1 ? a.x1 - x1 : 0;
+    if (y1 - y0 <= a.y1 - a.y0) t.y += y0 < a.y0 ? a.y0 - y0 : y1 > a.y1 ? a.y1 - y1 : 0;
+  }
   fitBack = fitAt = null;
   moveView(t.x, t.y, t.k, true, TIDY_MS);
   toast(`Tidied. <b>${isTouch() ? 'Undo' : 'Ctrl Z'}</b> puts it back.`, 'good');
@@ -1990,6 +2103,12 @@ function depositBoxes(): Box[] {
 }
 
 const CHIP_SPOTS = [0.5, 0.4, 0.6, 0.3, 0.7, 0.22, 0.78];
+/**
+ * Where a chip may stand off its wire when every place on it is taken by another chip (see `layoutWires`): in
+ * half-widths across and in heights up and down, never more than a width or two heights away.
+ */
+const NUDGES: [number, number][] = [];
+for (const dx of [0, 0.5, -0.5, 1, -1]) for (const dy of [0, 0.5, -0.5, 1, -1, 1.5, -1.5, 2, -2]) if ((dx || dy) && Math.abs(dx) + Math.abs(dy) / 2 <= 1.25) NUDGES.push([dx, dy]);
 /** Rate chips are set in bigger type when the cards are (15 px against 10.5), so they take more room. */
 const chipScale = () => (big ? 1.42 : 1);
 
@@ -2091,22 +2210,43 @@ function layoutWires() {
   // Chips on show are placed first, each keeping off those placed before it: two wires leaving the same
   // port (a Router's, with its weights on them) would otherwise put their chips one on top of the other.
   const order = [...wireEls.values()].sort((a, b) => Number(b.shown) - Number(a.shown));
+  /** Cards and deposits are the first `fixed` boxes of `avoid`; the chips placed so far come after them. */
+  const fixed = avoid.length;
+  const clearOf = (p: Pt, hw: number, hh: number, from = 0, to = avoid.length) => {
+    for (let i = from; i < to; i++) {
+      const b = avoid[i];
+      if (p.x + hw > b.x0 && p.x - hw < b.x1 && p.y + hh > b.y0 && p.y - hh < b.y1) return false;
+    }
+    return true;
+  };
   for (const refs of order) {
     const f = refs.flow;
     const hw = Math.max(24, refs.cChip.length * 3.3 + 9) * cs, hh = 11 * cs;
     let spot: Pt | null = null;
     for (const t of CHIP_SPOTS) {
       const p = flowPoint(f, f.len * t);
-      let clear = true;
-      for (const b of avoid) {
-        if (p.x + hw > b.x0 && p.x - hw < b.x1 && p.y + hh > b.y0 && p.y - hh < b.y1) {
-          clear = false;
-          break;
-        }
-      }
-      if (clear) {
+      if (clearOf(p, hw, hh)) {
         spot = p;
         break;
+      }
+    }
+    // Every place on the wire that no card covers is taken by a chip placed before (a Router's two wires that
+    // leave together for takers close by): this chip stands beside its wire there, nudged off the other by up to
+    // a chip's width or two of its heights, rather than going missing (the "×1" of a Router favouring its other
+    // wire "×3" was dropped). The nearest such place wins; still never over a card or a deposit.
+    if (!spot && refs.shown) {
+      let best = Infinity;
+      for (const t of CHIP_SPOTS) {
+        const p = flowPoint(f, f.len * t);
+        if (!clearOf(p, hw, hh, 0, fixed)) continue;
+        for (const [dx, dy] of NUDGES) {
+          const far = dx * dx + dy * dy;
+          if (far >= best) continue;
+          const q = { x: p.x + dx * hw, y: p.y + dy * (2 * hh + 4) };
+          if (!clearOf(q, hw, hh)) continue;
+          best = far;
+          spot = q;
+        }
       }
     }
     if (spot && refs.shown) avoid.push({ x0: spot.x - hw - 3, y0: spot.y - hh - 2, x1: spot.x + hw + 3, y1: spot.y + hh + 2 });
@@ -2340,6 +2480,9 @@ function updateNodes(g: Game) {
     }
     const dx = diagnose(g, n);
     let st: string = n.status;
+    // The ring and the border say what diagnose says: a node it finds nothing wrong with (the Lens-only
+    // Fabricator between the first Lens and free play, status.ts `resting`) is drawn as working, not amber or red.
+    if (!dx.problem && (n.status === 'blocked' || n.status === 'starved')) st = 'working';
     let pill = '';
     // Wells never get a pill: their ring colour says enough.
     if (n.type !== 'well') {
@@ -2590,6 +2733,8 @@ export function updateBoard(dt: number) {
   if (freshUntil && performance.now() >= freshUntil && syncChips()) layoutWires();
   if (glide) stepGlide(dt);
   if (ex.slide) drawExpand();
+  // A docked button left where it was while its surroundings settled takes its new place once they have.
+  else if (ex.settling && performance.now() - ex.aroundAt >= SETTLE_MS) placeExpand();
   // While a port is armed, a wire drawn, a card placed or the build menu open, the button stands back in
   // either form (faint, and a press goes through it to the board): that tap is not meant for a new plot.
   setClass(expandEl, 'quiet', expandQuiet());
@@ -2604,9 +2749,13 @@ export function updateBoard(dt: number) {
       showGains();
     }
   }
-  // The tech tree covers the whole board, so wire dots are not drawn behind it. With less motion asked
-  // for, the dots do not travel: the effects layer is told the board is paused (particles still run).
-  frameFx(dt, ui.view, g.paused || calm, ui.techOpen);
+  // The tech tree, the start screen and the time-away card cover the whole board, so wire dots are not drawn
+  // behind them, and they do not run on either: when the card goes they pick up where they were (fx.ts frameBoard).
+  // The summary does not count: it is a card at the foot of the screen (a sheet on a phone) with the factory
+  // framed above it and running, the picture the demo ends on. With less motion asked for, the dots do not
+  // travel: the effects layer is told the board is paused (particles still run).
+  const covered = ui.techOpen || !isStarted() || !!modalEl?.classList.contains('open');
+  frameFx(dt, ui.view, g.paused || calm, covered);
 }
 
 // ---------- placement ----------
@@ -3949,7 +4098,10 @@ function onUp(e: PointerEvent) {
 /**
  * The kind of node the card is asking the player to build right now, if any: the next step of the goal's
  * "while you wait" line when that is a build, or else what the goal's hint says to pick or to build
- * ("…and pick Lab", "Build a Router from…"). The build menu puts it first and preselects it.
+ * ("…and pick Lab", "Build a Router from…"), for as long as the goal still needs one built: while what it is
+ * buying next (Goal.step) is that kind. Once the Router of "Route more to a Lab…" stands, the card is about
+ * wiring it, and a menu opened from its own port must not offer a second Router first. The build menu puts it
+ * first and preselects it.
  */
 function wantedType(g: Game, from?: number): NodeType | null {
   const step = lineAdvice(g);
@@ -3961,9 +4113,16 @@ function wantedType(g: Game, from?: number): NodeType | null {
   const names = new Map<string, NodeType>();
   for (const t of Object.keys(NODE_DEFS) as NodeType[]) names.set(NODE_DEFS[t].name.toLowerCase(), t);
   const said = /\b(?:pick|build(?:\s+(?:a|an|another))?)\s+([A-Za-z]+)/gi;
+  // (A goal that keeps no account of what it buys goes by its words alone, until a node of that kind stands:
+  // once the Void of "Give the Silt somewhere to go" is built, what is left is selling the Ink, and a menu
+  // opened from the Ink port must not offer a Void first.)
+  const buying = goal.step ? goal.step(g) : undefined;
+  const named = buying === undefined ? null : buying === null ? '' : 'tech' in buying ? buying.thenWhat ?? '' : buying.what ?? '';
   for (const m of goal.hint.mouse.matchAll(said)) {
     const t = names.get(m[1].toLowerCase());
-    if (t) return t;
+    if (!t) continue;
+    if (named == null) return g.nodes.some((n) => n.type === t) ? null : t;
+    return named.includes(`the ${NODE_DEFS[t].name}`) ? t : null;
   }
   return null;
 }

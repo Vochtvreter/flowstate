@@ -217,6 +217,11 @@ export interface Game {
   flowNear: number;
   /** The same for "all but two producers flowing" (nearShare(producers, 2)), the valve's second step (RULES.flow.valveAfter2). */
   flowNear2?: number;
+  /**
+   * The valve's later steps (all but three, all but four... RULES.flow.valveEvery): seconds the smoothed Flow has
+   * stayed at or above the bar of the step open now, counted from the third step's opening (tickValve in src/goals.ts).
+   */
+  flowNearLate?: number;
   // --- goals and orders ---
   /** Active goal: index into GOALS (GOALS.length when all are claimed) and whether it is waiting for claimGoal(). */
   goal: { i: number; ready: boolean };
@@ -242,9 +247,10 @@ export interface Game {
    */
   edits?: Edit[];
   /**
-   * Game time of the last press of Upgrade all (src/actions.ts upgradeAll). "Upgrade all your Wells at once" is
-   * met by a press made since the goal came up; `edits` cannot carry that, as it forgets anything older than a
-   * minute, and the Claim then went with the next undo or reload.
+   * Game time of the last press of Upgrade all on Wells (src/actions.ts upgradeAll; a press on any other kind
+   * leaves it alone). "Upgrade all your Wells at once" is met by such a press made since the goal came up; `edits`
+   * cannot carry that, as it forgets anything older than a minute, and the Claim then went with the next undo or
+   * reload. It is part of the undo step (Snapshot.bulkAt): undoing the press takes the goal's readiness back.
    */
   bulkAt?: number;
   // --- not saved ---
@@ -322,7 +328,7 @@ export function newGame(): Game {
     paused: false, time: 0, savedAt: Date.now(),
     creditRate: 0, dataRate: { a: 0, b: 0, g: 0 },
     madeAt: { glint: 0 }, demandLeft: {},
-    flow: 0, flowOn: false, flowStreak: 0, flowBest: 0, flowHold: 0, flowNear: 0, flowNear2: 0,
+    flow: 0, flowOn: false, flowStreak: 0, flowBest: 0, flowHold: 0, flowNear: 0, flowNear2: 0, flowNearLate: 0,
     goal: { i: 0, ready: false }, goalAt: { i: 0, t: 0 },
     ordersOn: false, order: null, orderSeed: RULES.orders.seed >>> 0,
     ended: false, seenSurplus: false,
@@ -511,6 +517,7 @@ export function deserialize(json: string): Game | null {
     g.flowHold = num(raw.flowHold, 0);
     g.flowNear = pos(raw.flowNear);
     g.flowNear2 = pos(raw.flowNear2);
+    g.flowNearLate = pos(raw.flowNearLate);
     g.orderSeed = num(raw.orderSeed, base.orderSeed) >>> 0;
     g.order = loadOrder(raw.order);
     // A save from before the `ended` flag that already has a Lens is past the demo.
@@ -598,6 +605,11 @@ export interface Snapshot {
   /** The board's size and its deposits: an expansion is undone with the rest (actions.ts expandBoard). */
   board?: Game['board'];
   deposits?: Deposit[];
+  /**
+   * The last press of Upgrade all on Wells (Game.bulkAt), null for none: undoing the press takes back "Upgrade
+   * all your Wells at once" with it, which is met by that press alone (actions.ts unready).
+   */
+  bulkAt?: number | null;
 }
 
 export function snapshot(g: Game): Snapshot {
@@ -611,6 +623,7 @@ export function snapshot(g: Game): Snapshot {
     })),
     board: { ...g.board },
     deposits: g.deposits.map((d) => ({ ...d })),
+    bulkAt: g.bulkAt ?? null,
   };
 }
 
@@ -668,5 +681,9 @@ export function restore(g: Game, s: Snapshot) {
   });
   if (s.board) g.board = { ...s.board };
   if (s.deposits) g.deposits = s.deposits.map((d) => ({ ...d }));
+  if (s.bulkAt !== undefined) {
+    if (s.bulkAt == null) delete g.bulkAt;
+    else g.bulkAt = s.bulkAt;
+  }
   g.rev++;
 }

@@ -209,10 +209,11 @@ describe('the whole demo, by the card alone', () => {
 
   it('"Hold 95% Flow" is earned: it does not complete until the one machine short of its input is fixed', () => {
     // The card sends the player to the Flow ring; what holds Flow back is the Spark Refiner, short of Ember. The
-    // card's line names the fix, in the words the ring's tip used to: "buy Speed on the Ember Well".
+    // card's line names the fix, in the words the ring's tip used to: "buy Speed on the Ember Well" (or "its Ember
+    // Well", where an Ember Well with a Lab of its own stands too).
     const steps = plain.lines.filter((x) => x.goal === 'hold-flow');
     expect(steps.length).toBeGreaterThanOrEqual(1);
-    expect(steps[0].text).toMatch(/^The Spark Refiner needs more Ember: buy Speed on (the|an) Ember Well \(50¢\)\.$/);
+    expect(steps[0].text).toMatch(/^The Spark Refiner needs more Ember: buy Speed on (the|an|its) Ember Well \(50¢\)\.$/);
     expect(on(plain, 'hold-flow').seconds).toBeGreaterThan(20);
     expect(on(plain, 'hold-flow').seconds).toBeLessThan(60);
     // A player who ignores the lines gets no tip for it either (a tip never says what the card says): the valve

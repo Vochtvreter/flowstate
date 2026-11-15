@@ -7,7 +7,7 @@ import { Advice, advice, adviceTrials, applyAdvice, lineAdvice } from '../src/ad
 import { RULES, TECHS } from '../src/content';
 import { nodeCost } from '../src/economy';
 import { GOALS, MAIN_GOALS, Meanwhile, activeGoal, goalById, goalFocus, goalView, meanwhileAt, meanwhileOf } from '../src/goals';
-import { Game, cloneGame, serialize } from '../src/state';
+import { Game, cloneGame, nodeNoun, serialize } from '../src/state';
 import { Bot, CFG, POLICIES } from '../tools/pacing';
 import { followMeanwhile, playByTheCard } from './cardPlayer';
 import { fresh, market, realWaitEnds, rich, run, well } from './helpers';
@@ -42,9 +42,10 @@ const TEXT: Record<string, { mouse: string; touch: string }> = {
   'glint-lab': { mouse: 'Build a Lab from the port of the Glint Well that only sells: studied Glint is 1 α each.', touch: '' },
   'well-labs': { mouse: 'Give each new deposit a Well and a Lab built from its port: each pair is 1 α a second.', touch: '' },
   'expand-labs': { mouse: 'Expand the board again and give both new deposits a Well and a Lab of its own.', touch: '' },
+  // (Its words once done. While there is a step, the card reads the line's words for the board: Meanwhile.say, below.)
   'flow-fix': {
-    mouse: 'Click the Flow ring, then give the machine it picks what it lacks: input, or a Market.',
-    touch: 'Tap the Flow ring, then give the machine it picks what it lacks: input, or a Market.',
+    mouse: 'Click the Flow ring to find what holds Flow back, and give it what it lacks.',
+    touch: 'Tap the Flow ring to find what holds Flow back, and give it what it lacks.',
   },
   'speed-pairs': { mouse: 'Buy Speed on each Well with a Lab of its own, and on that Lab when it is full.', touch: '' },
   'cut-glyph': { mouse: 'You have the β you need: cut the wire from the Glyph Assembler to the Lab.', touch: '' },
@@ -549,7 +550,7 @@ describe('lineAdvice: the next step of the card\'s line, for its "Show me"', () 
     expect([...report['ink-lab']]).toEqual(['Wire the Ink Refiner\'s Ink port to the Lab: Ink is 3 α each in a Lab.']);
     for (const seq of report['glint-lab']) expect(seq).toMatch(/^Build a Lab from a Glint Well's port \(N¢\): Glint is 1 α each in a Lab\.$/);
     for (const seq of report['well-labs'] ?? []) expect(seq).toMatch(/^(Place a Well on the free (Glint|Murk) deposit \(N¢\), then build a Lab from its port\.|Build a Lab from the new (Glint|Murk) Well's port)/);
-    for (const seq of report['flow-fix'] ?? []) expect(seq).toMatch(/needs more \w+: buy Speed on (the|an?) \w+ (Well|Refiner)/);
+    for (const seq of report['flow-fix'] ?? []) expect(seq).toMatch(/needs more \w+: buy Speed on (the|an?|its) \w+ (Well|Refiner)/);
     for (const seq of report['cut-glyph']) expect(seq).toMatch(/^Cut the wire from the Glyph Assembler to (the|a) Lab: sold, each Glyph is N¢\.$/);
   });
 
@@ -777,6 +778,14 @@ describe('"while you wait": done means done on any board', () => {
     expect(a.culprit).toBeDefined();
     // goalFocus names the short producer, then what feeds it: what the step is about.
     expect(goalFocus(g)).toEqual([a.culprit!, a.node!]);
+    // The line's words name the node the step acts on, in both wordings, and say no more than a card line may.
+    const name = nodeNoun(g.nodes.find((n) => n.id === a.node)!);
+    for (const touch of [false, true]) {
+      const text = goalView(g, touch)!.meanwhile!.text;
+      expect(text).toContain(name);
+      expect(text).not.toMatch(/machine it picks/);
+      expect([...text].length).toBeLessThanOrEqual(90);
+    }
     const t0 = g.time;
     while (!g.goal.ready && g.time - t0 < 120) {
       const step = lineAdvice(g);

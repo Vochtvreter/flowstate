@@ -545,7 +545,49 @@ export const SAY = {
   linePairLab: (mat: string, cost: number) => `Buy Speed on the ${mat} Well's own Lab (${cents(cost)}): the pair then gives more α.`,
   // --- "Build a Fabricator", second line: the Wells with Labs of their own sell half of what they give ---
   lineSell: (port: string, market: string, mat: string) => `Wire ${port} to ${market} too: half its ${mat} is then sold, not studied.`,
+  // --- "Hold 95% Flow": the line itself, naming the node its step acts on (flowLineWords below; its other fix, a
+  // wire to the Market, reads as flowSell and flowNowhere do) ---
+  lineFlowSpeed: (Who: string, mat: string, node: string) => `${Who} needs more ${mat}: buy Speed on ${node}.`,
 };
+
+/**
+ * The Flow goal's line ("flow-fix"), in words that name the node its step acts on: the Well or machine to buy
+ * Speed on, with the producer that needs it, or the producer whose port goes to the Market. The ring picks the
+ * producer furthest from flowing, which is not always the one a single change can put right (a Glyph Assembler
+ * short of Spark that the Ember Well's Speed fixes through the Spark Refiner), so the line no longer says "the
+ * machine it picks". The same sentence for mouse and touch: it names no gesture. null when there is no such
+ * step (goalView then shows the line's own words).
+ */
+export function flowLineWords(g: Game): { mouse: string; touch: string } | null {
+  const f = flowFix(g);
+  if (!f) return null;
+  const Who = cap(the(g, f.n));
+  let text: string;
+  if ('speed' in f) text = SAY.lineFlowSpeed(Who, MATERIALS[f.mat].name, supplierName(g, f.speed, f.n));
+  else {
+    const p: Port = { n: f.n, port: f.port, mat: f.mat };
+    const say = outs(g, f.n, f.port).some((x) => machineAt(g, x.to)) ? SAY.flowSell : SAY.flowNowhere;
+    text = say(Who, MATERIALS[f.mat].name, portName(g, p, true), the(g, f.market));
+  }
+  return { mouse: text, touch: text };
+}
+
+/**
+ * The Well or machine `s` that feeds `n`, named for a sentence about `n`: "the Ember Well" where the board has one;
+ * "its Ember Well" where it has several and one of them feeds it (an Ember Well with a Lab of its own stands on most
+ * boards by the Flow goal: "an Ember Well" sent the player to either); otherwise "an Ember Well".
+ */
+function supplierName(g: Game, s: GNode, n: GNode): string {
+  const plain = the(g, s);
+  if (plain.startsWith('the ')) return plain;
+  const noun = nodeNoun(s);
+  let feeding = 0;
+  for (const w of graph(g).ins.get(n.id) ?? []) {
+    const from = node(g, w.from);
+    if (from && nodeNoun(from) === noun) feeding++;
+  }
+  return feeding === 1 ? `its ${noun}` : plain;
+}
 
 // =====================================================================================
 // Candidates: everything that might help, each with the words for it
@@ -1224,7 +1266,14 @@ function worth(base: number, tip: number, measured = true): boolean {
 
 interface Verdict { cand: Cand; base: number; tip: number; cut?: { wire: number; from: number; to: number } }
 
-/** How far the Flow goal is looked ahead: long enough to see its valve open, if that is still to come (doing nothing may end the wait too). */
+/**
+ * How far the Flow goal is looked ahead: long enough to see its valve open, if that is still to come (doing nothing
+ * may end the wait too). Its first two steps only: from the third on (one more producer every RULES.flow.valveEvery
+ * seconds) the valve is minutes away, and a tip that puts the board right is worth giving all the same. (The run
+ * itself is the real game: once the next of those steps is within ADVICE.flowScreen it is seen, and doing nothing
+ * then ends the wait too. On a board three short the line's fix stops being offered as a tip about 50 s before
+ * the third step opens.)
+ */
 function flowHorizon(g: Game): number {
   const age = goalAge(g);
   let short = 0;
@@ -1583,7 +1632,7 @@ function lineStep(g: Game, any = false): Cand | null {
         const cost = upgradeCost(s, 'speed');
         return afford({
           act: { t: 'upgrade', node: s.id, track: 'speed', all: false }, cost, hope: 0, show: s.id, culprit: f.n.id,
-          text: SAY.flowSpeed(Who, MATERIALS[f.mat].name, the(g, s), cost),
+          text: SAY.flowSpeed(Who, MATERIALS[f.mat].name, supplierName(g, s, f.n), cost),
         });
       }
       const p: Port = { n: f.n, port: f.port, mat: f.mat };
@@ -1654,6 +1703,18 @@ function feedsLab(g: Game, p: Port, seen = new Set<number>()): boolean {
     }
   }
   return false;
+}
+
+/**
+ * The place the next step of the card's line is about when it is not a node, whether or not it can be paid for
+ * yet: the free deposit it wants a Well on, or the expansion. null when its step is about nodes, or there is none.
+ */
+export function lineSpot(g: Game): { deposit: number } | { expand: true } | null {
+  const c = lineStep(g, true);
+  if (!c) return null;
+  if (c.act.t === 'build' && c.act.deposit != null) return { deposit: c.act.deposit };
+  if (c.act.t === 'expand') return { expand: true };
+  return null;
 }
 
 /**

@@ -1325,6 +1325,8 @@ describe('the words: every sentence of the repertoire fits the card', () => {
     linePairWell: [wells.flatMap(both), [upgradePrice]],
     linePairLab: [raws, [upgradePrice]],
     lineSell: [wells.flatMap(both).map((n) => `${n}'s port`), markets, raws],
+    // The Flow goal's line: who needs what, and the maker to buy Speed on, as for flowSpeed (and "its Ember Well").
+    lineFlowSpeed: { tuples: shortOf.flatMap(([Who, mat, maker]) => [[Who, mat, maker], [Who, mat, maker.replace(/^(the|an?) /, 'its ')]] as const) },
   };
 
   it('the largest prices are eight digits, and the tech names are the real ones', () => {

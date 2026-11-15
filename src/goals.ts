@@ -26,7 +26,7 @@ import { graph, isMachine, isPass } from './graph';
 import { startOrders } from './orders';
 import { Game, GNode, GoalReward, Wire, isLookahead, nodeNoun } from './state';
 import { clearHistory } from './actions';
-import { lineFocus, waitKind } from './advice';
+import { flowLineWords, lineFocus, waitKind } from './advice';
 
 /** [current, target, unit]. Unit '¢' means "saving up credits"; 'α' / 'β' / 'γ' mean saving up Data. */
 export type GoalProgress = [current: number, target: number, unit: string];
@@ -74,6 +74,11 @@ export interface Meanwhile {
   id: string;
   /** One sentence, worded for mouse and keyboard and for touch: at most 90 characters each. */
   text: { mouse: string; touch: string };
+  /**
+   * The sentence as it reads on this board, when it names what is on it (the Flow goal's line names the node its
+   * step acts on): goalView shows it in place of `text`. null: `text` it is. At most 90 characters each.
+   */
+  say?(g: Game): { mouse: string; touch: string } | null;
   /** It has been done: the card ticks the line off. */
   done(g: Game): boolean;
   /** Does the line apply right now? Absent = for as long as the goal is the active one. While it does not, the card leaves it out. */
@@ -394,13 +399,12 @@ export function lensFeeds(g: Game): { mat: MatId; name: string; fed: boolean }[]
 const lensFed = (g: Game, m: MatId) => !!lensFeeds(g)?.find((x) => x.mat === m)?.fed;
 
 /**
- * "Upgrade all your Wells at once": an Upgrade all has been pressed since this goal came up (g.bulkAt, kept with
- * the save; the edit notes are only a fallback, as they forget anything older than a minute).
+ * "Upgrade all your Wells at once": Upgrade all has raised the Wells since this goal came up (g.bulkAt, kept with
+ * the save and set only by a press on Wells; an undo of that press takes it back, and the goal's readiness with it).
  */
 const bulkSince = (g: Game) => {
   const since = g.goalAt && g.goalAt.i === g.goal.i ? g.goalAt.t : g.time;
-  if (g.bulkAt != null && g.bulkAt >= since - 1e-9) return true;
-  return (g.edits ?? []).some((e) => e.what.startsWith('upgrade-all:') && e.at >= since - 1e-9);
+  return g.bulkAt != null && g.bulkAt >= since - 1e-9;
 };
 
 /** The cheapest single Speed level on a Well: what one press of Upgrade all on the Wells costs at the least. */
@@ -492,20 +496,53 @@ export const goalAge = (g: Game) => (g.goalAt && g.goalAt.i === g.goal.i ? Math.
  * the card for RULES.flow.valveAfter seconds it also passes with all but one producer flowing, held just as
  * long, and from RULES.flow.valveAfter2 seconds with all but two. (A board with one producer that nobody can
  * get flowing would otherwise stop the chain for good; so would one with two, which a player who builds a second
- * Glyph Assembler on arrival has.) The number of producers that may be short right now is the valve's slack.
+ * Glyph Assembler on arrival has.) After that one more may be short every RULES.flow.valveEvery seconds (all but
+ * three at 300 s, all but four at 420 s...), until one producer flowing is enough: every board on which anything
+ * flows passes in the end, a save from the public version left to the tips three short among them. The number of
+ * producers that may be short at a goal age, before it is held to the board's own count (see flowSlack).
  */
-export const flowSlack = (g: Game) => (goalAge(g) >= RULES.flow.valveAfter2 ? 2 : goalAge(g) >= RULES.flow.valveAfter ? 1 : 0);
+export function valveSlack(age: number): number {
+  const F = RULES.flow;
+  if (age < F.valveAfter) return 0;
+  if (age < F.valveAfter2) return 1;
+  return 2 + Math.floor((age - F.valveAfter2) / F.valveEvery);
+}
+/** How many producers may be short right now and the goal still counts: the valve's slack, at most all but one of them. */
+export const flowSlack = (g: Game) => Math.max(0, Math.min(valveSlack(goalAge(g)), flowCount(g).of - 1));
+/** The valve's later steps (all but three and on) are open from this goal age. */
+const lateValve = () => RULES.flow.valveAfter2 + RULES.flow.valveEvery;
 /**
  * Seconds held toward the goal. Under the valve's lower bars they are counted from the moment each opens,
  * however long the board has been there before: the player sees the bar come down and the ten seconds run.
+ * (The steps from the third on share one count, g.flowNearLate: see tickValve.)
  */
 const flowHeld = (g: Game) => {
   let held = g.flowHold;
   const age = goalAge(g);
   if (age >= RULES.flow.valveAfter) held = Math.max(held, Math.min(g.flowNear, age - RULES.flow.valveAfter));
   if (age >= RULES.flow.valveAfter2) held = Math.max(held, Math.min(g.flowNear2 ?? 0, age - RULES.flow.valveAfter2));
+  if (age >= lateValve()) held = Math.max(held, g.flowNearLate ?? 0);
   return held;
 };
+
+/**
+ * The count for the valve's later steps, once a tick (src/sim.ts, after Flow is updated): seconds the smoothed
+ * Flow has stayed at or above "all but (the slack open now)", from the moment the third step opens. It starts
+ * from nothing when a step opens on a board that was not at the bar before it, or when the board drops under
+ * the bar; when the next step opens on a board already holding the last one's bar it runs on (the bar only came
+ * down), as the steps before it do. Nothing to count on any other goal, or while one of the first two steps is
+ * all the board can use (three producers or fewer: all but two of three is one).
+ */
+export function tickValve(g: Game, dt: number) {
+  const goal = GOALS[g.goal.i];
+  const open = !!goal && goal.id === 'hold-flow' && !g.goal.ready && g.flowOn && goalAge(g) >= lateValve();
+  const slack = open ? flowSlack(g) : 0;
+  if (slack < 3) {
+    if (g.flowNearLate) g.flowNearLate = 0;
+    return;
+  }
+  g.flowNearLate = g.flow >= nearShare(flowCount(g).of, slack) - 0.005 ? (g.flowNearLate ?? 0) + dt : 0;
+}
 
 /** What the Flow goal's card shows beside its count-down. */
 export interface FlowGoalView {
@@ -516,11 +553,13 @@ export interface FlowGoalView {
   of: number;
   /** The share needed right now: the goal's bar, or "all but one" once the valve is open. */
   need: number;
-  /** The valve is open: the bar has come down to "all but one running" because the goal has been up a while. */
+  /** The valve is open: the goal has been up for RULES.flow.valveAfter seconds, and its bar comes down from there. */
   valve?: boolean;
   /**
-   * How many producers may be short right now and the goal still counts: absent or 0 before the valve opens,
-   * 1 once it has ("all but one running"), more if the valve opens further later on. The card words it.
+   * How many producers may be short right now and the goal still counts, once the valve is open (absent before):
+   * a whole number from 0 to the producers counted less one. 1 from RULES.flow.valveAfter ("all but one
+   * running"), 2 from valveAfter2, then one more every valveEvery seconds; never more than all but one of them
+   * (so 0 on a board of one producer, whose bar the valve cannot lower). The card words it.
    */
   slack?: number;
 }
@@ -528,7 +567,8 @@ export interface FlowGoalView {
 function flowGoalView(g: Game): FlowGoalView {
   const { of, running } = flowCount(g);
   const slack = flowSlack(g);
-  return { pct: g.flow, running, of, need: slack ? nearShare(of, slack) : RULES.flow.holdShare, ...(slack ? { valve: true, slack } : {}) };
+  const open = goalAge(g) >= RULES.flow.valveAfter;
+  return { pct: g.flow, running, of, need: slack ? nearShare(of, slack) : RULES.flow.holdShare, ...(open ? { valve: true, slack } : {}) };
 }
 
 // ---------- the chain ----------
@@ -727,16 +767,18 @@ export const GOALS: Goal[] = [
     ),
     done: (g) => flowHeld(g) >= RULES.flow.holdSeconds,
     progress: (g) => [Math.min(flowHeld(g), RULES.flow.holdSeconds), RULES.flow.holdSeconds, 's'],
-    // What the ring leads to, named: the producer that is short, and the one change that puts it right (a level
-    // of Speed on the maker that feeds it, or a wire to the Market). Shown only while there is such a change;
-    // a board short in a way this cannot see has the valve.
+    // The one change that puts a short producer right, named: a level of Speed on the Well or machine that feeds
+    // it, or its port wired to the Market (flowFix; the line's words name the node the step acts on, which is not
+    // always the producer the Flow ring jumps to). Shown only while there is such a change; a board short in a
+    // way this cannot see has the valve. Its own words below are for the line once it is done.
     meanwhile: [
       {
         id: 'flow-fix',
         text: hint(
-          'Click the Flow ring, then give the machine it picks what it lacks: input, or a Market.',
-          'Tap the Flow ring, then give the machine it picks what it lacks: input, or a Market.',
+          'Click the Flow ring to find what holds Flow back, and give it what it lacks.',
+          'Tap the Flow ring to find what holds Flow back, and give it what it lacks.',
         ),
+        say: flowLineWords,
         done: (g) => { const f = flowCount(g); return f.of > 0 && f.running === f.of; },
         when: (g) => { const f = flowCount(g); return (f.of > 0 && f.running === f.of) || !!flowFix(g); },
       },
@@ -940,7 +982,7 @@ export function goalView(g: Game, touch = false): GoalView | null {
   const inputs = goal.id === 'make-lens' && !g.goal.ready ? lensFeeds(g) : null;
   return {
     ...(goal.id === 'hold-flow' ? { flow: flowGoalView(g) } : {}),
-    ...(at ? { meanwhile: { text: touch ? at.line.text.touch : at.line.text.mouse, done: at.line.done(g), ...(at.of > 1 ? { step: at.step, of: at.of } : {}) } } : {}),
+    ...(at ? { meanwhile: { text: lineText(g, at.line, touch), done: at.line.done(g), ...(at.of > 1 ? { step: at.step, of: at.of } : {}) } } : {}),
     ...(inputs ? { inputs } : {}),
     goal,
     number: free ? g.goal.i - MAIN_GOALS + 1 : g.goal.i + 1,
@@ -952,6 +994,12 @@ export function goalView(g: Game, touch = false): GoalView | null {
     reward: goal.reward,
     big: !!goal.big,
   };
+}
+
+/** A line's sentence as the card shows it: its words for this board (Meanwhile.say), else its own. */
+function lineText(g: Game, line: Meanwhile, touch: boolean): string {
+  const t = line.say?.(g) ?? line.text;
+  return touch ? t.touch : t.mouse;
 }
 
 /**
@@ -997,6 +1045,25 @@ export function goalFocus(g: Game): number[] {
   const out: number[] = [];
   for (const n of ids.length ? ids : hint) if (n != null && !out.includes(n) && g.nodes.some((x) => x.id === n)) out.push(n);
   return out;
+}
+
+/**
+ * The free deposit the active goal's hint asks for a Well on, while that is its next gesture (goalFocus is then
+ * empty: a deposit is not a node): the Glint deposit of "Place a second Well", and the Murk, Ember or Breeze
+ * deposit of a raw line ("Place a Well on the Murk deposit, then..."), once its research is done. null otherwise.
+ */
+export function goalDeposit(g: Game): number | null {
+  const goal = activeGoal(g);
+  if (!goal || g.goal.ready) return null;
+  const raw: Partial<Record<string, [MatId, string | null]>> = {
+    'second-well': ['glint', null], 'make-ink': ['murk', 'P2'], 'make-spark': ['ember', 'P3'], 'make-mist': ['breeze', 'P5'],
+  };
+  const want = raw[goal.id];
+  if (!want || (want[1] && !has(g, want[1]))) return null;
+  // (A Well already on that material: the hint has moved on to the Refiner, which goalFocus names.)
+  if (goal.id !== 'second-well' && g.nodes.some((n) => n.type === 'well' && n.material === want[0])) return null;
+  const used = new Set(g.nodes.map((n) => n.depositId));
+  return g.deposits.find((d) => d.mat === want[0] && !used.has(d.id))?.id ?? null;
 }
 
 /** The nodes the hint's next gesture is about, by goal (see goalFocus). */

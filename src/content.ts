@@ -368,6 +368,13 @@ export const RULES = {
      * upstream: no tip names those, and with "all but one" alone the chain stopped there for good.
      */
     valveAfter2: 180,
+    /**
+     * ...and after that, one more producer may be short every this many seconds (all but three at 300 s, all but
+     * four at 420 s...), until one producer flowing is enough: every board on which anything flows passes in
+     * the end. A save from the public version, played on by a player who follows only the tips, arrived three
+     * short in a way no single tip puts right, and stopped there for good with two steps alone.
+     */
+    valveEvery: 120,
   },
 
   /** 2.4 Goal thresholds that are numbers rather than events (the Flow goal's are in `flow` above). */

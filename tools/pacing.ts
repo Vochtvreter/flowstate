@@ -65,9 +65,9 @@
  *   newcomer10  the same person at 10 s per action
  *   cardonly    the newcomer who never follows a tip: the cards and their lines alone. The cards have to carry
  *               the game by themselves, so this player has targets too, the "nothing to do" measure below among
- *               them. The Flow goal's own line (the Flow ring picks a machine; give it what it lacks) gets them
- *               through that goal in 30–40 s; without it the valve does (all but one producer at 90 s, all but
- *               two at 180 s: RULES.flow.valveAfter, valveAfter2)
+ *               them. The Flow goal's own line (it names the one change that gets a short producer flowing)
+ *               gets them through that goal in 30–40 s; without it the valve does (all but one producer at 90 s,
+ *               all but two at 180 s, then one more every 120 s: RULES.flow.valveAfter, valveAfter2, valveEvery)
  *   nolines     the newcomer who never reads a line: the hints and the tips only. Slower, never stranded
  * For these players the report also counts the tips: how many came on offer, how many were followed, and the
  * smallest and the median saving the followed ones promised.
