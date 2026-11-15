@@ -267,6 +267,8 @@ button.fav:hover { background: #263252; }
 #app.phone .sum-go { flex: 1 0 100%; height: 52px; margin-bottom: 4px; }
 #app.phone .sum-copy { flex: 1 1 0; height: 44px; }
 #app.phone .sum-over { flex: 1 1 0; }
+/* (Both lines of the result fit a 360 px screen without wrapping at this size.) */
+#app.phone .sum-fallback textarea { padding: 7px 8px; font-size: 11.5px; line-height: 17px; }
 #app.phone .start-go { min-width: 0; width: 100%; }
 @media (max-width: 560px) {
   .start-card { padding: 28px 24px 20px; }
