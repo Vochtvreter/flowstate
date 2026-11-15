@@ -2,26 +2,30 @@
 // Owned by the feel track. Nothing here is called by the board or the panels: it listens to the
 // hooks in ui.ts (simulation events, interface signals, the frame and the beat) and answers with
 // sound (audio.ts), particles (fx.ts), the big celebrations (celebrate.ts) and the hand (hand.ts).
-import { DATA_COLORS, DataTier, NODE_DEFS, NodeType } from '../content';
+import { DATA_COLORS, DATA_NAMES, DataTier, MatId, NODE_DEFS, NodeType } from '../content';
 import { materialsAt, nodeById } from '../actions';
 import { fmt } from '../economy';
 import { inFlowState } from '../flow';
+import { meanwhileOf } from '../goals';
+import { graph } from '../sim';
 import { Game, GameEvent, GoalReward } from '../state';
 import {
-  audioState, buzz, cueAfford, cueClaim, cueConnect, cueError, cueFlowIn, cuePayout, cuePlace, cueReady, cueSales, cueTip, initAudio,
-  isMuted, onMuteChange, renderPeak, resetAudio, setDrone, setMuted,
+  audioState, buzz, cueAfford, cueClaim, cueConnect, cueError, cueExpand, cueExpandPops, cueFlowIn, cueLineDone, cuePayout, cuePlace,
+  cueReady, cueSales, cueStart, cueSurplus, cueTip, freshenSales, initAudio, isMuted, onMuteChange, renderCue, renderPeak, renderSales,
+  resetAudio, saleLevel, saleStep, setDrone, setMuted,
 } from './audio';
 import { boardRect, toClient } from './board';
 import { celebrateEnd, celebrateFlow, celebrateGoal, cancelCelebrations, celebrating, initCelebrate } from './celebrate';
-import { anchorPt, el, pulseAnchor, setAttr, setClass, setHTML } from './dom';
-import { FlyOpts, Overlay, addOverlay, burst, clearParticles, floater, fly, pop, ring, setMood } from './fx';
+import { anchorPt, el, setAttr, setClass, setHTML } from './dom';
+import { FlyOpts, Overlay, addOverlay, burst, clearParticles, fly, pop, ring, setMood, textWidth } from './fx';
 import { Pt, bezierAt, matColor, nodeSize, outPorts, wireEnds } from './geom';
-import { actOut, handState, initHand, pointAt } from './hand';
-import { addTopItem } from './panels';
+import { actOut, handState, initHand, tipSignal } from './hand';
+import { addTopItem, renderPanels } from './panels';
 import { onBeat, onFrame, onGame, onNewGame, onPress, onSignal, signal, ui } from './ui';
 
 const GOLD = '#FFC857';
 const UNLOCK = '#9DB8FF';
+const AMBER = '#FFB020';
 
 // ---------- recorder (for test scripts) ----------
 
@@ -63,51 +67,168 @@ const dataPt = (k: DataTier): Pt => anchorPt(`data-${k}`) ?? centreOf(`[data-tes
 
 // ---------- payouts ----------
 
-/** How many coins to send for a sum: a few for a few, more for more, never a swarm. */
-const coinCount = (amount: number) => Math.max(3, Math.min(9, 2 + Math.round(Math.log10(Math.max(1, amount)) * 2.2)));
+/** How many coins a sum sends: six for a few credits, ten for a thousand. */
+const coinCount = (amount: number) => Math.max(6, Math.min(10, 6 + Math.floor(Math.log10(Math.max(1, amount)) * 1.4)));
+/**
+ * A coin of a payout: 8 px across (`size` is its radius), 450 ms in the air, 40 ms after the one before.
+ * It is seen above the panels around where it leaves from (the Claim button), so it comes out of the
+ * button and not from under the goal card. (`small`: when the window above the panels is free it is
+ * brought there at its small size, which costs a fifth of the full one to keep on screen; a payout
+ * from a celebration card finds the full window already there.)
+ */
+const COIN: FlyOpts = { size: 4, ttl: 0.45, stagger: 0.04, jitter: 0, top: true, topAtStart: true, small: true };
+/**
+ * The amount beside its counter: 16 px bold in the counter's colour on a small dark plate, standing
+ * 0.9 s and then fading over 0.3. It is an element of its own above the bar (.feel-amount, feel.css):
+ * it pops in and fades by transform and opacity alone, so while it stands no canvas has to be redrawn
+ * for it. The plate is the words plus LABEL_PAD px on each side, LABEL_H px high.
+ */
+const LABEL_PX = 16;
+const LABEL_PAD = 7;
+const LABEL_H = 26;
+const LABEL_MS = 1200;
+/** How long a counter carries the class `pop` after a coin has landed on it, in ms (the pop itself is 120 ms, feel.css). */
+const POP_MS = 150;
+
+const counterEl = (testid: string) => app.querySelector<HTMLElement>(`[data-testid="${testid}"]`);
+const popTimers = new Map<string, number>();
+
+/**
+ * A coin has landed on a counter: its number and its symbol jump to 1.2 times their size and settle
+ * back in 120 ms (feel.css, a transform on the two of them, so nothing in the bar moves). The class
+ * `pop` is on the counter while that plays; `pop2` flips with every coin, which is what starts the
+ * jump again while the last one is still settling.
+ */
+function popCounter(testid: string) {
+  const e = counterEl(testid);
+  if (!e) return;
+  e.classList.add('pop');
+  e.classList.toggle('pop2');
+  clearTimeout(popTimers.get(testid));
+  popTimers.set(testid, window.setTimeout(() => e.classList.remove('pop', 'pop2'), POP_MS));
+}
+
+/**
+ * Where "+12¢" may stand, as the middle of its left edge (and how large it is): beside the counter
+ * when nothing else is there (it may lie over the counter's own Flow bonus); otherwise tucked under
+ * the counter, against the foot of the bar. Never over another counter or a button, never past the
+ * edge of the window. Reads layout: called once for each counter a payout lands on.
+ */
+function labelSpot(testid: string, text: string): { at: Pt; where: 'beside' | 'under'; w: number; h: number } | null {
+  const chip = counterEl(testid);
+  const bar = document.getElementById('top');
+  if (!chip || !bar) return null;
+  const c = chip.getBoundingClientRect();
+  if (!c.width || !c.height) return null;
+  const w = Math.ceil(textWidth(text, LABEL_PX)) + LABEL_PAD * 2, h = LABEL_H;
+  const num = (chip.querySelector('.nums b') ?? chip).getBoundingClientRect();
+  const others: DOMRect[] = [];
+  for (const e of bar.querySelectorAll('.res, .datas, .techbtn, .ibtn')) {
+    if (e === chip || chip.contains(e) || e.contains(chip)) continue;
+    const r = e.getBoundingClientRect();
+    if (r.width && r.height) others.push(r);
+  }
+  // Clear of everything else by 3 px at rest, and not touching it while it pops in (a tenth wider on each side for a moment).
+  const m = Math.max(3, w * 0.1);
+  const fits = (x: number) => x >= m && x + w <= window.innerWidth - m;
+  const clear = (x: number, y: number) => !others.some((r) => x < r.right + m && x + w > r.left - m && y - h / 2 < r.bottom && y + h / 2 > r.top);
+  // The Data counters of a narrow bar are lines of one block: "beside" and "under" are then beside and under the block.
+  const block = chip.parentElement?.classList.contains('datas') ? chip.parentElement.getBoundingClientRect() : null;
+  const box = block && block.height > c.height ? block : c;
+  // Beside: just outside the counter, level with its middle; or, when something else is there, just
+  // right of the number inside it (over the Flow bonus, which is the counter's own).
+  // (Never so near the top of the window that its pop-in, a tenth taller each way, is cut off.)
+  const y = Math.round(Math.max(h * 0.6 + 2, c.top + c.height / 2));
+  // (Inside the counter it keeps clear of the number as it is at the top of its pop, a fifth wider.)
+  for (const x of box === c ? [Math.round(c.right + 5), Math.round(num.right + num.width * 0.2 + 6)] : [Math.round(box.right + 5)]) {
+    if (fits(x) && clear(x, y)) return { at: { x, y }, where: 'beside', w, h };
+  }
+  // Under: in the middle of the counter, its top a few px into the counter's foot (under the rate
+  // line); or just clear of the bar's row when that would touch anything else (another line of a
+  // Data block, a neighbour it is wider than).
+  const x = Math.round(Math.max(m, Math.min(window.innerWidth - m - w, box.left + box.width / 2 - w / 2)));
+  const tucked = Math.round(box.bottom - 7 + h / 2);
+  // (Its own number counts too: the last line of a Data block reaches down to the block's foot.)
+  const free = clear(x, tucked) && !(x < num.right && x + w > num.left && tucked - h / 2 < num.bottom);
+  return { at: { x, y: free ? tucked : Math.round(box.bottom + 1 + h * 0.6) }, where: 'under', w, h };
+}
+
+/** The amount standing at each counter right now: a second payout to the same counter adds to it instead of writing over it. */
+const standing = new Map<string, { el: HTMLElement; amount: number; until: number; timer: number }>();
+
+function showAmount(testid: string, amount: number, unit: string, color: string) {
+  const now = performance.now();
+  const was = standing.get(testid);
+  let total = amount;
+  if (was) {
+    if (now < was.until) total += was.amount;
+    clearTimeout(was.timer);
+    was.el.remove();
+    standing.delete(testid);
+  }
+  const text = `+${fmt(total)}${unit}`;
+  const spot = labelSpot(testid, text);
+  if (!spot) return;
+  record('pay', 'label', `${testid} ${text} ${spot.where} ${spot.at.x},${spot.at.y} ${spot.w}x${spot.h}`);
+  const a = app.getBoundingClientRect();
+  const e = document.createElement('div');
+  e.className = `feel-amount${reduced() ? ' calm' : ''}`;
+  e.setAttribute('aria-hidden', 'true');
+  e.textContent = text;
+  e.style.cssText = `left:${spot.at.x - a.left}px;top:${spot.at.y - spot.h / 2 - a.top}px;width:${spot.w}px;height:${spot.h}px;--c:${color}`;
+  app.appendChild(e);
+  const timer = window.setTimeout(() => {
+    e.remove();
+    if (standing.get(testid)?.el === e) standing.delete(testid);
+  }, LABEL_MS + 40);
+  standing.set(testid, { el: e, amount: total, until: now + LABEL_MS * 0.75, timer });
+}
 
 /**
  * Send a reward from where it was earned to where it is counted: coins to the credits counter,
- * Data to its chip, and a spark to each hotbar button a new tech has just added. Each lands with a
- * pulse on the counter, the amount written over it, and a short rising run of ticks.
- * (With less motion asked for nothing flies: fx.fly() delivers at once, so the amount and the ticks
- * come straight away, and the counter does not pulse.)
- *
- * The coins are ordinary ones (fx.fly without `top`): over the stage they are drawn on the board
- * layer, so they come out from under the goal card rather than over it, and the big top layer stays
- * idle. That is deliberate: see the note on cost at the top of fx.ts.
+ * Data to its own counter, and a spark to each hotbar button a new tech has just added.
+ * Six to ten coins by the size of the sum, 40 ms apart, each 450 ms in the air. Each one that lands
+ * ticks (a rising run, scheduled on the audio clock when the first lands) and pops the counter; the
+ * amount stands beside the counter from the first landing.
+ * The coins are theatre: the game added the reward when it was claimed, and nothing here touches
+ * what the counter reads.
+ * With less motion asked for nothing flies and nothing pops: fx.fly() delivers at once, so the amount
+ * appears beside the counter and fades, and the ticks play.
  */
 function payout(from: Pt, r: GoalReward) {
   let ticked = false;
   const at = (p: Pt) => `${Math.round(p.x)},${Math.round(p.y)}`;
-  // Each flight is noted when it leaves and when it lands, and lands with a pulse, a label and ticks.
+  const sends: (() => void)[] = [];
+  let most = 0;
+  // Each flight is noted when it leaves and when its first coin lands.
   // A counter that cannot be seen (on a phone the open tech tree lies over the top bar) gets the
   // ticks only: coins and a "+40¢" arriving on top of the tree would point at nothing.
-  const send = (anchor: string, amount: number, to: Pt, text: string, color: string, n: number, opts: FlyOpts) => {
-    record('pay', 'send', `${anchor} ${amount} from ${at(from)} to ${at(to)}`);
-    const seen = inTopBar(to);
-    const land = () => {
-      record('pay', 'land', `${anchor} ${amount}`);
-      if (seen && !reduced()) pulseAnchor(anchor);
-      // The amount pops up just under the counter it has been added to.
-      if (seen) floater({ x: to.x + 12, y: to.y + 60 }, text, color, 13, { top: true, life: 0.95, rise: 18 });
-      if (!ticked) cuePayout(Math.min(6, n));
-      ticked = true;
-    };
-    if (seen) fly(from, to, color, n, land, opts);
-    else land();
+  const send = (anchor: string, amount: number, to: Pt, unit: string, color: string, shape?: FlyOpts['shape']) => {
+    const n = coinCount(amount);
+    most = Math.max(most, n);
+    sends.push(() => {
+      record('pay', 'send', `${anchor} ${amount} from ${at(from)} to ${at(to)}`);
+      const seen = inTopBar(to);
+      const land = () => {
+        record('pay', 'land', `${anchor} ${amount}`);
+        if (seen) showAmount(anchor, amount, unit, color);
+        if (!ticked) cuePayout(most);
+        ticked = true;
+      };
+      const each = () => {
+        record('pay', 'coin', anchor);
+        popCounter(anchor);
+      };
+      if (seen) fly(from, to, color, n, land, { ...COIN, shape, each });
+      else land();
+    });
   };
-  const quick = { ttl: 0.3, stagger: 0.035 };
-  if (r.credits) {
-    const n = coinCount(r.credits);
-    send('credits', r.credits, creditsPt(), `+${fmt(r.credits)}¢`, GOLD, n, quick);
-  }
+  if (r.credits) send('credits', r.credits, creditsPt(), '¢', GOLD);
   for (const k of ['a', 'b', 'g'] as DataTier[]) {
     const amount = r[k];
-    if (!amount) continue;
-    const n = coinCount(amount);
-    send(`data-${k}`, amount, dataPt(k), `+${fmt(amount)}${k === 'a' ? 'α' : k === 'b' ? 'β' : 'γ'}`, DATA_COLORS[k], n, { ...quick, shape: 'diamond', size: 4.6 });
+    if (amount) send(`data-${k}`, amount, dataPt(k), DATA_NAMES[k], DATA_COLORS[k], 'diamond');
   }
+  for (const go of sends) go();
   // A new machine in the hotbar: stars fly to where it has appeared. (They are drawn as far as the edge
   // of the stage, which the hotbar sits against.)
   for (const id of r.techs ?? []) {
@@ -119,15 +240,18 @@ function payout(from: Pt, r: GoalReward) {
   }
 }
 
-/** The quick celebration: a reward flies off, a chime, a light buzz. About a third of a second, and nothing is blocked. */
-function smallCelebration(name: string, from: Pt, r: GoalReward, color = GOLD, onTop = false) {
+/**
+ * The quick celebration: sparks and a ring where the player pressed, a chime, a light buzz, and the
+ * reward on its way. Nothing is blocked. The sparks are above the panels, like the coins: the button
+ * they come from is on the goal card.
+ */
+function smallCelebration(name: string, from: Pt, r: GoalReward, color = GOLD) {
   record('celebrate', 'small:' + name);
   cueClaim();
   buzz('claim', 15);
-  // On the board layer: sparks that clear the card they came from are seen, the rest are not missed.
   // (With less motion asked for, fx draws neither sparks nor ring, and the reward arrives at once.)
-  burst(from, color, 10, { top: onTop, power: 1.2 });
-  ring(from, color, { top: onTop, size: 44 });
+  burst(from, color, 10, { top: true, small: true, power: 1.2 });
+  ring(from, color, { top: true, small: true, size: 44 });
   payout(from, r);
 }
 
@@ -135,11 +259,41 @@ function smallCelebration(name: string, from: Pt, r: GoalReward, color = GOLD, o
 
 const batch: GameEvent[] = [];
 let lastPress: Pt | null = null;
+let lastPressAt = -1e9;
+
+/**
+ * Where an order's reward leaves from: where its Claim was pressed, if that was a moment ago and on
+ * the order chip (the button is gone by the time the reward is sent); otherwise the middle of the chip.
+ */
+function orderFrom(): Pt {
+  const chip = document.getElementById('order');
+  if (lastPress && chip && performance.now() - lastPressAt < 600) {
+    const r = chip.getBoundingClientRect();
+    if (lastPress.x >= r.left && lastPress.x <= r.right && lastPress.y >= r.top && lastPress.y <= r.bottom) return lastPress;
+  }
+  return anchorPt('order') ?? centre();
+}
+
+/** The Market that takes the most of a material: where the first surplus is shown. */
+function marketFor(g: Game, mat: MatId): number | null {
+  let best: number | null = null, most = -1;
+  const ins = graph(g).ins;
+  for (const n of g.nodes) {
+    if (n.type !== 'market') continue;
+    let rate = -1;
+    for (const w of ins.get(n.id) ?? []) if (w.mat === mat || materialsAt(g, w.from, w.port).includes(mat)) rate = Math.max(0, rate) + (w.mat === mat ? w.rate : 0);
+    if (rate > most) { most = rate; best = n.id; }
+  }
+  return best;
+}
 
 /** Everything the simulation raised this frame, together: a claim brings its unlocks with it, and they are one moment, not three. */
 function handleEvents(events: GameEvent[]) {
   // The Lens being made is a big moment in its own right: the goal turning ready beside it needs no sound of its own.
   const ended = events.some((e) => e.kind === 'demo-end');
+  // The first surplus brings Market Lens with it ('tech', then 'surplus'): nobody pressed Research for
+  // that one, so it gets no sparkle of its own.
+  const surplus = events.some((e) => e.kind === 'surplus');
   let claimed: 'big' | 'small' | null = ended ? 'big' : null;
   for (const ev of events) {
     switch (ev.kind) {
@@ -157,18 +311,30 @@ function handleEvents(events: GameEvent[]) {
         } else {
           claimed = claimed ?? 'small';
           // (Claimed from the slim bar over the open tech tree: the sparks go above the tree too.)
-          smallCelebration('goal', anchorPt('goal') ?? centre(), ev.reward, GOLD, ui.techOpen);
+          smallCelebration('goal', anchorPt('goal') ?? centre(), ev.reward);
         }
         break;
       case 'order-claimed':
         claimed = claimed ?? 'small';
-        smallCelebration('order', anchorPt('order') ?? centre(), ev.reward);
+        smallCelebration('order', orderFrom(), ev.reward);
         break;
       case 'tech':
         // Granted by the goal just claimed: part of that celebration. Researched: its own small one, where the player pressed.
-        // (That one is above the panels: the tech tree covers the board.)
-        if (!claimed) smallCelebration('tech', lastPress ?? centre(), {}, DATA_COLORS.a, true);
+        if (!claimed && !(surplus && ev.id === 'C1')) smallCelebration('tech', lastPress ?? centre(), {}, DATA_COLORS.a);
         break;
+      case 'surplus': {
+        // Something sells over its demand for the first time in this game: two uneasy notes, and one amber
+        // ring at the Market that is taking it. (The toast and the gauges that explain it are the HUD's.)
+        record('celebrate', 'surplus', ev.mat);
+        cueSurplus();
+        const market = marketFor(ui.g, ev.mat);
+        const n = market == null ? null : nodeById(ui.g, market);
+        if (n && !reduced()) {
+          const { w, h } = nodeSize(n);
+          worldRing({ x: n.x + w / 2, y: n.y + h / 2 }, AMBER, 96, 1.0, `market ${n.id}`);
+        }
+        break;
+      }
       case 'unlock':
         if (!claimed) smallCelebration('unlock', anchorPt(ev.what === 'flow' ? 'flow' : 'order') ?? centre(), {}, UNLOCK);
         break;
@@ -183,6 +349,8 @@ function handleEvents(events: GameEvent[]) {
       }
       case 'flow-state':
         record('celebrate', ev.first ? 'flow:first' : 'flow');
+        // (The sales are worth hearing again: they have just started paying more.)
+        freshenSales();
         if (ev.first) celebrateFlow();
         else {
           // Every time after the first: a soft rising tone, a ring on the Flow meter, and a shimmer
@@ -209,19 +377,26 @@ function handleEvents(events: GameEvent[]) {
 
 // ---------- interface signals ----------
 
-/** Credits each Market earned in the second just gone; played as one soft run of ticks. */
+/** The pitch step of each Market that sold in the second just gone; played as one soft run of ticks. */
 const sales: number[] = [];
 /**
- * Each Market's takings, smoothed. Items arrive in bursts, so one second's takings jump about even
- * when the line is steady; the tick's pitch follows the smoothed figure and stays put.
+ * Each Market's takings, smoothed, and the pitch step they are held at. Items arrive in bursts (a
+ * machine that makes one every two seconds pays every other second), so one second's takings jump
+ * about even when the line is steady. The step follows the smoothed figure, and it holds: it moves
+ * only when the takings are clearly on another step (three quarters of the way there), so the ticks'
+ * figure is heard around one note instead of hopping between two.
  */
-const takings = new Map<number, number>();
+const takings = new Map<number, { smooth: number; n: number; step: number }>();
 
 function onSale(d: { id: number; amount: number }) {
-  const before = takings.get(d.id);
-  const smooth = before == null ? d.amount : before + (d.amount - before) * 0.3;
-  takings.set(d.id, smooth);
-  sales.push(smooth);
+  let t = takings.get(d.id);
+  if (!t) takings.set(d.id, (t = { smooth: d.amount, n: 0, step: saleStep(saleLevel(d.amount)) }));
+  // A plain average over the first few seconds, then a slow follower.
+  t.n++;
+  t.smooth += (d.amount - t.smooth) * Math.max(0.15, 1 / t.n);
+  const level = saleLevel(t.smooth);
+  if (Math.abs(level - t.step) > 0.75) t.step = saleStep(level);
+  sales.push(t.step);
   if (reduced() || ui.techOpen) return;
   // The Market's coin pops. (The floating "+N¢" and the coins to the counter are the board's.)
   const n = nodeById(ui.g, d.id);
@@ -302,6 +477,87 @@ function onPlace(d: { id: number }) {
     burst({ x: foot.x - w * k * 0.32, y: foot.y }, '#8C97AD', 4, { power: 0.55 });
     burst({ x: foot.x + w * k * 0.32, y: foot.y }, '#8C97AD', 4, { power: 0.55 });
   }, 120);
+}
+
+// Rings that belong to a spot on the board (a deposit popping up, the Market that oversold): kept in
+// world space and drawn where that spot is on each frame, so they stay on it while the camera glides.
+interface WorldRing { x: number; y: number; color: string; size: number; life: number; t: number }
+const worldRings: WorldRing[] = [];
+
+/** One ring opening on a point of the board. `size` is its final radius in world px. Noted in the log with where it started on screen. */
+function worldRing(at: Pt, color: string, size: number, life: number, what: string) {
+  if (reduced()) return;
+  const p = toClient(at);
+  record('celebrate', 'ring', `${what} ${Math.round(p.x)},${Math.round(p.y)}`);
+  worldRings.push({ x: at.x, y: at.y, color, size, life, t: 0 });
+}
+
+const worldRingOverlay: Overlay = {
+  active: () => worldRings.length > 0,
+  draw(c, dt) {
+    const k = ui.view.k;
+    for (let i = worldRings.length - 1; i >= 0; i--) {
+      const r = worldRings[i];
+      r.t += dt;
+      const u = r.t / r.life;
+      if (u >= 1) {
+        worldRings.splice(i, 1);
+        continue;
+      }
+      const p = toClient(r);
+      const e = 1 - (1 - u) * (1 - u);
+      c.globalAlpha = (1 - u) * 0.9;
+      c.strokeStyle = r.color;
+      c.lineWidth = 3 * (1 - u) + 1;
+      c.beginPath();
+      c.arc(p.x, p.y, Math.max(6, (r.size * 0.25 + r.size * 0.75 * e) * k), 0, Math.PI * 2);
+      c.stroke();
+    }
+    c.globalAlpha = 1;
+  },
+};
+
+// The board has grown. The camera glides out for about 0.6 s (the board's doing) and the new deposits
+// pop in one after another; here that gets a rush of air, and for each deposit, at the moment it
+// appears, a small rising pop and one ring on it. Where the deposit is on screen is taken at that
+// moment and followed from there, because the camera is still moving.
+const expandTimers: number[] = [];
+
+function onExpand(d: { deposits: number[]; stagger: number }) {
+  for (const t of expandTimers.splice(0)) clearTimeout(t);
+  record('celebrate', 'expand', d.deposits.join(','));
+  const stagger = Math.max(0, d.stagger);
+  cueExpand();
+  // (The pops are put on the audio clock here and now, `stagger` apart: a busy frame cannot make them late.)
+  cueExpandPops(d.deposits.length, stagger / 1000);
+  buzz('expand', 15);
+  const g = ui.g;
+  d.deposits.forEach((id, i) => {
+    expandTimers.push(window.setTimeout(() => {
+      if (ui.g !== g) return;
+      const dep = g.deposits.find((x) => x.id === id);
+      if (dep) worldRing({ x: dep.x + 86, y: dep.y + 36 }, '#ffffff', 70, 0.55, `deposit ${id}`);
+    }, i * stagger));
+  });
+}
+
+// ---------- the goal card's "while you wait" line ----------
+// Looked at once a second. When the line of the goal on the card turns from not done to done, a small
+// cue says so (the card draws the tick). Not when the game is loaded or replaced, and not when the
+// goal changes: only a change seen on the same goal of the same game counts.
+let lineSeen: { g: Game; goal: number; done: boolean } | null = null;
+let lineBeat = 0;
+
+function tickLine() {
+  if (++lineBeat % 4) return;
+  const g = ui.g;
+  const line = meanwhileOf(g);
+  const now = line ? { g, goal: g.goal.i, done: line.done(g) } : null;
+  if (now && lineSeen && lineSeen.g === g && lineSeen.goal === now.goal && !lineSeen.done && now.done) {
+    cueLineDone();
+    buzz('line', 8);
+  }
+  lineSeen = now;
 }
 
 // ---------- Flow State ----------
@@ -398,8 +654,12 @@ function addMuteButton() {
   };
   onPress(btn, () => setMuted(!isMuted()));
   // Painted whenever sound is switched, by this button or by anything else (the phone's gear menu
-  // calls setMuted too), and again with every refresh of the top bar.
-  onMuteChange(paint);
+  // calls setMuted too), and again with every refresh of the top bar. The bar is refreshed at the same
+  // moment, so the gear menu's Sound row (which a phone shows instead of this button) never lags behind.
+  onMuteChange(() => {
+    paint();
+    renderPanels();
+  });
   addTopItem('actions', { el: btn, update: paint }, document.querySelector('#top .menuwrap'));
 }
 
@@ -415,6 +675,7 @@ export function initFeel() {
   initHand({ record, busy: celebrating });
   addOverlay(racerOverlay);
   addOverlay(edgeOverlay);
+  addOverlay(worldRingOverlay);
   addMuteButton();
 
   // The glow around the board's edge in Flow State: four strips, one along each edge of the stage,
@@ -422,7 +683,22 @@ export function initFeel() {
   const stage = document.getElementById('stage');
   if (stage) stage.appendChild((edge = el(`<div id="feel-edge" aria-hidden="true"><i></i><i></i><i></i><i></i></div>`)));
 
-  window.addEventListener('pointerdown', (e) => (lastPress = { x: e.clientX, y: e.clientY }), { capture: true, passive: true });
+  window.addEventListener('pointerdown', (e) => {
+    lastPress = { x: e.clientX, y: e.clientY };
+    lastPressAt = performance.now();
+  }, { capture: true, passive: true });
+
+  // The press on Start (or Continue) is the first sound of the game. #app is marked `started` by that
+  // press; under ?play it is marked while the page loads, with no press, and then there is no sound
+  // to make (audio.ts starts nothing before a press).
+  if (typeof MutationObserver !== 'undefined') {
+    let was = app.classList.contains('started');
+    new MutationObserver(() => {
+      const is = app.classList.contains('started');
+      if (is && !was) cueStart();
+      was = is;
+    }).observe(app, { attributes: true, attributeFilter: ['class'] });
+  }
 
   onGame((ev) => void batch.push(ev));
   onSignal('sale', onSale);
@@ -434,9 +710,10 @@ export function initFeel() {
   // at its Show me button when it has gone stale, and the hand acting it out when Show me is pressed.
   onSignal('tip', (d) => {
     if (d.state === 'shown') cueTip();
-    else pointAt(d.state === 'stale' ? d.at : null);
+    tipSignal(d);
   });
   onSignal('showme', actOut);
+  onSignal('expand', onExpand);
 
   onFrame(() => {
     if (batch.length) handleEvents(batch.splice(0));
@@ -451,6 +728,7 @@ export function initFeel() {
     lastCredits = g.credits;
   });
   onBeat(tickFlow);
+  onBeat(tickLine);
   onNewGame(() => {
     // Back to the beginning: nothing waiting, nothing flying, nothing humming, nothing glowing.
     // (No beat runs behind the start screen, so Flow State's hum and glow are put out here.)
@@ -458,6 +736,19 @@ export function initFeel() {
     sales.length = 0;
     takings.clear();
     racers.length = 0;
+    worldRings.length = 0;
+    for (const t of expandTimers.splice(0)) clearTimeout(t);
+    lineSeen = null;
+    for (const st of standing.values()) {
+      clearTimeout(st.timer);
+      st.el.remove();
+    }
+    standing.clear();
+    for (const [testid, t] of popTimers) {
+      clearTimeout(t);
+      counterEl(testid)?.classList.remove('pop', 'pop2');
+    }
+    popTimers.clear();
     cancelCelebrations();
     clearParticles();
     resetAudio();
@@ -489,6 +780,8 @@ export function initFeel() {
       emit: signal,
       /** Render the loudest pile-up of cues offline and report its peak (see renderPeak in audio.ts). */
       renderPeak,
+      /** Render one cue alone, or a stretch of sales, offline (see renderCue and renderSales in audio.ts). */
+      renderCue, renderSales,
       /** Where things are on screen, in client px: a node's output port, the middle of a node, the middle of a deposit. */
       where: {
         port: (id: number, i = 0) => {

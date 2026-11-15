@@ -4,10 +4,11 @@
 //  - the bar layer (`#fx-bar`, made here, a strip over the top bar and a little below it): whatever
 //    has to be seen up there, such as a coin on the last stretch of its way to the credits counter;
 //  - the top layer (`#fx-top`, made here, above every panel): a small window, a little larger than a
-//    celebration card (440 by 360 px), through which particles are seen above the HUD. A particle that asks to be
-//    on top is drawn there while it is inside the window and on the board or the strip once it has
-//    left, so a spark can start over the card and fly off across the board. The window is moved to
-//    wherever the next effect is whenever it is empty.
+//    celebration card (440 by 360 px; 220 px square for a small effect such as a claim), through which
+//    particles are seen above the HUD. A particle that asks to be on top is drawn there while it is
+//    inside the window and on the board or the strip once it has left, so a spark can start over the
+//    card and fly off across the board. The window is moved to wherever the next effect is whenever
+//    it is empty.
 // Nothing here touches the DOM after init, and nothing here knows about the game: the board hands
 // over wire geometry as `Flow` objects, everyone else calls the particle functions or adds an
 // overlay (a function that draws its own thing each frame).
@@ -132,6 +133,13 @@ const BOARD = 0, TOP = 1, BAR = 2, AUTO = -1;
  */
 const TOP_RATIO = 1;
 const TOP_W = 440, TOP_H = 360;
+/**
+ * A small effect (the sparks and first coins of a claim, thirty times a game) gets a small window:
+ * what the top layer costs each frame goes by its area, and this is a fifth of the full one.
+ */
+const SMALL_W = 220, SMALL_H = 220;
+/** The window is at its small size. */
+let topSmall = false;
 /** How far the bar layer reaches below the top bar, in px. */
 const BAR_SKIRT = 44;
 let appEl: HTMLElement | null = null;
@@ -219,7 +227,7 @@ function resize() {
   appX = a.left; appY = a.top;
   appW = Math.max(1, Math.round(a.width)); appH = Math.max(1, Math.round(a.height));
   // The top layer: a window in the middle until an effect asks for it somewhere else (see aimTop).
-  const tw = Math.min(appW, TOP_W), th = Math.min(appH, TOP_H);
+  const tw = Math.min(appW, topSmall ? SMALL_W : TOP_W), th = Math.min(appH, topSmall ? SMALL_H : TOP_H);
   place(top, appX + Math.round((appW - tw) / 2), appY + Math.round((appH - th) / 2), tw, th, TOP_RATIO);
   moveTop();
   // The strip from the top of the app to a little below the top of the stage: the top bar, in every
@@ -232,15 +240,26 @@ function moveTop() {
   if (top) top.canvas.style.transform = `translate(${top.x - appX}px, ${top.y - appY}px)`;
 }
 
-/** Centre the top layer on a point (as far as the app's edges allow), unless something is still being drawn on it. */
-function aimTop(x: number, y: number) {
+/**
+ * Centre the top layer on a point (as far as the app's edges allow), at its small or its full size,
+ * unless something is still being drawn on it. One thing overrides that: an effect that needs the
+ * full window (a celebration) takes it from a small one that is still in use; what was showing
+ * through the small window goes on where it would be without one, on the board or the bar.
+ */
+function aimTop(x: number, y: number, small = false) {
   if (sizeDirty) resize();
-  if (!top || topCount > 0) return;
-  const nx = Math.max(appX, Math.min(appX + appW - top.w, Math.round(x - top.w / 2)));
-  const ny = Math.max(appY, Math.min(appY + appH - top.h, Math.round(y - top.h / 2)));
-  if (nx === top.x && ny === top.y) return;
-  top.x = nx;
-  top.y = ny;
+  if (!top) return;
+  if (topCount > 0) {
+    if (!topSmall || small) return;
+    for (const p of pool) if (p.kind !== 0 && p.layer === TOP) p.layer = AUTO;
+    topCount = 0;
+  }
+  const w = Math.min(appW, small ? SMALL_W : TOP_W), h = Math.min(appH, small ? SMALL_H : TOP_H);
+  const nx = Math.max(appX, Math.min(appX + appW - w, Math.round(x - w / 2)));
+  const ny = Math.max(appY, Math.min(appY + appH - h, Math.round(y - h / 2)));
+  topSmall = small;
+  if (nx === top.x && ny === top.y && w === top.w && h === top.h) return;
+  place(top, nx, ny, w, h, TOP_RATIO);
   moveTop();
 }
 
@@ -499,12 +518,17 @@ interface Particle {
   cx: number; cy: number; tx: number; ty: number;
   size: number; color: string; text: string;
   shape: DotShape | '';
-  done: { fn: (() => void) | null } | null;
+  /** Text only: F_STILL. */
+  flags: number;
+  /** Text only: seconds it takes to fade at the end of its life. */
+  fade: number;
+  /** Coins: what runs when the first of a flight lands (`fn`, once) and when each of them does (`each`). */
+  done: { fn: (() => void) | null; each: (() => void) | null } | null;
 }
 
 const pool: Particle[] = [];
 for (let i = 0; i < POOL; i++) {
-  pool.push({ kind: 0, layer: 0, mask: 0, t: 0, ttl: 1, x: 0, y: 0, vx: 0, vy: 0, cx: 0, cy: 0, tx: 0, ty: 0, size: 1, color: '#fff', text: '', shape: '', done: null });
+  pool.push({ kind: 0, layer: 0, mask: 0, t: 0, ttl: 1, x: 0, y: 0, vx: 0, vy: 0, cx: 0, cy: 0, tx: 0, ty: 0, size: 1, color: '#fff', text: '', shape: '', flags: 0, fade: 0, done: null });
 }
 let live = 0;
 /** Particles to draw on each layer this frame, and how many of those are shared with the top layer's window. */
@@ -523,6 +547,8 @@ function spawn(kind: number, layer: number): Particle | null {
       p.mask = 0;
       p.t = 0;
       p.shape = '';
+      p.flags = 0;
+      p.fade = 0;
       p.done = null;
       live++;
       return p;
@@ -544,7 +570,11 @@ function kill(p: Particle) {
  * the top layer's window, about 440 by 360 px, which is centred on the first effect that uses it and
  * stays there until it is empty again. Outside the window the particle is drawn on the board as usual.
  */
-export interface LayerOpt { top?: boolean }
+export interface LayerOpt {
+  top?: boolean;
+  /** With `top`: a small effect. If the window above the panels is free it is brought here at its small size (about 220 px square). */
+  small?: boolean;
+}
 export interface BurstOpts extends LayerOpt {
   /** 1 = the usual spray; 2 flies about twice as far and lives a little longer. */
   power?: number;
@@ -560,8 +590,23 @@ export interface FlyOpts extends LayerOpt {
   stagger?: number;
   /** How far from `from` each one may start, in px. */
   spread?: number;
+  /** Each one's flight is longer than `ttl` by a random time up to this, in seconds (0.08 unless given). 0: they land exactly `stagger` apart. */
+  jitter?: number;
+  /** Runs as each one lands (after `onArrive`, which runs once, for the first). Not called when less motion is asked for: nothing flies then. */
+  each?: () => void;
+  /** With `top`: the window above the panels is put around where they leave from, not where they are going. */
+  topAtStart?: boolean;
+  /** How far their paths bow out to either side: 1 is the usual arc, 0 a straight line. */
+  bend?: number;
 }
-export interface FloaterOpts extends LayerOpt { life?: number; rise?: number }
+export interface FloaterOpts extends LayerOpt {
+  life?: number;
+  rise?: number;
+  /** Seconds of fading at the end of its life (by default the last 35% of it). */
+  fade?: number;
+  /** `size` is the size on screen, in px: not enlarged as moving text is. */
+  exact?: boolean;
+}
 export interface RingOpts extends LayerOpt { size?: number; life?: number }
 
 /**
@@ -573,7 +618,7 @@ export interface RingOpts extends LayerOpt { size?: number; life?: number }
 function layerFor(o: LayerOpt | undefined, x: number, y: number): number {
   if (!o?.top) return BOARD;
   if (inBar(x, y)) return AUTO;
-  aimTop(x, y);
+  aimTop(x, y, !!o.small);
   return TOP;
 }
 
@@ -609,19 +654,20 @@ export function burst(at: Pt, color: string, count = 10, o?: BurstOpts) {
  */
 export function fly(from: Pt, to: Pt, color: string, count = 3, onArrive?: () => void, o?: FlyOpts) {
   if (isCalm()) return void onArrive?.();
-  const done = { fn: onArrive ?? null };
+  const done = { fn: onArrive ?? null, each: o?.each ?? null };
   const dx = to.x - from.x, dy = to.y - from.y;
   const dist = Math.hypot(dx, dy) || 1;
   const nx = -dy / dist, ny = dx / dist;
   const spread = o?.spread ?? 12;
   const stagger = o?.stagger ?? 0.06;
-  const layer = o?.top ? layerFor(o, to.x, to.y) : AUTO;
+  const layer = o?.top ? (o.topAtStart ? layerFor(o, from.x, from.y) : layerFor(o, to.x, to.y)) : AUTO;
+  const jitter = o?.jitter ?? 0.08;
   let sent = 0;
   for (let i = 0; i < count; i++) {
     const p = spawn(COIN, layer);
     if (!p) break;
     sent++;
-    const bend = (Math.random() * 0.5 + 0.15) * dist * (i % 2 ? -0.45 : 0.45);
+    const bend = (Math.random() * 0.5 + 0.15) * dist * (i % 2 ? -0.45 : 0.45) * (o?.bend ?? 1);
     p.x = from.x + (Math.random() - 0.5) * spread;
     p.y = from.y + (Math.random() - 0.5) * spread;
     p.tx = to.x;
@@ -631,7 +677,7 @@ export function fly(from: Pt, to: Pt, color: string, count = 3, onArrive?: () =>
     p.vx = p.x;
     p.vy = p.y;
     p.t = -i * stagger; // staggered start
-    p.ttl = (o?.ttl ?? Math.min(0.9, 0.38 + dist / 2600)) + Math.random() * 0.08;
+    p.ttl = (o?.ttl ?? Math.min(0.9, 0.38 + dist / 2600)) + Math.random() * jitter;
     p.size = o?.size ?? 4.2;
     p.color = color;
     p.shape = o?.shape ?? '';
@@ -640,17 +686,37 @@ export function fly(from: Pt, to: Pt, color: string, count = 3, onArrive?: () =>
   if (!sent && onArrive) onArrive();
 }
 
-/** Text that pops in, rises and fades. */
+/** Text only: it neither pops in nor rises (less motion was asked for when it was made). */
+const F_STILL = 1;
+const FONT = (size: number) => `700 ${size}px "Space Grotesk", Inter, system-ui, sans-serif`;
+
+/**
+ * Text that pops in, rises and fades. (With `rise: 0` it pops in and stands where it is; with less
+ * motion asked for it neither pops nor rises, and only fades.)
+ */
 export function floater(at: Pt, text: string, color: string, size = 13, o?: FloaterOpts) {
   const p = spawn(TEXT, layerFor(o, at.x, at.y));
   if (!p) return;
+  const calmNow = isCalm();
   p.x = at.x;
   p.y = at.y;
   p.ttl = o?.life ?? 1.05;
-  p.vy = isCalm() ? 0 : o?.rise ?? 34;
-  p.size = size * TEXT_SCALE;
+  p.vy = calmNow ? 0 : o?.rise ?? 34;
+  p.fade = Math.min(p.ttl, o?.fade ?? p.ttl * 0.35);
+  p.flags = calmNow ? F_STILL : 0;
+  p.size = o?.exact ? size : size * TEXT_SCALE;
   p.color = color;
   p.text = text;
+}
+
+let measurer: CanvasRenderingContext2D | null = null;
+
+/** How wide some words are in the bold face floaters are drawn in, at `px` on screen: for laying out a label of one's own. */
+export function textWidth(text: string, px: number): number {
+  measurer ??= document.createElement('canvas').getContext('2d');
+  if (!measurer) return text.length * px * 0.6;
+  measurer.font = FONT(px);
+  return measurer.measureText(text).width;
 }
 
 /** An expanding ring. */
@@ -701,10 +767,12 @@ function stepParticles(dt: number) {
     p.t += dt;
     if (p.t < 0) continue; // still waiting for its staggered start
     if (p.t >= p.ttl) {
-      const fn = p.kind === COIN ? p.done?.fn : null;
-      if (fn) p.done!.fn = null;
+      const d = p.kind === COIN ? p.done : null;
+      const fn = d?.fn;
+      if (fn) d!.fn = null;
       kill(p);
       if (fn) fn();
+      d?.each?.();
       continue;
     }
     // Where it is now, and how far it reaches from there.
@@ -720,6 +788,7 @@ function stepParticles(dt: number) {
       y = p.vy = a * a * p.y + 2 * a * e * p.cy + e * e * p.ty;
     } else if (p.kind === TEXT) {
       y -= p.vy / 2;
+      // (Text that stands on the bar is no wider than the bar is high: it never needs the layer beside it.)
       reach = 90;
     } else reach = p.size * 1.8 + 4;
     let m: number;
@@ -773,7 +842,7 @@ function textSprite(text: string, color: string, size: number, ratio: number): S
   }
   const canvas = document.createElement('canvas');
   const c = canvas.getContext('2d')!;
-  const font = `700 ${size}px "Space Grotesk", Inter, system-ui, sans-serif`;
+  const font = FONT(size);
   const pad = 4;
   c.font = font;
   const w = Math.ceil(c.measureText(text).width) + pad * 2, h = Math.ceil(size * 1.45) + pad * 2;
@@ -849,8 +918,11 @@ function drawOne(c: CanvasRenderingContext2D, p: Particle, ratio: number) {
       const sp = textSprite(p.text, p.color, p.size, ratio);
       const rise = p.vy * (1 - (1 - u) * (1 - u));
       // It pops in a little too big and settles, then rises. (With less motion asked for: neither.)
-      const s = p.vy === 0 ? 1 : u < 0.1 ? 0.6 + u * 6 : u < 0.22 ? 1.2 - ((u - 0.1) / 0.12) * 0.2 : 1;
-      c.globalAlpha = u < 0.65 ? 1 : 1 - (u - 0.65) / 0.35;
+      // The pop takes about a fifth of a second, however long the text then stays.
+      const v = p.t / 1.05;
+      const s = p.flags & F_STILL ? 1 : v < 0.1 ? 0.6 + v * 6 : v < 0.22 ? 1.2 - ((v - 0.1) / 0.12) * 0.2 : 1;
+      const left = p.ttl - p.t;
+      c.globalAlpha = left >= p.fade ? 1 : Math.max(0, left / p.fade);
       c.drawImage(sp.canvas, p.x - (sp.w * s) / 2, p.y - rise - sp.base * s, sp.w * s, sp.h * s);
       break;
     }
