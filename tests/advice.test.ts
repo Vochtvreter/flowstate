@@ -76,6 +76,9 @@ function realGains(g: Game, a: Advice, limit = 1500, n = 3, dt = 0.1): number[] 
   return gains;
 }
 
+/** A tip as it reads, prices aside. */
+const reads = (text: string) => text.replace(/\d+¢/g, '¢');
+
 /** One sentence of at most 90 characters, with nothing broken in it. */
 function checkSentence(text: string) {
   expect([...text].length, text).toBeGreaterThan(20);
@@ -1477,9 +1480,13 @@ describe('advice: few tips, and never in a chain', () => {
 interface Case { g: Game; a: Advice; from: string }
 interface Followed { name: string; tips: { at: number; text: string; kind: Advice['kind']; saves: number | undefined }[] }
 
-function collect(): { cases: Case[]; runs: Followed[] } {
+/** A board in the middle of one of the long waits, as a player who reads only hints and tips has it. */
+interface Mid { g: Game; from: string }
+
+function collect(): { cases: Case[]; runs: Followed[]; mids: Mid[] } {
   const cases: Case[] = [];
   const followed: Followed[] = [];
+  const mids: Mid[] = [];
   const seen = new Set<string>();
   const runs: { tips: boolean; seed: number; hands?: number; studyAll?: boolean; meanwhile?: boolean }[] = [
     { tips: true, seed: 0 }, { tips: true, seed: 1 }, { tips: true, seed: 2 }, { tips: true, seed: 3, hands: 10 }, { tips: false, seed: 4 },
@@ -1489,10 +1496,18 @@ function collect(): { cases: Case[]; runs: Followed[] } {
   for (const o of runs) {
     let idle = 0;
     const name = `${o.meanwhile === false ? 'hints' : 'cards'}${o.tips ? '+tips' : ''}/${o.seed}`;
+    const waited = new Map<number, number>();
     const r = playByTheCard({
       ...o,
       wall: 30 * 60, // with the hints alone a wait can take a quarter of an hour
       onIdle: (g) => {
+        // The board 20 s and 60 s into the waits for Assembly, Breeze Deposits and the Fabricator, from the two
+        // players who follow tips and no lines: where two near-equal tips once took turns on the card.
+        if (o.tips && o.meanwhile === false && !o.hands && waitKind(g) && ['make-glyph', 'make-mist', 'build-fabricator'].includes(activeGoal(g)!.id)) {
+          const n = (waited.get(g.goal.i) ?? 0) + 1;
+          waited.set(g.goal.i, n);
+          if (n === 20 || n === 60) mids.push({ g: cloneGame(g)!, from: `${name} ${activeGoal(g)!.id}, ${n} s into the wait` });
+        }
         if (idle++ % 4) return;
         const a = advice(g);
         if (!a) return;
@@ -1505,11 +1520,11 @@ function collect(): { cases: Case[]; runs: Followed[] } {
     });
     followed.push({ name, tips: r.tips.map((t) => ({ at: t.at, text: t.text, kind: t.kind, saves: t.saves })) });
   }
-  return { cases, runs: followed };
+  return { cases, runs: followed, mids };
 }
 
 describe('every tip on a real board is affordable, can be done, and is true', () => {
-  const { cases, runs } = collect();
+  const { cases, runs, mids } = collect();
   const what = (a: Advice) => (a.cut ? 'cut' : a.favour ? 'favour' : a.research ? 'research' : a.build ? `build ${a.build}` : a.upgrade ? (a.all ? 'upgrade all' : 'upgrade') : 'wire');
 
   it('there are plenty of them, of every kind and for most of the repertoire', () => {
@@ -1519,6 +1534,31 @@ describe('every tip on a real board is affordable, can be done, and is true', ()
     // Which parts of the repertoire real boards exercised; the rest is covered on built boards above.
     console.info(`adviser: ${cases.length} tips collected from real boards, by kind and action: ${Object.entries(count).map(([k, n]) => `${k} ${n}`).join(', ')}`);
     for (const x of ['data: wire', 'data: upgrade', 'data: build lab', 'data: build well', 'flow: upgrade']) expect(Object.keys(count), x).toContain(x);
+  });
+
+  it('left alone in the middle of a long wait, no tip goes and comes back, and two tips never take turns', () => {
+    // On these boards (the card player who follows tips and no lines, 20 s and 60 s into the waits of goals 15,
+    // 18 and 21) "buy Speed on the Lab" and "build a second Lab" used to alternate every half minute. Watched
+    // here second by second for four minutes with nobody touching anything, not even the order's Claim (the
+    // case that showed it): whatever is said is said once.
+    expect(mids.length).toBe(12);
+    expect(new Set(mids.map((m) => activeGoal(m.g)!.id)).size).toBe(3);
+    let said = 0;
+    for (const { g, from } of mids) {
+      const goal = g.goal.i;
+      const rev = g.rev;
+      const seen: string[] = [];
+      for (let t = 0; t < 240 && g.goal.i === goal && !g.goal.ready && waitKind(g); t++) {
+        const text = reads(advice(g)?.text.mouse ?? '');
+        if (seen[seen.length - 1] !== text) seen.push(text);
+        run(g, 1);
+      }
+      expect(g.rev, from).toBe(rev);
+      const tips = seen.filter(Boolean);
+      said += tips.length;
+      expect(new Set(tips).size, `${from}: ${seen.map((x) => x || '—').join(' | ')}`).toBe(tips.length);
+    }
+    expect(said).toBeGreaterThanOrEqual(3); // (the adviser did have things to say on them)
   });
 
   it('affordable, worded properly, worth 15 s, and never against a goal card', () => {
