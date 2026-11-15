@@ -28,7 +28,7 @@ import { logoMark } from './hud-screens';
 import { isTouch, withKey } from './hud-words';
 import { esc, icon, matGlyph, nodeIcon } from './icons';
 import { env } from './phone-env';
-import { diagnose, matName } from './status';
+import { diagnose, matName, victoryQuiet } from './status';
 import { metData, pricedInMet, readyCount, setCardWait, teasedSlot } from './tech';
 import { delegate, select, signal, toast, touch, ui } from './ui';
 
@@ -948,7 +948,10 @@ function renderMini() {
     return;
   }
   const view = boardRect();
-  let key = `${g.board.w}x${g.board.h}|${Math.round(view.width)}x${Math.round(view.height)}`;
+  // Between the first Lens and free play no machine is in trouble in the picture (status.ts victoryQuiet): a starved or
+  // blocked one is drawn as working, as the board draws its ring then.
+  const quiet = victoryQuiet(g);
+  let key = `${g.board.w}x${g.board.h}|${Math.round(view.width)}x${Math.round(view.height)}${quiet ? '|quiet' : ''}`;
   for (const n of g.nodes) key += `|${n.x},${n.y},${n.status[0]}`;
   const at = `${Math.round(ui.view.x)},${Math.round(ui.view.y)},${ui.view.k.toFixed(3)}`;
   const now = performance.now();
@@ -968,7 +971,8 @@ function renderMini() {
   ctx.setLineDash([]);
   for (const n of g.nodes) {
     const { w, h } = nodeSize(n);
-    ctx.fillStyle = n.type === 'market' ? '#FFC857' : n.type === 'lab' ? '#C4A1FF' : ST_COLORS[n.status];
+    const st = quiet && (n.status === 'starved' || n.status === 'blocked') ? 'working' : n.status;
+    ctx.fillStyle = n.type === 'market' ? '#FFC857' : n.type === 'lab' ? '#C4A1FF' : ST_COLORS[st];
     ctx.fillRect(ox + n.x * s, oy + n.y * s, Math.max(3, w * s), Math.max(2, h * s));
   }
   const r = view;
