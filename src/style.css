@@ -129,11 +129,12 @@ g.wire.new .glow { animation: wire-glow 0.25s ease-out; }
 #temp-end { stroke: var(--canvas); stroke-width: 2px; }
 #knife { stroke: #f87171; stroke-width: 2px; stroke-dasharray: 6 5; }
 #temp-wire:not(.on), #temp-end:not(.on), #knife:not(.on) { display: none; }
-.chip { position: absolute; width: 0; height: 0; display: flex; align-items: center; justify-content: center; pointer-events: none; }
+/* A rate chip shows only while it has something to say (class `show`, see chipWanted in board.ts). */
+.chip { position: absolute; width: 0; height: 0; display: none; align-items: center; justify-content: center; pointer-events: none; }
+.chip.show { display: flex; }
 .chip i { flex: none; font-style: normal; font-size: 10.5px; line-height: 14px; padding: 2px 7px; border-radius: 999px; background: #0e1422; border: 1px solid var(--border); color: #c9d3e8; white-space: nowrap; }
 .chip.stalled i { color: #8c97ad; }
 .chip.sat i { color: #0b0f17; background: var(--warn); border-color: var(--warn); font-weight: 600; }
-.far .chip, .far .port-label { display: none; }
 
 /* nodes */
 /* Cards and chips have fixed sizes, so a text change inside one is laid out without touching the rest of the board. */
@@ -202,6 +203,62 @@ g.wire.new .glow { animation: wire-glow 0.25s ease-out; }
 #expand.ok i { color: var(--credits); }
 #expand.ok { border-color: var(--credits); background: rgba(255, 200, 87, 0.07); }
 #expand small { font-size: 11px; color: var(--muted); }
+
+/* ---------- board: rate chips, focus, what a wire may go to, the overview, expanding ---------- */
+
+/* Focus. While something is selected, wires that are not its own are drawn faint (class `dim`), by
+   stroke-opacity like every other wire state. Their dots are dimmed on the canvas (board.ts). */
+g.wire.dim .base { stroke-opacity: 0.12; }
+g.wire.dim .glow, g.wire.dim.sat .glow { stroke-opacity: 0.035; }
+g.wire.dim.sat .base { stroke-opacity: 0.18; }
+g.wire.dim.stalled .base { stroke-opacity: 0.2; }
+g.wire.dim.stalled .glow { stroke-opacity: 0; }
+g.wire.dim:hover .base { stroke-opacity: 0.6; }
+
+/* A wire dragged with the mouse: what cannot take it, or has no use for what it carries, is dimmed.
+   (For touch, and for a port armed by a tap, phone.css also lights up what can.) */
+#board.marking .node.cant { opacity: 0.4; }
+
+/* The overview: the camera is out past the floor of the detailed tier (#board.ov; data-ov is 1, 2, 3
+   as it pulls back further). Every card is its icon and status ring on a plain tile, wires are thin
+   lines of one width, and nothing has to be read. Icons and wires are sized in board units, so each
+   step draws them larger: an icon is never under 24 px on screen. */
+#board[data-ov='1'] { --ovs: 1.5; --ovw: 3px; }
+#board[data-ov='2'] { --ovs: 1.9; --ovw: 4px; }
+#board[data-ov='3'] { --ovs: 2.4; --ovw: 5.5px; }
+/* Going in and out of the overview, the icon slides to the middle of its card and grows while the text fades. */
+.node .ring { transition: transform 0.2s cubic-bezier(0.2, 0.8, 0.2, 1); }
+.node .txt { transition: opacity 0.12s; }
+#board.ov .node { box-shadow: none; }
+#board.ov .node.sel { box-shadow: 0 0 0 6px rgba(122, 162, 255, 0.3); }
+#board.ov .node .txt { opacity: 0; visibility: hidden; transition: opacity 0.12s, visibility 0s 0.12s; }
+#board.ov .node .ring { transform: translateX(53px) scale(var(--ovs)); }
+#board.ov .node .ring.flat { transform: translateX(56px) scale(var(--ovs)); }
+#board.ov .node.compact .ring.flat { transform: translateX(42px) scale(var(--ovs)); }
+#board.ov .pill, #board.ov .port, #board.ov .port-label, #board.ov #plot-label { display: none; }
+#board.ov .node { cursor: zoom-in; }
+#board.ov g.wire .glow { display: none; }
+#board.ov g.wire .hit { pointer-events: none; }
+#board.ov g.wire .base { stroke-width: var(--ovw) !important; stroke-opacity: 0.5; }
+#board.ov g.wire.stalled .base { stroke-dasharray: 12 16; }
+#board.ov g.wire.dim .base { stroke-opacity: 0.14; }
+#board.ov .deposit { justify-content: center; padding: 0; }
+#board.ov .deposit > div { display: none; }
+#board.ov .deposit > svg { transform: scale(var(--ovs)); }
+/* The Expand button is drawn larger too, so it can still be found and pressed from out here. */
+#board.ov #expand { transform: scale(var(--ovs)); transform-origin: 50% 0; }
+
+/* Expanding the board: each deposit it reveals pops in at its turn (the delay is set inline). */
+.deposit.pop { animation: deposit-pop 0.42s cubic-bezier(0.2, 1.5, 0.4, 1) backwards; }
+@keyframes deposit-pop { from { transform: scale(0.4); opacity: 0; } 60% { opacity: 1; } }
+
+/* Keys mean nothing to a finger: the hint row is for mouse and keyboard. */
+html[data-input='touch'] #hints { display: none; }
+
+@media (prefers-reduced-motion: reduce) {
+  .node .ring { transition: none; }
+  .deposit.pop { animation: none; }
+}
 
 /* radial */
 #radial { position: absolute; width: 0; height: 0; display: none; z-index: 15; }

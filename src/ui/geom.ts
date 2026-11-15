@@ -114,3 +114,178 @@ export function pinchView(v0: View, m0: Pt, d0: number, m1: Pt, d1: number, clam
   const k = clampK((v0.k * d1) / d0);
   return { x: m1.x - ((m0.x - v0.x) / v0.k) * k, y: m1.y - ((m0.y - v0.y) / v0.k) * k, k };
 }
+
+/** The zoom at which each view tier ends. Below `floor` cards are icons (the overview); `min` is as far out as the board ever goes. */
+export const ZOOM = { floor: 0.7, phoneFloor: 0.74, min: 0.25 };
+
+export interface Box { x0: number; y0: number; x1: number; y1: number }
+
+export const boxUnion = (a: Box | null, b: Box): Box =>
+  a ? { x0: Math.min(a.x0, b.x0), y0: Math.min(a.y0, b.y0), x1: Math.max(a.x1, b.x1), y1: Math.max(a.y1, b.y1) } : { ...b };
+
+/** The largest zoom, up to `kMax`, at which a world box fits a screen area. */
+export const fitZoom = (box: Box, area: Box, kMax = 1) =>
+  Math.min(kMax, Math.max(1, area.x1 - area.x0) / Math.max(1, box.x1 - box.x0), Math.max(1, area.y1 - area.y0) / Math.max(1, box.y1 - box.y0));
+
+/** The view that puts the middle of a world box in the middle of a screen area at zoom `k`. */
+export const centreView = (box: Box, area: Box, k: number): View => ({
+  x: (area.x0 + area.x1) / 2 - ((box.x0 + box.x1) / 2) * k,
+  y: (area.y0 + area.y1) / 2 - ((box.y0 + box.y1) / 2) * k,
+  k,
+});
+
+/**
+ * Frame a world box in a screen area: the largest zoom up to `kMax` that shows all of it, centred. When
+ * that zoom would be under `floor` (where cards can still be read) the view is the overview instead, no
+ * further out than `min`; a box too big even for that is centred at `min`.
+ */
+export function fitBox(box: Box, area: Box, floor: number, min = ZOOM.min, kMax = 1): View {
+  const k = fitZoom(box, area, kMax);
+  return centreView(box, area, k >= floor ? k : Math.max(min, k));
+}
+
+/**
+ * Move the camera as little as possible so that a world box lies inside a screen area. The zoom is kept
+ * when the box fits at it; otherwise the camera pulls back, but never past `floor`. A box that does not
+ * fit even there keeps its top left corner in view. Returns the same view object when nothing has to move.
+ */
+export function frameBox(v: View, box: Box, area: Box, floor: number): View {
+  const k = Math.min(v.k, Math.max(Math.min(floor, v.k), fitZoom(box, area, v.k)));
+  let x = v.x, y = v.y;
+  if (k !== v.k) {
+    // Pull back about the middle of the area, so what was in view stays roughly where it was.
+    const mx = (area.x0 + area.x1) / 2, my = (area.y0 + area.y1) / 2;
+    x = mx - ((mx - v.x) / v.k) * k;
+    y = my - ((my - v.y) / v.k) * k;
+  }
+  const slide = (lo: number, hi: number, a0: number, a1: number) => {
+    // lo..hi is the box on screen along one axis; a0..a1 the room for it. Returns how far to move.
+    if (hi - lo > a1 - a0) return a0 - lo;
+    if (lo < a0) return a0 - lo;
+    if (hi > a1) return a1 - hi;
+    return 0;
+  };
+  x += slide(box.x0 * k + x, box.x1 * k + x, area.x0, area.x1);
+  y += slide(box.y0 * k + y, box.y1 * k + y, area.y0, area.y1);
+  if (Math.abs(x - v.x) < 0.5 && Math.abs(y - v.y) < 0.5 && k === v.k) return v;
+  return { x, y, k };
+}
+
+// ---------- where a card may stand ----------
+
+/** Clear space kept between two cards, and between a card and a deposit with no Well on it. */
+export const CARD_GAP = 16;
+/** Cards stay this far inside the edge of the plot. */
+export const PLOT_MARGIN = 20;
+
+export interface SpotQuery {
+  /** Where the top left corner of the card is wanted. */
+  x: number; y: number;
+  w: number; h: number;
+  /** What to keep clear of: the other cards (each as tall as it may become) and the free deposits. */
+  avoid: Box[];
+  board: { w: number; h: number };
+  /** The grid cards stand on. */
+  grid: number;
+  /**
+   * The direction of the wire that leads to the card, when there is one (any length). A card that
+   * cannot stand where it is wanted then goes further along the wire rather than back toward where the
+   * wire came from, and to a row above or below before it goes back.
+   */
+  dir?: Pt;
+}
+
+/** True when a w×h card at (x, y) keeps `gap` clear of every box. */
+export function spotFree(x: number, y: number, w: number, h: number, avoid: Box[], gap = CARD_GAP): boolean {
+  for (const b of avoid) {
+    if (x < b.x1 + gap && x + w + gap > b.x0 && y < b.y1 + gap && y + h + gap > b.y0) return false;
+  }
+  return true;
+}
+
+/** Sideways from the wire costs this much more than along it, and going back against it this much more. */
+const SIDE = 1.5, BACK = 3;
+
+/**
+ * The spot on the grid nearest to where a card is wanted at which it stands inside the plot and keeps
+ * CARD_GAP clear of everything in `avoid`. Null when the plot has no such spot left.
+ *
+ * "Nearest" is plain distance (sideways counting a little less: cards are wider than tall), unless the
+ * card arrives on a wire (`dir`): then distance along the wire is the cheapest, a row above or below
+ * costs half as much again, and going back toward the wire's start three times as much.
+ */
+export function freeSpot(q: SpotQuery): Pt | null {
+  const { w, h, avoid, board, grid } = q;
+  const snap = (v: number) => Math.round(v / grid) * grid;
+  // The grid lines a card of this size can stand on inside the plot.
+  const gx0 = Math.ceil(PLOT_MARGIN / grid) * grid, gy0 = Math.ceil(PLOT_MARGIN / grid) * grid;
+  const gx1 = Math.floor((board.w - w - PLOT_MARGIN) / grid) * grid, gy1 = Math.floor((board.h - h - PLOT_MARGIN) / grid) * grid;
+  if (gx1 < gx0 || gy1 < gy0) return null;
+  const bx = Math.max(gx0, Math.min(gx1, snap(q.x))), by = Math.max(gy0, Math.min(gy1, snap(q.y)));
+  if (spotFree(bx, by, w, h, avoid)) return { x: bx, y: by };
+  const len = q.dir ? Math.hypot(q.dir.x, q.dir.y) : 0;
+  const ux = len > 1e-6 ? q.dir!.x / len : 0, uy = len > 1e-6 ? q.dir!.y / len : 0;
+  let best: Pt | null = null;
+  let bestCost = Infinity;
+  for (let y = gy0; y <= gy1; y += grid) {
+    for (let x = gx0; x <= gx1; x += grid) {
+      const ox = x - bx, oy = y - by;
+      let cost: number;
+      if (len > 1e-6) {
+        const along = ox * ux + oy * uy, side = Math.abs(ox * uy - oy * ux);
+        cost = (along >= 0 ? along : -along * BACK) + side * SIDE;
+      } else cost = Math.hypot(ox * 0.9, oy);
+      if (cost >= bestCost) continue;
+      if (!spotFree(x, y, w, h, avoid)) continue;
+      bestCost = cost;
+      best = { x, y };
+    }
+  }
+  return best;
+}
+
+export interface Card { id: number; x: number; y: number; w: number; h: number; /** Height to keep clear for it (it may grow). */ room: number; /** A Well: it stays on its deposit. */ fixed: boolean }
+
+/** True when two cards share any ground at all (touching edges do not count). */
+export const cardsOverlap = (a: Card, b: Card) => a.x < b.x + b.w && a.x + a.w > b.x && a.y < b.y + b.h && a.y + a.h > b.y;
+
+/**
+ * Pull apart cards that rest on top of one another (a board from an old save, or one a script laid
+ * out). Cards are taken in order: one that overlaps a card before it in the list, or a Well, has to move;
+ * every other card stays exactly where it is. Each card that has to move then goes to the nearest spot
+ * clear of all the cards that stayed and of those already moved. Wells never move. Returns the new
+ * positions of the cards that moved; a board with no overlap comes back untouched.
+ */
+export function separate(cards: Card[], deposits: Box[], board: { w: number; h: number }, grid: number): Map<number, Pt> {
+  const moved = new Map<number, Pt>();
+  const kept: Card[] = cards.filter((c) => c.fixed);
+  const loose: Card[] = [];
+  for (const c of cards) {
+    if (c.fixed) continue;
+    if (kept.some((p) => cardsOverlap(p, c))) loose.push(c);
+    else kept.push(c);
+  }
+  if (!loose.length) return moved;
+  const avoid: Box[] = kept.map((c) => ({ x0: c.x, y0: c.y, x1: c.x + c.w, y1: c.y + c.room })).concat(deposits);
+  for (const c of loose) {
+    const spot = freeSpot({ x: c.x, y: c.y, w: c.w, h: c.room, avoid, board, grid }) ?? { x: c.x, y: c.y };
+    if (spot.x !== c.x || spot.y !== c.y) moved.set(c.id, spot);
+    avoid.push({ x0: spot.x, y0: spot.y, x1: spot.x + c.w, y1: spot.y + c.room });
+  }
+  return moved;
+}
+
+/**
+ * A colour as it looks at `alpha` over the board's background, as a plain hex colour. (Wire dots are
+ * drawn on a canvas in flat colours: this is how a dimmed wire's dots are dimmed.)
+ */
+export function fadeColor(hex: string, alpha: number, over = '#0b0f17'): string {
+  const parse = (s: string) => {
+    const v = s.replace('#', '');
+    const full = v.length === 3 ? v.split('').map((c) => c + c).join('') : v;
+    return [parseInt(full.slice(0, 2), 16), parseInt(full.slice(2, 4), 16), parseInt(full.slice(4, 6), 16)];
+  };
+  const a = parse(hex), b = parse(over);
+  if (a.some(Number.isNaN)) return hex;
+  return '#' + a.map((c, i) => Math.round(c * alpha + b[i] * (1 - alpha)).toString(16).padStart(2, '0')).join('');
+}
