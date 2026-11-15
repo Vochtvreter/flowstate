@@ -49,6 +49,7 @@ import { toastFor } from './hud-toasts';
 import { aboutTime, calmMotion, isTouch, valveWords } from './hud-words';
 import { esc, icon, matGlyph } from './icons';
 import { onPanels, renderPanels } from './panels';
+import { setClaimer } from './tech';
 import { alertPick, diagnose, matName } from './status';
 import { env } from './phone-env';
 import { delegate, onFrame, onGame, onNewGame, touch, ui } from './ui';
@@ -83,20 +84,8 @@ export function initHud() {
     // button only when the player has put the focus on that button (the slim bar over the tree).
     if (ui.techOpen && byKey && (a === 'claim' || a === 'claim-order') && document.activeElement !== el) return;
     if (a === 'claim') {
-      // One press, one goal: a double click, two quick taps or a key held down would otherwise claim the next
-      // goal as well when it is met already, and its card would never be seen.
-      const now = performance.now();
-      if (now - lastClaim < CLAIM_GAP) return;
-      const pressed = goalEl.querySelector('[data-testid="claim"]')?.getBoundingClientRect();
-      const body = goalEl.querySelector<HTMLElement>('.gc-body:not(.gc-ghost)');
-      const old = body ? { html: body.innerHTML, top: body.offsetTop, width: body.offsetWidth } : null;
-      const index = g.goal.i;
-      if (claimGoal(g)) {
-        lastClaim = now;
-        if (pressed) holdGoalAnchor(pressed);
-        claimed(index, old, pressed ?? null);
-        if (byKey) focusAfter = true;
-      }
+      const pressed = goalEl.querySelector('[data-testid="claim"]')?.getBoundingClientRect() ?? null;
+      if (claimFromCard(pressed) && byKey) focusAfter = true;
     } else if (a === 'claim-order') {
       const now = performance.now();
       if (now - lastOrderClaim < CLAIM_GAP) return;
@@ -160,6 +149,8 @@ export function initHud() {
   }
 
   onPanels(renderHud);
+  // (The phone tree's Claim claims as the card does.)
+  setClaimer(claimFromCard);
   onGame(toastFor);
   onGame((ev) => {
     // A new order slides in (one that quietly replaced a stale order does not).
@@ -193,6 +184,27 @@ export function initHud() {
 
 /** Milliseconds after a claim during which another press of a Claim button is ignored. */
 export const CLAIM_GAP = 500;
+
+/**
+ * Claim the goal as the card's Claim does: one press, one goal (a double click, two quick taps or a key held down would
+ * otherwise claim the next goal as well when it is met already, and its card would never be seen); the pressed button
+ * gives and fades where it stood (`pressed`: its screen box), the old card lifts away and the new one rises, and the
+ * claim's coins leave from where it was pressed. Also the phone tree's own Claim (tech.ts). True when it claimed.
+ */
+function claimFromCard(pressed: DOMRect | null): boolean {
+  const g = ui.g;
+  const now = performance.now();
+  if (now - lastClaim < CLAIM_GAP) return false;
+  const body = goalEl.querySelector<HTMLElement>('.gc-body:not(.gc-ghost)');
+  const old = body ? { html: body.innerHTML, top: body.offsetTop, width: body.offsetWidth } : null;
+  const index = g.goal.i;
+  if (!claimGoal(g)) return false;
+  lastClaim = now;
+  if (pressed) holdGoalAnchor(pressed);
+  claimed(index, old, pressed);
+  renderPanels(true);
+  return true;
+}
 let lastClaim = -1e9;
 let lastOrderClaim = -1e9;
 /** A claim was made from the keyboard: the focus goes to the new card once it is drawn. */
