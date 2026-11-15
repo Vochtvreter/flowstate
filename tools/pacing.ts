@@ -18,6 +18,13 @@
  *                --noTips              what-if: the newcomer never follows a tip. The policy `cardonly` is that
  *                                      player, with targets of its own
  *                --noMeanwhile         what-if: the card players ignore the cards' "while you wait" lines
+ *                --skipLine=<goal ids> what-if: they ignore the line of these goals only (make-glyph,make-mist):
+ *                                      against the plain run, that is what one line is worth
+ *                --lineDelay=<seconds> what-if: they get to a line only once it has been on the card that long
+ *                --tipDelay=<seconds>  what-if: they follow a tip after this long on offer (15 otherwise)
+ *                --tipEvery=<n>[,<k>]  what-if: they follow only every nth tip that comes due, starting with
+ *                                      the kth (the nth when left out), and let the others pass
+ *                --hands=<seconds>     what-if: seconds per action of every card player (cardonly at 10 s)
  *                --trials              with --policy=newcomer: for every wait that begins with no tip on offer,
  *                                      list what the adviser weighed and how each candidate did
  *
@@ -213,6 +220,17 @@ export const CFG = {
   tips: true,
   /** Card players do what the card's "while you wait" line says. */
   meanwhile: true,
+  /**
+   * What-ifs that bend the model of the card players, not the game. They ignore the lines of these goals (ids);
+   * they get to a line only once it has been on the card for `lineDelay` seconds; and of the tips that come
+   * due they follow every `tipEvery`-th, starting with number `tipFirst`, and let the others pass.
+   */
+  skipLines: [] as string[],
+  lineDelay: 0,
+  tipEvery: 1,
+  tipFirst: 1,
+  /** For tests: called when a card player is about to make the first gesture of a goal's "while you wait" line, with the game as it stands. */
+  onLine: null as ((g: Game, goal: string) => void) | null,
   /** --trials: record what the adviser weighed whenever a wait begins with no tip on offer. */
   trials: false,
   deadStretch: 45, // seconds with free hands and nothing useful to do, listed in the report
@@ -344,7 +362,7 @@ interface Minute {
 // The simulated player
 // =====================================================================================
 
-class Bot {
+export class Bot {
   g: Game;
   P: Policy;
   seed: number;
@@ -406,6 +424,11 @@ class Bot {
   tipsOffered: { t: number; goal: number; text: string; saves: number | undefined }[] = [];
   /** The sentence on offer at the last look, '' when there was none. */
   tipShown = '';
+  /** --tipEvery: tips that have come due so far, and the sentence of one the player let pass (while it stays on offer). */
+  tipsDue = 0;
+  tipPassed = '';
+  /** --lineDelay: the goal whose "while you wait" line is showing, and since when. */
+  lineSeen: { goal: number; t: number } | null = null;
   /** Stretches of waiting with nothing the card asks and no tip on offer. */
   tiplessSince: number | null = null;
   tipless: { from: number; to: number; goal: number; why: string; trials: string[] }[] = [];
@@ -1118,10 +1141,25 @@ class Bot {
    * when the goal has no line, the line does not apply to this board, or it has been done.
    */
   meanwhileStep(): Want | null {
+    const want = this.lineStep();
+    const id = activeGoal(this.g)?.id;
+    if (want && id && !this.linesBegun.has(id)) {
+      this.linesBegun.add(id);
+      CFG.onLine?.(this.g, id);
+    }
+    return want;
+  }
+
+  /** Goals whose line this player has begun to follow. */
+  linesBegun = new Set<string>();
+
+  lineStep(): Want | null {
     const g = this.g;
     const line = CFG.meanwhile ? meanwhileOf(g) : null;
     const goal = activeGoal(g);
-    if (!line || !goal || line.done(g)) return null;
+    if (!line || !goal || line.done(g) || CFG.skipLines.includes(goal.id)) return null;
+    // --lineDelay: a person who reads the line late.
+    if (CFG.lineDelay > 0 && (this.lineSeen?.goal !== g.goal.i || g.time - this.lineSeen.t < CFG.lineDelay)) return null;
     const lab = g.nodes.find((n) => n.type === 'lab') ?? null;
     switch (goal.id) {
       case 'make-spark': {
@@ -1174,6 +1212,8 @@ class Bot {
     const g = this.g;
     this.dawdling = false;
     this.tipOn = false;
+    // Since when this goal's "while you wait" line has been on the card (for --lineDelay).
+    if (this.lineSeen?.goal !== g.goal.i && CFG.meanwhile && meanwhileOf(g)) this.lineSeen = { goal: g.goal.i, t: g.time };
     if (g.goal.ready && g.time >= this.goalClaimAt) {
       const goal = activeGoal(g)!;
       return { cls: 'new', kind: 'claim', cost: 0, label: `claim goal ${g.goal.i + 1} "${goal.title}"`, run: () => claimGoal(g) };
@@ -1211,9 +1251,15 @@ class Bot {
       this.tipsOffered.push({ t: g.time, goal: g.goal.i, text: tip.text.mouse, saves: tip.saves });
     }
     this.tipOn = true;
+    // --tipEvery: a tip the player has let pass stays on the card, unfollowed, for as long as it is on offer.
+    if (tip.text.mouse === this.tipPassed) return null;
     if (this.tipSince == null) this.tipSince = g.time;
     if (g.time - this.tipSince < this.P.tipDelay) return null;
     this.tipSince = null;
+    if (CFG.tipEvery > 1 && (++this.tipsDue - CFG.tipFirst) % CFG.tipEvery !== 0) {
+      this.tipPassed = tip.text.mouse;
+      return null;
+    }
     const index = g.goal.i;
     return {
       cls: 'grow', cost: tip.cost ?? 0, gestures: tip.steps ?? 1, tip, bulk: !!tip.all,
@@ -1427,6 +1473,7 @@ class Bot {
       return;
     }
     const before = g.credits;
+    const rev = g.rev;
     const ok = want.run();
     if (!ok) {
       // Should not happen; make it loud so the policy gets fixed rather than silently stalling.
@@ -1436,7 +1483,12 @@ class Bot {
     }
     this.endTipless();
     this.endIdle(want.label);
-    this.tipShown = ''; // the board has changed: whatever is on offer next is a new offer
+    // The board has changed: whatever is on offer next is a new offer. (A claim changes nothing on the board:
+    // the tip that was on the card before it is the same tip after it, and is not counted twice.)
+    if (g.rev !== rev) {
+      this.tipShown = '';
+      this.tipPassed = '';
+    }
     if (want.kind === 'upgrade') this.presses[want.bulk ? 'bulk' : want.label.startsWith('upgrade wire') ? 'wire' : 'single']++;
     const spent = before - g.credits;
     this.mSpent += Math.max(0, spent);
@@ -2073,6 +2125,21 @@ function main() {
     else if (k === 'noBulk') CFG.bulk = false;
     else if (k === 'noTips') CFG.tips = false;
     else if (k === 'noMeanwhile') CFG.meanwhile = false;
+    else if (k === 'skipLine' && v) CFG.skipLines = v.split(',');
+    else if (k === 'lineDelay' && v) CFG.lineDelay = Number(v);
+    else if (k === 'tipDelay' && v) {
+      for (const pol of Object.values(POLICIES)) if (pol.card) pol.tipDelay = Number(v);
+    } else if (k === 'tipEvery' && v) {
+      const [n, first] = v.split(',').map(Number);
+      CFG.tipEvery = Math.max(1, n);
+      CFG.tipFirst = first || CFG.tipEvery;
+    } else if (k === 'hands' && v) {
+      for (const pol of Object.values(POLICIES)) {
+        if (!pol.card) continue;
+        pol.actionSeconds = hands([Number(v), Number(v)]);
+        pol.firstActionDelay = 6 + Number(v);
+      }
+    }
     else if (k === 'trials') CFG.trials = true;
     else if ((k === 'spendShare' || k === 'pettyBudget') && v) {
       for (const pol of Object.values(POLICIES)) if (!pol.card) pol.spendShare = Number(v);
@@ -2094,6 +2161,7 @@ function main() {
   const what = [
     profileName !== 'current' ? `profile "${profileName}": ${profile.describe}` : '', ...overrides.map((o) => `--set=${o}`),
     CFG.bulk ? '' : '--noBulk', CFG.tips ? '' : '--noTips', CFG.meanwhile ? '' : '--noMeanwhile',
+    ...process.argv.slice(2).filter((a) => /^--(skipLine|lineDelay|tipDelay|tipEvery|hands)=/.test(a)),
   ].filter(Boolean).join('  ');
   const play = (p: Policy, s: number) => {
     const bot = new Bot(p, s, minutes ?? (p.card ? CFG.minutesCard : p.fast ? CFG.minutesFast : CFG.minutesSlow));
