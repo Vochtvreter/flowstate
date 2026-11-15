@@ -495,7 +495,8 @@ html[data-input='touch'] .claim-ghost { animation-name: claim-sink-touch; }
    second line. */
 #hud-strip.tight #order, #app.phone #order { position: relative; flex: none; gap: 8px; min-height: 44px; padding: 4px 6px 6px 8px; border-radius: 12px; font-size: 12.5px; }
 #hud-strip.tight #order[data-ready='1'], #app.phone #order[data-ready='1'] { padding: 3px 4px 5px 8px; }
-#app.phone #order[data-ready='1'] { padding-top: 2px; padding-bottom: 4px; }
+#app.phone #order[data-ready='1'] { padding-top: 1px; padding-bottom: 1px; }
+#app.phone #order[data-ready='1'] .oc-main .pbar { bottom: 1px; }
 #hud-strip.tight .oc-ico, #app.phone .oc-ico { width: 28px; height: 28px; border-radius: 8px; }
 #hud-strip.tight .oc-main, #app.phone .oc-main { flex-flow: row wrap; align-items: center; gap: 1px 8px; }
 #hud-strip.tight .oc-lbl, #hud-strip.tight .oc-pay .gc-lbl, #app.phone .oc-lbl, #app.phone .oc-pay .gc-lbl { display: none; }
