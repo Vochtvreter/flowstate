@@ -263,7 +263,13 @@ export function setFlows(list: Flow[]) {
   stale = true;
 }
 
+// The player has asked the system for less motion. Nothing then flies, sprays or swells, whoever
+// asks for it: burst(), ring() and pop() draw nothing, fly() delivers at once (its `onArrive` runs
+// straight away, so counters still pulse and sounds still play), and a floater appears where it was
+// asked for and fades without rising. Dots still travel along the wires: they are the game's display
+// of what is flowing, not decoration.
 const calm = typeof matchMedia === 'function' ? matchMedia('(prefers-reduced-motion: reduce)') : null;
+const isCalm = () => !!calm?.matches;
 
 /** A spot on the board that should pulse gently to invite a click (an output port with nothing attached). */
 export interface Beacon { x: number; y: number; r: number }
@@ -556,15 +562,22 @@ export interface FlyOpts extends LayerOpt {
 export interface FloaterOpts extends LayerOpt { life?: number; rise?: number }
 export interface RingOpts extends LayerOpt { size?: number; life?: number }
 
-/** The layer value for a particle at this point, bringing the top layer's window here if it is wanted and free. */
+/**
+ * The layer value for a particle at this point, bringing the top layer's window here if it is wanted and free.
+ * Something that starts over the top bar is already above the panels on the bar's own strip: it
+ * never needs the big top layer (which would otherwise be woken for every "+12¢" under a counter
+ * whenever its window happened to be near, as it is on a short phone).
+ */
 function layerFor(o: LayerOpt | undefined, x: number, y: number): number {
   if (!o?.top) return BOARD;
-  if (!inBar(x, y)) aimTop(x, y);
+  if (inBar(x, y)) return AUTO;
+  aimTop(x, y);
   return TOP;
 }
 
 /** A spray of sparks. */
 export function burst(at: Pt, color: string, count = 10, o?: BurstOpts) {
+  if (isCalm()) return;
   const pw = o?.power ?? 1;
   const layer = layerFor(o, at.x, at.y);
   for (let i = 0; i < count; i++) {
@@ -593,6 +606,7 @@ export function burst(at: Pt, color: string, count = 10, o?: BurstOpts) {
  * could be sent), so it is safe to hang a counter update or a sound on it.
  */
 export function fly(from: Pt, to: Pt, color: string, count = 3, onArrive?: () => void, o?: FlyOpts) {
+  if (isCalm()) return void onArrive?.();
   const done = { fn: onArrive ?? null };
   const dx = to.x - from.x, dy = to.y - from.y;
   const dist = Math.hypot(dx, dy) || 1;
@@ -631,7 +645,7 @@ export function floater(at: Pt, text: string, color: string, size = 13, o?: Floa
   p.x = at.x;
   p.y = at.y;
   p.ttl = o?.life ?? 1.05;
-  p.vy = o?.rise ?? 34;
+  p.vy = isCalm() ? 0 : o?.rise ?? 34;
   p.size = size * TEXT_SCALE;
   p.color = color;
   p.text = text;
@@ -639,6 +653,7 @@ export function floater(at: Pt, text: string, color: string, size = 13, o?: Floa
 
 /** An expanding ring. */
 export function ring(at: Pt, color: string, o?: RingOpts) {
+  if (isCalm()) return;
   const p = spawn(RING, layerFor(o, at.x, at.y));
   if (!p) return;
   p.x = at.x;
@@ -650,6 +665,7 @@ export function ring(at: Pt, color: string, o?: RingOpts) {
 
 /** A disc of radius `r` that swells and fades: the after-image of something popping (a coin on a sale). */
 export function pop(at: Pt, color: string, r = 13, o?: LayerOpt) {
+  if (isCalm()) return;
   const p = spawn(POP, layerFor(o, at.x, at.y));
   if (!p) return;
   p.x = at.x;
@@ -830,8 +846,8 @@ function drawOne(c: CanvasRenderingContext2D, p: Particle, ratio: number) {
       // dearest thing a canvas does, and a floater lives for sixty frames.
       const sp = textSprite(p.text, p.color, p.size, ratio);
       const rise = p.vy * (1 - (1 - u) * (1 - u));
-      // It pops in a little too big and settles, then rises.
-      const s = u < 0.1 ? 0.6 + u * 6 : u < 0.22 ? 1.2 - ((u - 0.1) / 0.12) * 0.2 : 1;
+      // It pops in a little too big and settles, then rises. (With less motion asked for: neither.)
+      const s = p.vy === 0 ? 1 : u < 0.1 ? 0.6 + u * 6 : u < 0.22 ? 1.2 - ((u - 0.1) / 0.12) * 0.2 : 1;
       c.globalAlpha = u < 0.65 ? 1 : 1 - (u - 0.65) / 0.35;
       c.drawImage(sp.canvas, p.x - (sp.w * s) / 2, p.y - rise - sp.base * s, sp.w * s, sp.h * s);
       break;
@@ -1006,8 +1022,11 @@ function frameSurface(s: Surface, parts: number, list: Overlay[] | null, layer: 
 
 /** Numbers for tests and tuning. `width`, `height` and `dpr` describe the board layer. */
 export function fxStats() {
+  // Particles that travel or swell (everything but floating text): none while less motion is asked for.
+  let moving = 0;
+  for (const p of pool) if (p.kind !== 0 && p.kind !== TEXT) moving++;
   return {
-    dots: dotCount, particles: live, thin: +thin.toFixed(2), width: canvas?.width ?? 0, height: canvas?.height ?? 0, dpr,
+    dots: dotCount, particles: live, moving, pool: POOL, thin: +thin.toFixed(2), width: canvas?.width ?? 0, height: canvas?.height ?? 0, dpr,
     top: { particles: liveBy[TOP], width: top?.canvas.width ?? 0, height: top?.canvas.height ?? 0 },
     bar: { particles: liveBy[BAR], width: bar?.canvas.width ?? 0, height: bar?.canvas.height ?? 0 },
     mood: +mood.toFixed(2),
