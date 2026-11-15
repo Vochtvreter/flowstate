@@ -20,7 +20,7 @@ button:focus-visible { outline: 2px solid var(--sel); outline-offset: 2px; }
 [hidden] { display: none !important; }
 
 /* --top-h is the height of the top bar: the tech tree starts under it (the phone layout sets its own, see phone.css). */
-#app { --top-h: 56px; display: grid; grid-template-columns: 72px minmax(0, 1fr) auto; grid-template-rows: var(--top-h) minmax(0, 1fr); height: 100vh; position: relative; }
+#app { --top-h: 56px; display: grid; grid-template-columns: 76px minmax(0, 1fr) auto; grid-template-rows: var(--top-h) minmax(0, 1fr); height: 100vh; position: relative; }
 
 /* ---------- top bar ---------- */
 #top { grid-column: 1 / -1; display: flex; align-items: center; gap: 8px; padding: 0 14px 0 20px; background: var(--chrome); border-bottom: 1px solid var(--line); z-index: 30; }
@@ -69,18 +69,27 @@ html[data-input='touch'] #top .ibtn { width: 44px; height: 44px; }
 html[data-input='touch'] #top .techbtn { height: 44px; }
 
 /* ---------- hotbar ---------- */
-#hot { grid-row: 2; display: flex; flex-direction: column; gap: 4px; padding: 10px 8px; background: var(--chrome); border-right: 1px solid var(--line); z-index: 20; overflow: hidden; }
-.hb { width: 56px; height: 62px; flex: none; border-radius: 12px; border: 1px solid transparent; background: transparent; color: #c9d3e8; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 3px; position: relative; padding: 0; overflow: hidden; }
+/* The build bar: a rail down the left side (a bar along the bottom in the phone layout, see phone.css). Each
+   slot is the icon, a short name and the price; a mouse-and-keyboard player also sees its key in the corner.
+   A window too short for every slot scrolls the rail. */
+#hot { grid-row: 2; display: flex; flex-direction: column; gap: 4px; padding: 8px 6px; background: var(--chrome); border-right: 1px solid var(--line); z-index: 20; overflow-x: hidden; overflow-y: auto; scrollbar-width: none; }
+#hot::-webkit-scrollbar { display: none; }
+.hb { width: 63px; height: 64px; flex: none; border-radius: 12px; border: 1px solid transparent; background: transparent; color: #c9d3e8; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 1px; position: relative; padding: 2px 0 0; overflow: hidden; }
 .hb:hover { background: #151d30; border-color: var(--border); }
 .hb.on { background: #1a2440; border-color: var(--sel); color: #fff; }
 .hb .k { position: absolute; left: 6px; top: 4px; font-size: 9px; color: var(--dim); }
-.hb .p { font-size: 10px; position: relative; }
-.hb svg { position: relative; }
+.hb .n { position: relative; font-size: 10px; font-weight: 600; line-height: 12px; letter-spacing: -0.01em; white-space: nowrap; }
+.hb .p { font-size: 10px; line-height: 12px; position: relative; white-space: nowrap; }
+.hb svg { position: relative; width: 20px; height: 20px; margin-bottom: 1px; }
 .hb .fill { position: absolute; left: 0; right: 0; bottom: 0; background: rgba(255, 200, 87, 0.13); }
 .hb.poor { color: #6b7690; }
 .hb.poor .p { color: #8c97ad; }
+/* The one locked slot on show: a dim silhouette, and in place of a price what unlocks it. */
 .hb.locked { border: 1px dashed #2a3550; color: #5d6880; }
-.hb.locked .p { color: #5eead4; font-size: 9.5px; }
+div.hb.locked { cursor: default; }
+div.hb.locked:hover { background: transparent; border-color: #2a3550; }
+.hb.locked svg { opacity: 0.7; }
+.hb.locked .p { color: #4fb5a6; font-size: 9.5px; letter-spacing: -0.01em; }
 .hb.tip { color: #f2a3ae; border: 1px dashed #3a2a35; cursor: default; }
 .hb.tip .p { font-size: 9px; color: #f2a3ae; }
 
