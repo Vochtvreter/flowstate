@@ -43,17 +43,30 @@ html[data-input='touch'] #tech .tt.own, html[data-input='touch'] #tech .qbox { m
 #tech .tgoal .go { flex: none; padding: 5px 12px; border-radius: 999px; background: var(--credits); color: #1a1405; font-size: 12.5px; font-weight: 700; white-space: nowrap; }
 @keyframes tgoal-in { from { opacity: 0; transform: translateY(-8px); } }
 /* Outside the phone layout the HUD lifts a ready goal above the tree as a slim bar with its own Claim
-   (#hud-strip.over-tech, z-index 45, 14 px from the top of the stage). Then this bar is not a button
-   but the seat that bar lands on: a band across the very top of the tree, so the bar covers nothing.
-   (Should the HUD stop doing that, the rule no longer matches and this is the tree's own bar again.) */
+   (#hud-strip.over-tech, z-index 45, 14 px from the top of the stage). That bar is the one way to claim
+   there; this element is then no banner of its own but the seat the bar lands on: an empty band across
+   the very top of the tree, so the bar covers nothing.
+   (Should the HUD stop doing that, the rules no longer match and this is the tree's own bar again.) */
 #app:not(.phone):has(#hud-strip.over-tech) #tech { grid-template-areas: 'goal goal' 'head head' 'tree detail'; grid-template-rows: auto auto minmax(0, 1fr); }
-#app:not(.phone):has(#hud-strip.over-tech) #tech .tgoal { min-height: 86px; pointer-events: none; animation: none; }
-#app:not(.phone):has(#hud-strip.over-tech) #tech .tgoal .gt span, #app:not(.phone):has(#hud-strip.over-tech) #tech .tgoal .go { display: none; }
+#app:not(.phone):has(#hud-strip.over-tech) #tech .tgoal { min-height: 86px; pointer-events: none; animation: none; background: transparent; border-bottom-color: var(--line); }
+#app:not(.phone):has(#hud-strip.over-tech) #tech .tgoal > * { display: none; }
+/* The seat runs the whole width of the tree, so on a narrow window the bar may too, instead of keeping to
+   the tree's left column (at 768 px that left 179 px for a 286 px title). Where even that is short (the
+   inspector open beside a narrow stage) the title takes two lines and the reward chips step aside. */
+@media (max-width: 1100px) {
+  #app:not(.phone) #hud-strip.over-tech { padding-right: 0; }
+  #app:not(.phone) #hud-strip.over-tech .gc-title { white-space: normal; display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 2; line-height: 18px; }
+}
+@media (max-width: 1000px) {
+  #app:not(.phone):has(#insp.open) #hud-strip.over-tech div.gc-rewards { display: none; }
+}
 
-/* Toasts are drawn above the tree (50 over 40) at the foot of the stage. While the tree is open they
-   keep to its list, clear of the detail column and the Research button at its foot. */
-#app:not(.phone):has(#tech.open) #hud #toasts { right: calc(var(--tech-side) + 12px); }
-#app:not(.phone):has(#tech.open):has(#insp.open) #hud #toasts { right: 32px; }
+/* Toasts are drawn above the tree (50 over 40), docked at the bottom left of the stage (hud.css). While the
+   tree is open they keep to its list, clear of the detail column and the Research button at its foot: the
+   column is --tech-side wide from the window's right edge, and the stage ends there too unless the inspector
+   (320 px) is open beside it. (These outrank the docking rules in hud.css, narrow windows included.) */
+#app:not(.phone):has(#tech.open) #hud #toasts, html[data-input='touch'] #app:not(.phone):has(#tech.open) #hud #toasts { right: calc(var(--tech-side) + 12px); bottom: calc(16px + var(--toast-up, 0px)); }
+#app:not(.phone):has(#tech.open):has(#insp.open) #hud #toasts, html[data-input='touch'] #app:not(.phone):has(#tech.open):has(#insp.open) #hud #toasts { right: calc(var(--tech-side) - 320px + 12px); bottom: calc(16px + var(--toast-up, 0px)); }
 /* The top bar already shows the Data in hand; only the phone layout, where the tree covers the bar, repeats it. */
 #app:not(.phone) #tech .tdata { display: none; }
 
@@ -164,6 +177,9 @@ html[data-input='touch'] #tech .tt.own, html[data-input='touch'] #tech .qbox { m
 #tech .rbtn.wake { animation: rbtn-wake 0.6s cubic-bezier(0.2, 1.5, 0.4, 1); }
 @keyframes rbtn-wake { 0% { transform: scale(0.97); } 40% { transform: scale(1.03); } 100% { transform: scale(1); } }
 #tech .owned { display: flex; align-items: center; gap: 8px; height: 48px; font-size: 14px; font-weight: 600; color: var(--rdy); }
+/* A tip's "Show me" has pointed at this button: the same ring the inspector's controls get, until it is pressed. */
+#tech .rbtn.hl { outline: 2px solid #7aa2ff; outline-offset: 3px; animation: tech-hl 1.3s ease-in-out infinite; }
+@keyframes tech-hl { 0%, 100% { box-shadow: 0 0 0 3px rgba(122, 162, 255, 0); } 50% { box-shadow: 0 0 0 9px rgba(122, 162, 255, 0.3); } }
 
 /* Hover is for pointers that can hover; on touch it would stick to the last thing tapped. */
 @media (hover: hover) {
@@ -173,11 +189,6 @@ html[data-input='touch'] #tech .tt.own, html[data-input='touch'] #tech .qbox { m
   #tech .tt.rdy:hover { background: #12302b; }
   #tech .tt.goal:hover { background: #162038; }
   #tech .rbtn.ok:hover, #tech .tgoal:hover .go { filter: brightness(1.08); }
-}
-
-/* (Under 1100 px the slim bar reaches the left end of its seat: the seat keeps only its flag.) */
-@media (max-width: 1100px) {
-  #app:not(.phone):has(#hud-strip.over-tech) #tech .tgoal .gt { display: none; }
 }
 
 /* A narrow window that is not a phone: headings sit above their tiles and the detail column slims down. */
@@ -268,6 +279,8 @@ html[data-input='touch'] #tech .tt.own, html[data-input='touch'] #tech .qbox { m
   #app.phone #tech .tree, #app.phone #tech.sheet .tree { padding-bottom: calc(12px + env(safe-area-inset-bottom)); }
   #app.phone #tech .tdetail { max-height: none; border-top: 0; border-left: 1px solid var(--line); border-radius: 0; box-shadow: none; animation: none; }
   #app.phone #tech .dhide { display: none; }
+  /* Toasts raised while the tree is open keep to the list's side, clear of the detail and its Research button. */
+  #app.phone:has(#tech.open) #toasts { align-self: flex-start; max-width: calc(58% - 16px); }
 }
 
 @media (prefers-reduced-motion: reduce) {

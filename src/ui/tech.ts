@@ -16,8 +16,9 @@ import { fmtInt, fmtRate, research, techAffordable, techAvailable, techEta, tech
 import { GOALS } from '../goals';
 import { Game } from '../state';
 import { Panel, makePanel, setClass } from './dom';
+import { isTouch } from './hud-words';
 import { esc, icon } from './icons';
-import { delegate, onNewGame, toast, touch, ui } from './ui';
+import { delegate, onNewGame, onSignal, toast, touch, ui } from './ui';
 
 // ---------- what is shown ----------
 
@@ -135,6 +136,9 @@ function needsText(x: Tile): string {
   return `${x.needs.every((n) => !n.auto) ? 'Research' : 'Earn'} ${listText(x.needs.map((n) => n.name))} first`;
 }
 
+/** A tech's description as written says "one click"; a finger taps. */
+const forInput = (text: string) => (isTouch() ? text.replace(/\b([Oo])ne click\b/g, '$1ne tap') : text);
+
 /** A wait in round, calm numbers: "about 40 s", "about 3 min". */
 function aboutText(seconds: number): string {
   if (seconds <= 5) return 'a few seconds';
@@ -197,6 +201,12 @@ const seen = new Map<string, TileState>();
 /** Techs whose state has just changed: which one-off animation they get and when it is over (0 = not drawn yet). */
 const fresh = new Map<string, { kind: 'wake' | 'won' | 'new'; until: number }>();
 const FRESH_MS = 1200;
+/**
+ * The tech whose Research button a tip has pointed at ("Show me" sends the 'showme' signal with press
+ * 'research' once the tree is open on it). The button carries the ring (class `hl`) until it is pressed,
+ * another tech is chosen, or the tree is closed.
+ */
+let ringed: string | null = null;
 /** What to do with the scroll position after the next refresh. */
 let scrollTo: 'top' | 'show' | null = null;
 /** When the tree last refreshed by itself. Refreshes nobody pressed for keep at least this far apart: twice a second at most. */
@@ -215,6 +225,7 @@ export function initTech(el: HTMLElement) {
     else if (a === 'sel') selectTech(args[0]);
     else if (a === 'tab') {
       tab = args[0] as Branch;
+      ringed = null;
       // The detail always belongs to a row of the list on show.
       const first = sortTiles(techTiles(g).filter((x) => x.t.branch === tab), goalTech(g))[0];
       if (first) ui.techSel = first.t.id;
@@ -240,9 +251,16 @@ export function initTech(el: HTMLElement) {
     doResearch(ui.techSel);
     renderTech(true);
   });
+  // "Show me" on a tip about research: the tree is already open on the tech; its Research button gets the ring.
+  onSignal('showme', (d) => {
+    if (d.press !== 'research' || !ui.techOpen || !ui.techSel) return;
+    ringed = ui.techSel;
+    renderTech(true);
+  });
   onNewGame(() => {
     // A different game: nothing remembered about the old one applies.
     if (ui.techOpen) closeTech();
+    ringed = null;
     ui.techSel = null;
     tab = null;
     sheet = false;
@@ -254,6 +272,7 @@ export function initTech(el: HTMLElement) {
 function selectTech(id: string) {
   const t = TECHS[id];
   if (!t) return;
+  if (id !== ringed) ringed = null;
   ui.techSel = id;
   tab = t.branch;
   sheet = true;
@@ -264,7 +283,8 @@ function selectTech(id: string) {
 function doResearch(id: string) {
   const g = ui.g;
   const t = TECHS[id];
-  if (!t || !research(g, id)) return; // the unlock toast comes from the game event
+  if (id === ringed) ringed = null; // pressed: the ring has done its work
+  if (!t || !research(g, id)) return; // (the tree itself shows what was researched; no toast while it is open)
   const next = sortTiles(techTiles(g).filter((x) => x.t.branch === t.branch), goalTech(g)).find((x) => x.state === 'rdy');
   if (!next) return; // nothing more to buy here: stay on what was just researched
   ui.techSel = next.t.id;
@@ -358,6 +378,7 @@ export function openTech(id?: string) {
 
 export function closeTech() {
   ui.techOpen = false;
+  ringed = null;
   setClass(host, 'open', false);
   touch();
 }
@@ -426,7 +447,7 @@ function detailHtml(g: Game, x: Tile | undefined, want: string | null): string {
       + `${first ? `<button class="dgo" data-act="sel:${first.id}">Show ${esc(first.name)}</button>` : ''}</div>`;
   }
 
-  let body = `${head}<p class="desc">${esc(t.desc)}</p><span class="lbl">Unlocks</span><ul class="unl">${t.unlocks.map((u) => `<li>${esc(u)}</li>`).join('')}</ul>`;
+  let body = `${head}<p class="desc">${esc(forInput(t.desc))}</p><span class="lbl">Unlocks</span><ul class="unl">${t.unlocks.map((u) => `<li>${esc(u)}</li>`).join('')}</ul>`;
   let foot = '';
   if (x.state === 'own') foot = `<div class="owned">${icon('check', 16)}Researched</div>`;
   else if (x.state === 'goal') {
@@ -441,10 +462,10 @@ function detailHtml(g: Game, x: Tile | undefined, want: string | null): string {
     }
     foot = `<div class="costs">${costRows(g, t)}</div>${dry ? `<p class="hint">${HOW[dry]}</p>` : ''}`;
     if (x.state === 'rdy') {
-      foot += `<button class="rbtn ok${fresh.has(t.id) ? ' wake' : ''}" data-act="research:${t.id}" data-testid="research"><span class="lab">Research</span><span class="kbd">Enter</span></button>`;
+      foot += `<button class="rbtn ok${fresh.has(t.id) ? ' wake' : ''}${t.id === ringed ? ' hl' : ''}" data-act="research:${t.id}" data-testid="research"><span class="lab">Research</span><span class="kbd">Enter</span></button>`;
     } else {
       const label = x.state === 'lck' ? needsText(x) : dry ? `Not enough ${DATA_NAMES[dry]} yet` : `Ready in ${aboutText(techEta(g, t))}`;
-      foot += `<button class="rbtn" data-act="research:${t.id}" data-testid="research" disabled>`
+      foot += `<button class="rbtn${t.id === ringed ? ' hl' : ''}" data-act="research:${t.id}" data-testid="research" disabled>`
         + `<span class="fill" style="transform:scaleX(${frac(techProgress(g, t))})"></span><span class="lab">${esc(label)}</span></button>`;
     }
   }
@@ -521,7 +542,9 @@ export function renderTech(force = false) {
   }).join('');
   // Whatever is further ahead is not drawn at all; one quiet line says the tree will grow.
   const hiddenLeft = tiles.length < Object.values(TECHS).filter((t) => !techHidden(g, t)).length;
-  // A goal that is waiting to be claimed sits on the board, behind this screen: say so and offer the way back.
+  // A goal that is waiting to be claimed sits on the board, behind this screen. On a phone this bar says so and
+  // leads back to Claim. Elsewhere the HUD lifts its own slim Claim bar above the tree, and this element is
+  // only the empty seat that bar lands on (tech.css): one way to claim on either layout, never two.
   const waiting = g.goal.ready ? GOALS[g.goal.i] : null;
   const claim = `<button class="tgoal" data-act="close"${waiting ? '' : ' hidden'}>`
     + `${waiting ? `${glyph(FLAG, 18)}<span class="gt"><b>Goal complete</b><span>${esc(waiting.title)}</span></span><span class="go">Claim on the board</span>` : ''}</button>`;
