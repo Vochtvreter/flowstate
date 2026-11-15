@@ -97,7 +97,7 @@ export const NODE_DEFS: Record<NodeType, NodeDef> = {
   router: { type: 'router', name: 'Router', base: 25, growth: 1.1, tech: 'L1', tracks: [], verb: 'split', blurb: 'Splits a stream by ratio, priority or filter.' },
   merger: { type: 'merger', name: 'Merger', base: 25, growth: 1.1, tech: 'L2', tracks: [], verb: 'merge', blurb: 'A junction: many wires in, one stream out.' },
   silo: { type: 'silo', name: 'Silo', base: 200, growth: 1.2, tech: 'L5', tracks: ['buffer'], verb: 'store', blurb: 'A big buffer that smooths bursts.' },
-  market: { type: 'market', name: 'Market', base: 150, growth: 1.5, firstFree: true, tracks: [], verb: 'sell', blurb: 'Sells anything for credits. Full price up to each material\'s demand; the surplus sells cheap.' },
+  market: { type: 'market', name: 'Market', base: 150, growth: 1.5, firstFree: true, tracks: [], verb: 'sell', blurb: 'Sells anything for credits. Takes any number of wires.' },
   lab: { type: 'lab', name: 'Lab', base: 100, growth: 1.3, tech: 'R1', tracks: ['speed'], verb: 'study', blurb: 'Turns items into Data for the tech tree.' },
   void: { type: 'void', name: 'Void', base: 0, growth: 1, tech: 'P2', tracks: [], verb: 'destroy', blurb: 'Destroys whatever arrives. Free.' },
 };

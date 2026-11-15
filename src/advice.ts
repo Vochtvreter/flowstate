@@ -43,8 +43,8 @@ import {
 } from './actions';
 import { DATA_NAMES, DATA_WORTH, DATA_YIELD, DataTier, MATERIALS, MAT_IDS, MatId, NODE_DEFS, NodeType, RULES, TECHS, Track } from './content';
 import {
-  costText, dataYield, demandInfo, has, labRate, maxLevel, nodeCost, recipeOf, research, techAffordable, techAvailable, trackAvailable,
-  upgradeCost, wellRate,
+  costText, dataYield, demandInfo, demandShown, has, labRate, maxLevel, nodeCost, recipeOf, research, techAffordable, techAvailable,
+  trackAvailable, upgradeCost, wellRate,
 } from './economy';
 import { countsForFlow, isFlowing } from './flow';
 import { Forecast, forecast, lookahead } from './forecast';
@@ -395,8 +395,13 @@ function upstreamOf(g: Game, types: NodeType[]): Set<number> {
   return seen;
 }
 
-/** A material selling over its demand right now, if any: the one losing the most to the surplus price. */
+/**
+ * A material selling over its demand right now, if any: the one losing the most to the surplus price.
+ * None until demand has shown itself (the 'surplus' event, a few seconds into the first run over demand): a tip
+ * does not name a rule the game has not introduced yet.
+ */
 function overDemand(g: Game): MatId | null {
+  if (!demandShown(g)) return null;
   let worst: MatId | null = null;
   let loss = 0.02;
   for (const m of MAT_IDS) {

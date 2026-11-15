@@ -453,6 +453,30 @@ describe('advice: the repertoire, one board at a time', () => {
     for (const x of trials.trials) if (/Glint Well runs flat out/.test(x.text)) expect(x.worth, x.text).toBe(false);
   });
 
+  it('...but not before the game has introduced demand: until the first surplus is noted, no tip names it', () => {
+    const g = rich();
+    g.techs = ['P1', 'R1', 'P2'];
+    const m = market(g);
+    for (let i = 0; i < 6; i++) upgrade(g, well(g).id, 'speed');
+    connect(g, well(g).id, 0, m.id);
+    const murk = placeNode(g, 'well', 0, 0, { depositId: 3 })!;
+    connect(g, murk.id, 0, placeNode(g, 'void', 700, 600)!.id);
+    run(g, 60);
+    g.credits = 30;
+    at(g, 'make-glyph');
+    g.techs.push('P4');
+    // The same board at the moment before the 'surplus' event: Glint already sells over its demand, the game
+    // has not said so yet (it waits a few seconds), and Market Lens has not been granted.
+    g.seenSurplus = false;
+    g.techs = g.techs.filter((t) => t !== 'C1');
+    const trials = adviceTrials(g)!;
+    expect(trials.trials.length).toBeGreaterThan(0);
+    for (const x of trials.trials) expect(x.text, x.text).not.toMatch(/demand/i);
+    const a = advice(g)!;
+    expect(a.text.mouse).toBe('Wire the Murk Well\'s port to the Market: Murk sells for 1¢ each.');
+    checkWording(a);
+  });
+
   it('"remove this wire" is only ever said when the goal card says it too', () => {
     // "Build a Fabricator", researched: 7,100¢ to save, the β long covered, and half the Glyph going into the Lab.
     const g = glyphGame();

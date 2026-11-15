@@ -652,6 +652,21 @@ describe('demand with two prices (2.2)', () => {
     expect(techHidden(copy, TECHS.C5)).toBe(false);
   });
 
+  it('nothing a player can read before that moment names demand: goal cards, node blurbs, the techs in view', () => {
+    const names = /demand|surplus|full price/i;
+    for (const goal of GOALS) {
+      for (const text of [goal.title, goal.hint.mouse, goal.hint.touch, goal.meanwhile?.text.mouse ?? '', goal.meanwhile?.text.touch ?? '']) {
+        expect(text, `${goal.id}: ${text}`).not.toMatch(names);
+      }
+    }
+    // The hotbar and the inspector show a node's blurb from the first second (the Market's used to explain demand).
+    for (const def of Object.values(NODE_DEFS)) expect(def.blurb, def.type).not.toMatch(names);
+    // Every tech that says the word is one of the hidden ones.
+    for (const t of Object.values(TECHS)) {
+      if ([t.name, t.desc, t.auto ?? '', ...t.unlocks].some((text) => names.test(text))) expect(t.needsSurplus, t.id).toBe(true);
+    }
+  });
+
   it('a save that already owns Market Lens or Wider Demand keeps them, and keeps the branch in view', () => {
     // Before this rule "Fill your first order" paid Market Lens, with no surplus ever seen.
     const old = JSON.parse(serialize(fresh()));
