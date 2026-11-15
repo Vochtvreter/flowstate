@@ -213,6 +213,33 @@ interface RadialOpt { type: NodeType; recipe?: string; label: string; sub: strin
 interface RadialState { at: Pt; opts: RadialOpt[]; dir: 'consume' | 'produce'; from: number; port: number; to: number; mat: MatId | null; a: Pt }
 let radial: RadialState | null = null;
 
+// ----- the build menu takes no press from the gesture that opened it -----
+// The menu opens when a finger lifts (a tap on empty board with a port armed, or a wire let go there).
+// For touch the browser then sends that lift's click to whatever is under the finger, and the menu,
+// kept inside the visible stage, may by then have an option there: one tap would buy a node nobody
+// chose. So an option takes only a press that began on the menu after it opened, and not in its
+// first moment (MENU_GUARD), whatever the pointer. Keys (1 to 9, Enter on a focused option) still pick.
+
+/** When the build menu last opened (performance.now), and when a press last began on it. */
+let menuOpenedAt = -Infinity;
+let menuPressAt = -Infinity;
+/** A press on the menu this soon after it opened is not taken as a choice (a double tap, or a finger still landing). */
+const MENU_GUARD = 250;
+
+function noteMenuPress() {
+  if (performance.now() - menuOpenedAt >= MENU_GUARD) menuPressAt = performance.now();
+}
+
+/** May this press or click on the menu choose an option? */
+function menuPressOk(ev: Event): boolean {
+  const pe = ev as PointerEvent;
+  // A click with no pointer behind it: the keyboard, or a script.
+  if (ev.type === 'click' && pe.detail === 0) return true;
+  // (A mouse acts on its press, which `noteMenuPress` has just looked at; touch and pen on the click
+  // that follows a press: either way that press has to be one that began after the menu opened.)
+  return menuPressAt > menuOpenedAt && menuPressAt - menuOpenedAt >= MENU_GUARD;
+}
+
 // ---------- coordinates ----------
 
 const rectOf = cachedRect(() => boardEl);
@@ -1052,11 +1079,13 @@ export function initBoard(root: HTMLElement) {
   onSignal('showme', (d) => {
     shownWire = d.wire ? { ...d.wire } : null;
   });
-  delegate(radialEl, (a, args) => {
-    if (a === 'pick') pickRadial(Number(args[0]));
+  // An option counts only for a press that began on the menu after it opened (see `menuPressOk`).
+  for (const m of [radialEl, buildEl]) m.addEventListener('pointerdown', noteMenuPress, true);
+  delegate(radialEl, (a, args, _el, ev) => {
+    if (a === 'pick' && menuPressOk(ev)) pickRadial(Number(args[0]));
   });
-  delegate(buildEl, (a, args) => {
-    if (a === 'pick') pickRadial(Number(args[0]));
+  delegate(buildEl, (a, args, _el, ev) => {
+    if (a === 'pick' && menuPressOk(ev)) pickRadial(Number(args[0]));
     else if (a === 'close') closeRadial();
   });
   // The cached board rect (and the minimap's viewport box) follow the stage's size.
@@ -3336,6 +3365,8 @@ function refreshBuildSheet() {
 
 function openRadial(state: RadialState) {
   radial = state;
+  menuOpenedAt = performance.now();
+  menuPressAt = -Infinity;
   if (env.phone) {
     openBuildSheet(state);
     return;
