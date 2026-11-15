@@ -411,6 +411,8 @@ function builtBox(): Box | null {
 
 /** Clear space kept between the strip and whatever the camera brings into view beside or below it. */
 const STRIP_GAP = 14;
+/** How far under the goal card the alert chip reaches when it shows (outside the phone layout). */
+const ALERT_ROOM = 46;
 
 /**
  * The camera that shows a world box in the part of the stage nothing covers: clear of the strip, an
@@ -445,7 +447,9 @@ function fitTarget(box: Box, detailed = false): View {
   // corner: the space is either everything to their left or everything above them, whichever shows more.
   const r = rectOf();
   const s = env.strip();
-  const y0 = (s ? s.bottom : 40) + 22;
+  // (The alert chip comes and goes under the goal card: room is kept for it whether it is showing or not,
+  // so that nothing framed now is under it a moment later.)
+  const y0 = (s ? Math.max(s.bottom, s.goalBottom + ALERT_ROOM) : 40) + 22;
   const full: Box = { x0: 40, y0, x1: Math.max(100, r.width - 40), y1: Math.max(y0 + 120, r.height - 48) };
   let area = full;
   const c = env.corner();
@@ -603,7 +607,15 @@ export function frameNodes(ids: number[]): void {
   const blocks: Box[] = [];
   if (env.phone) {
     const free = freeArea(true);
-    tiers.push([inset(free, 14)], [inset(free, 4)]);
+    // Tidy stands above the thumb row, in the corner: nothing is framed under it either.
+    const fab = fabsEl?.querySelector('[data-testid="fab-tidy"]:not([hidden])')?.getBoundingClientRect();
+    const r = rectOf();
+    const corner = fab && fab.width > 0 ? { x0: fab.left - r.left - 8, y0: fab.top - r.top - 8 } : null;
+    for (const pad of [14, 4]) {
+      const a = inset(free, pad);
+      tiers.push(corner ? [a, { ...a, x1: Math.min(a.x1, corner.x0) }, { ...a, y1: Math.min(a.y1, corner.y0) }] : [a]);
+    }
+    if (corner) blocks.push({ x0: corner.x0, y0: corner.y0, x1: Infinity, y1: free.y1 });
     // Behind the floating controls only when the room clear of them is too small for one card.
     if (free.y1 - free.y0 - 8 < (last.y1 - last.y0) * Math.min(cur.k, floor)) tiers.push([inset(freeArea(), 4)]);
   } else {
