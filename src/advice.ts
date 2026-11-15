@@ -53,7 +53,7 @@ import {
 } from './economy';
 import { countsForFlow, isFlowing } from './flow';
 import { Forecast, forecast, lookahead } from './forecast';
-import { activeGoal, depositsFrom, flowFix, goalAge, lensMaker, meanwhileAt, meanwhileOf, ownPairs, pairedWells, rawGlintWell } from './goals';
+import { activeGoal, depositsFrom, flowFix, goalAge, lensMaker, meanwhileAt, meanwhileOf, ownPairs, rawGlintWell } from './goals';
 import { graph, isMachine, isPass } from './graph';
 import { claimOrder, orderReachesMarket, ordersWorth } from './orders';
 import { tick } from './sim';
@@ -200,6 +200,12 @@ export const ADVICE = {
   full: 0.85,
   /** A step of a card's line is only given from the credits the card's own next purchase does not need (lineAdvice). */
   lineReserve: true,
+  /**
+   * ...and of those, only what the income cannot bring back in before that purchase can be made: the Assembler
+   * of "Assemble your first Glyph" can only be bought once Assembly is researched, minutes away, and whatever comes
+   * in meanwhile pays for it (cardReserve). false: the whole price is kept back from the moment the goal comes up.
+   */
+  reserveEarned: true,
 };
 
 // =====================================================================================
@@ -362,6 +368,10 @@ export function researchDelay(g: Game, id: string): number {
   const goal = savingFor(g);
   const t = TECHS[id];
   if (!goal || !t || goal === id) return 0;
+  // The card's own line asks for it (Lab Speed, then Deep Analysis, on "Make your first Mist"): the line is the
+  // card's plan for its wait, and the two together end it sooner. The tree does not warn against the card.
+  const step = lineStep(g, true);
+  if (step?.act.t === 'research' && step.act.tech === id) return 0;
   const want = TECHS[goal].cost;
   const f = income(g);
   let delay = 0;
@@ -543,8 +553,9 @@ export const SAY = {
   // --- "Make your first Mist", second line: Speed on a Well with a Lab of its own, then on the Lab ---
   linePairWell: (well: string, cost: number) => `Buy Speed on ${well} (${cents(cost)}): its Lab of its own then gets more to study.`,
   linePairLab: (mat: string, cost: number) => `Buy Speed on the ${mat} Well's own Lab (${cents(cost)}): the pair then gives more α.`,
-  // --- "Build a Fabricator", second line: the Wells with Labs of their own sell half of what they give ---
-  lineSell: (port: string, market: string, mat: string) => `Wire ${port} to ${market} too: half its ${mat} is then sold, not studied.`,
+  // --- "Make your first Mist", third line: Lab Speed, then Deep Analysis ---
+  lineLabSpeed: (name: string, cost: string) => `Research ${name} (${cost}): Labs then study twice as fast, and Deep Analysis opens.`,
+  lineDeep: (name: string, cost: string) => `Research ${name} (${cost}): every item studied then gives half as much Data again.`,
   // --- "Hold 95% Flow": the line itself, naming the node its step acts on (flowLineWords below; its other fix, a
   // wire to the Market, reads as flowSell and flowNowhere do) ---
   lineFlowSpeed: (Who: string, mat: string, node: string) => `${Who} needs more ${mat}: buy Speed on ${node}.`,
@@ -1019,7 +1030,8 @@ function flowCands(g: Game): Cand[] {
       for (const w of fed) {
         const s = node(g, w.from)!;
         if (!isPass(s)) {
-          if (s.util >= 0.9) add(speedCand(g, s, hope, (cost) => SAY.flowSpeed(Who, name, the(g, s), cost)));
+          // Named as the card's Flow line names it: "its Ember Well" where several stand and one feeds it.
+          if (s.util >= 0.9) add(speedCand(g, s, hope, (cost) => SAY.flowSpeed(Who, name, supplierName(g, s, n), cost)));
           continue;
         }
         // It is fed through a Router, Merger or Silo. A Router that sends most of what passes elsewhere: Favour
@@ -1539,7 +1551,7 @@ export function adviceLife(g: Game): number {
  * that applyAdvice(g, a) can carry out. One step at a time: for "give each new deposit a Well and a Lab built
  * from its port" that is the Well first, then, once it stands, the Lab from its port. null when the goal has no
  * line, the line is done or does not apply, or its next step cannot be done right now (not affordable, nothing
- * to build it on). Unlike advice(g) it is not held back by the quiet after an edit, costs no look-ahead, and
+ * to build it on); lineHeld(g) then says what a step that is only waiting for credits or Data is waiting for. Unlike advice(g) it is not held back by the quiet after an edit, costs no look-ahead, and
  * promises no saving (`saves` is absent): the line's worth is tested once, in tests/meanwhile.test.ts.
  *
  * What comes back, by step. Each has `text` (one sentence, the same for mouse and touch), `kind`, `cost`
@@ -1548,6 +1560,7 @@ export function adviceLife(g: Game): number {
  *  - a Well on a deposit: `build: 'well'`, `deposit` (and no `to`: the Well is placed, nothing more)
  *  - a Lab from a Well:   `build: 'lab'`, `node` = the Well, `port: 0`
  *  - the board:           `expand: true` (`cost` is the price of the expansion)
+ *  - a research:          `research` (the tech's id; `cost` 0: its price is Data, in its sentence)
  *  - a wire to cut:       `cut { wire, from, to }`, `node` = from
  * While a step is on offer here, advice(g) does not give it (or another ending to its first gesture) as a tip.
  */
@@ -1570,6 +1583,27 @@ export function lineAdvice(g: Game): Advice | null {
  * or done right now. With `any`, a step that cannot be paid for yet is given all the same (goalFocus wants the
  * nodes it is about). Looks at the board only: no copy of the game is run.
  *
+ * A step that costs credits is only given from what the card is not saving for (cardReserve): the line never
+ * makes the goal itself wait. Where it waits on that, lineHeld(g) says for how much and about how long.
+ */
+function lineStep(g: Game, any = false): Cand | null {
+  const next = lineNext(g);
+  if (!next) return null;
+  if (any) return next.c;
+  if (next.c.act.t === 'research' && !techAffordable(g, TECHS[next.c.act.tech])) return null;
+  if (next.need <= 1e-9) return next.c;
+  return next.need <= lineFunds(g) + 1e-6 ? next.c : null;
+}
+
+/** Credits a line's step may spend right now: what is in hand less what the card keeps back (cardReserve). */
+const lineFunds = (g: Game) => Math.max(0, g.credits - cardReserve(g));
+
+/**
+ * The line's next gesture whether or not it can be paid for (`c`), and the credits that must be free to spend for
+ * it to be given (`need`): its price; for a Well on a free deposit, the Well and the Lab that is to be built from
+ * its port, which are one step of the line (a goal must never end with the Well standing and its Lab not built: a
+ * Well with nowhere to send what it gives is blocked, and the alert names it for minutes). 0 for a wire or a cut.
+ *
  *  - ink-lab (goal 11):     the Ink Refiner's Ink port to the Lab (the one with the most room, if several).
  *  - glint-lab (goal 11):   a Lab from the port of the Glint Well that only sells.
  *  - well-labs (goal 15):   a Well that stands unwired gets a Lab from its port; else a free deposit gets a Well.
@@ -1577,17 +1611,15 @@ export function lineAdvice(g: Game): Advice | null {
  *                           when none of those is free.
  *  - flow-fix (goal 16):    a level of Speed on what feeds the short producer, or its port wired to the Market.
  *  - speed-pairs (goal 18): a level of Speed on a Well with a Lab of its own, then on that Lab.
+ *  - deep-analysis (goal 18): Lab Speed researched, then Deep Analysis (in Data: given once it is in hand).
  *  - cut-glyph (goals 19 and 21): the first wire that still takes Glyph to a Lab is cut.
- *  - sell-raw (goal 21):    a Well with a Lab of its own wired to the Market too.
  *  - prism-fab, glyph-fab (goal 22): the maker's port wired to the Fabricator.
  */
-function lineStep(g: Game, any = false): Cand | null {
+function lineNext(g: Game): { c: Cand; need: number } | null {
   const at = meanwhileAt(g);
   if (!at || at.line.done(g)) return null;
-  // A line spends what the card is not saving for: the credits for the card's own next purchase (the Assembler
-  // after Assembly, say) stay put, so that a line never makes the goal itself wait.
-  const keep = ADVICE.lineReserve ? cardReserve(g) : 0;
-  const afford = (c: Cand | null) => (c && (any || c.cost <= Math.max(0, g.credits - keep) + 1e-6) ? c : null);
+  const paid = (c: Cand, need = c.cost) => ({ c, need });
+  const free = (c: Cand | null) => (c ? { c, need: 0 } : null);
   switch (at.line.id) {
     case 'ink-lab': {
       const p = ports(g).find((x) => x.mat === 'ink' && isMachine(x.n));
@@ -1595,13 +1627,13 @@ function lineStep(g: Game, any = false): Cand | null {
       const lab = p && g.nodes.filter((n) => n.type === 'lab' && !wired(g, p, n)).sort((a, b) => room(b) - room(a))[0];
       if (!p || !lab) return null;
       const y = dataYield(g, p.mat);
-      return { ...wireCand(p, lab, 0, SAY.study(portName(g, p), the(g, lab), MATERIALS[p.mat].name, y.amount, DATA_NAMES[y.tier])), brings: 'data' };
+      return free({ ...wireCand(p, lab, 0, SAY.study(portName(g, p), the(g, lab), MATERIALS[p.mat].name, y.amount, DATA_NAMES[y.tier])), brings: 'data' });
     }
     case 'glint-lab': {
       const w = rawGlintWell(g);
       if (!w || !has(g, NODE_DEFS.lab.tech)) return null;
       const cost = nodeCost(g, 'lab');
-      return afford({ act: { t: 'build', type: 'lab', from: w.id, port: 0 }, cost, hope: 0, show: w.id, brings: 'data', text: SAY.lineOwnLab(portName(g, { n: w, port: 0, mat: 'glint' }), cost) });
+      return paid({ act: { t: 'build', type: 'lab', from: w.id, port: 0 }, cost, hope: 0, show: w.id, brings: 'data', text: SAY.lineOwnLab(portName(g, { n: w, port: 0, mat: 'glint' }), cost) });
     }
     case 'well-labs': case 'expand-labs': {
       // Which deposits the line is about: any (goal 15's first line), or those of the second expansion on.
@@ -1612,16 +1644,17 @@ function lineStep(g: Game, any = false): Cand | null {
       const bare = g.nodes.find((n) => n.type === 'well' && !!n.material && mine(n.depositId) && !outs(g, n).length);
       if (bare) {
         const cost = nodeCost(g, 'lab');
-        return afford({ act: { t: 'build', type: 'lab', from: bare.id, port: 0 }, cost, hope: 0, show: bare.id, brings: 'data', text: SAY.lineLab(MATERIALS[bare.material!].name, cost) });
+        return paid({ act: { t: 'build', type: 'lab', from: bare.id, port: 0 }, cost, hope: 0, show: bare.id, brings: 'data', text: SAY.lineLab(MATERIALS[bare.material!].name, cost) });
       }
       const d = freeDeposits(g).find((x) => mine(x.id));
       if (d) {
         const cost = nodeCost(g, 'well');
-        return afford({ act: { t: 'build', type: 'well', deposit: d.id }, cost, hope: 0, brings: 'data', text: SAY.lineWell(MATERIALS[d.mat].name, cost) });
+        // The Well and its Lab together (see above). The Lab's price does not move with a Well placed.
+        return paid({ act: { t: 'build', type: 'well', deposit: d.id }, cost, hope: 0, brings: 'data', text: SAY.lineWell(MATERIALS[d.mat].name, cost) }, cost + nodeCost(g, 'lab'));
       }
       if (!later) return null;
       const cost = expansionCost(g);
-      return afford({ act: { t: 'expand' }, cost, hope: 0, brings: 'data', text: SAY.lineExpand(cost) });
+      return paid({ act: { t: 'expand' }, cost, hope: 0, brings: 'data', text: SAY.lineExpand(cost) });
     }
     case 'flow-fix': {
       const f = flowFix(g);
@@ -1630,14 +1663,14 @@ function lineStep(g: Game, any = false): Cand | null {
       if ('speed' in f) {
         const s = f.speed;
         const cost = upgradeCost(s, 'speed');
-        return afford({
+        return paid({
           act: { t: 'upgrade', node: s.id, track: 'speed', all: false }, cost, hope: 0, show: s.id, culprit: f.n.id,
           text: SAY.flowSpeed(Who, MATERIALS[f.mat].name, supplierName(g, s, f.n), cost),
         });
       }
       const p: Port = { n: f.n, port: f.port, mat: f.mat };
       const say = outs(g, f.n, f.port).some((x) => machineAt(g, x.to)) ? SAY.flowSell : SAY.flowNowhere;
-      return { ...wireCand(p, f.market, 0, say(Who, MATERIALS[f.mat].name, portName(g, p, true), the(g, f.market))), culprit: f.n.id };
+      return free({ ...wireCand(p, f.market, 0, say(Who, MATERIALS[f.mat].name, portName(g, p, true), the(g, f.market))), culprit: f.n.id });
     }
     case 'speed-pairs': {
       // The first pair still at its old pace: a level on whichever side holds it back (the Well, or the Lab when
@@ -1651,24 +1684,24 @@ function lineStep(g: Game, any = false): Cand | null {
         if (n.lv.speed >= maxLevel(g, 'speed')) continue;
         const cost = upgradeCost(n, 'speed');
         const mat = well.material ? MATERIALS[well.material].name : 'raw';
-        return afford({
+        return paid({
           act: { t: 'upgrade', node: n.id, track: 'speed', all: false }, cost, hope: 0, show: n.id, brings: 'data',
           text: n === well ? SAY.linePairWell(the(g, well), cost) : SAY.linePairLab(mat, cost),
         });
       }
       return null;
     }
-    case 'sell-raw': {
-      const market = g.nodes.find((n) => n.type === 'market');
-      const w = pairedWells(g).find((n) => !outs(g, n).some((x) => node(g, x.to)?.type === 'market'));
-      if (!market || !w?.material) return null;
-      const p: Port = { n: w, port: 0, mat: w.material };
-      return { ...wireCand(p, market, 0, SAY.lineSell(portName(g, p), the(g, market), MATERIALS[w.material].name)), brings: 'credits' };
+    case 'deep-analysis': {
+      // Lab Speed first (Deep Analysis needs it), then Deep Analysis itself.
+      const id = !has(g, 'R2') ? 'R2' : 'R3';
+      const t = TECHS[id];
+      if (!t || !techAvailable(g, t)) return null;
+      return free({ act: { t: 'research', tech: id }, cost: 0, hope: 0, brings: 'data', text: id === 'R2' ? SAY.lineLabSpeed(t.name, costText(t)) : SAY.lineDeep(t.name, costText(t)) });
     }
     case 'cut-glyph': {
       const id = at.line.cuts?.(g)[0];
       const c = id == null ? null : cutCand(g, id);
-      return c && { ...c, brings: 'credits' };
+      return free(c && { ...c, brings: 'credits' });
     }
     case 'prism-fab': case 'glyph-fab': {
       const mat: MatId = at.line.id === 'prism-fab' ? 'prism' : 'glyph';
@@ -1677,18 +1710,92 @@ function lineStep(g: Game, any = false): Cand | null {
       const p = fab && ports(g).filter((x) => x.mat === mat && x.n !== fab && !wired(g, x, fab)).sort((a, b) => spare(g, b) - spare(g, a))[0];
       if (!fab || !p) return null;
       const n = RECIPES.lens.inputs.find(([m]) => m === mat)?.[1] ?? 1;
-      return { ...wireCand(p, fab, 0, SAY.lineFeed(portName(g, p), the(g, fab), n === 1 ? 'one' : n === 2 ? 'two' : String(n), MATERIALS[mat].name)), brings: 'credits' };
+      return free({ ...wireCand(p, fab, 0, SAY.lineFeed(portName(g, p), the(g, fab), n === 1 ? 'one' : n === 2 ? 'two' : String(n), MATERIALS[mat].name)), brings: 'credits' });
     }
     default:
       return null;
   }
 }
 
-/** Credits the card's own next purchase needs (the machine after a research, or the thing it is saving for), which a line leaves alone. */
-function cardReserve(g: Game): number {
+/**
+ * The card's own next purchase, as the reserve sees it: its price (`then`), the seconds until it can be made
+ * (`wait`: until the Data for its research is in hand at the current income, Infinity when some of that Data has
+ * nothing bringing it in; 0 for a purchase that waits on credits alone, which can be made the moment they are
+ * there), and the credits coming in a second from sales (`rate`). null when the card buys nothing next. Read from
+ * the game's own smoothed rates (Game.creditRate, Game.dataRate): no copy of the game is run.
+ */
+function cardPurchase(g: Game): { then: number; wait: number; rate: number } | null {
   const step = activeGoal(g)?.step?.(g) ?? null;
-  if (!step) return 0;
-  return 'tech' in step ? step.then ?? 0 : step.credits;
+  if (!step) return null;
+  const rate = Math.max(0, g.creditRate);
+  if (!('tech' in step)) return step.credits > 0 ? { then: step.credits, wait: 0, rate } : null;
+  const then = step.then ?? 0;
+  const t = TECHS[step.tech];
+  if (then <= 0 || !t) return null;
+  let wait = 0;
+  for (const k of TIERS) {
+    const missing = (t.cost[k] ?? 0) - g.data[k];
+    if (missing <= 1e-9) continue;
+    wait = Math.max(wait, g.dataRate[k] > 1e-6 ? missing / g.dataRate[k] : Infinity);
+  }
+  return { then, wait, rate };
+}
+
+/**
+ * Credits a line's step leaves alone: of the price of the card's own next purchase (the machine after a research,
+ * or the thing it is saving for), what the income cannot bring back in before that purchase can be made, at the
+ * least (ADVICE.reserveEarned): max(0, price − credits a second × seconds until it can be made). So a line never
+ * makes the goal itself wait, and never sits idle beside credits it could spend: while Assembly is minutes away,
+ * the Assembler's 600¢ come in meanwhile and nothing need be kept for it; once Assembly is near, all of it is.
+ */
+function cardReserve(g: Game): number {
+  if (!ADVICE.lineReserve) return 0;
+  const p = cardPurchase(g);
+  if (!p) return 0;
+  if (!ADVICE.reserveEarned) return p.then;
+  const earned = p.wait <= 0 ? 0 : p.rate > 0 ? p.rate * p.wait : 0;
+  return Math.max(0, p.then - earned);
+}
+
+/**
+ * The step of the card's line that is being saved for, when there is one: the line's next gesture costs credits
+ * and they are not free to spend yet (not in hand, or kept back for the card's own next purchase: cardReserve).
+ * `cost`: the credits to have in hand when it is given (its price, or for a Well its price and its Lab's; and,
+ * where the card's purchase comes first, that purchase's price as well: the Expand of 500¢ after the Assembler of
+ * 600¢ is "1,100¢"); `eta`: about how many game seconds until then at the current income (Infinity when no
+ * credits come in). null when the line has no step, its step can be done now, or costs nothing.
+ *
+ * What a card can say: "Saving for this · 1,100¢ · about 40 s". The arithmetic follows the reserve: while some of
+ * the card's purchase can still be earned back before it can be made, what is free to spend stays where it is
+ * (credits come in as fast as the reserve grows), so a step it does not cover waits for that purchase to be
+ * covered as well.
+ */
+export function lineHeld(g: Game): { cost: number; sym: '¢' | 'α' | 'β' | 'γ'; eta: number } | null {
+  const next = lineNext(g);
+  if (!next) return null;
+  if (next.c.act.t === 'research') {
+    // A research the line asks for (Deep Analysis, 80β): saved for in Data. The kind it is furthest from.
+    const t = TECHS[next.c.act.tech];
+    let worst: { cost: number; sym: '¢' | 'α' | 'β' | 'γ'; eta: number } | null = null;
+    for (const k of TIERS) {
+      const cost = t?.cost[k] ?? 0;
+      const missing = cost - g.data[k];
+      if (missing <= 1e-9) continue;
+      const eta = g.dataRate[k] > 1e-6 ? missing / g.dataRate[k] : Infinity;
+      if (!worst || eta > worst.eta) worst = { cost, sym: UNIT[k], eta };
+    }
+    return worst;
+  }
+  if (next.need <= 1e-9 || next.need <= lineFunds(g) + 1e-6) return null;
+  const p = ADVICE.lineReserve ? cardPurchase(g) : null;
+  const rate = Math.max(0, g.creditRate);
+  const need = next.need;
+  // Can the step be covered before the card's purchase is (the reserve shrinking as the purchase draws near
+  // only matters when the step costs more than is free now)?
+  const before = !p || (ADVICE.reserveEarned && p.wait > 0 && g.credits + (rate > 0 ? rate * p.wait : 0) - p.then >= need);
+  const cost = before ? need : need + p!.then;
+  const eta = rate > 1e-9 ? Math.max(0, (cost - g.credits) / rate) : Infinity;
+  return { cost, sym: '¢', eta };
 }
 
 /** Does this port feed a Lab, straight or through Routers, Mergers and Silos? */
