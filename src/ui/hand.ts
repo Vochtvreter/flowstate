@@ -1,5 +1,7 @@
 // The guiding hand: a small pointer that acts out a gesture for the player. It never takes input,
 // never presses anything, and vanishes the moment the player touches the screen, a key or the wheel.
+// (The one thing it ever changes is where a panel is scrolled to: when Show me is about a button that
+// its panel has scrolled out of sight, the panel is scrolled back to it so that it can be pointed at.)
 //
 // It has three jobs:
 //  - The first wire and the first build ("goal"). When the player has done nothing for a few seconds
