@@ -252,8 +252,10 @@ const inTop = (x: number, y: number, m = 0) => !!top && x >= top.x - m && x <= t
  * How lively the wires look, 0..1. The feel module raises it in Flow State: dots then run a little
  * faster and a touch larger. It eases, so the change is felt rather than seen.
  */
-export function setMood(level: number) {
+export function setMood(level: number, atOnce = false) {
   moodTarget = Math.max(0, Math.min(1, level));
+  // (A reset: no easing. Behind the start screen no time passes, so there would be none anyway.)
+  if (atOnce) mood = moodTarget;
 }
 
 /** The wires to draw dots on. Call again whenever wires are added or removed. */

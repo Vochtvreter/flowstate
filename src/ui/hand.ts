@@ -98,7 +98,12 @@ let clock = 0;
 /** Where the fingertip was last drawn, in client px (for tests). */
 const tip: Pt = { x: 0, y: 0 };
 let lastInput = 0;
-let pointersDown = 0;
+/**
+ * The pointers that are down, by id. (Kept as a set, not a count: when a press opens a browser dialog,
+ * "New game" asks "are you sure?", the page never hears that press end. A count would stay one too high
+ * for good and the hand would never show again; the set is emptied by the next press.)
+ */
+const pointersDown = new Set<number>();
 /** The build menu has been opened from a port during this game: that gesture is learnt. */
 let builtOnce = false;
 const reducedQuery = typeof matchMedia === 'function' ? matchMedia('(prefers-reduced-motion: reduce)') : null;
@@ -113,7 +118,7 @@ const buildDone = (g: Game) => builtOnce || g.goal.i > 3 || g.nodes.some((n) => 
 
 /** A full-screen card is up, a celebration is playing, or the player is holding something down. */
 function blockedAnywhere(): boolean {
-  if (pointersDown > 0 || document.hidden || ui.menuOpen || isBusy()) return true;
+  if (pointersDown.size > 0 || document.hidden || ui.menuOpen || isBusy()) return true;
   if (!app) return false;
   // The start screen is up until #app is marked as started.
   if (!app.classList.contains('started')) return true;
@@ -379,19 +384,22 @@ export function initHand(hooks: { record: typeof record; busy: () => boolean }) 
   handEl.style.transformOrigin = `${TIP.x}px ${TIP.y}px`;
   (app ?? document.body).appendChild(handEl);
   const opts = { capture: true, passive: true } as const;
-  window.addEventListener('pointerdown', () => {
-    pointersDown++;
+  window.addEventListener('pointerdown', (e) => {
+    // The first pointer of a new press (the mouse, or the first finger) means nothing else is still
+    // down, whatever was left in the set by a release that was never heard.
+    if (e.isPrimary) pointersDown.clear();
+    pointersDown.add(e.pointerId);
     input();
   }, opts);
-  const up = () => {
-    pointersDown = Math.max(0, pointersDown - 1);
+  const up = (e: PointerEvent) => {
+    pointersDown.delete(e.pointerId);
     lastInput = performance.now();
     // Show me was pressed with a mouse: the hand may start now that the button is let go.
-    if (act && !act.shown && !pointersDown) soon();
+    if (act && !act.shown && !pointersDown.size) soon();
   };
   window.addEventListener('pointerup', up, opts);
   window.addEventListener('pointercancel', up, opts);
-  window.addEventListener('blur', () => (pointersDown = 0));
+  window.addEventListener('blur', () => pointersDown.clear());
   window.addEventListener('keydown', input, opts);
   window.addEventListener('wheel', input, opts);
   window.addEventListener('touchstart', input, opts);
@@ -401,6 +409,7 @@ export function initHand(hooks: { record: typeof record; busy: () => boolean }) 
   onNewGame(() => {
     builtOnce = false;
     act = null;
+    pointersDown.clear();
     lastInput = performance.now();
     hide('new game');
   });

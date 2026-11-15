@@ -464,7 +464,7 @@ export function initFeel() {
     inFlow = edgeOn = false;
     edgeLevel = 0;
     shimmer = SHIMMER;
-    setMood(0);
+    setMood(0, true);
     if (edge) setClass(edge, 'on', false);
     creditsGame = null;
   });
