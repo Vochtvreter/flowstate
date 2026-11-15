@@ -499,12 +499,17 @@ interface Particle {
   cx: number; cy: number; tx: number; ty: number;
   size: number; color: string; text: string;
   shape: DotShape | '';
-  done: { fn: (() => void) | null } | null;
+  /** Text only: F_PLATE, F_LEFT, F_STILL (see FloaterOpts). */
+  flags: number;
+  /** Text only: seconds it takes to fade at the end of its life. */
+  fade: number;
+  /** Coins: what runs when the first of a flight lands (`fn`, once) and when each of them does (`each`). */
+  done: { fn: (() => void) | null; each: (() => void) | null } | null;
 }
 
 const pool: Particle[] = [];
 for (let i = 0; i < POOL; i++) {
-  pool.push({ kind: 0, layer: 0, mask: 0, t: 0, ttl: 1, x: 0, y: 0, vx: 0, vy: 0, cx: 0, cy: 0, tx: 0, ty: 0, size: 1, color: '#fff', text: '', shape: '', done: null });
+  pool.push({ kind: 0, layer: 0, mask: 0, t: 0, ttl: 1, x: 0, y: 0, vx: 0, vy: 0, cx: 0, cy: 0, tx: 0, ty: 0, size: 1, color: '#fff', text: '', shape: '', flags: 0, fade: 0, done: null });
 }
 let live = 0;
 /** Particles to draw on each layer this frame, and how many of those are shared with the top layer's window. */
@@ -523,6 +528,8 @@ function spawn(kind: number, layer: number): Particle | null {
       p.mask = 0;
       p.t = 0;
       p.shape = '';
+      p.flags = 0;
+      p.fade = 0;
       p.done = null;
       live++;
       return p;
@@ -560,8 +567,27 @@ export interface FlyOpts extends LayerOpt {
   stagger?: number;
   /** How far from `from` each one may start, in px. */
   spread?: number;
+  /** Each one's flight is longer than `ttl` by a random time up to this, in seconds (0.08 unless given). 0: they land exactly `stagger` apart. */
+  jitter?: number;
+  /** Runs as each one lands (after `onArrive`, which runs once, for the first). Not called when less motion is asked for: nothing flies then. */
+  each?: () => void;
+  /** With `top`: the window above the panels is put around where they leave from, not where they are going. */
+  topAtStart?: boolean;
+  /** How far their paths bow out to either side: 1 is the usual arc, 0 a straight line. */
+  bend?: number;
 }
-export interface FloaterOpts extends LayerOpt { life?: number; rise?: number }
+export interface FloaterOpts extends LayerOpt {
+  life?: number;
+  rise?: number;
+  /** Seconds of fading at the end of its life (by default the last 35% of it). */
+  fade?: number;
+  /** A dark plate behind the words, so they can be read over whatever they stand on. */
+  plate?: boolean;
+  /** `at` is the middle of the text's left edge instead of its bottom centre. */
+  left?: boolean;
+  /** `size` is the size on screen, in px: not enlarged as moving text is. */
+  exact?: boolean;
+}
 export interface RingOpts extends LayerOpt { size?: number; life?: number }
 
 /**
@@ -609,19 +635,20 @@ export function burst(at: Pt, color: string, count = 10, o?: BurstOpts) {
  */
 export function fly(from: Pt, to: Pt, color: string, count = 3, onArrive?: () => void, o?: FlyOpts) {
   if (isCalm()) return void onArrive?.();
-  const done = { fn: onArrive ?? null };
+  const done = { fn: onArrive ?? null, each: o?.each ?? null };
   const dx = to.x - from.x, dy = to.y - from.y;
   const dist = Math.hypot(dx, dy) || 1;
   const nx = -dy / dist, ny = dx / dist;
   const spread = o?.spread ?? 12;
   const stagger = o?.stagger ?? 0.06;
-  const layer = o?.top ? layerFor(o, to.x, to.y) : AUTO;
+  const layer = o?.top ? (o.topAtStart ? layerFor(o, from.x, from.y) : layerFor(o, to.x, to.y)) : AUTO;
+  const jitter = o?.jitter ?? 0.08;
   let sent = 0;
   for (let i = 0; i < count; i++) {
     const p = spawn(COIN, layer);
     if (!p) break;
     sent++;
-    const bend = (Math.random() * 0.5 + 0.15) * dist * (i % 2 ? -0.45 : 0.45);
+    const bend = (Math.random() * 0.5 + 0.15) * dist * (i % 2 ? -0.45 : 0.45) * (o?.bend ?? 1);
     p.x = from.x + (Math.random() - 0.5) * spread;
     p.y = from.y + (Math.random() - 0.5) * spread;
     p.tx = to.x;
@@ -631,7 +658,7 @@ export function fly(from: Pt, to: Pt, color: string, count = 3, onArrive?: () =>
     p.vx = p.x;
     p.vy = p.y;
     p.t = -i * stagger; // staggered start
-    p.ttl = (o?.ttl ?? Math.min(0.9, 0.38 + dist / 2600)) + Math.random() * 0.08;
+    p.ttl = (o?.ttl ?? Math.min(0.9, 0.38 + dist / 2600)) + Math.random() * jitter;
     p.size = o?.size ?? 4.2;
     p.color = color;
     p.shape = o?.shape ?? '';
@@ -640,17 +667,43 @@ export function fly(from: Pt, to: Pt, color: string, count = 3, onArrive?: () =>
   if (!sent && onArrive) onArrive();
 }
 
-/** Text that pops in, rises and fades. */
-export function floater(at: Pt, text: string, color: string, size = 13, o?: FloaterOpts) {
+const F_PLATE = 1, F_LEFT = 2, F_STILL = 4;
+
+/** The font size a floater of `size` is drawn at, in px. */
+const floaterPx = (size: number, o?: FloaterOpts) => (o?.exact ? size : size * TEXT_SCALE);
+
+/**
+ * Text that pops in, rises and fades. (With `rise: 0` it pops in and stands where it is; with less
+ * motion asked for it neither pops nor rises, and only fades.)
+ * Returns a handle for endFloater(), or null when the pool is full and nothing was drawn.
+ */
+export function floater(at: Pt, text: string, color: string, size = 13, o?: FloaterOpts): object | null {
   const p = spawn(TEXT, layerFor(o, at.x, at.y));
-  if (!p) return;
+  if (!p) return null;
+  const calmNow = isCalm();
   p.x = at.x;
   p.y = at.y;
   p.ttl = o?.life ?? 1.05;
-  p.vy = isCalm() ? 0 : o?.rise ?? 34;
-  p.size = size * TEXT_SCALE;
+  p.vy = calmNow ? 0 : o?.rise ?? 34;
+  p.fade = Math.min(p.ttl, o?.fade ?? p.ttl * 0.35);
+  p.flags = (o?.plate ? F_PLATE : 0) | (o?.left ? F_LEFT : 0) | (calmNow ? F_STILL : 0);
+  p.size = floaterPx(size, o);
   p.color = color;
   p.text = text;
+  return p;
+}
+
+/** Take a floater away now (its handle is what floater() returned). Does nothing if it has already gone. */
+export function endFloater(handle: object | null, text: string) {
+  const p = handle as Particle | null;
+  // (The pool hands the same object out again: the words tell whether it is still the one that was made.)
+  if (p && p.kind === TEXT && p.text === text) kill(p);
+}
+
+/** How large a floater's picture is on screen, in px: for placing one where it covers nothing. */
+export function floaterSize(text: string, size = 13, o?: FloaterOpts): { w: number; h: number } {
+  const sp = textSprite(text, '#ffffff', floaterPx(size, o), 1, !!o?.plate);
+  return { w: sp.w, h: sp.h };
 }
 
 /** An expanding ring. */
@@ -701,10 +754,12 @@ function stepParticles(dt: number) {
     p.t += dt;
     if (p.t < 0) continue; // still waiting for its staggered start
     if (p.t >= p.ttl) {
-      const fn = p.kind === COIN ? p.done?.fn : null;
-      if (fn) p.done!.fn = null;
+      const d = p.kind === COIN ? p.done : null;
+      const fn = d?.fn;
+      if (fn) d!.fn = null;
       kill(p);
       if (fn) fn();
+      d?.each?.();
       continue;
     }
     // Where it is now, and how far it reaches from there.
@@ -720,6 +775,7 @@ function stepParticles(dt: number) {
       y = p.vy = a * a * p.y + 2 * a * e * p.cy + e * e * p.ty;
     } else if (p.kind === TEXT) {
       y -= p.vy / 2;
+      // (Text that stands on the bar is no wider than the bar is high: it never needs the layer beside it.)
       reach = 90;
     } else reach = p.size * 1.8 + 4;
     let m: number;
@@ -759,8 +815,8 @@ let fontsWatched = false;
  * (how far the baseline is below the top) are in CSS px; the picture is `ratio` times that.
  * Kept while in use, so the "+1¢" of every Market each second is drawn once.
  */
-function textSprite(text: string, color: string, size: number, ratio: number): Sprite {
-  const key = `${text}|${color}|${size}|${ratio}`;
+function textSprite(text: string, color: string, size: number, ratio: number, plate = false): Sprite {
+  const key = `${text}|${color}|${size}|${ratio}|${plate ? 1 : 0}`;
   let s = sprites.get(key);
   if (s) {
     s.used = ++spriteClock;
@@ -774,12 +830,30 @@ function textSprite(text: string, color: string, size: number, ratio: number): S
   const canvas = document.createElement('canvas');
   const c = canvas.getContext('2d')!;
   const font = `700 ${size}px "Space Grotesk", Inter, system-ui, sans-serif`;
-  const pad = 4;
+  const pad = plate ? 6 : 4, padY = plate ? 2 : 4;
   c.font = font;
-  const w = Math.ceil(c.measureText(text).width) + pad * 2, h = Math.ceil(size * 1.45) + pad * 2;
+  const w = Math.ceil(c.measureText(text).width) + pad * 2, h = Math.ceil(size * (plate ? 1.3 : 1.45)) + padY * 2;
   canvas.width = Math.ceil(w * ratio);
   canvas.height = Math.ceil(h * ratio);
   c.setTransform(ratio, 0, 0, ratio, 0, 0);
+  if (plate) {
+    // A small dark tablet with a hairline in the text's colour: the words can then stand on anything.
+    const r = Math.min(8, h / 2 - 0.5);
+    c.beginPath();
+    c.moveTo(0.5 + r, 0.5);
+    c.arcTo(w - 0.5, 0.5, w - 0.5, h - 0.5, r);
+    c.arcTo(w - 0.5, h - 0.5, 0.5, h - 0.5, r);
+    c.arcTo(0.5, h - 0.5, 0.5, 0.5, r);
+    c.arcTo(0.5, 0.5, w - 0.5, 0.5, r);
+    c.closePath();
+    c.fillStyle = 'rgba(13, 18, 30, 0.94)';
+    c.fill();
+    c.globalAlpha = 0.55;
+    c.strokeStyle = color;
+    c.lineWidth = 1;
+    c.stroke();
+    c.globalAlpha = 1;
+  }
   c.font = font;
   c.textAlign = 'center';
   c.textBaseline = 'alphabetic';
@@ -787,8 +861,8 @@ function textSprite(text: string, color: string, size: number, ratio: number): S
   c.lineJoin = 'round';
   c.strokeStyle = 'rgba(11, 15, 23, 0.9)';
   c.fillStyle = color;
-  const base = pad + size * 1.08;
-  c.strokeText(text, w / 2, base);
+  const base = padY + size * (plate ? 1.0 : 1.08);
+  if (!plate) c.strokeText(text, w / 2, base);
   c.fillText(text, w / 2, base);
   s = { canvas, w, h, base, used: ++spriteClock };
   sprites.set(key, s);
@@ -846,12 +920,16 @@ function drawOne(c: CanvasRenderingContext2D, p: Particle, ratio: number) {
     case TEXT: {
       // Drawn once into a small picture of its own, then stamped each frame: stroking text is the
       // dearest thing a canvas does, and a floater lives for sixty frames.
-      const sp = textSprite(p.text, p.color, p.size, ratio);
+      const sp = textSprite(p.text, p.color, p.size, ratio, !!(p.flags & F_PLATE));
       const rise = p.vy * (1 - (1 - u) * (1 - u));
       // It pops in a little too big and settles, then rises. (With less motion asked for: neither.)
-      const s = p.vy === 0 ? 1 : u < 0.1 ? 0.6 + u * 6 : u < 0.22 ? 1.2 - ((u - 0.1) / 0.12) * 0.2 : 1;
-      c.globalAlpha = u < 0.65 ? 1 : 1 - (u - 0.65) / 0.35;
-      c.drawImage(sp.canvas, p.x - (sp.w * s) / 2, p.y - rise - sp.base * s, sp.w * s, sp.h * s);
+      // The pop takes about a fifth of a second, however long the text then stays.
+      const v = p.t / 1.05;
+      const s = p.flags & F_STILL ? 1 : v < 0.1 ? 0.6 + v * 6 : v < 0.22 ? 1.2 - ((v - 0.1) / 0.12) * 0.2 : 1;
+      const left = p.ttl - p.t;
+      c.globalAlpha = left >= p.fade ? 1 : Math.max(0, left / p.fade);
+      if (p.flags & F_LEFT) c.drawImage(sp.canvas, p.x, p.y - rise - (sp.h * s) / 2, sp.w * s, sp.h * s);
+      else c.drawImage(sp.canvas, p.x - (sp.w * s) / 2, p.y - rise - sp.base * s, sp.w * s, sp.h * s);
       break;
     }
     case RING: {
