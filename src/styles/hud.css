@@ -145,6 +145,12 @@ div.gc-rewards { justify-content: flex-start; margin-top: 2px; }
 /* The arc is stepped with the panels, never eased: see hud-flow.ts. */
 .fr-val { fill: none; stroke: #5ce1ff; stroke-width: 3; stroke-linecap: round; stroke-dasharray: 0 100; }
 .flowpct { margin-left: 3px; padding: 2px 6px; border-radius: 6px; font-size: 11.5px; font-weight: 600; color: #5ce1ff; background: rgba(92, 225, 255, 0.1); }
+/* Once the Flow meter is on, the whole credits chip answers a press as the ring does (hud-flow.ts): a 44 px target for a
+   finger whatever the layout (the chip is 40 px tall outside the phone layout: it reaches 2 px further each way). */
+/* (The reach lies under the chip's own content, so a press on the ring still lands on the ring button.) */
+.res.credits.flow-on { position: relative; isolation: isolate; cursor: pointer; }
+.res.credits.flow-on:hover { background: #172034; }
+html[data-input='touch'] .res.credits.flow-on::after { content: ''; position: absolute; z-index: -1; inset: -3px -1px; border-radius: 14px; }
 #app.flow-state .fr-val { stroke: #fff; }
 #app.flow-state .flowpct { color: #06222b; background: #5ce1ff; }
 .res.credits { padding-left: 10px; }
@@ -173,6 +179,17 @@ div.gc-rewards { justify-content: flex-start; margin-top: 2px; }
 .shortbox .mono { font-weight: 600; }
 .shortbox .st-actions { margin-top: 8px; }
 #insp .row .short { color: #fcd34d; }
+
+/* ---------- inspector: "Upgrade all" ----------
+   A quiet button beside the price (panels.ts), not a text link: 30 px for a mouse, 44 px for a finger. */
+.bulkbtn { flex: none; height: 30px; padding: 0 10px; border-radius: 8px; border: 1px solid #3a4a70; background: #141c2e; color: #9db8ff; font-size: 12px; font-weight: 600; white-space: nowrap; }
+/* Where the two buttons would leave the words beside them less than about 130 px (the 320 px inspector), the pair goes
+   under the words, at the right, rather than squeeze them into four lines. */
+.uprow.hasbulk { flex-wrap: wrap; row-gap: 8px; }
+.uprow.hasbulk > div { flex: 1 1 130px; }
+.upbtns { flex: none; display: flex; align-items: center; gap: 8px; margin-left: auto; }
+.bulkbtn:hover { background: #1a2338; }
+html[data-input='touch'] #insp .bulkbtn { height: 44px; padding: 0 12px; font-size: 13px; }
 
 /* ---------- Market inspector: demand gauges ---------- */
 .dg { display: flex; flex-direction: column; gap: 5px; padding: 2px 0 4px; }

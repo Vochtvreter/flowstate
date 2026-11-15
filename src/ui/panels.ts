@@ -735,8 +735,11 @@ function upgradeSection(g: Game, n: GNode): string {
     if (lv >= max) return `<div class="uprow"><div><b>${TRACK_INFO[t].name} <span class="mono muted">Lv ${lv}</span></b><small>Maxed${t === 'speed' && TECHS.U2 && !has(g, 'U2') ? ` · ${esc(TECHS.U2.name)} raises the cap` : ''}</small></div></div>`;
     const cost = upgradeCost(n, t);
     const all = `upgall-${t}`;
-    const bulk = has(g, 'S1') ? `<button class="link${marked(all)}" data-act="upgall:${t}" data-testid="${all}" title="Upgrade every ${def.name} by one level" aria-label="Upgrade every ${def.name} by one level">Upgrade all</button>` : '';
-    return `<div class="uprow"><div><b>${TRACK_INFO[t].name} <span class="mono muted">Lv ${lv} → ${lv + 1}</span></b><small>${TRACK_INFO[t].desc(n)}</small></div>${bulk}${buyBtn(`upg:${t}`, cost, g.credits, '', `upg-${t}`)}</div>`;
+    // (A button with an edge, 44 px tall for a finger: as a text link it was 66 by 15 px on a tablet, and goal 20 asks for it.)
+    const bulk = has(g, 'S1') ? `<button class="bulkbtn${marked(all)}" data-act="upgall:${t}" data-testid="${all}" title="Upgrade every ${def.name} by one level" aria-label="Upgrade every ${def.name} by one level">Upgrade all</button>` : '';
+    const buy = buyBtn(`upg:${t}`, cost, g.credits, '', `upg-${t}`);
+    // (With "Upgrade all" the two buttons are kept together: where the row is narrow they go under the words as a pair.)
+    return `<div class="uprow${bulk ? ' hasbulk' : ''}"><div><b>${TRACK_INFO[t].name} <span class="mono muted">Lv ${lv} → ${lv + 1}</span></b><small>${TRACK_INFO[t].desc(n)}</small></div>${bulk ? `<span class="upbtns">${bulk}${buy}</span>` : buy}</div>`;
   }).join('');
   return rows ? `<div class="sec"><span class="lbl">Upgrades</span>${rows}</div>` : '';
 }
