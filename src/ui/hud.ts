@@ -44,7 +44,7 @@ import { tendFocus, tendMark } from './advice-show';
 import { jumpTo } from './board';
 import { Panel, anchorPt, makePanel, setAnchor, setAttr, setClass, setHidden, setStyle } from './dom';
 import { initFlowRing, updateFlowRing } from './hud-flow';
-import { isStarted } from './hud-screens';
+import { endingShown } from './hud-screens';
 import { toastFor } from './hud-toasts';
 import { aboutTime, calmMotion, isTouch, valveWords } from './hud-words';
 import { esc, icon, matGlyph } from './icons';
@@ -157,8 +157,6 @@ export function initHud() {
     if (ev.kind === 'order-new' && !ev.quiet && !calmMotion() && orderEl.animate) {
       orderEl.animate([{ transform: 'translateY(-12px)', opacity: 0 }, { transform: 'none', opacity: 1 }], { duration: 280, easing: 'cubic-bezier(0.2, 0.9, 0.3, 1)' });
     }
-    // The first Lens: from here until the player leaves the summary, the card shows no free-play goal.
-    if (ev.kind === 'demo-end') endingFrom = performance.now();
   });
   // The nodes the goal is about are brought into view when it comes up, and when a sheet or the tree closes.
   onFrame(() => tendFocus(ui.g));
@@ -175,8 +173,7 @@ export function initHud() {
     justClaimed = -1;
     lastClaim = lastOrderClaim = -1e9;
     focusAfter = false;
-    endingFrom = 0;
-    summarySeen = false;
+    heldBefore = false;
     // (A new game is this tab's own: main.ts saves it again, and the slot no longer says another tab has it.)
     elsewhere = false;
   });
@@ -434,32 +431,21 @@ function endedHtml(g: Game): string {
 
 // ---------- the ending ----------
 
-/** Real time of the first Lens in this session (0: not seen). */
-let endingFrom = 0;
-/** The summary has been seen open: once it has gone again, the player has gone on (Keep playing). */
-let summarySeen = false;
-const NO_SUMMARY = typeof location !== 'undefined' && new URLSearchParams(location.search).has('nosummary');
-
 /**
- * The demo has ended and the player has not gone on into free play yet: from the first Lens until the summary
- * has been left (and behind the start screen of a save that has ended). Under `?nosummary` there is no summary
- * to leave, and free play shows as soon as the capstone is claimed.
+ * The demo has ended and the player has not gone on into free play yet (endingShown in hud-screens.ts): from the
+ * first Lens until Keep playing (or Escape) on the summary, and behind the start screen of a save that has ended.
+ * The card shows the demo's last goal done, with no Claim, whether or not the capstone was claimed: Keep playing
+ * claims it. Under `?nosummary` there is no summary to leave: the card goes on as ever, Claim and all.
  */
-function endingHeld(g: Game): boolean {
-  if (!g.ended || g.goal.i < MAIN_GOALS || NO_SUMMARY) return false;
-  if (document.getElementById('app')?.classList.contains('summary-open')) {
-    summarySeen = true;
-    return true;
-  }
-  if (summarySeen) {
-    summarySeen = false;
-    endingFrom = 0;
-  }
-  return !isStarted() || endingFrom > 0;
-}
+const endingHeld = (g: Game) => endingShown(g);
+/** The card showed the ending at the last refresh: when it gives way to free play, the new card rises. */
+let heldBefore = false;
 
 function renderGoal(g: Game, force: boolean) {
   const held = endingHeld(g);
+  // (Free play arrives as a claimed goal's next card does: it rises into place.)
+  if (heldBefore && !held && g.ended) rises++;
+  heldBefore = held;
   const v = held ? null : goalView(g, isTouch());
   const narrow = isNarrow();
   setAttr(goalEl, 'data-goal', held ? GOALS[MAIN_GOALS - 1].id : v ? v.goal.id : 'none');
@@ -705,7 +691,8 @@ function renderHud(force: boolean) {
   renderAlert(g, force);
   updateFlowRing(g);
   // While the tech tree covers the board, a goal that is ready lifts above it as a slim bar, so Claim is never hidden.
-  const overTech = ui.techOpen && g.goal.ready;
+  // (Not the capstone, during the ending: it has no Claim, Keep playing claims it.)
+  const overTech = ui.techOpen && g.goal.ready && !endingHeld(g);
   setClass(stripEl, 'over-tech', overTech);
   setClass(stripEl, 'tight', isTight());
   setClass(stripEl, 'stack', isStacked());

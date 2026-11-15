@@ -25,7 +25,7 @@ import { fmtInt, fmtRate, readyTechs, research, techAffordable, techAvailable, t
 import { GOALS, activeGoal, claimGoal } from '../goals';
 import { Game } from '../state';
 import { Panel, makePanel, setClass } from './dom';
-import { UNCOVER_DELAY, coverFor } from './hud-screens';
+import { UNCOVER_DELAY, coverFor, endingShown } from './hud-screens';
 import { aboutTime, isTouch } from './hud-words';
 import { esc, icon } from './icons';
 import { delegate, onGame, onNewGame, onSignal, toast, touch, ui } from './ui';
@@ -602,7 +602,7 @@ export function setClaimer(fn: (pressed: DOMRect | null) => boolean) {
  */
 function claimFromTree(pressed: boolean) {
   const g = ui.g;
-  if (!g.goal.ready) return closeTech(pressed);
+  if (!g.goal.ready || endingShown(g)) return closeTech(pressed);
   const button = host.querySelector('[data-testid="tree-claim"]')?.getBoundingClientRect() ?? null;
   closeTech(pressed);
   claimer(button);
@@ -702,7 +702,7 @@ export function openTech(id?: string) {
     focusTimer = window.setTimeout(focusTree, 0);
   }
   setClass(host, 'open', true);
-  markApp(true, g.goal.ready);
+  markApp(true, g.goal.ready && !endingShown(g));
   renderTech(true);
   touch();
 }
@@ -898,8 +898,9 @@ export function renderTech(force = false) {
   const hiddenLeft = tiles.length < Object.values(TECHS).filter((t) => !techHidden(g, t)).length;
   // A goal that is waiting to be claimed. On a phone this bar says so, and one press on it claims the goal and
   // goes back to the board. Elsewhere the HUD lifts its own slim Claim bar above the tree, and this element is
-  // only the empty seat that bar lands on (tech.css): one way to claim on either layout, never two.
-  const waiting = g.goal.ready ? GOALS[g.goal.i] : null;
+  // only the empty seat that bar lands on (tech.css): one way to claim on either layout, never two. (Not the capstone
+  // during the ending: nothing offers its Claim, the summary's Keep playing claims it.)
+  const waiting = g.goal.ready && !endingShown(g) ? GOALS[g.goal.i] : null;
   const claim = phone
     ? `<button class="tgoal" data-act="claim" data-testid="tree-claim"${waiting ? '' : ' hidden'}>`
       + `${waiting ? `${glyph(FLAG, 18)}<span class="gt"><b>Goal complete</b><span>${esc(waiting.title)}</span></span><span class="go">Claim</span>` : ''}</button>`

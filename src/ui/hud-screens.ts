@@ -7,7 +7,9 @@
 //    `summary-open` while the end-of-demo summary is up.
 //  - `?play` in the URL skips the start screen, also after a reset. Scripts rely on it.
 //  - The summary opens SUMMARY_DELAY seconds after the 'demo-end' event; the celebration plays in
-//    between. `?nosummary` keeps it shut (for benchmarks that build a finished factory).
+//    between. `?nosummary` keeps it shut (for benchmarks that build a finished factory). For its first
+//    SUMMARY_GUARD milliseconds it takes no press. Its "Keep playing" (or Escape) claims the capstone if it is
+//    still waiting and starts free play; from the first Lens until then, endingShown(g) holds.
 import { MATERIALS, MatId, RULES, TECHS } from '../content';
 import { EndStats, demandShown, endStats, fmt, fmtTime, has, offlineCap } from '../economy';
 import { GOALS, activeGoal, claimGoal } from '../goals';
@@ -81,6 +83,15 @@ let freePlayNow = false;
  * there is no summary to leave, so free play is there as soon as the demo ends.
  */
 export const freePlay = () => freePlayNow || (NO_SUMMARY && !!ui.g?.ended);
+/**
+ * The ending is on show: from the first Lens until free play begins (Keep playing, or Escape, on the summary; a
+ * save that had already left it; at once under `?nosummary`). Meanwhile the goal card shows the demo's last goal
+ * done, with no Claim and no free-play goal behind it: "Keep playing" claims the capstone on the way out, whether
+ * or not Claim was pressed before (hud.ts). The tree offers no Claim either (tech.ts).
+ */
+export function endingShown(g: Game | null | undefined): boolean {
+  return !!g?.ended && !freePlay();
+}
 /** A full-screen card is up: keyboard shortcuts for the board are ignored. */
 export const screenOpen = () => !started || summaryOpen || modalOpen;
 
@@ -148,12 +159,14 @@ export function initScreens(h: ScreenHooks) {
   summaryEl.addEventListener('click', (e) => {
     const b = (e.target as HTMLElement).closest<HTMLElement>('[data-do]');
     if (!b) return;
+    // (A press that comes while the card is still arriving was aimed at something else: see SUMMARY_GUARD.)
+    if (summaryGuarded()) return;
     if (b.dataset.do === 'keep') keepPlaying();
     else if (b.dataset.do === 'copy') void copyResult(b);
     else if (b.dataset.do === 'over' && confirm('Start over? This erases your whole supply line and all research.')) hooks.reset();
   });
   window.addEventListener('keydown', (e) => {
-    if (summaryOpen && e.key === 'Escape') keepPlaying();
+    if (summaryOpen && e.key === 'Escape' && !summaryGuarded()) keepPlaying();
   });
 
   onGame((ev) => {
@@ -289,8 +302,19 @@ export function resultText(g: Game): string {
 /** The result as the open card shows it. (The line keeps running behind the card: what is copied is what is on show.) */
 let shownResult = '';
 
+/**
+ * Real milliseconds after the summary opens during which it takes no press, from a pointer or a key. It comes up as
+ * the First Lens card leaves, under a thumb or a pointer that may already be on its way to something else (a tap on
+ * the spot where Claim had been for twenty goals landed on Keep playing, and the summary went unseen: final-phone F2).
+ */
+export const SUMMARY_GUARD = 600;
+/** When the summary last opened (performance.now). */
+let summaryAt = -Infinity;
+const summaryGuarded = () => performance.now() - summaryAt < SUMMARY_GUARD;
+
 export function openSummary() {
   const g = ui.g;
+  summaryAt = performance.now();
   const s = endStats(g);
   shownResult = resultText(g);
   const cap = MATERIALS[RULES.capstone];
@@ -401,7 +425,10 @@ function closeSummary() {
   touch();
 }
 
-/** Close the summary for good. The capstone goal is claimed on the way out if it is still waiting. */
+/**
+ * Close the summary for good. The capstone goal is claimed on the way out if it is still waiting (the card offered no
+ * Claim from the first Lens on), and free play begins: the card shows its first goal at the next refresh.
+ */
 function keepPlaying() {
   const g = ui.g;
   const goal = activeGoal(g);

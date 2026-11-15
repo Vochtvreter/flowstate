@@ -1,9 +1,61 @@
-// The end-of-demo summary's words (hud-screens.ts). These run without a browser: they only read the game.
-import { describe, expect, it } from 'vitest';
+// The end-of-demo summary's words (hud-screens.ts), and the way out of the ending into free play. These run without a
+// browser: they only read the game.
+import { describe, expect, it, vi } from 'vitest';
 import { MATERIALS } from '../content';
-import { GOALS } from '../goals';
-import { newGame } from '../state';
+import { GOALS, MAIN_GOALS, goalView } from '../goals';
+import { Game, newGame } from '../state';
 import { awayLine, awayText, clockTime, nextMaterials, resultText } from './hud-screens';
+
+describe('the ending: from the first Lens to free play', () => {
+  /** A fresh copy of the screens module (its state: free play begun or not) and of ui.ts, with a game whose Lens is made. */
+  async function lensMade(): Promise<{ g: Game; screens: typeof import('./hud-screens'); ui: typeof import('./ui') }> {
+    vi.resetModules();
+    const screens = await import('./hud-screens');
+    const ui = await import('./ui');
+    const g = newGame();
+    // "Make your first Lens", met: the Lens has just been made (sim.ts endDemo), and nobody has pressed Claim.
+    g.goal = { i: MAIN_GOALS - 1, ready: true };
+    g.ended = true;
+    ui.ui.g = g;
+    return { g, screens, ui };
+  }
+
+  it('Keep playing with no Claim before it: the capstone is claimed and free play shows at once (final-consultant F1)', async () => {
+    const { g, screens } = await lensMade();
+    expect(GOALS[g.goal.i].reward.unlock).toBe('end');
+    // From the Lens on, the card shows the ending (no Claim: Keep playing claims), and the board is quiet.
+    expect(screens.endingShown(g)).toBe(true);
+    expect(screens.freePlay()).toBe(false);
+    screens.screensApi.keepPlaying();
+    expect(g.goal.i).toBe(MAIN_GOALS);
+    expect(screens.freePlay()).toBe(true);
+    expect(screens.endingShown(g)).toBe(false);
+    // What the card shows next: the first free-play goal.
+    const v = goalView(g);
+    expect(v?.free).toBe(true);
+    expect(v?.number).toBe(1);
+  });
+
+  it('Keep playing after a Claim: nothing more is claimed, and free play shows', async () => {
+    const { g, screens } = await lensMade();
+    const { claimGoal } = await import('../goals');
+    expect(claimGoal(g)).toBe(true);
+    expect(g.goal.i).toBe(MAIN_GOALS);
+    // Claimed, but the summary has not been left: still the ending.
+    expect(screens.endingShown(g)).toBe(true);
+    screens.screensApi.keepPlaying();
+    expect(g.goal.i).toBe(MAIN_GOALS);
+    expect(screens.endingShown(g)).toBe(false);
+    expect(goalView(g)?.goal.free).toBe(true);
+  });
+
+  it('is not shown before the Lens', async () => {
+    const { g, screens } = await lensMade();
+    g.ended = false;
+    expect(screens.endingShown(g)).toBe(false);
+    expect(screens.endingShown(null)).toBe(false);
+  });
+});
 
 describe('summary: the time to the first Lens', () => {
   it('reads as minutes and seconds, with hours only when there are any', () => {

@@ -161,8 +161,10 @@ function measure() {
   // Everything else (the strip growing a line, a sheet's contents, the stage) bumps sizeRev. Reading layout
   // forces the browser to lay the page out there and then, so it is done only when something may have moved,
   // never on every refresh while a sheet slides in.
+  // (A goal that is ready seats its Claim in the thumb row; the capstone during the ending has none: hud.ts.)
+  const claimUp = !!g?.goal.ready && !!goalEl?.querySelector('[data-testid="claim"]');
   const key = env.phone
-    ? `p|${sizeRev}|${isOpen(insp) ? 1 : 0}${isOpen(build) ? 1 : 0}${carrying() ? 1 : 0}${g?.goal.ready ? 1 : 0}${summaryEl && !summaryEl.hidden ? 1 : 0}`
+    ? `p|${sizeRev}|${isOpen(insp) ? 1 : 0}${isOpen(build) ? 1 : 0}${carrying() ? 1 : 0}${claimUp ? 1 : 0}${summaryEl && !summaryEl.hidden ? 1 : 0}`
     : `d|${sizeRev}`;
   if (key === measuredKey) return;
   measuredKey = key;
@@ -200,7 +202,7 @@ function measure() {
   const sum = summaryCover();
   sumNow = sum;
   // (Under the summary the thumb row is out of reach and out of sight: nothing is kept clear of it.)
-  const row = sum.bottom ? 12 : (g?.goal.ready ? CLAIM_ROW : THUMB_ROW) + 16;
+  const row = sum.bottom ? 12 : (claimUp ? CLAIM_ROW : THUMB_ROW) + 16;
   coverNow = { top: bottom, right: Math.max(sheetNow.shift, sum.right), bottom: Math.max(sheetNow.lift, sum.bottom), left: 0, row };
 }
 
