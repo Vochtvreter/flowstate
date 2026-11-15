@@ -342,10 +342,14 @@ let focusDue = 0;
 /** For scripts: what the last look found and did. */
 let focusLast: { at: number; goal: number; ids: number[]; inView: boolean; framed: boolean; why?: string } | null = null;
 
-/** A sheet the player works in lies over the board (a phone's inspector or build menu), or the build menu is up. */
+/**
+ * A sheet the player works in lies over the board: on a phone, the inspector or the build menu. (Elsewhere the build
+ * menu is a menu at the pointer, not a sheet: it moves nothing, and once a node has been built from it the camera
+ * stays on what the player is building. While it is up nothing is looked for either: see tendFocus.)
+ */
 function sheetUp(): boolean {
   const app = document.getElementById('app');
-  return radialOpen() || (env.phone && !!app && (app.classList.contains('insp-open') || app.classList.contains('building')));
+  return env.phone && !!app && (radialOpen() || app.classList.contains('insp-open') || app.classList.contains('building'));
 }
 
 /**
@@ -399,8 +403,8 @@ export function tendFocus(g: Game) {
   if (!focusDue || now < focusDue) return;
   focusDue = 0;
   const ids = goalFocus(g);
-  const busy = sheet ? 'a sheet is up' : tree ? 'the tree is open' : gestureActive() ? 'a gesture' : armedPort() ? 'a port is armed'
-    : ui.placing ? 'placing' : '';
+  const busy = sheet ? 'a sheet is up' : radialOpen() ? 'the build menu is up' : tree ? 'the tree is open' : gestureActive() ? 'a gesture'
+    : armedPort() ? 'a port is armed' : ui.placing ? 'placing' : '';
   if (busy || !ids.length) {
     focusLast = { at: g.time, goal: g.goal.i, ids, inView: false, framed: false, why: busy || 'no nodes' };
     return;
