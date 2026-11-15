@@ -35,6 +35,17 @@ function cardSays(m: MatId): boolean {
 
 const orderWords = (o: Order) => `${o.need} ${MATERIALS[o.mat].name}`;
 
+/** The tech whose research gets a card of its own (the one the goal card was saving for), or null. */
+let researchCard: () => string | null = () => null;
+
+/**
+ * feel.ts says which research its card covers (researchCardTech), so that no toast says it as well. (Handed in, not
+ * imported: feel.ts brings the board with it, and this file is loaded by modules that are tested without a page.)
+ */
+export function setResearchCard(fn: () => string | null) {
+  researchCard = fn;
+}
+
 export function toastFor(ev: GameEvent) {
   switch (ev.kind) {
     case 'milestone':
@@ -50,6 +61,9 @@ export function toastFor(ev: GameEvent) {
       if (!t || t.auto) break;
       // Researched in the open tech tree: the tree shows it there and then, and a toast would only be in its way.
       if (ui.techOpen) break;
+      // The goal card was saving for it: the research card (feel.ts) says so. (Toasts run before feel's frame
+      // hook, so this reads the tech as of the end of the last frame, which is the one the card will name.)
+      if (ev.id === researchCard()) break;
       // What is left is a tech the queue researched while the player was on the board.
       toast(`${icon('tree', 16)}<span><b>${esc(t.name)}</b> researched: ${esc(t.unlocks.join(', '))}</span>`, 'good', 5000);
       break;
