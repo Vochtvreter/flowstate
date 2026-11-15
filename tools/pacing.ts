@@ -25,6 +25,7 @@
  *                --tipEvery=<n>[,<k>]  what-if: they follow only every nth tip that comes due, starting with
  *                                      the kth (the nth when left out), and let the others pass
  *                --hands=<seconds>     what-if: seconds per action of every card player (cardonly at 10 s)
+ *                --minShare=<0..1>     what-if: the share of a wait a tip has to save (ADVICE.minShare)
  *                --trials              with --policy=newcomer: for every wait that begins with no tip on offer,
  *                                      list what the adviser weighed and how each candidate did
  *
@@ -2172,7 +2173,7 @@ function main() {
   const what = [
     profileName !== 'current' ? `profile "${profileName}": ${profile.describe}` : '', ...overrides.map((o) => `--set=${o}`),
     CFG.bulk ? '' : '--noBulk', CFG.tips ? '' : '--noTips', CFG.meanwhile ? '' : '--noMeanwhile',
-    ...process.argv.slice(2).filter((a) => /^--(skipLine|lineDelay|tipDelay|tipEvery|hands)=/.test(a)),
+    ...process.argv.slice(2).filter((a) => /^--(skipLine|lineDelay|tipDelay|tipEvery|hands|minShare)=/.test(a)),
   ].filter(Boolean).join('  ');
   const play = (p: Policy, s: number) => {
     const bot = new Bot(p, s, minutes ?? (p.card ? CFG.minutesCard : p.fast ? CFG.minutesFast : CFG.minutesSlow));

@@ -996,6 +996,60 @@ describe('advice: the repertoire, one board at a time', () => {
   });
 });
 
+describe('advice: how much a tip has to save', () => {
+  it('15 s, and 8% of the wait up to 30 s: a small promise in a long wait is not made', () => {
+    expect(ADVICE).toMatchObject({ minSaves: 15, minShare: 0.08, shareMax: 30, estSaves: 15, estShare: 0.04, horizon: 300 });
+    // A save of some twenty minutes, followed tip by tip. A wait that ends inside the look-ahead's horizon is
+    // measured to the end, and the tip has to save 15 s and 8% of it. A longer one is an estimate: 15 s and 4%
+    // (after a first look that showed 30 s or 8%).
+    const long = () => {
+      const g = midGame();
+      g.techs.push('P4', 'P5', 'P7', 'S1');
+      g.data = { a: 5000, b: 5000, g: 0 };
+      g.credits = 100;
+      at(g, 'build-fabricator');
+      run(g, 0.1);
+      return g;
+    };
+    const follow = (g: Game, each: (a: Advice) => void = () => {}) => {
+      let tips = 0;
+      for (let i = 0; i < 14; i++) {
+        const a = advice(g);
+        if (!a) break;
+        tips++;
+        each(a);
+        expect(applyAdvice(g, a)).toBe(true);
+        run(g, 25);
+      }
+      return tips;
+    };
+    const g = long();
+    const tips = follow(g, (a) => {
+      expect(isFinite(a.eta) && isFinite(a.saves!), a.text.mouse).toBe(true);
+      const share = a.eta <= ADVICE.horizon ? ADVICE.minShare : ADVICE.estShare;
+      expect(a.saves!, `${a.text.mouse} (${Math.round(a.saves!)} s of ${Math.round(a.eta)} s)`).toBeGreaterThanOrEqual(Math.max(ADVICE.minSaves, share * a.eta) - 0.5);
+    });
+    expect(tips).toBeGreaterThanOrEqual(6);
+    // With the ceiling gone the same save hears far less: in a wait of ten minutes the first look would ask a tip for 50 s.
+    const was = ADVICE.shareMax;
+    ADVICE.shareMax = Infinity;
+    try {
+      expect(follow(long())).toBeLessThan(tips);
+    } finally {
+      ADVICE.shareMax = was;
+    }
+    // And at the old share of 1% it hears a little more: the tips that promise under 8% of a wait under five minutes.
+    const share = ADVICE.minShare;
+    ADVICE.minShare = 0.01;
+    try {
+      expect(follow(long())).toBeGreaterThanOrEqual(tips);
+    } finally {
+      ADVICE.minShare = share;
+    }
+    clearHistory();
+  });
+});
+
 describe('advice: a long save, followed tip by tip', () => {
   it('every tip is true and worth at least 15 s, no two in a row ask for the same thing, and then it falls silent', () => {
     // 7,000¢ to go for the Fabricator on a few credits a second, with Bulk Upgrade and Data to spare.

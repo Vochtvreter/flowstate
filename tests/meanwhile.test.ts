@@ -598,12 +598,17 @@ describe('lineAdvice: the next step of the card\'s line, for its "Show me"', () 
       expect(each, `${from}: ${each.toFixed(4)} ms a call`).toBeLessThan(0.25);
       expect(serialize(g).replace(/"savedAt":\d+/, ''), from).toBe(before);
       expect(g.rev).toBe(rev);
-      // A step that has to be worked out afresh (the board just changed) is as cheap: no copy of the game is run.
-      const h = cloneGame(g)!;
-      const t1 = now();
-      const first = lineAdvice(h);
-      expect(now() - t1, from).toBeLessThan(5);
-      expect(first).not.toBeNull();
+      // A step that has to be worked out afresh (a game object never asked before) is as cheap: no copy of the
+      // game is run. The best of five, so that a pause of the machine in one of them does not count.
+      let fresh = Infinity;
+      for (let k = 0; k < 5; k++) {
+        const h = cloneGame(g)!;
+        const t1 = now();
+        const first = lineAdvice(h);
+        fresh = Math.min(fresh, now() - t1);
+        expect(first).not.toBeNull();
+      }
+      expect(fresh, `${from}: ${fresh.toFixed(3)} ms for a first call`).toBeLessThan(1);
     }
     console.info(`lineAdvice: ${(worst * 1000).toFixed(1)} µs a call at the worst of ${boards.length} boards`);
     // For scale: one verdict of the adviser on the same boards runs copies of the game for tens of milliseconds.
