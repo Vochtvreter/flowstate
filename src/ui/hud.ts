@@ -7,7 +7,14 @@
 //    a second after a claim it is still the place where Claim was pressed); 'order' is the order
 //    chip (null while hidden); 'flow' is the Flow ring (null until it is unlocked).
 //  - #goal carries data-goal="<id>" and data-ready="0|1"; the buttons are data-testid="claim",
-//    "advice-show" and "order-claim". The tip row is data-testid="advice-tip".
+//    "advice-show", "line-show" and "order-claim". The tip row is data-testid="advice-tip", the goal's
+//    "while you wait" line "goal-line" (data-done="0|1"), the strip of pips "goal-pips".
+//  - Inside #goal: .gc-main holds the pips and .gc-body (head, title, hint, progress, line, tip); the
+//    Claim button stands beside .gc-main. When a goal is claimed, .gc-body is what moves (the old one
+//    lifts away as a ghost, the new one rises): #goal itself never moves, the phone's Claim seat and the
+//    anchors depend on that.
+//  - #hud-strip carries the class `tight` where the stage is too narrow for the card and the order side
+//    by side (a desktop with the inspector open): the order and the alert then share one row under the card.
 //  - The adviser never runs here: its answers come from a Web Worker (advice-client.ts), and what the
 //    card does with them is in advice-tip.ts.
 //  - The whole strip is patched in place (makePanel), so a press never lands on a rebuilt element
@@ -15,12 +22,13 @@
 import { materialsAt, nodeById } from '../actions';
 import { DATA_COLORS, DATA_NAMES, DataTier, MATERIALS, MatId, NODE_DEFS, RECIPES, TECHS } from '../content';
 import { fmt } from '../economy';
-import { GoalProgress, GoalView, claimGoal, goalView } from '../goals';
+import { FlowGoalView, GOALS, GoalProgress, GoalView, MAIN_GOALS, claimGoal, goalView } from '../goals';
 import { claimOrder, orderView } from '../orders';
 import { graph } from '../sim';
 import { Game, GNode, GoalReward, Reward } from '../state';
 import { initAdviser, pollAdviser } from './advice-client';
-import { WaitLine, announceTips, resetTips, showTip, tendTips, tipHtml, tipShown, waitLine } from './advice-tip';
+import { WaitLine, announceTips, lineHtml, lineShown, resetTips, showLine, showTip, tendCard, tipHtml, tipShown, waitLine } from './advice-tip';
+import { tendMark } from './advice-show';
 import { jumpTo } from './board';
 import { Panel, anchorPt, makePanel, setAnchor, setAttr, setClass, setHidden } from './dom';
 import { initFlowRing, updateFlowRing } from './hud-flow';
@@ -29,6 +37,7 @@ import { aboutTime, calmMotion, isTouch } from './hud-words';
 import { esc, icon, matGlyph } from './icons';
 import { onPanels, renderPanels } from './panels';
 import { diagnose, matName } from './status';
+import { env } from './phone-env';
 import { delegate, onGame, onNewGame, ui } from './ui';
 
 let stripEl: HTMLElement;
@@ -62,12 +71,30 @@ export function initHud() {
     if (ui.techOpen && byKey && (a === 'claim' || a === 'claim-order')) return;
     if (a === 'claim') {
       const pressed = goalEl.querySelector('[data-testid="claim"]')?.getBoundingClientRect();
-      if (claimGoal(g) && pressed) holdGoalAnchor(pressed);
+      const body = goalEl.querySelector<HTMLElement>('.gc-body:not(.gc-ghost)');
+      const old = body ? { html: body.innerHTML, top: body.offsetTop, width: body.offsetWidth } : null;
+      const index = g.goal.i;
+      if (claimGoal(g)) {
+        if (pressed) holdGoalAnchor(pressed);
+        claimed(index, old, pressed ?? null);
+      }
     } else if (a === 'claim-order') claimOrder(g);
     else if (a === 'show') return showTip(g, () => renderPanels(true));
+    else if (a === 'show-line') return showLine(g, () => renderPanels(true));
     else if (a === 'jump') jumpTo(Number(args[0]));
     renderPanels(true);
   });
+  // The stage decides whether the card and the order fit side by side (see `tight`).
+  const hud = document.getElementById('hud');
+  if (hud && typeof ResizeObserver !== 'undefined') {
+    new ResizeObserver(() => {
+      const w = hud.clientWidth;
+      if (w !== hudWidth) {
+        hudWidth = w;
+        renderPanels();
+      }
+    }).observe(hud);
+  }
 
   onPanels(renderHud);
   onGame(toastFor);
@@ -82,8 +109,23 @@ export function initHud() {
     anchorKey = '';
     standUntil = 0;
     alertNode = -1;
+    ghost = null;
+    pressGhost = null;
+    justClaimed = -1;
   });
 }
+
+// ---------- how much room the strip has ----------
+
+/** Width of the stage, as last reported (0 until then). */
+let hudWidth = 0;
+/** The card at its full width, the gap and the order chip, with the strip's margins: less than this and they do not fit in one row. */
+const ROW_NEEDS = 500 + 10 + 256 + 28;
+
+/** Outside the phone layout: the stage is too narrow for the card and the order side by side. */
+const isTight = () => !env.phone && hudWidth > 0 && hudWidth < ROW_NEEDS;
+/** The card has room for one row of guidance (the line, or the tip), not both. */
+const isNarrow = () => env.phone || isTight();
 
 // ---------- shared bits ----------
 
@@ -146,35 +188,121 @@ function waitHtml(w: WaitLine): string {
   return `${bar(w.need > 0 ? w.have / w.need : 0, color)}<span class="gc-num">Saving <b class="mono"${tier ? ` style="color:${color}"` : ''}>${fmt(Math.floor(w.have))} / ${fmt(w.need)}${w.unit}</b></span><span class="gc-eta${isFinite(w.eta) ? '' : ' never'}" data-testid="goal-eta">${left}</span>`;
 }
 
-function goalHtml(g: Game, v: GoalView): string {
-  const step = `${v.free ? 'Free play' : 'Goal'} ${v.number} / ${v.total}`;
-  if (v.ready) {
-    return `<div class="gc-main"><div class="gc-head"><span class="gc-step">${step}</span><span class="gc-done">${icon('check', 12)}Done</span></div>
-      <h3 class="gc-title">${esc(v.goal.title)}</h3>
-      <div class="gc-rewards"><span class="gc-lbl">Reward</span>${rewardChips(v.reward)}</div></div>
-      <button class="claim" data-act="claim" data-testid="claim">Claim</button>`;
+/**
+ * The Flow goal's progress: the number the goal is about ("Flow 90% · 9 of 10 running"), on a bar with a
+ * mark at the share that has to be held, and the seconds still to hold once it is being held. When the goal
+ * has stood for a while its bar comes down to "all but one running" (the valve): the mark moves there and
+ * the card says so.
+ */
+function flowHtml(f: FlowGoalView, p: GoalProgress | null): string {
+  const pct = Math.round(Math.max(0, Math.min(1, f.pct)) * 100);
+  const need = Math.round(Math.max(0, Math.min(1, f.need)) * 1000) / 10;
+  const count = f.of > 0 ? `${f.running} of ${f.of} running` : 'nothing wired up counts yet';
+  const holding = !!p && p[2] === 's' && p[0] > 0;
+  const left = p ? Math.max(0, Math.ceil(p[1] - p[0] - 1e-6)) : 0;
+  let valve = '';
+  if (f.valve && f.of > 1 && f.running < f.of) {
+    valve = f.running >= f.of - 1 ? 'Close enough: all but one is running' : 'All but one running is enough now';
   }
-  const wait = waitLine(g, v.progress);
-  return `<div class="gc-main"><div class="gc-head"><span class="gc-step">${step}</span><span class="gc-rewards">${rewardChips(v.reward)}</span></div>
+  return `<div class="fl-bar${f.valve ? ' valve' : ''}">${bar(f.pct, '#5ce1ff')}<i class="fl-mark" style="left:${need}%"></i></div>
+    <span class="gc-num" data-testid="goal-flow">Flow <b class="mono">${pct}%</b><span class="fl-count"> · ${count}</span></span>${
+    holding ? `<span class="gc-eta gc-hold" data-testid="goal-hold"><b class="mono">${left}s</b> to go</span>` : ''}${
+    valve ? `<span class="gc-valve" data-testid="goal-valve">${valve}</span>` : ''}`;
+}
+
+// ---------- the chain, as pips ----------
+
+/** The goal that was claimed a moment ago: its pip pops. Real time. */
+let justClaimed = -1;
+let justUntil = 0;
+
+/**
+ * Where the player is in the chain: one pip for each of the demo's goals, the big ones (Goal.big) larger,
+ * claimed ones filled, the current one lit. In free play the 22 are all filled and four more follow, one
+ * for each free-play goal, so the strip goes on saying how much is left.
+ */
+function pipsHtml(g: Game): string {
+  const now = performance.now();
+  const upTo = g.goal.i >= MAIN_GOALS ? GOALS.length : MAIN_GOALS;
+  let out = '';
+  for (let i = 0; i < upTo; i++) {
+    const state = i < g.goal.i ? ' done' : i === g.goal.i ? ' now' : '';
+    out += `${i === MAIN_GOALS ? '<i class="pip-gap"></i>' : ''}<i class="pip${GOALS[i].big ? ' big' : ''}${GOALS[i].free ? ' free' : ''}${state}${i === justClaimed && now < justUntil ? ' just' : ''}"></i>`;
+  }
+  return `<div class="gc-pips" data-testid="goal-pips" data-at="${g.goal.i}" aria-hidden="true">${out}</div>`;
+}
+
+// ---------- claiming ----------
+
+/** Milliseconds the old card takes to lift away, and the new one to rise after it (hud.css). */
+const LIFT_MS = 120;
+const RISE_MS = 180;
+/** The card that was claimed, lifting away over the new one. */
+let ghost: { html: string; top: number; width: number; until: number } | null = null;
+/** The Claim button that was pressed, sinking away where it stood (client pixels). */
+let pressGhost: { left: number; top: number; width: number; height: number; small: boolean; until: number } | null = null;
+/** Counts claims: the new card's rise plays again each time. */
+let rises = 0;
+
+/** A goal has just been claimed: the old card lifts and fades, the new one rises, the claimed goal's pip pops. */
+function claimed(index: number, old: { html: string; top: number; width: number } | null, pressed: DOMRect | null) {
+  const now = performance.now();
+  // Nothing in the ghost answers a press, and no script takes it for the card.
+  if (old) ghost = { html: old.html.replace(/\s(?:data-testid|data-act|title)="[^"]*"/g, ''), top: old.top, width: old.width, until: now + LIFT_MS + 30 };
+  if (pressed) pressGhost = { left: pressed.left, top: pressed.top, width: pressed.width, height: pressed.height, small: false, until: now + LIFT_MS + 30 };
+  rises++;
+  justClaimed = index;
+  justUntil = now + 900;
+  // The ghosts are taken out of the card once they have faded (they are invisible by then).
+  setTimeout(() => renderPanels(), LIFT_MS + RISE_MS + 40);
+}
+
+function ghostsHtml(now: number): { card: string; press: string } {
+  if (ghost && now >= ghost.until + RISE_MS) ghost = null;
+  if (pressGhost && now >= pressGhost.until + RISE_MS) pressGhost = null;
+  const p = pressGhost;
+  return {
+    card: ghost ? `<div class="gc-body gc-ghost" aria-hidden="true" style="top:${ghost.top}px;width:${ghost.width}px">${ghost.html}</div>` : '',
+    press: p ? `<i class="claim-ghost" aria-hidden="true" style="left:${p.left.toFixed(1)}px;top:${p.top.toFixed(1)}px;width:${p.width.toFixed(1)}px;height:${p.height.toFixed(1)}px">Claim</i>` : '',
+  };
+}
+
+function goalHtml(g: Game, v: GoalView, narrow: boolean): string {
+  const step = `${v.free ? 'Free play' : 'Goal'} ${v.number} / ${v.total}`;
+  const gh = ghostsHtml(performance.now());
+  const body = `<div class="gc-body${rises ? ` rise${rises % 2}` : ''}">`;
+  if (v.ready) {
+    return `<div class="gc-main">${pipsHtml(g)}${gh.card}${body}<div class="gc-head"><span class="gc-step">${step}</span><span class="gc-done">${icon('check', 12)}Done</span></div>
+      <h3 class="gc-title">${esc(v.goal.title)}</h3>
+      <div class="gc-rewards"><span class="gc-lbl">Reward</span>${rewardChips(v.reward)}</div></div></div>
+      <button class="claim" data-act="claim" data-testid="claim">Claim</button>${gh.press}`;
+  }
+  const wait = waitLine(g);
+  const prog = v.flow ? flowHtml(v.flow, v.progress) : wait ? waitHtml(wait) : v.progress ? progressHtml(v.progress) : '';
+  return `<div class="gc-main">${pipsHtml(g)}${gh.card}${body}<div class="gc-head"><span class="gc-step">${step}</span><span class="gc-rewards">${rewardChips(v.reward)}</span></div>
       <h3 class="gc-title">${esc(v.goal.title)}</h3>
       <p class="gc-hint">${esc(v.hint)}</p>
-      ${wait ? `<div class="gc-prog">${waitHtml(wait)}</div>` : v.progress ? `<div class="gc-prog">${progressHtml(v.progress)}</div>` : ''}
-      ${tipHtml()}</div>`;
+      ${prog ? `<div class="gc-prog${v.flow ? ' flow' : ''}">${prog}</div>` : ''}
+      ${lineHtml(g, narrow)}${tipHtml(g)}</div></div>${gh.press}`;
 }
 
 function renderGoal(g: Game, force: boolean) {
   const v = goalView(g, isTouch());
+  const narrow = isNarrow();
   setAttr(goalEl, 'data-goal', v ? v.goal.id : 'none');
   setAttr(goalEl, 'data-ready', v?.ready ? '1' : '0');
   setClass(goalEl, 'done', !v);
-  // The adviser is asked (in its worker) whenever its last answer no longer holds, and the tip row follows.
+  // The adviser is asked (in its worker) whenever its last answer no longer holds, and the two rows of
+  // guidance (the goal's own line, the adviser's tip) follow.
   pollAdviser(g);
-  tendTips(g);
+  tendCard(g, v, narrow);
+  // (The ring Show me puts on the Expand button goes once the board has been expanded.)
+  tendMark();
   if (!v) {
     goalPanel.render(`<div class="gc-free">${icon('check', 13)}<span><b>Free play</b> · every goal is done. The line is yours.</span></div>`, force);
     return;
   }
-  goalPanel.render(goalHtml(g, v), force);
+  goalPanel.render(goalHtml(g, v, narrow), force);
   announceTips(goalEl);
 }
 
@@ -294,6 +422,7 @@ function renderHud(force: boolean) {
   updateFlowRing(g);
   // While the tech tree covers the board, a goal that is ready lifts above it as a slim bar, so Claim is never hidden.
   setClass(stripEl, 'over-tech', ui.techOpen && g.goal.ready);
+  setClass(stripEl, 'tight', isTight());
   // Toasts raised while it is open keep clear of its Research button (hud.css).
   setClass(toastsEl, 'over-tech', ui.techOpen);
   // The keyboard belongs to the tree while it is open (Enter researches there, unless a button holds the
@@ -302,7 +431,7 @@ function renderHud(force: boolean) {
   // The anchors are pointed at what is on screen whenever the layout of the strip may have changed.
   const claim = goalEl.querySelector('[data-testid="claim"]');
   const held = !claim && !!stand && performance.now() < standUntil;
-  const key = `${g.goal.i}|${claim ? 1 : 0}|${g.order ? 1 : 0}${g.order?.ready ? 1 : 0}|${alertEl.hasAttribute('hidden') ? 0 : 1}|${ui.techOpen ? 1 : 0}|${tipShown() ? 1 : 0}|${held ? 1 : 0}`;
+  const key = `${g.goal.i}|${claim ? 1 : 0}|${g.order ? 1 : 0}${g.order?.ready ? 1 : 0}|${alertEl.hasAttribute('hidden') ? 0 : 1}|${ui.techOpen ? 1 : 0}|${tipShown() ? 1 : 0}${lineShown() ? 1 : 0}|${held ? 1 : 0}|${hudWidth}`;
   if (key !== anchorKey) {
     anchorKey = key;
     setAnchor('goal', claim ?? (held ? stand! : goalEl));

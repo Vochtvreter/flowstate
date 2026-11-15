@@ -25,5 +25,22 @@ export function aboutTime(seconds: number): string {
   return 'over an hour';
 }
 
+/**
+ * A length of time that was measured, said a little finer than aboutTime: "about 40 s", "about 1 min 20 s",
+ * "about 3 min", "about 12 min". For what a move has bought ("Assembly about 1 min 20 s sooner").
+ */
+export function aboutSpan(seconds: number): string {
+  if (!isFinite(seconds) || seconds < 0) return '';
+  if (seconds < 8) return 'a few seconds';
+  const s = Math.max(10, Math.round(seconds / 10) * 10);
+  if (s < 60) return `about ${s} s`;
+  if (s >= 600) return aboutTime(seconds);
+  const rest = s % 60;
+  return `about ${Math.floor(s / 60)} min${rest ? ` ${rest} s` : ''}`;
+}
+
+/** The same string with a capital first letter: names from the rules come as "the Fabricator". */
+export const capFirst = (s: string) => s.charAt(0).toUpperCase() + s.slice(1);
+
 /** The player asked for less motion: entrance animations are skipped. */
 export const calmMotion = () => typeof matchMedia === 'function' && matchMedia('(prefers-reduced-motion: reduce)').matches;

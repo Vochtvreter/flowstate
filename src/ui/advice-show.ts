@@ -1,18 +1,19 @@
-// "Show me": take the player to what a tip is about, without doing it for them.
+// "Show me": take the player to what a tip, or the next step of a goal card's "while you wait" line, is
+// about, without doing it for them.
 //
-// Whatever the tip is about is selected and brought on screen, the control to press (if it is one in the
-// inspector) gets a ring that stays until it is pressed or something else is selected, and the 'showme'
-// signal tells whoever can point (the guiding hand) what to act out. The tip itself is never carried out
+// Whatever it is about is selected and brought on screen, the control to press (a button in the inspector,
+// or the board's Expand button) gets a ring that stays until it is pressed or something else is selected, and
+// the 'showme' signal tells whoever can point (the guiding hand) what to act out. Nothing is ever carried out
 // here: applyAdvice() in src/advice.ts is for bots.
 import { canFavour, freeDeposits, nodeById } from '../actions';
 import type { Advice } from '../advice';
 import { NodeType, TECHS } from '../content';
-import { has, nodeUnlocked } from '../economy';
+import { expansionCost, has, nodeUnlocked } from '../economy';
 import { Game, GNode } from '../state';
-import { boardRect, toClient, zoomBy } from './board';
+import * as board from './board';
+import { boardRect, toClient, toWorld, zoomBy } from './board';
 import { ring } from './fx';
 import { nodeSize, outPorts } from './geom';
-import { calmMotion } from './hud-words';
 import { env } from './phone-env';
 import { closeTech, openTech } from './tech';
 import { Signals, select, signal, ui } from './ui';
@@ -20,9 +21,24 @@ import { Signals, select, signal, ui } from './ui';
 // ---------- the ring on a control ----------
 
 /** The control a tip pointed at (its data-testid), and the selection it belongs to. */
-let mark: { testid: string; sel: string } | null = null;
+let mark: { testid: string; sel: string; expansions: number } | null = null;
+
+/** The one control outside the inspector that can carry the ring: the board's Expand button. */
+const EXPAND = 'expand';
+const expandButton = () => document.querySelector<HTMLElement>(`[data-testid="${EXPAND}"]`);
 
 const selKey = () => (ui.sel ? `${ui.sel.kind}${ui.sel.id}` : '');
+
+function setMark(testid: string) {
+  mark = { testid, sel: selKey(), expansions: ui.g.board.expansions };
+}
+
+function unmark() {
+  // (The inspector's buttons take the ring from marked() when they are drawn; the Expand button is the
+  // board's, and gets the class put on and taken off here.)
+  if (mark?.testid === EXPAND) expandButton()?.classList.remove('hl');
+  mark = null;
+}
 
 /** ' hl' for the control a tip has pointed at, '' for every other. For the class list of a button in the inspector. */
 export function marked(testid: string): string {
@@ -31,24 +47,26 @@ export function marked(testid: string): string {
 
 /** The ring goes when its control is pressed... */
 export function pressedMark(testid: string | undefined) {
-  if (mark && testid === mark.testid) mark = null;
+  if (mark && testid === mark.testid) unmark();
 }
 
-/** ...when the selection changes (call with every inspector refresh), or when the tip is gone. */
+/** ...when the selection changes (call with every inspector refresh), when the board has been expanded, or when the tip is gone. */
 export function tendMark() {
-  if (mark && mark.sel !== selKey()) mark = null;
+  if (!mark) return;
+  if (mark.sel !== selKey() || (mark.testid === EXPAND && ui.g.board.expansions !== mark.expansions)) unmark();
 }
 export function clearMark() {
-  mark = null;
+  unmark();
 }
 
 /** For scripts: the control that carries the ring, or null. */
 export const markedControl = () => (mark && mark.sel === selKey() ? mark.testid : null);
 
-// ---------- can it still be done? ----------
+// ---------- can it still be done? has it been done? ----------
 
 /** The board may have changed since the adviser looked: is everything the tip names still there? */
 export function doable(g: Game, a: Advice): boolean {
+  if (a.expand) return g.credits + 1e-6 >= expansionCost(g);
   if (a.research) return !!TECHS[a.research] && !has(g, a.research);
   if (a.cut) return g.wires.some((w) => w.id === a.cut!.wire);
   if (a.favour) return canFavour(g, a.favour.router, a.favour.wire);
@@ -63,6 +81,51 @@ export function doable(g: Game, a: Advice): boolean {
     return a.node != null && !!nodeById(g, a.node);
   }
   return false;
+}
+
+/** What the board was like when a tip was put on offer: enough to tell, later, whether the tip was carried out. */
+export interface Offered { nextId: number; level: number; expansions: number }
+
+/** The level a tip's upgrade is about: of its node, or (Upgrade all) of every node of that kind together. */
+function levelOf(g: Game, a: Advice): number {
+  const n = a.node != null ? nodeById(g, a.node) : null;
+  if (!n || !a.upgrade) return 0;
+  if (!a.all) return n.lv[a.upgrade];
+  let sum = 0;
+  for (const x of g.nodes) if (x.type === n.type) sum += x.lv[a.upgrade];
+  return sum;
+}
+
+export const offeredAt = (g: Game, a: Advice): Offered => ({ nextId: g.nextId, level: levelOf(g, a), expansions: g.board.expansions });
+
+/**
+ * Has the player done what this tip says, on the board as it is now? 'done': all of it. 'half': a tip of two
+ * gestures ("place a Well on the free deposit, wired to the Lab") whose first has been done; `built` is the
+ * node that now stands and still has to be wired to the tip's `to`. null: not (yet).
+ */
+export function carriedOut(g: Game, a: Advice, o: Offered): { state: 'done' | 'half'; built?: number } | null {
+  const done = { state: 'done' as const };
+  if (a.expand) return g.board.expansions > o.expansions ? done : null;
+  if (a.research) return has(g, a.research) ? done : null;
+  if (a.cut) return g.wires.some((w) => w.id === a.cut!.wire) ? null : done;
+  if (a.favour) {
+    const { router, wire } = a.favour;
+    return g.wires.some((w) => w.id === wire) && !canFavour(g, router, wire) ? done : null;
+  }
+  if (a.upgrade) return levelOf(g, a) > o.level ? done : null;
+  if (a.wire) {
+    const { from, to, port } = a.wire;
+    return g.wires.some((w) => w.from === from && w.to === to && w.port === (port ?? 0)) ? done : null;
+  }
+  if (a.build) {
+    // Built since the tip came up, where the tip said: on its deposit, or wired from its port.
+    const built = g.nodes.find((n) => n.id >= o.nextId && n.type === a.build
+      && (a.deposit != null ? n.depositId === a.deposit : a.node == null || g.wires.some((w) => w.from === a.node && w.to === n.id)));
+    if (!built) return null;
+    if (a.to == null || g.wires.some((w) => w.from === built.id && w.to === a.to)) return done;
+    return { state: 'half', built: built.id };
+  }
+  return null;
 }
 
 // ---------- bringing things on screen ----------
@@ -111,14 +174,32 @@ function frame(boxes: Box[]) {
   zoomBy(1);
 }
 
-/** Rings opening on a spot of the board (a world point, followed as the camera settles): "here". */
+/**
+ * Bring these nodes on screen. The board does it when it can (frameNodes glides, and keeps clear of the
+ * strip, an open sheet and the corner controls); a board without it gets the framing above. `room` is extra
+ * space to the right of the first node, for a node that is about to be built from its port.
+ */
+function frameNodes(nodes: GNode[], room = 0) {
+  const byBoard = (board as unknown as { frameNodes?: (ids: number[]) => void }).frameNodes;
+  if (byBoard) return byBoard(nodes.map((n) => n.id));
+  frame(nodes.map((n, i) => {
+    const b = boxOf(n);
+    return i === 0 ? { ...b, w: b.w + room } : b;
+  }));
+}
+
+/**
+ * Three rings opening on a spot of the board (a world point, followed as the camera settles): "here".
+ * Only where the player asked for less motion: everywhere else the guiding hand acts the step out on the
+ * board (it listens to 'showme'), and where it does not move, this marks the spot instead.
+ */
 function beacon(at: () => { x: number; y: number } | null, color = '#7AA2FF') {
+  if (!env.calm) return;
   const once = () => {
     const p = at();
     if (p) ring(toClient(p), color, { size: 34, life: 0.6 });
   };
   once();
-  if (calmMotion()) return;
   setTimeout(once, 450);
   setTimeout(once, 900);
 }
@@ -148,9 +229,9 @@ function revealMark() {
  */
 export function showAdvice(g: Game, a: Advice, render: () => void): boolean {
   if (!doable(g, a)) return false;
-  mark = null;
+  unmark();
   const press = (testid: string): Signals['showme'] => {
-    mark = { testid, sel: selKey() };
+    setMark(testid);
     return { press: testid };
   };
   let detail: Signals['showme'];
@@ -160,19 +241,31 @@ export function showAdvice(g: Game, a: Advice, render: () => void): boolean {
     detail = { press: 'research' };
   } else {
     if (ui.techOpen) closeTech();
-    if (a.cut) {
+    if (a.expand) {
+      // The Expand button lies on the board, under the plot. Nothing is selected: the ring is on the button.
+      select(null);
+      detail = press(EXPAND);
+      after = () => {
+        const b = expandButton();
+        if (!b) return;
+        const r = b.getBoundingClientRect();
+        const p = toWorld(r.left, r.top), k = ui.view.k || 1;
+        frame([{ x: p.x - 16, y: p.y - 16, w: r.width / k + 32, h: r.height / k + 32 }]);
+        b.classList.add('hl');
+      };
+    } else if (a.cut) {
       const w = g.wires.find((x) => x.id === a.cut!.wire)!;
       select({ kind: 'wire', id: w.id });
       detail = press('cut-wire');
       const ends = [nodeById(g, w.from), nodeById(g, w.to)].filter((n): n is GNode => !!n);
-      after = () => frame(ends.map(boxOf));
+      after = () => frameNodes(ends);
     } else if (a.favour || a.upgrade) {
       // The node is selected, which opens its inspector (a sheet on a phone), and then brought into what
       // is left of the board.
       const n = nodeById(g, a.favour ? a.favour.router : a.node!)!;
       select({ kind: 'node', id: n.id });
       detail = press(a.favour ? `favour-${a.favour.wire}` : `${a.all ? 'upgall' : 'upg'}-${a.upgrade}`);
-      after = () => frame([boxOf(n)]);
+      after = () => frameNodes([n]);
     } else if (a.wire) {
       const from = nodeById(g, a.wire.from)!, to = nodeById(g, a.wire.to)!;
       const port = a.wire.port ?? 0;
@@ -180,7 +273,7 @@ export function showAdvice(g: Game, a: Advice, render: () => void): boolean {
       select(null);
       detail = { wire: { from: from.id, to: to.id, port } };
       after = () => {
-        frame([boxOf(from), boxOf(to)]);
+        frameNodes([from, to]);
         beacon(() => outPorts(g, from)[port] ?? null);
         beacon(() => centre(to));
       };
@@ -200,8 +293,7 @@ export function showAdvice(g: Game, a: Advice, render: () => void): boolean {
         detail = { build: { type, from: from.id, port } };
         after = () => {
           // With room to its right, where the new node will go.
-          const b = boxOf(from);
-          frame([{ ...b, w: b.w + (env.phone ? 80 : 220) }]);
+          frameNodes([from], env.phone ? 80 : 220);
           beacon(() => outPorts(g, from)[port] ?? null);
         };
       }
