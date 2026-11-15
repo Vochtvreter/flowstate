@@ -207,6 +207,8 @@ export function audioState() {
     exists: !!ac, state: ac ? ac.state : 'none', muted, gesture, drone: droneOn,
     sampleRate: ac?.sampleRate ?? 0, cuesLastSecond: recent.length, master: MASTER,
     voices: live_?.voices ?? 0, maxVoices: MAX_VOICES, ceiling: CEILING,
+    /** The hum's gain into the bus right now (it fades in to DRONE_LEVEL and out to nothing). */
+    droneLevel: drone ? +drone.gain.gain.value.toFixed(4) : 0, droneMax: DRONE_LEVEL,
   };
 }
 
