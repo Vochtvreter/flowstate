@@ -138,10 +138,19 @@ const grow = (s: { w: number; h: number }, by: number) => ({ w: s.w + by, h: s.h
 /**
  * Move the camera so that all of these (world boxes) can be seen: a pan when they fit at the current zoom,
  * otherwise as far out as it takes. Never zooms in. Whatever lies over the board is kept clear: the sheets
- * and the strip on a phone (env.cover), the goal card on a desktop.
+ * and the strip on a phone (env.cover), the goal card on a desktop. When they are too far apart to be seen
+ * together at the smallest zoom the board allows (a phone does not go below what can be read), the first
+ * one is shown: it is where the gesture starts.
  */
 function frame(boxes: Box[]) {
   if (!boxes.length) return;
+  const fit = frameAll(boxes);
+  // (The board has kept the zoom inside its limits: if that is not what the boxes needed, they do not fit.)
+  if (boxes.length > 1 && ui.view.k > fit * 1.01) frameAll([boxes[0]]);
+}
+
+/** Frame these boxes as well as the board lets us; returns the zoom they would have needed (Infinity: the current one did). */
+function frameAll(boxes: Box[]): number {
   const r = boardRect();
   const c = env.cover();
   // (The strip is measured here too: it is the card this was pressed on, and it has just grown or shrunk.)
@@ -159,6 +168,7 @@ function frame(boxes: Box[]) {
   }
   const v = ui.view;
   const fit = Math.min((x1 - x0) / (bx1 - bx0), (y1 - y0) / (by1 - by0));
+  const needed = fit < v.k ? fit : Infinity;
   if (fit < v.k) {
     v.k = fit;
     v.x = (x0 + x1) / 2 - ((bx0 + bx1) / 2) * fit;
@@ -172,6 +182,7 @@ function frame(boxes: Box[]) {
   }
   // The board applies the view (and keeps the zoom inside what the device can read) when asked to zoom by nothing.
   zoomBy(1);
+  return needed;
 }
 
 /**
@@ -181,7 +192,9 @@ function frame(boxes: Box[]) {
  */
 function frameNodes(nodes: GNode[], room = 0) {
   const byBoard = (board as unknown as { frameNodes?: (ids: number[]) => void }).frameNodes;
-  if (byBoard) return byBoard(nodes.map((n) => n.id));
+  // (The board's own: when they cannot all be seen together it shows the last one named. Here the first is
+  // where the gesture starts, so they are named back to front.)
+  if (byBoard) return byBoard(nodes.map((n) => n.id).reverse());
   frame(nodes.map((n, i) => {
     const b = boxOf(n);
     return i === 0 ? { ...b, w: b.w + room } : b;
