@@ -78,8 +78,10 @@ export function initHud() {
         if (pressed) holdGoalAnchor(pressed);
         claimed(index, old, pressed ?? null);
       }
-    } else if (a === 'claim-order') claimOrder(g);
-    else if (a === 'show') return showTip(g, () => renderPanels(true));
+    } else if (a === 'claim-order') {
+      const pressed = orderEl.querySelector('[data-testid="order-claim"]')?.getBoundingClientRect();
+      if (claimOrder(g) && pressed) pressClaim(pressed, true);
+    } else if (a === 'show') return showTip(g, () => renderPanels(true));
     else if (a === 'show-line') return showLine(g, () => renderPanels(true));
     else if (a === 'jump') jumpTo(Number(args[0]));
     renderPanels(true);
@@ -237,53 +239,65 @@ function pipsHtml(g: Game): string {
 /** Milliseconds the old card takes to lift away, and the new one to rise after it (hud.css). */
 const LIFT_MS = 120;
 const RISE_MS = 180;
+/** Milliseconds a pressed Claim button gives (to 0.96 of its size) before it fades where it stood. */
+const PRESS_MS = 80;
 /** The card that was claimed, lifting away over the new one. */
 let ghost: { html: string; top: number; width: number; until: number } | null = null;
-/** The Claim button that was pressed, sinking away where it stood (client pixels). */
+/**
+ * The Claim button that was pressed (the goal's, or the order's), giving and fading where it stood (client
+ * pixels). A mouse claims on the way down, so the button itself is gone before it could be seen pressed:
+ * this is its press state.
+ */
 let pressGhost: { left: number; top: number; width: number; height: number; small: boolean; until: number } | null = null;
 /** Counts claims: the new card's rise plays again each time. */
 let rises = 0;
+
+function pressClaim(r: DOMRect, small: boolean) {
+  pressGhost = { left: r.left, top: r.top, width: r.width, height: r.height, small, until: performance.now() + PRESS_MS + LIFT_MS + 60 };
+  // The ghosts are taken out of the card once they have faded (they are invisible by then).
+  setTimeout(() => renderPanels(), PRESS_MS + LIFT_MS + RISE_MS);
+}
 
 /** A goal has just been claimed: the old card lifts and fades, the new one rises, the claimed goal's pip pops. */
 function claimed(index: number, old: { html: string; top: number; width: number } | null, pressed: DOMRect | null) {
   const now = performance.now();
   // Nothing in the ghost answers a press, and no script takes it for the card.
-  if (old) ghost = { html: old.html.replace(/\s(?:data-testid|data-act|title)="[^"]*"/g, ''), top: old.top, width: old.width, until: now + LIFT_MS + 30 };
-  if (pressed) pressGhost = { left: pressed.left, top: pressed.top, width: pressed.width, height: pressed.height, small: false, until: now + LIFT_MS + 30 };
+  if (old) ghost = { html: old.html.replace(/\s(?:data-testid|data-act|title)="[^"]*"/g, ''), top: old.top, width: old.width, until: now + LIFT_MS + RISE_MS };
+  if (pressed) pressClaim(pressed, false);
   rises++;
   justClaimed = index;
   justUntil = now + 900;
-  // The ghosts are taken out of the card once they have faded (they are invisible by then).
-  setTimeout(() => renderPanels(), LIFT_MS + RISE_MS + 40);
 }
 
 function ghostsHtml(now: number): { card: string; press: string } {
-  if (ghost && now >= ghost.until + RISE_MS) ghost = null;
-  if (pressGhost && now >= pressGhost.until + RISE_MS) pressGhost = null;
+  if (ghost && now >= ghost.until) ghost = null;
+  if (pressGhost && now >= pressGhost.until) pressGhost = null;
   const p = pressGhost;
   return {
-    card: ghost ? `<div class="gc-body gc-ghost" aria-hidden="true" style="top:${ghost.top}px;width:${ghost.width}px">${ghost.html}</div>` : '',
-    press: p ? `<i class="claim-ghost" aria-hidden="true" style="left:${p.left.toFixed(1)}px;top:${p.top.toFixed(1)}px;width:${p.width.toFixed(1)}px;height:${p.height.toFixed(1)}px">Claim</i>` : '',
+    card: ghost ? `<div class="gc-body gc-ghost" data-key="ghost" aria-hidden="true" style="top:${ghost.top}px;width:${ghost.width}px">${ghost.html}</div>` : '',
+    press: p ? `<i class="claim-ghost${p.small ? ' sm' : ''}" aria-hidden="true" style="left:${p.left.toFixed(1)}px;top:${p.top.toFixed(1)}px;width:${p.width.toFixed(1)}px;height:${p.height.toFixed(1)}px">Claim</i>` : '',
   };
 }
 
 function goalHtml(g: Game, v: GoalView, narrow: boolean): string {
   const step = `${v.free ? 'Free play' : 'Goal'} ${v.number} / ${v.total}`;
   const gh = ghostsHtml(performance.now());
-  const body = `<div class="gc-body${rises ? ` rise${rises % 2}` : ''}">`;
+  // (The ghost comes after the body it lies over, and the two never pass for one another: the card is patched
+  // in place by position, and a body rebuilt when the ghost comes or goes would rise a second time.)
+  const body = `<div class="gc-body${rises ? ` rise${rises % 2}` : ''}" data-key="body">`;
   if (v.ready) {
-    return `<div class="gc-main">${pipsHtml(g)}${gh.card}${body}<div class="gc-head"><span class="gc-step">${step}</span><span class="gc-done">${icon('check', 12)}Done</span></div>
+    return `<div class="gc-main">${pipsHtml(g)}${body}<div class="gc-head"><span class="gc-step">${step}</span><span class="gc-done">${icon('check', 12)}Done</span></div>
       <h3 class="gc-title">${esc(v.goal.title)}</h3>
-      <div class="gc-rewards"><span class="gc-lbl">Reward</span>${rewardChips(v.reward)}</div></div></div>
+      <div class="gc-rewards"><span class="gc-lbl">Reward</span>${rewardChips(v.reward)}</div></div>${gh.card}</div>
       <button class="claim" data-act="claim" data-testid="claim">Claim</button>${gh.press}`;
   }
   const wait = waitLine(g);
   const prog = v.flow ? flowHtml(v.flow, v.progress) : wait ? waitHtml(wait) : v.progress ? progressHtml(v.progress) : '';
-  return `<div class="gc-main">${pipsHtml(g)}${gh.card}${body}<div class="gc-head"><span class="gc-step">${step}</span><span class="gc-rewards">${rewardChips(v.reward)}</span></div>
+  return `<div class="gc-main">${pipsHtml(g)}${body}<div class="gc-head"><span class="gc-step">${step}</span><span class="gc-rewards">${rewardChips(v.reward)}</span></div>
       <h3 class="gc-title">${esc(v.goal.title)}</h3>
       <p class="gc-hint">${esc(v.hint)}</p>
       ${prog ? `<div class="gc-prog${v.flow ? ' flow' : ''}">${prog}</div>` : ''}
-      ${lineHtml(g, narrow)}${tipHtml(g)}</div></div>${gh.press}`;
+      ${lineHtml(g, narrow)}${tipHtml(g)}</div>${gh.card}</div>${gh.press}`;
 }
 
 function renderGoal(g: Game, force: boolean) {

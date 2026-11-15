@@ -33,7 +33,7 @@
 /* .gc-main holds the strip of pips and .gc-body, the part that changes with the goal (and the only part
    that moves when one is claimed: see "the card, this round" below). --gc-gap is the space between the
    card's parts; a row that opens or closes inside it takes that into account (advice.css). */
-.gc-main { --gc-gap: 5px; flex: 1 1 200px; min-width: 0; position: relative; display: flex; flex-direction: column; gap: var(--gc-gap); }
+.gc-main { --gc-gap: 4px; flex: 1 1 200px; min-width: 0; position: relative; display: flex; flex-direction: column; gap: var(--gc-gap); }
 .gc-body { min-width: 0; display: flex; flex-direction: column; gap: var(--gc-gap); }
 .gc-head { display: flex; align-items: center; justify-content: space-between; gap: 10px; min-height: 20px; }
 .gc-step { font-size: 10.5px; font-weight: 700; letter-spacing: 0.09em; text-transform: uppercase; color: #9db8ff; white-space: nowrap; }
@@ -79,7 +79,9 @@ div.gc-rewards { justify-content: flex-start; margin-top: 2px; }
 .claim::before { content: ''; position: absolute; inset: -4px; z-index: -1; border-radius: 18px; background: #4ade80; opacity: 0.25; pointer-events: none; animation: claim-breathe 1.5s ease-in-out infinite; }
 .claim::after { content: ''; position: absolute; inset: -5px; border-radius: 19px; border: 2px solid #4ade80; opacity: 0; pointer-events: none; animation: claim-halo 1.5s ease-out infinite; }
 .claim:hover { background: #6cf09a; }
-/* Pressed: the button gives a little (the `scale` property, so the phone seat's own transform is left alone). */
+/* Pressed: the button gives a little (the `scale` property, so the phone seat's own transform is left alone).
+   A finger sees this while it is down. A mouse claims on the way down, and sees the same on the button's
+   ghost (.claim-ghost, under "the card, this round"). */
 .claim { transition: scale 80ms ease-out; }
 .claim:active { scale: 0.96; }
 .claim.sm { min-width: 74px; height: 44px; padding: 0 14px; border-radius: 12px; font-size: 15px; }
@@ -309,20 +311,43 @@ html[data-input='touch'] #insp .link::after { content: ''; position: absolute; i
 .gc-body.rise1 { animation: gc-rise-b 180ms cubic-bezier(0.2, 0.8, 0.3, 1) 120ms backwards; }
 @keyframes gc-rise-a { from { transform: translateY(8px); opacity: 0; } }
 @keyframes gc-rise-b { from { transform: translateY(8px); opacity: 0; } }
-.claim-ghost { position: fixed; z-index: 1; display: flex; align-items: center; justify-content: center; border-radius: 14px; background: #4ade80; color: #04240f; font-family: var(--disp); font-size: 19px; font-style: normal; font-weight: 700; pointer-events: none; animation: claim-sink 130ms ease-out forwards; }
-@keyframes claim-sink { from { scale: 0.96; opacity: 1; } to { scale: 0.88; opacity: 0; } }
+/* The pressed button: it gives to 0.96 over 80 ms, then fades over the 120 ms the old card takes to lift.
+   (A finger has already seen the button give under it: there the ghost starts pressed.) */
+.claim-ghost { position: fixed; z-index: 1; display: flex; align-items: center; justify-content: center; border-radius: 14px; background: #4ade80; color: #04240f; font-family: var(--disp); font-size: 19px; font-style: normal; font-weight: 700; letter-spacing: 0.01em; pointer-events: none; animation: claim-sink 200ms ease-out forwards; }
+.claim-ghost.sm { border-radius: 12px; font-size: 15px; }
+html[data-input='touch'] .claim-ghost { animation-name: claim-sink-touch; }
+@keyframes claim-sink { 0% { scale: 1; opacity: 1; } 40% { scale: 0.96; opacity: 1; } 100% { scale: 0.96; opacity: 0; } }
+@keyframes claim-sink-touch { 0%, 40% { scale: 0.96; opacity: 1; } 100% { scale: 0.96; opacity: 0; } }
 
 /* A squeezed stage (a desktop with the inspector open; #hud-strip.tight, set in hud.ts where the card and
    the order no longer fit side by side). The card takes the width, set a little tighter, and the order and
    the alert share one row under it instead of stacking: the strip keeps to a third of the stage. */
-#hud-strip.tight:not(.over-tech) { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); grid-template-areas: 'goal goal' 'order alert'; gap: 6px 8px; align-items: start; }
+#hud-strip.tight:not(.over-tech) { display: grid; grid-template-columns: auto minmax(0, 1fr); grid-template-areas: 'goal goal' 'order alert'; gap: 6px 8px; align-items: start; margin-top: -6px; }
 #hud-strip.tight:not(.over-tech) #hud-row { display: contents; }
-#hud-strip.tight:not(.over-tech) #goal { grid-area: goal; justify-self: center; width: 100%; max-width: 640px; padding: 8px 12px 9px 14px; }
-#hud-strip.tight:not(.over-tech) .gc-main { --gc-gap: 4px; }
-#hud-strip.tight:not(.over-tech) #order { grid-area: order; justify-self: end; max-width: 100%; }
+#hud-strip.tight:not(.over-tech) #goal { grid-area: goal; justify-self: center; width: 100%; max-width: 640px; padding: 7px 12px 8px 14px; }
+#hud-strip.tight:not(.over-tech) .gc-main { --gc-gap: 3px; }
+#hud-strip.tight:not(.over-tech) .gc-line > .gc-in { padding-top: 4px; }
+#hud-strip.tight:not(.over-tech) .gc-tip > .gc-in { padding-top: 5px; }
+#hud-strip.tight:not(.over-tech) #order { grid-area: order; justify-self: start; max-width: 100%; }
 #hud-strip.tight:not(.over-tech) #hud-alert { grid-area: alert; justify-self: start; }
 #hud-strip.tight:not(:has(#hud-alert:not([hidden]))) #order, #hud-strip.tight:not(:has(#order:not([hidden]))) #hud-alert { grid-column: 1 / -1; justify-self: center; }
-#hud-strip.tight .alertchip { min-height: 44px; border-radius: 12px; }
+#hud-strip.tight .alertchip { min-height: 40px; border-radius: 12px; }
+/* With a window of 1000 px or more the squeezed card is still wide enough for the pips to ride in its head
+   row, after the step (as on a phone held sideways): no line of their own. */
+@media (min-width: 1000px) {
+  #hud-strip.tight:not(.over-tech) .gc-main { gap: 0; }
+  #hud-strip.tight:not(.over-tech) .gc-pips { position: absolute; left: 106px; top: 5px; }
+}
+
+/* The line's label run in before its sentence (a squeezed desktop stage, a phone held sideways): one line
+   of the card less. While the line says what it bought, those words lie where the sentence starts and the
+   sentence, which has been done, is out of sight: nothing in the row moves when the box is ticked. */
+#hud-strip.tight .gc-linehead { display: inline; }
+#hud-strip.tight .gc-linehead .gc-lbl { margin-right: 7px; }
+#hud-strip.tight .gc-linetxt { display: inline; }
+#hud-strip.tight .gc-bought { position: absolute; white-space: nowrap; font-size: 12px; }
+#hud-strip.tight .gc-line.said .gc-linetxt { visibility: hidden; }
+#hud-strip.tight .gc-tick { margin-top: 1px; }
 
 /* The order as one row (a squeezed desktop stage, and the phone): what to deliver, how long that takes, what
    it pays, and its progress as a line along the foot. An order none of which is being sold says so on a
@@ -335,6 +360,10 @@ html[data-input='touch'] #insp .link::after { content: ''; position: absolute; i
 #hud-strip.tight .oc-line, #app.phone .oc-line { order: 1; flex: 0 1 auto; }
 #hud-strip.tight .oc-top, #app.phone .oc-top { order: 2; flex: 1 1 auto; justify-content: flex-start; }
 #hud-strip.tight .oc-top:empty, #app.phone .oc-top:empty { display: none; }
+/* (Beside the alert there is no room for the time left as well: the bar along the foot says how far it is.) */
+#hud-strip.tight .oc-top { display: none; }
+#hud-strip.tight #order { min-height: 40px; }
+html[data-input='mouse'] #hud-strip.tight .claim.sm { height: 32px; }
 #hud-strip.tight .oc-pay, #app.phone .oc-pay { order: 3; flex: none; flex-wrap: nowrap; margin-left: auto; }
 #hud-strip.tight .oc-warn, #app.phone .oc-warn { order: 4; flex: 1 0 100%; font-size: 11.5px; line-height: 14px; padding-bottom: 1px; }
 #hud-strip.tight #order .rw, #app.phone #order .rw { height: 18px; padding: 0 6px; font-size: 11px; line-height: 18px; }
@@ -347,7 +376,7 @@ html[data-input='touch'] #insp .link::after { content: ''; position: absolute; i
   .gc-ghost { animation: gc-fade-out 120ms linear forwards; }
   .gc-body.rise0 { animation: gc-fade-a 180ms linear 120ms backwards; }
   .gc-body.rise1 { animation: gc-fade-b 180ms linear 120ms backwards; }
-  .claim-ghost { animation: gc-fade-out 120ms linear forwards; }
+  .claim-ghost, html[data-input='touch'] .claim-ghost { animation: gc-fade-out 200ms linear forwards; }
   .pip.just { animation: none; }
   .pip, .fl-mark { transition: none; }
 }
@@ -411,12 +440,15 @@ html[data-input='touch'] #insp .link::after { content: ''; position: absolute; i
    Show me answers a 44 px press: 36 px to look at, and its ::after reaches the rest. */
 #app.phone .gc-show { height: 36px; padding: 0 12px; }
 #app.phone .gc-show::after { content: ''; position: absolute; inset: -4px 0; }
-/* The line: its label, then the tick, the sentence at the hint's size, and the button. */
-#app.phone .gc-line > .gc-in { gap: 1px; margin-top: 2px; padding-top: 4px; }
-#app.phone .gc-linehead { min-height: 13px; line-height: 13px; }
+/* The line: the tick, its label over the sentence (at the hint's size), and the button. */
+#app.phone .gc-line > .gc-in { margin-top: 2px; padding-top: 4px; }
+#app.phone .gc-linebody { line-height: 16px; }
+#app.phone .gc-linehead { min-height: 14px; line-height: 14px; }
 #app.phone .gc-linehead .gc-lbl { font-size: 10px; }
-#app.phone .gc-linetxt { font-size: 12.5px; line-height: 16px; }
-#app.phone .gc-bought { font-size: 11px; }
+/* What the line bought takes the label's place while it is said (there is no room beside it), and may run on
+   over where the button was: the row does not grow by a line when the box is ticked. */
+#app.phone .gc-bought { position: absolute; left: 0; top: 0; white-space: nowrap; font-size: 11.5px; }
+#app.phone .gc-line.said .gc-lbl { visibility: hidden; }
 /* The tip: what it buys, the sentence and its price, beside the button. */
 #app.phone .gc-tip > .gc-in { flex-wrap: nowrap; gap: 8px; margin-top: 2px; padding-top: 4px; font-size: 12px; line-height: 15px; }
 #app.phone .gc-tipbody { flex: 1 1 auto; gap: 1px; }
@@ -469,14 +501,20 @@ html[data-input='touch'] #insp .link::after { content: ''; position: absolute; i
   #app.phone .gc-head .rw { height: 16px; line-height: 16px; }
   #app.phone .gc-title { grid-area: title; }
   #app.phone .gc-prog { grid-area: prog; margin: 0; }
-  #app.phone .gc-prog .pbar, #app.phone .gc-prog .fl-bar { flex: none; width: 72px; }
+  #app.phone .gc-prog .pbar, #app.phone .gc-prog .fl-bar { flex: none; width: 48px; }
   #app.phone .gc-prog .fl-bar .pbar { flex: 1; width: auto; }
   #app.phone .gc-valve { flex: 0 1 auto; }
   #app.phone div.gc-rewards { grid-area: prog; margin: 0; flex-wrap: nowrap; }
   #app.phone .gc-hint { grid-area: hint; padding: 2px 0 1px; }
   #app.phone .gc-line { grid-area: line; }
   #app.phone .gc-line > .gc-in { margin-top: 2px; padding-top: 3px; }
-  #app.phone .gc-linerow { align-items: center; }
+  /* (The label runs in before the sentence, as on a squeezed desktop stage: see "run in" above.) */
+  #app.phone .gc-linehead { display: inline; }
+  #app.phone .gc-linehead .gc-lbl { margin-right: 6px; }
+  #app.phone .gc-linetxt { display: inline; }
+  #app.phone .gc-bought { left: auto; top: auto; font-size: 12px; }
+  #app.phone .gc-line.said .gc-lbl { visibility: visible; }
+  #app.phone .gc-line.said .gc-linetxt { visibility: hidden; }
   #app.phone .gc-tip { grid-area: tip; }
   #app.phone .gc-tip > .gc-in { margin-top: 2px; padding-top: 3px; }
   /* Claim keeps to the right-hand thumb, beside Fit and Undo, and to the left of a sheet at the side. */

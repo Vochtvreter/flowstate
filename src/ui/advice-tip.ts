@@ -572,10 +572,12 @@ export function lineHtml(g: Game, narrow: boolean): string {
   const now = performance.now();
   const bought = lineBought(g);
   const title = step ? ` title="${esc(sentence(step))}"` : '';
-  lineInner = `<div class="gc-linehead"><span class="gc-lbl">While you wait</span>${bought ? `<span class="gc-bought" data-testid="line-bought">${esc(bought)}</span>` : ''}</div>
-    <div class="gc-linerow"><span class="gc-tick" role="img" aria-label="${line.done ? 'Done' : 'Not done yet'}">${icon('check', 12)}</span><p class="gc-linetxt">${esc(line.text)}</p>${
-    step && !line.done ? `<button class="gc-show" data-act="show-line" data-testid="line-show"${title}>Show me</button>` : line.tickedAt ? GONE : ''}</div>`;
-  const cls = `${line.openedAt ? ' open' : ''}${line.done ? ' done' : ''}${line.done && now - line.popAt < 700 ? ' pop' : ''}${lineNag ? ` nag${lineNag % 2}` : ''}`;
+  // The tick, then the label over the sentence (or run in before it, where every line counts: hud.css), then the button.
+  lineInner = `<span class="gc-tick" role="img" aria-label="${line.done ? 'Done' : 'Not done yet'}">${icon('check', 12)}</span>
+    <div class="gc-linebody"><span class="gc-linehead"><span class="gc-lbl">While you wait</span>${bought ? `<span class="gc-bought" data-testid="line-bought">${esc(bought)}</span>` : ''}</span>
+    <span class="gc-linetxt">${esc(line.text)}</span></div>${
+    step && !line.done ? `<button class="gc-show" data-act="show-line" data-testid="line-show"${title}>Show me</button>` : line.tickedAt ? GONE : ''}`;
+  const cls = `${line.openedAt ? ' open' : ''}${line.done ? ' done' : ''}${bought ? ' said' : ''}${line.done && now - line.popAt < 700 ? ' pop' : ''}${lineNag ? ` nag${lineNag % 2}` : ''}`;
   return `<div class="gc-line gc-row${cls}" data-done="${line.done ? 1 : 0}" data-testid="goal-line"><div class="gc-in">${lineInner}</div></div>`;
 }
 
