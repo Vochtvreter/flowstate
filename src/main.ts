@@ -9,8 +9,8 @@ import { fmt, fmtTime, has, offlineCap } from './economy';
 import { offlineGains, tick } from './sim';
 import { clearSave, loadGame, newGame, saveGame } from './state';
 import {
-  cancelGesture, ensureVisible, fitView, initBoard, jumpTo, pickRadial, radialOpen, settleGesture, startPlacing,
-  updateBoard, updateSlow, zoomBy,
+  cancelGesture, ensureVisible, fitView, frameNodes, initBoard, jumpTo, pickRadial, radialOpen, settleGesture, startPlacing,
+  tidyBoard, updateBoard, updateSlow, zoomBy,
 } from './ui/board';
 import { invalidateLayout } from './ui/dom';
 import { fx, initFx } from './ui/fx';
@@ -100,7 +100,7 @@ function boot() {
   setInterval(save, 10000);
   // Test hooks. `ui` and `tick` are relied on by scripts; the rest are there for convenience.
   (window as unknown as Record<string, unknown>).flowstate = {
-    ui, tick, fx, view: { fit: fitView, zoomBy, jumpTo }, onSignal, hud: { ...screensApi, anchors: hudAnchors },
+    ui, tick, fx, view: { fit: fitView, zoomBy, jumpTo, frame: frameNodes, tidy: tidyBoard }, onSignal, hud: { ...screensApi, anchors: hudAnchors },
     // The adviser: how it is run and what it cost; the tip on the card and its timing; the control "Show me" ringed;
     // the goal card's "while you wait" line with its next step; what the tip row says a followed tip bought.
     adviser: {

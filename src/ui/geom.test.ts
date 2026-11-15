@@ -1,5 +1,8 @@
 import { describe, expect, it } from 'vitest';
-import { Box, CARD_GAP, Card, PLOT_MARGIN, cardsOverlap, fadeColor, fitBox, frameBox, freeSpot, pinchView, separate, spotFree } from './geom';
+import {
+  Box, CARD_GAP, Card, PLOT_MARGIN, boxClear, cardsOverlap, dockSpot, fadeColor, fitBox, frameBox, freeSpot, heldRate, pinchView, separate, spotFree,
+  wholeGain,
+} from './geom';
 
 const free = (k: number) => k;
 const phone = (k: number) => Math.max(0.74, Math.min(1.5, k));
@@ -302,5 +305,149 @@ describe('fadeColor', () => {
     expect(fadeColor('#ffffff', 0)).toBe('#0b0f17');
     expect(fadeColor('#ffc857', 0.35)).toBe('#60502d');
     expect(fadeColor('#fff', 0.5)).toBe(fadeColor('#ffffff', 0.5));
+  });
+});
+
+describe('dockSpot: where the Expand button rests when its own place cannot be seen', () => {
+  // A 1364 x 844 stage (1440 x 900 window): the goal card over the middle of the top edge, the key hints
+  // bottom left, the zoom buttons and the minimap bottom right.
+  const area: Box = { x0: 10, y0: 10, x1: 1354, y1: 834 };
+  const strip: Box = { x0: 300, y0: -1e6, x1: 1065, y1: 186 };
+  const hints: Box = { x0: 16, y0: 810, x1: 396, y1: 828 };
+  const corner: Box = { x0: 1152, y0: 668, x1: 1e6, y1: 1e6 };
+  const blocks = [strip, hints, corner];
+  const at = (p: { x: number; y: number }, w: number, h: number): Box => ({ x0: p.x, y0: p.y, x1: p.x + w, y1: p.y + h });
+  const dist = (p: { x: number; y: number }, w: number, h: number, home: { x: number; y: number }) => Math.hypot(p.x + w / 2 - home.x, p.y + h / 2 - home.y);
+
+  it('a place under the stage: it rests on the bottom edge, straight above where the place is', () => {
+    const p = dockSpot({ home: { x: 700, y: 1100 }, w: 150, h: 36, area, blocks, gap: 10 });
+    expect(p).toEqual({ x: 625, y: 798 });
+    expect(boxClear(at(p, 150, 36), area, blocks, 10)).toBe(true);
+  });
+
+  it('follows the place along the edge, and steps out from under the hints and the corner controls', () => {
+    // Above the key hints the nearest free place is beside them, not on top of them.
+    const left = dockSpot({ home: { x: 120, y: 1100 }, w: 150, h: 36, area, blocks, gap: 10 });
+    expect(boxClear(at(left, 150, 36), area, blocks, 10)).toBe(true);
+    expect(left.y + 36).toBeLessThanOrEqual(hints.y0 - 10 + 0.01);
+    // Under the corner controls it stands just left of them, on the bottom edge.
+    const right = dockSpot({ home: { x: 1300, y: 1100 }, w: 150, h: 36, area, blocks, gap: 10 });
+    expect(right).toEqual({ x: corner.x0 - 10 - 150, y: 798 });
+  });
+
+  it('a place hidden by the goal card: just under the card', () => {
+    const p = dockSpot({ home: { x: 700, y: 120 }, w: 150, h: 36, area, blocks, gap: 10 });
+    expect(p).toEqual({ x: 625, y: 196 });
+  });
+
+  it('a place off to one side: on that side, level with it', () => {
+    expect(dockSpot({ home: { x: 2000, y: 400 }, w: 150, h: 36, area, blocks, gap: 10 })).toEqual({ x: 1204, y: 382 });
+    expect(dockSpot({ home: { x: -900, y: 400 }, w: 150, h: 36, area, blocks, gap: 10 })).toEqual({ x: 10, y: 382 });
+  });
+
+  it('is always inside the area, clear of every block, and no further from the place than any other free spot', () => {
+    let seed = 7;
+    const rnd = () => ((seed = (seed * 1664525 + 1013904223) >>> 0) / 4294967296);
+    for (let n = 0; n < 300; n++) {
+      const W = 300 + Math.floor(rnd() * 1100), H = 200 + Math.floor(rnd() * 700);
+      const a: Box = { x0: 8, y0: 8, x1: W - 8, y1: H - 8 };
+      const bs: Box[] = [];
+      for (let i = Math.floor(rnd() * 5); i > 0; i--) {
+        const x = Math.floor(rnd() * W), y = Math.floor(rnd() * H);
+        bs.push({ x0: x, y0: y, x1: x + 20 + Math.floor(rnd() * W * 0.4), y1: y + 10 + Math.floor(rnd() * H * 0.3) });
+      }
+      const w = 120 + Math.floor(rnd() * 140), h = rnd() < 0.5 ? 36 : 64, gap = 10;
+      const home = { x: Math.floor(rnd() * W * 3 - W), y: Math.floor(rnd() * H * 3 - H) };
+      const p = dockSpot({ home, w, h, area: a, blocks: bs, gap });
+      // The best a search of every whole pixel finds.
+      let best = Infinity;
+      for (let y = a.y0; y + h <= a.y1; y += 2) for (let x = a.x0; x + w <= a.x1; x += 2) {
+        if (boxClear(at({ x, y }, w, h), a, bs, gap)) best = Math.min(best, dist({ x, y }, w, h, home));
+      }
+      if (best === Infinity) continue; // no free place at all on this stage
+      expect(boxClear(at(p, w, h), a, bs, gap), `scene ${n}`).toBe(true);
+      expect(dist(p, w, h, home), `scene ${n}`).toBeLessThanOrEqual(best + 1e-6);
+    }
+  });
+
+  it('with no free place at all it still lands inside the area, over as little as possible', () => {
+    const small: Box = { x0: 8, y0: 8, x1: 208, y1: 108 };
+    const wall: Box = { x0: 0, y0: 0, x1: 300, y1: 70 };
+    const p = dockSpot({ home: { x: 100, y: 400 }, w: 150, h: 64, area: small, blocks: [wall], gap: 10 });
+    expect(p.x).toBeGreaterThanOrEqual(8);
+    expect(p.x + 150).toBeLessThanOrEqual(208);
+    expect(p.y + 64).toBeLessThanOrEqual(108);
+    expect(p.y).toBe(44);
+  });
+
+  it('boxClear: inside the area and a gap away from every block', () => {
+    expect(boxClear({ x0: 20, y0: 20, x1: 120, y1: 60 }, area, blocks)).toBe(true);
+    expect(boxClear({ x0: 0, y0: 20, x1: 100, y1: 60 }, area, blocks)).toBe(false);
+    expect(boxClear({ x0: 1000, y0: 700, x1: 1146, y1: 760 }, area, blocks, 0)).toBe(true);
+    expect(boxClear({ x0: 1000, y0: 700, x1: 1146, y1: 760 }, area, blocks, 10)).toBe(false);
+  });
+});
+
+describe('wholeGain: what floats over a Market or a Lab is whole units', () => {
+  it('shows nothing until a whole unit has been earned, and carries the rest', () => {
+    expect(wholeGain(0, 0.4)).toEqual({ show: 0, carry: 0.4 });
+    const b = wholeGain(0.4, 0.4);
+    expect(b.show).toBe(0);
+    const c = wholeGain(b.carry, 0.4);
+    expect(c.show).toBe(1);
+    expect(c.carry).toBeCloseTo(0.2, 9);
+    expect(wholeGain(0.59, 7.41).show).toBe(8);
+    expect(wholeGain(0, 1234.5)).toEqual({ show: 1234, carry: 0.5 });
+  });
+
+  it('ten tenths make one', () => {
+    let carry = 0, shown = 0;
+    for (let i = 0; i < 10; i++) {
+      const r = wholeGain(carry, 0.1);
+      carry = r.carry;
+      shown += r.show;
+    }
+    expect(shown).toBe(1);
+    expect(carry).toBeLessThan(1e-6);
+  });
+
+  it('over a minute what was shown is what was earned, to within one unit, and never more', () => {
+    let seed = 99;
+    const rnd = () => ((seed = (seed * 1664525 + 1013904223) >>> 0) / 4294967296);
+    for (const scale of [0.05, 0.4, 1, 7.41, 1.99, 180, 12345.678]) {
+      let carry = 0, shown = 0, earned = 0;
+      for (let s = 0; s < 60; s++) {
+        const e = scale * (0.5 + rnd());
+        earned += e;
+        const r = wholeGain(carry, e);
+        expect(Number.isInteger(r.show)).toBe(true);
+        expect(r.carry).toBeGreaterThanOrEqual(0);
+        expect(r.carry).toBeLessThan(1);
+        carry = r.carry;
+        shown += r.show;
+      }
+      expect(shown).toBeLessThanOrEqual(earned + 1e-4);
+      expect(earned - shown).toBeLessThan(1);
+    }
+  });
+
+  it('never goes below nothing', () => {
+    expect(wholeGain(-1, -3)).toEqual({ show: 0, carry: 0 });
+  });
+});
+
+describe('heldRate: a still pattern is only redrawn for a real change of rate', () => {
+  it('holds through the wobble of a reading', () => {
+    let held = heldRate(0, 0.5);
+    expect(held).toBe(0.5);
+    for (const r of [0.46, 0.53, 0.49, 0.58, 0.42]) held = heldRate(held, r);
+    expect(held).toBe(0.5);
+  });
+  it('follows a change of a fifth or more, a start and a stop', () => {
+    expect(heldRate(0.5, 0.64)).toBe(0.64);
+    expect(heldRate(1, 0.79)).toBe(0.79);
+    expect(heldRate(1, 0)).toBe(0);
+    expect(heldRate(0, 0.02)).toBe(0.02);
+    expect(heldRate(2, -1)).toBe(0);
   });
 });
