@@ -170,6 +170,11 @@ export function initScreens(h: ScreenHooks) {
   });
 
   onGame((ev) => {
+    // Goal 1 claimed in a game begun here: the one-off suggestion to turn the phone, a moment after the claim's coins.
+    if (ev.kind === 'goal-claimed' && ev.index === 0 && uprightDue) {
+      uprightDue = false;
+      window.setTimeout(suggestUpright, UPRIGHT_AFTER);
+    }
     if (ev.kind !== 'demo-end') return;
     if (!NO_SUMMARY) summaryDue = performance.now() + SUMMARY_DELAY * 1000;
     // The ending is the factory and its first Lens, framed whole: no inspector over it, nothing selected (a
@@ -250,7 +255,8 @@ function begin(pressed = true) {
   const earned = hooks.begin();
   pendingAway = earned ? { ...earned, away: Math.max(awayFor, earned.seconds) } : null;
   if (pressed && resuming && ui.g.paused) ui.g.paused = false;
-  if (pressed && !resuming) suggestUpright();
+  // (A newcomer on a phone held sideways is told it plays better upright, once goal 1 is behind them: see suggestUpright.)
+  uprightDue = pressed && !resuming;
   // A save that reached the end but never dismissed the summary shows it now; the time away follows it.
   if (ui.g.ended && !summaryDone() && !NO_SUMMARY) openSummary();
   else flushAway();
@@ -505,6 +511,7 @@ function closeModal() {
 export function backToStart() {
   setSummaryDone(false);
   freePlayNow = false;
+  uprightDue = false;
   summaryDue = 0;
   pendingAway = null;
   closeSummary();
@@ -519,28 +526,45 @@ export function backToStart() {
 const UPRIGHT_KEY = 'flowstate-upright-v1';
 /** How long the line stays if nobody dismisses it. */
 const UPRIGHT_MS = 9000;
+/** Real milliseconds after goal 1's claim before it is made: the claim's coins have reached the counter by then. */
+const UPRIGHT_AFTER = 1200;
+/** The game was begun here with a press on Start: the suggestion is due once goal 1 has been claimed. */
+let uprightDue = false;
 
 /**
- * A phone held sideways gives the board a strip a few cards high (rev-wide F2). A newcomer who starts that way
- * is told once, as the game begins, that it plays better upright: one short line under the card, with a way to
- * dismiss it. It goes by itself after a few seconds, or as soon as the phone is turned.
+ * A phone held sideways gives the board a strip a few cards high (rev-wide F2). A newcomer who starts that way is
+ * told once that it plays better upright: one short line with a way to dismiss it. Not at the start, where it lay over
+ * goal 1's Well and Market and the board slid under it (final-wide F1): once goal 1 is claimed, and at the top of the
+ * screen, in the top bar's free middle (between the credits and the gear), never over the board. It goes by itself
+ * after a few seconds, or as soon as the phone is turned. (Under reduced motion, as everywhere, it only fades.)
  */
 function suggestUpright() {
   const sideways = app.classList.contains('phone') && window.innerWidth > window.innerHeight;
-  if (!sideways || !isTouch()) return;
+  if (!sideways || !isTouch() || !started) return;
+  const top = document.getElementById('top');
+  const res = top?.querySelector('.resrow')?.getBoundingClientRect();
+  const acts = top?.querySelector('.acts')?.getBoundingClientRect();
+  const bar = top?.getBoundingClientRect();
+  if (!top || !res || !acts || !bar) return;
   try {
     if (localStorage.getItem(UPRIGHT_KEY)) return;
     localStorage.setItem(UPRIGHT_KEY, '1');
   } catch {
     return; // (no storage: it could not be kept to once, so it is not said at all)
   }
-  const host = document.getElementById('toasts');
-  if (!host) return;
   const line = document.createElement('div');
-  line.className = 'toast info upright';
+  line.className = 'upright-line';
   line.setAttribute('data-testid', 'upright');
-  line.innerHTML = `<svg class="ic" viewBox="0 0 24 24" width="18" height="18" aria-hidden="true"><rect x="7" y="3" width="10" height="18" rx="2"/><path d="M3 14a8 8 0 0 0 4 5M21 10a8 8 0 0 0-4-5"/></svg>`
-    + `<span>Best played upright: turn your phone for more room.</span><button class="up-x" aria-label="Dismiss">${icon('close', 16)}</button>`;
+  line.setAttribute('role', 'status');
+  line.innerHTML = `<div class="up-pill"><svg class="ic" viewBox="0 0 24 24" width="18" height="18" aria-hidden="true"><rect x="7" y="3" width="10" height="18" rx="2"/><path d="M3 14a8 8 0 0 0 4 5M21 10a8 8 0 0 0-4-5"/></svg>`
+    + `<span>Best played upright: turn your phone for more room.</span><button class="up-x" aria-label="Dismiss">${icon('close', 16)}</button></div>`;
+  // In the bar's free middle: between the credits (and whatever else the left holds) and the buttons on the right.
+  const a = app.getBoundingClientRect();
+  const x0 = res.right + 8 - a.left, x1 = acts.left - 8 - a.left;
+  line.style.left = `${Math.round(x0)}px`;
+  line.style.width = `${Math.max(0, Math.round(x1 - x0))}px`;
+  line.style.top = `${Math.round(bar.top - a.top)}px`;
+  line.style.height = `${Math.round(bar.height)}px`;
   let gone = false;
   const go = () => {
     if (gone) return;
@@ -555,7 +579,7 @@ function suggestUpright() {
   line.querySelector('button')!.addEventListener('click', go);
   window.addEventListener('resize', turned);
   setTimeout(go, UPRIGHT_MS);
-  host.appendChild(line);
+  app.appendChild(line);
 }
 
 /** For scripts (window.flowstate.hud). */

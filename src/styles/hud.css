@@ -413,10 +413,18 @@ html[data-input='touch'] #insp .step::after, html[data-input='touch'] #insp .fil
 html[data-input='touch'] #app:not(.phone) #hud #toasts { right: var(--toast-r, 228px); bottom: calc(16px + var(--toast-up, 0px)); }
 #app:not(.phone) .toast { text-align: left; }
 #toasts .toast:nth-last-child(n + 4) { display: none; }
-/* The one-off "Best played upright" line on a phone held sideways (hud-screens.ts): it can be dismissed. */
-.toast.upright { padding-right: 4px; }
-.toast.upright > svg { flex: none; color: #9db8ff; }
-.toast.upright .up-x { flex: none; pointer-events: auto; width: 44px; height: 44px; margin: -8px 0; padding: 0; border: 0; border-radius: 50%; background: transparent; color: #9db8ff; display: flex; align-items: center; justify-content: center; }
+/* The one-off "Best played upright" line on a phone held sideways (hud-screens.ts), once goal 1 is claimed: in the
+   middle of the top bar (hud-screens.ts sets the box: between the credits and the buttons on the right), never over
+   the board. Above the bar, under its open menu (#top.menu-open is 42). It fades in and out; it can be dismissed. */
+.upright-line { position: absolute; z-index: 35; display: flex; align-items: center; justify-content: center; pointer-events: none; transition: opacity 0.3s; }
+.upright-line.out { opacity: 0; }
+.up-pill { display: flex; align-items: center; gap: 8px; max-width: 100%; min-height: 36px; padding: 0 0 0 12px; border-radius: 12px; background: #17213a; border: 1px solid #34467a; box-shadow: 0 8px 24px rgba(0, 0, 0, 0.5); color: #dbe6ff; font-size: 12.5px; line-height: 16px; pointer-events: auto; animation: up-in 0.25s ease-out; }
+.up-pill > svg { flex: none; color: #9db8ff; }
+.up-pill > span { min-width: 0; }
+.up-x { flex: none; position: relative; width: 36px; height: 36px; padding: 0; border: 0; border-radius: 50%; background: transparent; color: #9db8ff; display: flex; align-items: center; justify-content: center; }
+/* (36 px to look at, 44 px to press.) */
+.up-x::after { content: ''; position: absolute; inset: -4px; }
+@keyframes up-in { from { opacity: 0; } }
 @media (max-width: 900px) {
   /* (No key hints at this width.) */
   #app:not(.phone) #hud #toasts { bottom: calc(16px + var(--toast-up, 0px)); }
