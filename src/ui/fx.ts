@@ -1143,8 +1143,9 @@ function frameBoard(c: CanvasRenderingContext2D, cv: HTMLCanvasElement, dt: numb
   if (!held) beaconClock += pdt;
   sinceDraw += dt;
   // (The time the dots move on by when next drawn: none while they are held, so they pick up where they
-  // stopped rather than jumping on by the length of the pause.)
-  flowDue = still ? 0 : flowDue + dt;
+  // stopped rather than jumping on by the length of the pause; and none while the board is covered, so a
+  // minute in the tech tree does not run every dot off its wire and leave the wires empty when it closes.)
+  flowDue = still || covered ? 0 : flowDue + dt;
   const over = !covered && anyActive(list);
   const parts = covered ? 0 : liveBy[BOARD];
   // The frame after the last particle or overlay has gone must be drawn once more, or (while paused,
