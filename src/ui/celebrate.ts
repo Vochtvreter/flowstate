@@ -176,10 +176,11 @@ function start(spec: Spec) {
     : { x: window.innerWidth / 2, y: window.innerHeight / 2 - GLYPH_RISE[spec.kind] };
   const c: Card = (current = { spec, wash, wrap, timers, raf: 0, leaving: false, shownAt: performance.now(), at, paid: false });
   // A big card covers the middle of the board: the dots there hold still until it has gone, which saves
-  // redrawing the whole board layer while the card, its wash and its sparks are on screen. (The Lens
-  // card stays for five seconds or more, until the summary: there they hold for its opening only, as a
-  // factory standing still that long at its finest moment reads as one that has stopped.)
-  if (!small) {
+  // redrawing the whole board layer while the card, its wash and its sparks are on screen. Not under the
+  // Flow State card, whose news is that everything is running flat out (it has no sparks and costs
+  // little). The Lens card stays for five seconds or more, until the summary: there they hold for its
+  // opening only, as a factory standing still that long at its finest moment reads as one that has stopped.
+  if (!small && spec.kind !== 'flow') {
     holdFlows(true);
     if (spec.holds) timers.push(window.setTimeout(() => current === c && holdFlows(false), LENS_HOLD_MS));
   }

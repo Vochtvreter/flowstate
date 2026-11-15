@@ -9,7 +9,8 @@
 //    inside the window and on the board or the strip once it has left, so a spark can start over the
 //    card and fly off across the board. The window is moved to wherever the next effect is whenever
 //    it is empty.
-// Nothing here touches the DOM after init, and nothing here knows about the game: the board hands
+// Nothing here touches the DOM after init but to move the top layer's window and to hide the board
+// layer while there is nothing on it, and nothing here knows about the game: the board hands
 // over wire geometry as `Flow` objects, everyone else calls the particle functions or adds an
 // overlay (a function that draws its own thing each frame).
 //
@@ -190,9 +191,7 @@ let sinceDraw = 0, flowDue = 0;
 let dotsIn = 1;
 /** A celebration card is up: dots and port pulses hold still (see holdFlows). */
 let held = false;
-/** Dots on screen at the last redraw (for deciding whether a skipped frame missed anything). */
-let lastTotal = 0;
-/** Redraws of the board layer since the page loaded, and how many of them the camera's moving left without dots (for tests). */
+/** Redraws of the board layer since the page loaded, and whether its dots are left out right now because the camera is moving (for tests). */
 let boardDraws = 0;
 let boardHidden = false;
 
@@ -1162,7 +1161,7 @@ function frameBoard(c: CanvasRenderingContext2D, cv: HTMLCanvasElement, dt: numb
     lastKey = '';
   };
   if (covered) {
-    dotCount = lastTotal = 0;
+    dotCount = 0;
     stale = false;
     return wipeAll();
   }
@@ -1196,7 +1195,6 @@ function frameBoard(c: CanvasRenderingContext2D, cv: HTMLCanvasElement, dt: numb
   if (busy && !urgent && sinceDraw < BUSY_GAP) return;
   const total = stepFlows(flowDue, view, still);
   flowDue = 0;
-  lastTotal = total;
   let pulsing = false;
   for (const b of beacons) {
     if (onScreen(b, view)) {
