@@ -1,6 +1,6 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { claimGoal, claimOrder, connect, deleteNode, placeNode, upgrade } from '../src/actions';
-import { advice, applyAdvice } from '../src/advice';
+import { advice, applyAdvice, lineAdvice } from '../src/advice';
 import { RULES, TECHS } from '../src/content';
 import { endDemo, endStats, offlineCap, research, techAvailable, techHidden } from '../src/economy';
 import { GOALS, activeGoal, goalById, goalView } from '../src/goals';
@@ -524,7 +524,7 @@ describe('damaged and old saves cannot poison the game', () => {
       delete raw.flowNear;
       return deserialize(JSON.stringify(raw))!;
     };
-    // 1. Saved in the wait for Ember Deposits with a tip on the card ("study the Ink").
+    // 1. Saved in the wait for Ember Deposits with a tip on the card, and the card's own line ("study the Ink") not done.
     const g = rich();
     g.techs = ['P1', 'R1', 'P2'];
     g.credits = 300;
@@ -541,7 +541,9 @@ describe('damaged and old saves cannot poison the game', () => {
     g.goal = { i: GOALS.findIndex((x) => x.id === 'make-spark'), ready: false };
     run(g, 40);
     const pending = advice(g)!;
-    expect(pending.text.mouse).toBe('Wire the Ink Refiner\'s Ink port to the Lab: Ink is 3 α each in a Lab.');
+    expect(pending.text.mouse).toBe('Place a Well on the free Glint deposit (13¢), wired to the Lab: 1 α each.');
+    const step = lineAdvice(g)!;
+    expect(step.text.mouse).toBe('Wire the Ink Refiner\'s Ink port to the Lab: Ink is 3 α each in a Lab.');
     const loaded = older(g);
     expect(loaded.edits).toEqual([]);
     run(loaded, 1);
@@ -549,11 +551,15 @@ describe('damaged and old saves cannot poison the game', () => {
     const again = advice(loaded)!;
     expect(again.text).toEqual(pending.text);
     expect(again.saves!).toBeGreaterThanOrEqual(15);
-    // The card's own line for this goal says the same, in the card's words.
+    // So is the card's own line for this goal, and its next step (which the tip never repeats).
     expect(goalView(loaded)!.meanwhile).toEqual({ text: 'Drag from the Ink Refiner\'s Ink port to the Lab too: studied Ink is 3 α each.', done: false });
-    expect(applyAdvice(loaded, again)).toBe(true);
+    const stepAgain = lineAdvice(loaded)!;
+    expect(stepAgain.text).toEqual(step.text);
+    expect(stepAgain.wire).toEqual(step.wire);
+    expect(applyAdvice(loaded, stepAgain)).toBe(true);
     expect(goalView(loaded)!.meanwhile!.done).toBe(true);
-    expect(advice(loaded)).toBeNull(); // and now it keeps quiet for a while, like any game
+    expect(lineAdvice(loaded)).toBeNull();
+    expect(advice(loaded)).toBeNull(); // and now the adviser keeps quiet for a while, like in any game
     run(loaded, 300);
     expect(loaded.data.a).toBeGreaterThan(TECHS.P3.cost.a!);
     finiteTotals(loaded);
@@ -576,6 +582,7 @@ describe('damaged and old saves cannot poison the game', () => {
     expect(view.flow!.need).toBe(RULES.flow.holdShare);
     run(flowLoaded, 60);
     expect(flowLoaded.goal.ready).toBe(false); // 61 s after the load: the bar still stands
+    expect(goalView(flowLoaded)!.flow!.valve).toBeUndefined();
     finiteTotals(flowLoaded);
 
     // 3. A save that owns Market Lens (and one that went on to Wider Demand) keeps them, and still sees the branch.

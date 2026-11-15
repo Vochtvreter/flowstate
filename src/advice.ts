@@ -9,7 +9,8 @@
 //
 //   waitInfo(g)       what the goal card is waiting for, and how long that takes at the current income
 //   advice(g)         one tip, or null
-//   applyAdvice(g, a) do what the tip says, through the normal actions (for bots and tests)
+//   lineAdvice(g)     the next step of the goal card's "while you wait" line, in the shape of a tip, or null
+//   applyAdvice(g, a) do what a tip or a line's step says, through the normal actions (for bots and tests)
 //
 // Few tips, and large ones. The moves that matter most are on the goal cards themselves (Goal.meanwhile in
 // src/goals.ts), because the card is what every player reads. What is left for a tip:
@@ -19,8 +20,10 @@
 //    RULES.tips.quiet seconds (20): tips are for a player with free hands, and never arrive in a chain.
 //  - It never asks again for what has just been done to the same kind of node, for RULES.tips.repeatAfter
 //    seconds (60): no "buy Speed on a Lab" twice running.
-//  - It never reverses a goal card. "Remove this wire" is only ever said when the active card says so too,
+//  - It never reverses a goal card. "Cut this wire" is only ever said when the active card says so too,
 //    and a Router that a card had turned toward a Lab is never turned away from it.
+//  - It never says what the card is saying already: while the card's "while you wait" line is up and not
+//    done, the step that line asks for next (lineAdvice) is not offered as a tip as well.
 //  - Every tip carries `saves` (a number of seconds, or Infinity when the wait would not end without it), and
 //    every sentence fits RULES.tips.maxLength characters (90), for mouse and for touch.
 //
@@ -38,13 +41,13 @@
 // src/orders.ts). A wire that takes goods from the Markets makes every later order smaller, and a copy
 // with no orders after the first could not see that cost.
 import {
-  act, buildNote, connect, cutNote, cutWire, favour, favourNote, favouredWire, freeDeposits, materialsAt, pickRecipe, placeNode, upgrade,
-  upgradeAll, upgradeAllNote, upgradeNote, wireNote,
+  act, buildNote, connect, cutNote, cutWire, expandBoard, favour, favourNote, favouredWire, freeDeposits, materialsAt, pickRecipe, placeNode,
+  upgrade, upgradeAll, upgradeAllNote, upgradeNote, wireNote,
 } from './actions';
-import { DATA_NAMES, DATA_WORTH, DATA_YIELD, DataTier, MATERIALS, MAT_IDS, MatId, NODE_DEFS, NodeType, RULES, TECHS, Track } from './content';
+import { DATA_NAMES, DATA_WORTH, DATA_YIELD, DataTier, EXPANSION_DEPOSITS, MATERIALS, MAT_IDS, MatId, NODE_DEFS, NodeType, RULES, TECHS, Track } from './content';
 import {
-  costText, dataYield, demandInfo, demandShown, has, labRate, maxLevel, nodeCost, recipeOf, research, techAffordable, techAvailable,
-  trackAvailable, upgradeCost, wellRate,
+  costText, dataYield, demandInfo, demandShown, expansionCost, has, labRate, maxLevel, nodeCost, recipeOf, research, techAffordable,
+  techAvailable, trackAvailable, upgradeCost, wellRate,
 } from './economy';
 import { countsForFlow, isFlowing } from './flow';
 import { Forecast, forecast, lookahead } from './forecast';
@@ -89,8 +92,10 @@ export interface Advice {
   favour?: { router: number; wire: number };
   /** Research this tech. */
   research?: string;
-  /** Remove this wire (it runs from `from` to `to`; `node` is `from`). */
+  /** Cut this wire (it runs from `from` to `to`; `node` is `from`). */
   cut?: { wire: number; from: number; to: number };
+  /** Expand the board (the Expand button; `cost` is its price). Only ever a step of a goal card's line (lineAdvice), never a tip. */
+  expand?: true;
   /** A Flow tip: the Well or machine that is holding Flow back, which the tip gets flowing, or a good deal closer to it (`node` is what to act on). */
   culprit?: number;
   /** Gestures the tip takes: 1, or 2 when something is built and then wired on. */
@@ -456,8 +461,8 @@ export const SAY = {
   labSpeed: (name: string, cost: string) => `Research ${name} (${cost}): your Lab is full, and Labs then study twice as fast.`,
   deepAnalysis: (name: string, cost: string) => `Research ${name} (${cost}): every item studied then gives half as much Data again.`,
   widerDemand: (name: string, cost: string, glut: string) => `Research ${name} (${cost}): ${glut} is over demand, and Markets then buy 50% more.`,
-  // --- remove a wire: only ever what a goal card asks for as well ---
-  cut: (from: string, to: string, mat: string, value: number) => `Remove the wire from ${from} to ${to}: sold, each ${mat} is ${value}¢.`,
+  // --- cut a wire: only ever what a goal card asks for as well ---
+  cut: (from: string, to: string, mat: string, value: number) => `Cut the wire from ${from} to ${to}: sold, each ${mat} is ${value}¢.`,
   // --- build ---
   labFull: (port: string, cost: number) => `Build a Lab from ${port} (${cents(cost)}): the Lab you have is full.`,
   labNone: (port: string, cost: number, mat: string, unit: string) => `Build a Lab from ${port} (${cents(cost)}): a Lab turns ${mat} into ${unit}.`,
@@ -475,6 +480,10 @@ export const SAY = {
   flowFavour: (Who: string, mat: string) => `${Who} needs more ${mat}: favour its wire on the Router.`,
   flowBlank: (Who: string, port: string) => `${Who} has nothing to work on: wire ${port} to it.`,
   flowTaker: (Who: string, node: string, cost: number) => `${Who} is backed up: buy Speed on ${node} (${cents(cost)}).`,
+  // --- the steps of a goal card's "while you wait" line (lineAdvice): a Well, its own Lab, the board ---
+  lineWell: (mat: string, cost: number) => `Place a Well on the free ${mat} deposit (${cents(cost)}), then build a Lab from its port.`,
+  lineLab: (mat: string, cost: number) => `Build a Lab from the new ${mat} Well's port (${cents(cost)}): a Lab of its own is 1 α a second.`,
+  lineExpand: (cost: number) => `Expand the board (${cents(cost)}): it brings new deposits for a Well and a Lab of its own.`,
 };
 
 // =====================================================================================
@@ -487,7 +496,9 @@ type Act =
   | { t: 'build'; type: NodeType; from?: number; port?: number; deposit?: number; to?: number; recipe?: string }
   | { t: 'favour'; router: number; wire: number }
   | { t: 'research'; tech: string }
-  | { t: 'cut'; wire: number };
+  | { t: 'cut'; wire: number }
+  /** Only as a step of a goal card's line: no tip ever expands the board. */
+  | { t: 'expand' };
 
 interface Cand {
   act: Act;
@@ -521,6 +532,8 @@ function perform(g: Game, a: Act): boolean {
       return research(g, a.tech);
     case 'cut':
       return cutWire(g, a.wire);
+    case 'expand':
+      return expandBoard(g);
     case 'build':
       return act(g, () => {
         const src = a.from != null ? node(g, a.from) : null;
@@ -562,6 +575,8 @@ function noteOf(g: Game, a: Act): string | null {
       const to = w && node(g, w.to);
       return from && to ? cutNote(from, to) : null;
     }
+    case 'expand':
+      return 'edit';
     case 'build':
       return buildNote(a.type, a.deposit != null ? g.deposits.find((d) => d.id === a.deposit)?.mat ?? null : null);
   }
@@ -643,6 +658,22 @@ function refinerCand(g: Game, p: Port, to: GNode, hope: number): Cand | null {
   return {
     act: { t: 'build', type: 'refiner', from: p.n.id, port: p.port, recipe: r.id, to: to.id }, cost, hope, show: p.n.id,
     text: SAY.refiner(portName(g, p), cost, out.name, out.value),
+  };
+}
+
+/**
+ * Cut a wire into a Lab so that what came down it is sold instead: only ever for a wire a goal card's line
+ * lists (Meanwhile.cuts). The sentence names the dearest thing the wire carries.
+ */
+function cutCand(g: Game, wireId: number): Cand | null {
+  const x = g.wires.find((w) => w.id === wireId);
+  const from = x && node(g, x.from);
+  const to = x && node(g, x.to);
+  const mat = x && [...materialsAt(g, x.from, x.port)].sort((a, b) => MATERIALS[b].value - MATERIALS[a].value)[0];
+  if (!x || !from || !to || !mat) return null;
+  return {
+    act: { t: 'cut', wire: x.id }, cost: 0, hope: MATERIALS[mat].value * Math.max(0.02, x.rate), show: from.id,
+    text: SAY.cut(the(g, from), the(g, to), MATERIALS[mat].name, MATERIALS[mat].value),
   };
 }
 
@@ -815,22 +846,10 @@ function creditCands(g: Game): Cand[] {
     const toMarket = outs(g, r).find((x) => node(g, x.to)?.type === 'market');
     if (toMarket && outs(g, r).length > 1) push(list, favourCand(g, r, toMarket, 2, SAY.favourSell('Market')));
   }
-  // Remove a wire: only where the goal card asks for it (its "while you wait" line), so that a tip never
-  // reverses a card. The card says it; the tip, if it comes, says the same and how many seconds it is worth.
+  // Cut a wire: only where the goal card asks for it (its "while you wait" line), so that a tip never
+  // reverses a card. (The wire the line's own "Show me" points at is then left to the line: see candidates.)
   const line = meanwhileOf(g);
-  if (line?.cuts && !line.done(g)) {
-    for (const id of line.cuts(g).slice(0, 3)) {
-      const x = g.wires.find((w) => w.id === id);
-      const from = x && node(g, x.from);
-      const to = x && node(g, x.to);
-      const mat = x && materialsAt(g, x.from, x.port)[0];
-      if (!x || !from || !to || !mat) continue;
-      list.push({
-        act: { t: 'cut', wire: x.id }, cost: 0, hope: MATERIALS[mat].value * Math.max(0.02, x.rate), show: from.id,
-        text: SAY.cut(the(g, from), the(g, to), MATERIALS[mat].name, MATERIALS[mat].value),
-      });
-    }
-  }
+  if (line?.cuts && !line.done(g)) for (const id of line.cuts(g).slice(0, 3)) push(list, cutCand(g, id));
   if (glutted) push(list, researchCand(g, 'C2', 3, (name, cost) => SAY.widerDemand(name, cost, MATERIALS[glutted].name)));
   list.push(...fasterProducers(g, 'market', 'credits'));
   list.push(...wellsForHungryMachines(g));
@@ -938,15 +957,36 @@ function flowCands(g: Game): Cand[] {
  * the two is further off changes from one second to the next near the end: going by that alone, a tip
  * blinked on and off as the two swapped places.
  *
- * Left out: what the player has just done to the same kind of node (g.edits), and `skip`, the tips (as they
- * read) that have already come and gone on this board.
+ * Left out: what the player has just done to the same kind of node (g.edits); `skip`, the tips (as they
+ * read) that have already come and gone on this board; and the step the goal card's "while you wait" line is
+ * asking for right now (lineStep): the card says that itself, with a "Show me" of its own. A player who
+ * reads only the tips and never the lines reaches the Lens half a minute to a minute and a half later for it
+ * (`npm run pacing -- --policies=newcomer --noMeanwhile`), and is not stranded.
  */
 function candidates(g: Game, w: Wait, skip: ReadonlySet<string> = new Set()): Cand[] {
   const recent = new Set((g.edits ?? []).filter((e) => g.time - e.at < RULES.tips.repeatAfter).map((e) => e.what));
+  const line = lineStep(g);
+  const lineAct = line && JSON.stringify(line.act);
+  const lineReads = line && reads(line.text);
+  /**
+   * The line's step (the same action, or the same sentence about another node of the same name), or another
+   * ending to its first gesture: a Well on the deposit the line wants a Well on, wired into the Lab the player
+   * has; a wire from the Well the line wants a Lab of its own on. The card and the tip would point at the
+   * same spot and say different things.
+   */
+  const theLines = (c: Cand): boolean => {
+    if (!line) return false;
+    if (JSON.stringify(c.act) === lineAct || reads(c.text) === lineReads) return true;
+    if (line.act.t !== 'build') return false;
+    if (line.act.deposit != null) return c.act.t === 'build' && c.act.deposit === line.act.deposit;
+    const well = line.act.from;
+    return (c.act.t === 'wire' || c.act.t === 'build') && c.act.from === well;
+  };
   const best = (list: Cand[]): Cand[] => {
     const seen = new Set<string>();
     return top(list, list.length).filter((c) => {
       const key = JSON.stringify(c.act);
+      if (theLines(c)) return false;
       if (seen.has(key) || seen.size >= ADVICE.candidates || skip.has(reads(c.text))) return false;
       const note = noteOf(g, c.act);
       if (!note || recent.has(note)) return false;
@@ -1273,17 +1313,16 @@ const reads = (text: string) => text.replace(/\d+¢/g, '¢');
 const verdicts = new WeakMap<Game, Memory>();
 
 function toAdvice(w: Wait, v: Verdict): Advice {
-  const c = v.cand;
-  const a: Advice = {
-    kind: w.kind === 'flow' ? 'flow' : c.brings ?? (w.kind === 'data' ? 'data' : 'credits'),
-    text: { mouse: c.text, touch: c.text },
-    eta: v.base,
-    // Every tip says what it saves. Infinity: the wait would not end without it (which is also true of a tip
-    // that is one step of several and does not end it alone).
-    saves: isFinite(v.tip) && isFinite(v.base) ? Math.max(0, v.base - v.tip) : Infinity,
-    cost: c.cost,
-    steps: 1,
-  };
+  const a = shaped(v.cand, w.kind === 'flow' ? 'flow' : v.cand.brings ?? (w.kind === 'data' ? 'data' : 'credits'), v.base, v.cut);
+  // Every tip says what it saves. Infinity: the wait would not end without it (which is also true of a tip
+  // that is one step of several and does not end it alone).
+  a.saves = isFinite(v.tip) && isFinite(v.base) ? Math.max(0, v.base - v.tip) : Infinity;
+  return a;
+}
+
+/** A candidate in the shape the interface and applyAdvice read: what to point at and what to do. */
+function shaped(c: Cand, kind: Advice['kind'], eta: number, cut?: { wire: number; from: number; to: number }): Advice {
+  const a: Advice = { kind, text: { mouse: c.text, touch: c.text }, eta, cost: c.cost, steps: 1 };
   if (c.show != null) a.node = c.show;
   if (c.culprit != null) a.culprit = c.culprit;
   const x = c.act;
@@ -1297,9 +1336,9 @@ function toAdvice(w: Wait, v: Verdict): Advice {
     a.favour = { router: x.router, wire: x.wire };
   } else if (x.t === 'research') a.research = x.tech;
   else if (x.t === 'cut') {
-    const wire = v.cut;
-    if (wire) a.cut = wire;
-  } else {
+    if (cut) a.cut = cut;
+  } else if (x.t === 'expand') a.expand = true;
+  else {
     a.build = x.type;
     if (x.from != null) a.node = x.from;
     if (x.port != null) a.port = x.port;
@@ -1377,9 +1416,89 @@ export function adviceLife(g: Game): number {
  * line, the line is done or does not apply, or its next step cannot be done right now (not affordable, nothing
  * to build it on). Unlike advice(g) it is not held back by the quiet after an edit, costs no look-ahead, and
  * promises no saving (`saves` is absent): the line's worth is tested once, in tests/meanwhile.test.ts.
+ *
+ * What comes back, by step. Each has `text` (one sentence, the same for mouse and touch), `kind`, `cost`
+ * (0 for a wire) and `steps: 1`; `eta` is 0, because the wait is not looked at here at all.
+ *  - a wire to make:      `wire { from, to, port }`, `node` = from
+ *  - a Well on a deposit: `build: 'well'`, `deposit` (and no `to`: the Well is placed, nothing more)
+ *  - a Lab from a Well:   `build: 'lab'`, `node` = the Well, `port: 0`
+ *  - the board:           `expand: true` (`cost` is the price of the expansion)
+ *  - a wire to cut:       `cut { wire, from, to }`, `node` = from
+ * While a step is on offer here, advice(g) does not give it (or another ending to its first gesture) as a tip.
  */
-export function lineAdvice(_g: Game): Advice | null {
-  return null;
+export function lineAdvice(g: Game): Advice | null {
+  const c = lineStep(g);
+  if (!c) return null;
+  let cut: Advice['cut'];
+  if (c.act.t === 'cut') {
+    const id = c.act.wire;
+    const wire = g.wires.find((x) => x.id === id);
+    if (!wire) return null;
+    cut = { wire: id, from: wire.from, to: wire.to };
+  }
+  return shaped(c, c.brings ?? 'data', 0, cut);
+}
+
+/** Deposits that came with the board's second expansion or a later one: the "new" ones of "Make your first Mist". */
+function laterDeposits(g: Game): Set<number> {
+  let n = 0;
+  for (let i = 1; i < g.board.expansions; i++) n += EXPANSION_DEPOSITS[i % EXPANSION_DEPOSITS.length].length;
+  return new Set(n > 0 ? g.deposits.slice(-n).map((d) => d.id) : []);
+}
+
+/**
+ * The next gesture the active goal's "while you wait" line asks for, read to the letter, as a candidate with
+ * its sentence. null: no line, done, not applicable, or the step cannot be paid for or done right now.
+ * Looks at the board only: no copy of the game is run.
+ *
+ *  - "Make your first Spark": the Ink Refiner's Ink port to the Lab (the one with the most room, if several).
+ *  - "Assemble your first Glyph": a Well that stands unwired gets a Lab from its port; else a free deposit
+ *    gets a Well. One deposit after the other, until two Wells have a Lab each.
+ *  - "Make your first Mist": the same on a deposit of the second expansion (or a later one), and when none
+ *    of those is free, the board is expanded first.
+ *  - "Build a Fabricator": the first wire that still takes Glyph to a Lab is cut.
+ */
+function lineStep(g: Game): Cand | null {
+  const goal = activeGoal(g);
+  const line = meanwhileOf(g);
+  if (!goal || !line || line.done(g)) return null;
+  const afford = (c: Cand | null) => (c && c.cost <= g.credits + 1e-6 ? c : null);
+  switch (goal.id) {
+    case 'make-spark': {
+      const p = ports(g).find((x) => x.mat === 'ink' && isMachine(x.n));
+      const room = (lab: GNode) => Math.max(0, labRate(g, lab) - lab.rate);
+      const lab = p && g.nodes.filter((n) => n.type === 'lab' && !wired(g, p, n)).sort((a, b) => room(b) - room(a))[0];
+      if (!p || !lab) return null;
+      const y = dataYield(g, p.mat);
+      return { ...wireCand(p, lab, 0, SAY.study(portName(g, p), the(g, lab), MATERIALS[p.mat].name, y.amount, DATA_NAMES[y.tier])), brings: 'data' };
+    }
+    case 'make-glyph': case 'make-mist': {
+      // On "Make your first Mist" only the deposits the line is about: those of the second expansion on.
+      const later = goal.id === 'make-mist' ? laterDeposits(g) : null;
+      const mine = (deposit: number | null | undefined) => deposit != null && (!later || later.has(deposit));
+      if (!has(g, NODE_DEFS.lab.tech)) return null;
+      const bare = g.nodes.find((n) => n.type === 'well' && !!n.material && mine(n.depositId) && !outs(g, n).length);
+      if (bare) {
+        const cost = nodeCost(g, 'lab');
+        return afford({ act: { t: 'build', type: 'lab', from: bare.id, port: 0 }, cost, hope: 0, show: bare.id, brings: 'data', text: SAY.lineLab(MATERIALS[bare.material!].name, cost) });
+      }
+      const d = freeDeposits(g).find((x) => mine(x.id));
+      if (d) {
+        const cost = nodeCost(g, 'well');
+        return afford({ act: { t: 'build', type: 'well', deposit: d.id }, cost, hope: 0, brings: 'data', text: SAY.lineWell(MATERIALS[d.mat].name, cost) });
+      }
+      if (!later) return null;
+      const cost = expansionCost(g);
+      return afford({ act: { t: 'expand' }, cost, hope: 0, brings: 'data', text: SAY.lineExpand(cost) });
+    }
+    case 'build-fabricator': {
+      const id = line.cuts?.(g)[0];
+      const c = id == null ? null : cutCand(g, id);
+      return c && { ...c, brings: 'credits' };
+    }
+    default:
+      return null;
+  }
 }
 
 export interface AdviceTrial {
@@ -1418,10 +1537,11 @@ export function adviceTrials(g: Game): { kind: string; idle: { ends: number; sco
   return { kind: w.kind, idle: { ends: base.t, score: base.score }, trials };
 }
 
-/** Do what a tip says, through the normal actions. Returns false if it can no longer be done (the board has changed). */
+/** Do what a tip (or a step from lineAdvice) says, through the normal actions. Returns false if it can no longer be done (the board has changed). */
 export function applyAdvice(g: Game, a: Advice): boolean {
   let x: Act | null = null;
-  if (a.research) x = { t: 'research', tech: a.research };
+  if (a.expand) x = { t: 'expand' };
+  else if (a.research) x = { t: 'research', tech: a.research };
   else if (a.cut) x = { t: 'cut', wire: a.cut.wire };
   else if (a.favour) x = { t: 'favour', router: a.favour.router, wire: a.favour.wire };
   else if (a.build) x = { t: 'build', type: a.build as NodeType, from: a.node, port: a.port, deposit: a.deposit, to: a.to, recipe: a.recipe };

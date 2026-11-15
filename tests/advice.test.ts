@@ -4,7 +4,7 @@ import {
   canRedo, canUndo, claimOrder, clearHistory, connect, cutWire, deleteNode, expandBoard, favour, favouredWire, placeNode, redo, setMode, undo,
   upgrade, upgradeAll,
 } from '../src/actions';
-import { ADVICE, Advice, SAY, advice, adviceQuiet, adviceTrials, applyAdvice, waitInfo, waitKind } from '../src/advice';
+import { ADVICE, Advice, SAY, advice, adviceQuiet, adviceTrials, applyAdvice, lineAdvice, waitInfo, waitKind } from '../src/advice';
 import { DATA_NAMES, DATA_YIELD, MATERIALS, MAT_IDS, NODE_DEFS, RECIPES, RULES, TECHS } from '../src/content';
 import { costText, demandInfo, nodeCost, nodeCostAt, research, techAffordable, upgradeCostAt } from '../src/economy';
 import { countsForFlow, flowInfo, isFlowing } from '../src/flow';
@@ -287,42 +287,66 @@ describe('advice: the repertoire, one board at a time', () => {
     g.techs = g.techs.filter((id) => id !== 'P3');
     at(g, 'make-spark'); // Ember Deposits: 215 α, and no orders yet (they come with this goal's reward)
     g.credits = 1e6; // the Well and the Refiner are paid for: the wait is for α alone
-    const a = advice(g)!;
-    expect(a.kind).toBe('data');
-    expect(a.wire).toBeDefined();
     // Ink is sold and Silt is thrown away. Ink is worth 3 α in the Lab, Silt (a by-product) only 1: Ink first.
-    expect(a.text.mouse).toBe('Wire the Ink Refiner\'s Ink port to the Lab: Ink is 3 α each in a Lab.');
-    expect(a.text.touch).toBe(a.text.mouse);
-    expect(a.cost).toBe(0);
-    expect(a.steps).toBe(1);
-    expect(a.saves!).toBeGreaterThan(60);
-    expect(a.eta).toBeGreaterThan(a.saves!);
-    checkWording(a);
-    const t = trial(g, a, 3000);
-    expect(t.applied).toBe(true);
-    expect(t.tip).toBeLessThan(t.idle);
+    // On this goal that is the card's own "while you wait" line, and the line's next step is that very wire...
+    const step = lineAdvice(g)!;
+    expect(step.text.mouse).toBe('Wire the Ink Refiner\'s Ink port to the Lab: Ink is 3 α each in a Lab.');
+    // ...so the adviser leaves it to the card and says the next best thing: nothing is said twice.
+    expect(adviceTrials(g)!.trials.some((x) => /Ink port to the Lab/.test(x.text))).toBe(false);
+    const other = advice(g)!;
+    expect(other.text.mouse).toMatch(/^Place a Well on the free Glint deposit \(\d+¢\), wired to the Lab: 1 α each\.$/);
+    checkWording(other);
     // The Silt that is being dumped is on the list too, for what it is worth.
     const silt = adviceTrials(g)!.trials.find((x) => /Silt port/.test(x.text))!;
     expect(silt.text).toBe('Wire the Ink Refiner\'s Silt port to the Lab: you are throwing away 1 α each.');
     expect(silt.doable).toBe(true);
+    // The step is a tip in everything but the promise: it can be carried out, and the wait ends sooner for it.
+    expect(step.kind).toBe('data');
+    expect(step.wire).toBeDefined();
+    expect(step.text.touch).toBe(step.text.mouse);
+    expect(step.cost).toBe(0);
+    expect(step.steps).toBe(1);
+    expect(step.saves).toBeUndefined();
+    checkSentence(step.text.mouse);
+    const t = trial(g, step, 3000);
+    expect(t.applied).toBe(true);
+    expect(t.tip).toBeLessThan(t.idle - 60);
     // The same board once orders exist. An order asks for 45–90 s of what is SOLD of a material and pays α by
     // the item: Ink taken from the Market makes every Ink order smaller. The look-ahead counts the orders to
-    // come, so the Ink wire is worth less than it was, and a Well of raw Glint (which no order asks for while
-    // something refined is made) is now the better tip.
+    // come, so the Ink wire is worth less than it was, and raw material (which no order asks for while
+    // something refined is made) is now the better tip. Not the free Glint deposit, though: on this card that
+    // deposit is the line's ("a Well and a Lab built from its port"), and a tip does not give it another ending.
     const o = midGame();
     at(o, 'make-glyph'); // Assembly: 1,140 α
     o.credits = 1e6;
     run(o, 0.1);
     expect(o.ordersOn).toBe(true);
+    const line = lineAdvice(o)!;
+    expect(line.text.mouse).toMatch(/^Place a Well on the free Glint deposit \(\d+¢\), then build a Lab from its port\.$/);
+    expect(line.build).toBe('well');
+    expect(line.deposit).toBe(2);
+    expect(line.to).toBeUndefined();
+    expect(line.steps).toBe(1);
+    expect(adviceTrials(o)!.trials.some((x) => /free Glint deposit/.test(x.text))).toBe(false);
     const b = advice(o)!;
-    expect(b.text.mouse).toMatch(/^Place a Well on the free Glint deposit \(\d+¢\), wired to the Lab: 1 α each\.$/);
-    expect(b.build).toBe('well');
-    expect(b.steps).toBe(2);
+    expect(b.text.mouse).toBe('Wire the Ember Well\'s port to the Lab: Ember is 1 α each in a Lab.');
+    expect(b.wire).toBeDefined();
+    expect(b.steps).toBe(1);
     checkWording(b);
     const ink = adviceTrials(o)!.trials.find((x) => /Ink port to the Lab/.test(x.text))!;
     expect(ink.doable).toBe(true);
     // True in the real game, where orders keep coming, under this order sequence and four others.
     for (const gain of realGains(o, b, 2000, 5)) expect(gain).toBeGreaterThan(30);
+    // Once the line's Well stands, its next step is the Lab from that Well's port, and no tip wires that Well elsewhere.
+    expect(applyAdvice(o, line)).toBe(true);
+    const placed = o.nodes.find((n) => n.depositId === 2)!;
+    const next = lineAdvice(o)!;
+    expect(next.text.mouse).toMatch(/^Build a Lab from the new Glint Well's port \(\d+¢\): a Lab of its own is 1 α a second\.$/);
+    expect(next).toMatchObject({ build: 'lab', node: placed.id, port: 0, steps: 1 });
+    run(o, 25);
+    expect(adviceTrials(o)!.trials.some((x) => /a Glint Well's port to the (Lab|Market)/.test(x.text))).toBe(false);
+    expect(applyAdvice(o, lineAdvice(o)!)).toBe(true);
+    expect(o.wires.some((w) => w.from === placed.id && o.nodes.find((n) => n.id === w.to)!.type === 'lab')).toBe(true);
     // "Worth more Data than": a Lab that studies raw Glint is offered Shard.
     const h = rich();
     h.techs = ['P1', 'R1'];
@@ -477,7 +501,7 @@ describe('advice: the repertoire, one board at a time', () => {
     checkWording(a);
   });
 
-  it('"remove this wire" is only ever said when the goal card says it too', () => {
+  it('"cut this wire" is only ever said when the goal card says it too, and then the card\'s own step says it', () => {
     // "Build a Fabricator", researched: 7,100¢ to save, the β long covered, and half the Glyph going into the Lab.
     const g = glyphGame();
     g.techs.push('P5', 'P7');
@@ -490,31 +514,59 @@ describe('advice: the repertoire, one board at a time', () => {
     const lab = g.nodes.find((n) => n.type === 'lab')!;
     const wire = g.wires.find((w) => w.from === glyph.id && w.to === lab.id)!;
     // The card says it: its "while you wait" line.
-    expect(goalView(g)!.meanwhile).toEqual({ text: 'You have the β you need: remove the wire from the Glyph Assembler to the Lab.', done: false });
+    expect(goalView(g)!.meanwhile).toEqual({ text: 'You have the β you need: cut the wire from the Glyph Assembler to the Lab.', done: false });
     expect(activeGoal(g)!.meanwhile!.cuts!(g)).toEqual([wire.id]);
-    // The adviser says the same, and what it is worth.
-    const a = advice(g)!;
+    // The line's step says which wire, in the words of the button ("Cut wire"), for the card's "Show me".
+    const a = lineAdvice(g)!;
     expect(a.kind).toBe('credits');
-    expect(a.text.mouse).toBe('Remove the wire from the Glyph Assembler to the Lab: sold, each Glyph is 20¢.');
+    expect(a.text.mouse).toBe('Cut the wire from the Glyph Assembler to the Lab: sold, each Glyph is 20¢.');
     expect(a.text.touch).toBe(a.text.mouse);
     expect(a.cut).toEqual({ wire: wire.id, from: glyph.id, to: lab.id });
     expect(a.node).toBe(glyph.id);
     expect(a.cost).toBe(0);
-    expect(a.saves!).toBeGreaterThan(60);
-    checkWording(a);
+    expect(a.saves).toBeUndefined(); // a line's step promises nothing: its worth is tested, not measured on the spot
+    checkSentence(a.text.mouse);
     const t = trial(g, a, 4000);
     expect(t.tip).toBeLessThan(t.idle - 60);
-    // The Shard wire into the same Lab is as useless right now (no α is needed either), and a card asked for
-    // it once ("Build a Lab and feed it"): no tip takes it back, and nothing else is ever cut.
+    // The adviser does not say it as well: the card has it. And it cuts nothing else. The Shard wire into the
+    // same Lab is as useless right now (no α is needed either), and a card asked for it once ("Build a Lab
+    // and feed it"): no tip takes it back.
     expect(g.wires.some((w) => w.from === shard.id && w.to === lab.id)).toBe(true);
-    expect(adviceTrials(g)!.trials.filter((x) => /^Remove /.test(x.text)).map((x) => x.text)).toEqual([a.text.mouse]);
+    expect(adviceTrials(g)!.trials.some((x) => /^(Cut|Remove) /.test(x.text))).toBe(false);
+    expect(advice(g)?.cut).toBeUndefined();
     expect(applyAdvice(g, a)).toBe(true);
     expect(g.wires.some((w) => w.id === wire.id)).toBe(false);
     expect(goalView(g)!.meanwhile!.done).toBe(true);
+    expect(lineAdvice(g)).toBeNull();
     expect(applyAdvice(g, a)).toBe(false); // the wire is gone
     run(g, 25);
-    expect(adviceTrials(g)!.trials.some((x) => /^Remove /.test(x.text))).toBe(false);
+    expect(adviceTrials(g)!.trials.some((x) => /^(Cut|Remove) /.test(x.text))).toBe(false);
     expect(advice(g)?.cut).toBeUndefined();
+
+    // Two wires take Glyph to Labs: the line's step is the first, and the adviser may name the other one, which
+    // the card's "Show me" is not pointing at. It is still a wire the card asks to go, and only such a wire.
+    const two = glyphGame();
+    two.techs.push('P5', 'P7');
+    two.data = { a: 5000, b: 5000, g: 0 };
+    two.credits = 1e5;
+    const glyph2 = two.nodes.find((n) => n.recipe === 'glyph')!;
+    const lab2 = placeNode(two, 'lab', 900, 500)!;
+    const extra = connect(two, glyph2.id, 0, lab2.id)!;
+    two.credits = 0;
+    two.edits = [];
+    at(two, 'build-fabricator');
+    run(two, 0.1);
+    const cuts = activeGoal(two)!.meanwhile!.cuts!(two);
+    expect(cuts.length).toBe(2);
+    expect(cuts).toContain(extra.id);
+    expect(lineAdvice(two)!.cut!.wire).toBe(cuts[0]);
+    // Both read the same ("...from the Glyph Assembler to a Lab..."), so neither is said as a tip while the line is up.
+    expect(adviceTrials(two)!.trials.some((x) => /^Cut /.test(x.text))).toBe(false);
+    expect(applyAdvice(two, lineAdvice(two)!)).toBe(true);
+    expect(lineAdvice(two)!.cut!.wire).toBe(cuts[1]);
+    expect(applyAdvice(two, lineAdvice(two)!)).toBe(true);
+    expect(goalView(two)!.meanwhile!.done).toBe(true);
+    expect(lineAdvice(two)).toBeNull();
 
     // While the β is still wanted, neither the card nor the adviser asks for it.
     const h = glyphGame();
@@ -524,7 +576,8 @@ describe('advice: the repertoire, one board at a time', () => {
     at(h, 'build-fabricator');
     run(h, 0.1);
     expect(goalView(h)!.meanwhile).toBeUndefined();
-    expect(adviceTrials(h)!.trials.some((x) => /^Remove /.test(x.text))).toBe(false);
+    expect(lineAdvice(h)).toBeNull();
+    expect(adviceTrials(h)!.trials.some((x) => /^(Cut|Remove) /.test(x.text))).toBe(false);
     // Nor when the Fabricator's price is already in hand: selling Glyph would bring nothing sooner.
     h.data.b = 5000;
     h.credits = 1e6;
@@ -537,7 +590,8 @@ describe('advice: the repertoire, one board at a time', () => {
     at(k, 'make-prism'); // an Assembler to save for: 1,500¢
     run(k, 0.1);
     expect(waitKind(k)).toBe('credits');
-    expect(adviceTrials(k)!.trials.some((x) => /^Remove /.test(x.text))).toBe(false);
+    expect(lineAdvice(k)).toBeNull();
+    expect(adviceTrials(k)!.trials.some((x) => /^(Cut|Remove) /.test(x.text))).toBe(false);
   });
 
   it('a Router that a card turned toward a Lab is never turned away from it', () => {
@@ -746,7 +800,11 @@ describe('advice: the repertoire, one board at a time', () => {
     expect(g.goal.ready).toBe(false);
     expect(g.flowHold).toBe(0);
     expect(goalView(g)!.flow).toMatchObject({ of: 6, running: 5, need: RULES.flow.holdShare });
-    // ...and then the valve opens.
+    // ...and then the valve opens, and its ten seconds run where the player can see them.
+    run(g, 10);
+    expect(g.goal.ready).toBe(false);
+    expect(goalView(g)!.flow).toMatchObject({ of: 6, running: 5, valve: true });
+    expect(goalView(g)!.progress![0]).toBeGreaterThan(0);
     run(g, 10);
     expect(g.goal.ready).toBe(true);
     expect(favouredWire(g, router.id)).toBe(toLab.id); // the Router still stands as the card left it
@@ -1172,7 +1230,8 @@ describe('the words: every sentence of the repertoire fits the card', () => {
     labSpeed: [[TECHS.R2.name], [costText(TECHS.R2)]],
     deepAnalysis: [[TECHS.R3.name], [costText(TECHS.R3)]],
     widerDemand: [[TECHS.C2.name], [costText(TECHS.C2)], mats],
-    cut: [machines, labs, mats, values],
+    // A wire into a Lab from the machine that makes the thing, or from a Router, Merger or Silo it passes through.
+    cut: [[...machines, ...['Router', 'Merger', 'Silo'].flatMap(both)], labs, mats, values],
     labFull: [ports, [buildPrice]],
     labNone: [ports, [buildPrice], mats, units],
     market: [ports, [buildPrice, 0]],
@@ -1188,6 +1247,10 @@ describe('the words: every sentence of the repertoire fits the card', () => {
     flowFavour: [Machines, mats],
     flowBlank: [Machines, ports],
     flowTaker: [Producers, machines, [upgradePrice]],
+    // The steps of a goal card's line: a Well on a deposit, a Lab from that Well's port, the board's expansion.
+    lineWell: [raws, [buildPrice]],
+    lineLab: [raws, [buildPrice]],
+    lineExpand: [[buildPrice * 10]],
   };
 
   it('the largest prices are eight digits, and the tech names are the real ones', () => {
@@ -1465,7 +1528,7 @@ describe('every tip on a real board is affordable, can be done, and is true', ()
       checkWording(a);
       expect(a.eta, from).toBeGreaterThan(ADVICE.minWait);
       if (a.kind === 'flow') expect(a.culprit, from).toBeDefined();
-      // "Remove this wire" only where the active card's own line asks for that wire to go.
+      // "Cut this wire" only where the active card's own line asks for that wire to go.
       if (a.cut) expect(activeGoal(g)!.meanwhile?.cuts?.(g) ?? [], `${from}: ${a.text.mouse}`).toContain(a.cut.wire);
       // A Router that favours a Lab (as "Route more to a Lab" asks) is left that way.
       if (a.favour) {

@@ -77,7 +77,7 @@ import {
   claimGoal, claimOrder, clearHistory, connect, cutWire, deleteNode, expandBoard, favour, freeDeposits, materialsAt, placeNode, setMode,
   setWeight, upgrade, upgradeAll, upgradeWire,
 } from '../src/actions';
-import { Advice, advice, adviceTrials, applyAdvice, waitInfo, waitKind } from '../src/advice';
+import { ADVICE, Advice, advice, adviceTrials, applyAdvice, waitInfo, waitKind } from '../src/advice';
 import {
   cycleTime, demandRate, expansionCost, flowMult, fmt, has, maxLevel, maxPipeTier, nodeCost, pipeCap, readyTechs, recipeOf, recipeUnlocked, research,
   saturation, techAffordable, techAvailable, techEta, trackAvailable, upgradeCost, upgradeCostAt, valueOf, wellRate,
@@ -1110,7 +1110,9 @@ export class Bot {
       case 'make-glyph': {
         if (!has(g, 'P4')) return study('P4');
         const a = this.maker('glyph');
-        if (!a) return buy('assembler', 'glyph');
+        const ink = this.maker('ink');
+        // "...then build an Assembler from the Ink Refiner's Ink port, wire Spark into it too and sell its Glyph."
+        if (!a) return ink ? from(ink, 0, 'assembler', 'glyph') : buy('assembler', 'glyph');
         const fed = (m: MatId) => this.ins(a).some((w) => materialsAt(g, w.from, w.port).includes(m));
         return (fed('ink') ? null : wireIf(this.maker('ink'), 0, a)) ?? (fed('spark') ? null : wireIf(this.maker('spark'), 0, a)) ?? wireIf(a, 0, market);
       }
@@ -1118,11 +1120,18 @@ export class Bot {
       case 'make-mist': return rawLine('P5', 'breeze', 'mist');
       case 'make-prism': {
         const a = this.maker('prism');
-        if (!a) return has(g, 'P5') ? buy('assembler', 'prism') : null;
+        const mist = this.maker('mist');
+        // "Build another Assembler from the Mist Refiner's port, wire Shard into it too and sell its Prism."
+        if (!a) return !has(g, 'P5') ? null : mist ? from(mist, 0, 'assembler', 'prism') : buy('assembler', 'prism');
         const fed = (m: MatId) => this.ins(a).some((w) => materialsAt(g, w.from, w.port).includes(m));
         return (fed('shard') ? null : wireIf(this.maker('shard'), 0, a)) ?? (fed('mist') ? null : wireIf(this.maker('mist'), 0, a)) ?? wireIf(a, 0, market);
       }
-      case 'build-fabricator': return has(g, 'P7') ? buy('fabricator', 'lens') : study('P7');
+      case 'build-fabricator': {
+        // "Research Fabrication, then save up and build a Fabricator from the Prism Assembler's port."
+        if (!has(g, 'P7')) return study('P7');
+        const prism = this.maker('prism');
+        return prism ? from(prism, 0, 'fabricator', 'lens') : buy('fabricator', 'lens');
+      }
       case 'make-lens': {
         const f = this.maker('lens');
         if (!f) return null;
@@ -1198,10 +1207,10 @@ export class Bot {
         };
       }
       case 'build-fabricator': {
-        // "Remove the wire from the Glyph Assembler to the Lab."
+        // "Cut the wire from the Glyph Assembler to the Lab."
         const id = line.cuts?.(g)[0];
         const w = id == null ? null : g.wires.find((x) => x.id === id) ?? null;
-        return !w ? null : { cls: 'fix', kind: 'cut', cost: 0, label: `card, meanwhile: remove wire ${this.name(this.node(w.from))} → ${this.name(this.node(w.to))}`, run: () => cutWire(g, w.id) };
+        return !w ? null : { cls: 'fix', kind: 'cut', cost: 0, label: `card, meanwhile: cut wire ${this.name(this.node(w.from))} → ${this.name(this.node(w.to))}`, run: () => cutWire(g, w.id) };
       }
       default: return null;
     }
@@ -2125,6 +2134,7 @@ function main() {
     else if (k === 'noBulk') CFG.bulk = false;
     else if (k === 'noTips') CFG.tips = false;
     else if (k === 'noMeanwhile') CFG.meanwhile = false;
+    else if (k === 'minShare' && v) ADVICE.minShare = Number(v);
     else if (k === 'skipLine' && v) CFG.skipLines = v.split(',');
     else if (k === 'lineDelay' && v) CFG.lineDelay = Number(v);
     else if (k === 'tipDelay' && v) {

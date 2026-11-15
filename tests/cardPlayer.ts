@@ -91,7 +91,7 @@ export function followMeanwhile(g: Game): boolean {
       return !!d && g.credits >= nodeCost(g, 'well') && !!placeNode(g, 'well', d.x, d.y, { depositId: d.id });
     }
     case 'build-fabricator': {
-      // "Remove the wire from the Glyph Assembler to the Lab."
+      // "Cut the wire from the Glyph Assembler to the Lab."
       const id = line.cuts?.(g)[0];
       return id != null && cutWire(g, id);
     }
@@ -286,9 +286,9 @@ export function playByTheCard(opts: CardOptions = {}): CardRun {
   claim('expand');
   // 15–17: Glyph, Flow, β.
   study('P4');
-  const glyph = buy('assembler', { recipe: 'glyph' });
-  wire(ink, glyph);
-  wire(spark, glyph);
+  const glyph = from(ink, 'assembler'); // "...then build an Assembler from the Ink Refiner's Ink port..."
+  expect(glyph.recipe).toBe('glyph');
+  wire(spark, glyph); // "...wire Spark into it too..."
   wire(glyph, m); // "...and sell its Glyph at the Market"
   claim('make-glyph');
   claim('hold-flow');
@@ -301,18 +301,18 @@ export function playByTheCard(opts: CardOptions = {}): CardRun {
   wire(mist, m); // "...and sell the Mist"
   claim('make-mist');
   if (opts.studyAll) wire(mist, lab);
-  const prism = buy('assembler', { recipe: 'prism' });
-  wire(shard, prism);
-  wire(mist, prism);
+  const prism = from(mist, 'assembler'); // "Build another Assembler from the Mist Refiner's port..."
+  expect(prism.recipe).toBe('prism');
+  wire(shard, prism); // "...wire Shard into it too (two for every Mist)..."
   wire(prism, m); // "...and sell its Prism at the Market"
   claim('make-prism');
   claim('three-orders');
   // 21–22: the Fabricator and the Lens.
   study('P7');
-  const fab = buy('fabricator', { recipe: 'lens' });
+  const fab = from(prism, 'fabricator'); // "...then save up and build a Fabricator from the Prism Assembler's port"
+  expect(fab.recipe).toBe('lens');
   claim('build-fabricator');
-  wire(prism, fab);
-  wire(glyph, fab);
+  wire(glyph, fab); // "Feed the Fabricator one Prism and two Glyph for every Lens": the Prism is wired already
   claim('make-lens');
   tickSurplus();
   return { g, spent, tips, longestTipless, surplusAt };
