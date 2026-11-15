@@ -1113,20 +1113,20 @@ export class Bot {
         if (!has(g, 'P4')) return study('P4');
         const a = this.maker('glyph');
         const ink = this.maker('ink');
-        // "...then build an Assembler from the Ink Refiner's Ink port, wire Spark into it too and sell its Glyph."
+        // "...build an Assembler from the Ink Refiner's Ink port, wire it to the Market, then wire Spark into it."
         if (!a) return ink ? from(ink, 0, 'assembler', 'glyph') : buy('assembler', 'glyph');
         const fed = (m: MatId) => this.ins(a).some((w) => materialsAt(g, w.from, w.port).includes(m));
-        return (fed('ink') ? null : wireIf(this.maker('ink'), 0, a)) ?? (fed('spark') ? null : wireIf(this.maker('spark'), 0, a)) ?? wireIf(a, 0, market);
+        return (fed('ink') ? null : wireIf(this.maker('ink'), 0, a)) ?? wireIf(a, 0, market) ?? (fed('spark') ? null : wireIf(this.maker('spark'), 0, a));
       }
       case 'study-glyph': return wireIf(this.maker('glyph'), 0, lab);
       case 'make-mist': return rawLine('P5', 'breeze', 'mist');
       case 'make-prism': {
         const a = this.maker('prism');
         const mist = this.maker('mist');
-        // "Build another Assembler from the Mist Refiner's port, wire Shard into it too and sell its Prism."
+        // "Build another Assembler from the Mist Refiner's port, wire it to the Market, then wire Shard into it."
         if (!a) return !has(g, 'P5') ? null : mist ? from(mist, 0, 'assembler', 'prism') : buy('assembler', 'prism');
         const fed = (m: MatId) => this.ins(a).some((w) => materialsAt(g, w.from, w.port).includes(m));
-        return (fed('shard') ? null : wireIf(this.maker('shard'), 0, a)) ?? (fed('mist') ? null : wireIf(this.maker('mist'), 0, a)) ?? wireIf(a, 0, market);
+        return (fed('mist') ? null : wireIf(this.maker('mist'), 0, a)) ?? wireIf(a, 0, market) ?? (fed('shard') ? null : wireIf(this.maker('shard'), 0, a));
       }
       case 'build-fabricator': {
         // "Research Fabrication, then save up and build a Fabricator from the Prism Assembler's port."

@@ -286,10 +286,10 @@ export function playByTheCard(opts: CardOptions = {}): CardRun {
   claim('expand');
   // 15–17: Glyph, Flow, β.
   study('P4');
-  const glyph = from(ink, 'assembler'); // "...then build an Assembler from the Ink Refiner's Ink port..."
+  const glyph = from(ink, 'assembler'); // "...build an Assembler from the Ink Refiner's Ink port..."
   expect(glyph.recipe).toBe('glyph');
-  wire(spark, glyph); // "...wire Spark into it too..."
-  wire(glyph, m); // "...and sell its Glyph at the Market"
+  wire(glyph, m); // "...wire it to the Market..."
+  wire(spark, glyph); // "...then wire Spark into it to make Glyph"
   claim('make-glyph');
   claim('hold-flow');
   wire(glyph, lab); // "Drag from the Assembler's port to a Lab"
@@ -303,8 +303,8 @@ export function playByTheCard(opts: CardOptions = {}): CardRun {
   if (opts.studyAll) wire(mist, lab);
   const prism = from(mist, 'assembler'); // "Build another Assembler from the Mist Refiner's port..."
   expect(prism.recipe).toBe('prism');
-  wire(shard, prism); // "...wire Shard into it too (two for every Mist)..."
-  wire(prism, m); // "...and sell its Prism at the Market"
+  wire(prism, m); // "...wire it to the Market..."
+  wire(shard, prism); // "...then wire Shard into it to make Prism (two for every Mist)"
   claim('make-prism');
   claim('three-orders');
   // 21–22: the Fabricator and the Lens.

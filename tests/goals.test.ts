@@ -376,12 +376,77 @@ describe('goal chain: conditions and progress', () => {
   it('every card that has the player make something new says to sell it', () => {
     // Without this a newcomer who does only what the card says leaves Spark, Glyph, Mist and Prism unsold:
     // the machines block, and the Fabricator has to be paid for from Shard and Ink alone.
-    for (const [id, what] of [['make-spark', 'sell the Spark'], ['make-glyph', 'sell its Glyph at the Market'], ['make-mist', 'sell the Mist'], ['make-prism', 'sell its Prism at the Market']]) {
+    for (const [id, what] of [['make-spark', 'sell the Spark'], ['make-glyph', 'wire it to the Market'], ['make-mist', 'sell the Mist'], ['make-prism', 'wire it to the Market']]) {
       const hint = goalById(id)!.hint;
       expect(hint.mouse, id).toContain(what);
       expect(hint.touch, id).toContain(what);
     }
     expect(goalById('silt-exit')!.hint.mouse).toContain('sell the Ink at the Market');
+  });
+
+  it('the Assembler cards say where to build from, and name the Market before the wire that completes the goal', () => {
+    // The goal completes with the first Glyph (or Prism), and a card that is ready shows Claim and no hint. With
+    // the Market last in the sentence, the gesture still to come was the sale, and it was the one left out.
+    expect(goalById('make-glyph')!.hint.mouse).toBe('Research Assembly, build an Assembler from the Ink Refiner\'s Ink port, wire it to the Market, then wire Spark into it to make Glyph.');
+    expect(goalById('make-prism')!.hint.mouse).toBe('Build another Assembler from the Mist Refiner\'s port, wire it to the Market, then wire Shard into it to make Prism (two for every Mist).');
+    expect(goalById('build-fabricator')!.hint.mouse).toBe('Research Fabrication, then save up and build a Fabricator from the Prism Assembler\'s port: orders and a high Flow get you there faster.');
+    const longest = (touch: boolean) => Math.max(...['silt-exit', 'route-lab'].map((id) => [...(touch ? goalById(id)!.hint.touch : goalById(id)!.hint.mouse)].length));
+    for (const id of ['make-glyph', 'make-prism', 'build-fabricator']) {
+      const hint = goalById(id)!.hint;
+      expect(hint.touch, id).toBe(hint.mouse); // nothing in them names a click, a drag or a tap
+      expect(hint.mouse, id).not.toMatch(/\b(click|drag|tap|press|key)\b/i);
+      expect([...hint.mouse].length, id).toBeLessThanOrEqual(longest(false));
+      expect([...hint.touch].length, id).toBeLessThanOrEqual(longest(true));
+    }
+    // Done to the letter on a real board: built from the named port the machine arrives wired and set to its
+    // recipe, and the goal is not complete until the last wire of the sentence is made.
+    const g = rich();
+    g.techs = ['P1', 'R1', 'P2', 'P3', 'P4', 'P5', 'P7'];
+    const m = market(g);
+    const make = (dep: number, recipe: string) => {
+      const r = placeNode(g, 'refiner', 400, 100 * dep, { recipe })!;
+      connect(g, placeNode(g, 'well', 0, 0, { depositId: dep })!.id, 0, r.id);
+      connect(g, r.id, 0, m.id);
+      return r;
+    };
+    const shard = placeNode(g, 'refiner', 400, 100, { recipe: 'shard' })!;
+    connect(g, well(g).id, 0, shard.id);
+    connect(g, shard.id, 0, m.id);
+    const ink = make(3, 'ink');
+    connect(g, ink.id, 1, placeNode(g, 'void', 700, 650)!.id); // (its Silt has somewhere to go)
+    const spark = make(4, 'spark');
+    const mist = make(5, 'mist');
+    run(g, 20);
+    at(g, 'make-glyph');
+    const glyph = placeNode(g, 'assembler', 700, 300)!; // "build an Assembler from the Ink Refiner's Ink port"
+    connect(g, ink.id, 0, glyph.id);
+    expect(glyph.recipe).toBe('glyph');
+    connect(g, glyph.id, 0, m.id); // "wire it to the Market"
+    run(g, 20);
+    expect(g.goal.ready).toBe(false);
+    connect(g, spark.id, 0, glyph.id); // "then wire Spark into it"
+    run(g, 10);
+    expect(g.goal.ready).toBe(true);
+    expect(g.sold.glyph ?? 0).toBeGreaterThan(0); // sold from the first one
+    at(g, 'make-prism');
+    const prism = placeNode(g, 'assembler', 700, 500)!; // "Build another Assembler from the Mist Refiner's port"
+    connect(g, mist.id, 0, prism.id);
+    expect(prism.recipe).toBe('prism');
+    connect(g, prism.id, 0, m.id);
+    run(g, 20);
+    expect(g.goal.ready).toBe(false);
+    connect(g, shard.id, 0, prism.id);
+    run(g, 20);
+    expect(g.goal.ready).toBe(true);
+    expect(g.sold.prism ?? 0).toBeGreaterThan(0);
+    at(g, 'build-fabricator');
+    run(g, 0.1);
+    expect(g.goal.ready).toBe(false);
+    const fab = placeNode(g, 'fabricator', 1000, 500)!; // "build a Fabricator from the Prism Assembler's port"
+    connect(g, prism.id, 0, fab.id);
+    expect(fab.recipe).toBe('lens');
+    run(g, 0.1);
+    expect(g.goal.ready).toBe(true);
   });
 
   it('a goal that asks for a research and then a machine says so: the step carries the price that follows', () => {

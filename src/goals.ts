@@ -451,7 +451,10 @@ export const GOALS: Goal[] = [
   {
     id: 'make-glyph', title: 'Assemble your first Glyph',
     // Where the Assembler is built from is said: dragged out of the Ink port it arrives wired, set to Glyph.
-    hint: hint('Research Assembly, then build an Assembler from the Ink Refiner\'s Ink port, wire Spark into it too and sell its Glyph at the Market.'),
+    // The Market comes before the Spark: the goal completes with the first Glyph, the card then shows Claim
+    // and no hint, and a player who had still to "sell its Glyph" never read that again (the Glyph sat
+    // unsold until a tip said so, six minutes on).
+    hint: hint('Research Assembly, build an Assembler from the Ink Refiner\'s Ink port, wire it to the Market, then wire Spark into it to make Glyph.'),
     done: (g) => made(g, 'glyph'),
     ...buying((g) => techThenNode(g, 'P4', 'assembler', 'glyph')),
     // The board has just grown by two deposits. A Well with a Lab of its own is 1 α a second for good: wired
@@ -503,7 +506,8 @@ export const GOALS: Goal[] = [
   },
   {
     id: 'make-prism', title: 'Assemble your first Prism',
-    hint: hint('Build another Assembler from the Mist Refiner\'s port, wire Shard into it too (two for every Mist) and sell its Prism at the Market.'),
+    // The Market before the Shard, for the same reason as on "Assemble your first Glyph".
+    hint: hint('Build another Assembler from the Mist Refiner\'s port, wire it to the Market, then wire Shard into it to make Prism (two for every Mist).'),
     done: (g) => made(g, 'prism'),
     ...buying((g) => techThenNode(g, 'P5', 'assembler', 'prism')),
     reward: { credits: 600, b: 40 },
