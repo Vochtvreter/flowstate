@@ -11,12 +11,22 @@
 // Refresh: main.ts calls renderTech() twice a second while the tree is open, and a press inside the tree
 // refreshes it at once. The HTML is patched in place by makePanel(), which also holds off while a finger
 // is down or a list is still scrolling.
+//
+// The keyboard: opening the tree moves the focus into it (to the selected tile) and closing it gives the
+// focus back. While it is open, what lies behind it is `inert` (coverFor in hud-screens.ts): Tab, Enter and
+// a pointer cannot reach the board, the build bar or the inspector, only the tree, the top bar above it on a
+// wide screen, and the HUD's Claim bar when it lies over the tree. Enter and Space research the selected tech.
+//
+// While the goal on the card is saving up for a tech, the tree opens on that tech, says how long it takes in
+// the card's own words and numbers (waitLine, from the adviser), warns on any other tech that would spend the
+// same Data, and the top bar's "N ready" leaves those out (readyCount).
 import { BRANCHES, Branch, DATA_COLORS, DATA_NAMES, DataTier, NODE_DEFS, NodeType, TECHS, Tech } from '../content';
-import { fmtInt, fmtRate, research, techAffordable, techAvailable, techEta, techHidden, techProgress } from '../economy';
-import { GOALS } from '../goals';
+import { fmtInt, fmtRate, readyTechs, research, techAffordable, techAvailable, techEta, techHidden, techProgress } from '../economy';
+import { GOALS, activeGoal, claimGoal } from '../goals';
 import { Game } from '../state';
 import { Panel, makePanel, setClass } from './dom';
-import { isTouch } from './hud-words';
+import { UNCOVER_DELAY, coverFor } from './hud-screens';
+import { aboutTime, isTouch } from './hud-words';
 import { esc, icon } from './icons';
 import { delegate, onGame, onNewGame, onSignal, toast, touch, ui } from './ui';
 
@@ -43,17 +53,43 @@ export interface Tile {
   needs: Tech[];
   /** Set to be researched by itself as soon as it can be. */
   queued: boolean;
+  /** Researching it would spend Data the goal on the card is saving up (goalDelay). */
+  slows: boolean;
 }
+
+const TIERS: DataTier[] = ['a', 'b', 'g'];
+
+/** For each game, the kinds of Data the player has met. Once met, a kind stays met. */
+const metSeen = new WeakMap<Game, Partial<Record<DataTier, boolean>>>();
+
+/**
+ * Has the player met this kind of Data: had some, made some, or owned a tech priced in it? Before β exists
+ * (the first Glyph studied), a price in β means nothing, so nothing priced in it is shown (see techTiles).
+ */
+export function metData(g: Game, k: DataTier): boolean {
+  let seen = metSeen.get(g);
+  if (!seen) metSeen.set(g, (seen = {}));
+  if (!seen[k] && (g.data[k] > 0 || g.dataRate[k] > 0 || g.techs.some((t) => (TECHS[t]?.cost[k] ?? 0) > 0))) seen[k] = true;
+  return !!seen[k];
+}
+
+/**
+ * Every kind of Data in this tech's price has been met. (α counts as met from the start: it is the first Data,
+ * the tree opens before any is made, and the tree's own hint says how to make it.)
+ */
+export const pricedInMet = (g: Game, t: Tech) => TIERS.every((k) => k === 'a' || !t.cost[k] || metData(g, k));
 
 /**
  * The techs the tree shows right now, in content order:
  *  - in full: owned, researchable now (affordable or not), or queued;
  *  - one step beyond those: a tech whose every requirement is shown in full. It is a silhouette, except
  *    that a goal reward whose requirements are all owned says which goal it comes from.
- * Everything else, and whatever techHidden() hides, is left out.
+ * Everything else, and whatever techHidden() hides, is left out; so is a tech priced in a kind of Data the
+ * player has not met yet (Priority Routing's β at goal 13), unless the goal on the card names it.
  */
 export function techTiles(g: Game): Tile[] {
-  const all = Object.values(TECHS).filter((t) => !techHidden(g, t));
+  const want = goalTech(g);
+  const all = Object.values(TECHS).filter((t) => !techHidden(g, t) && (g.techs.includes(t.id) || t.id === want || pricedInMet(g, t)));
   const owned = (id: string) => g.techs.includes(id);
   const full = new Set<string>();
   for (const t of all) {
@@ -73,18 +109,21 @@ export function techTiles(g: Game): Tile[] {
       veiled = true;
     }
     const needs = t.requires.filter((r) => !owned(r) && TECHS[r]).map((r) => TECHS[r]);
-    out.push({ t, state, veiled, needs, queued: state !== 'own' && g.queue.includes(t.id) });
+    const slows = (state === 'rdy' || state === 'sav') && !!goalDelay(g, t);
+    out.push({ t, state, veiled, needs, queued: state !== 'own' && g.queue.includes(t.id), slows });
   }
   return out;
 }
 
 /**
- * The tech the active goal asks the player to research, if it names one ("Research Assembly, then...").
- * Goals do not carry this as data, so it is read from their wording; no match simply means no badge.
+ * The tech the active goal asks the player to research, if it names one ("Research Assembly, then..."): the
+ * tech its next step is saving up for (Goal.step), or else one its wording names; no match means no badge.
  */
 export function goalTech(g: Game): string | null {
   const goal = GOALS[g.goal.i];
   if (!goal || g.goal.ready) return null;
+  const saving = goalSaving(g);
+  if (saving?.tech) return saving.tech.id;
   const text = `${goal.title}. ${goal.hint.mouse}`;
   // The longest name wins, so "Pipes Mk III" is never taken for "Pipes Mk II".
   let best: Tech | null = null;
@@ -93,6 +132,134 @@ export function goalTech(g: Game): string | null {
     if (!best || t.name.length > best.name.length) best = t;
   }
   return best && !g.techs.includes(best.id) ? best.id : null;
+}
+
+// ---------- the goal's wait ----------
+
+const TIER_OF: Record<string, DataTier> = { α: 'a', β: 'b', γ: 'g' };
+
+/** What the goal card's progress line counts during a wait, and how long it says that takes (advice-tip.ts). */
+export interface CardWait { unit: string; have: number; need: number; eta: number }
+
+/**
+ * The goal card's wait, as the card itself works it out: waitLine() in advice-tip.ts, handed in by panels.ts.
+ * (Not imported here: that module brings the board with it, and the rules of this file are tested without a
+ * page.) Until it is handed in, there is no card wait and the tree counts with the game's own rates.
+ */
+let cardWait: (g: Game) => CardWait | null = () => null;
+export function setCardWait(fn: (g: Game) => CardWait | null) {
+  cardWait = fn;
+}
+
+/** What the goal on the card is saving Data for, and how much of each kind it needs. */
+export interface GoalSaving {
+  /** The tech its next step names; null for a goal that counts Data itself ("Study Glyph for β"). */
+  tech: Tech | null;
+  need: Partial<Record<DataTier, number>>;
+  /** Credits the same step needs straight after the research (the machine it asks for next); 0 or absent: none. */
+  then?: number;
+}
+
+/**
+ * The Data the active goal is saving up, if any: the price of the tech its next step names (not yet owned), or
+ * for a goal that counts a kind of Data itself, that count. null while the goal is ready, or saves credits.
+ */
+export function goalSaving(g: Game): GoalSaving | null {
+  const goal = activeGoal(g);
+  if (!goal || g.goal.ready) return null;
+  const step = goal.step?.(g) ?? null;
+  if (step) {
+    if (!('tech' in step)) return null;
+    const t = TECHS[step.tech];
+    return t && !g.techs.includes(t.id) ? { tech: t, need: { ...t.cost }, then: step.then ?? 0 } : null;
+  }
+  const p = goal.progress?.(g) ?? null;
+  const k = p ? TIER_OF[p[2]] : undefined;
+  return p && k && p[0] < p[1] ? { tech: null, need: { [k]: p[1] } } : null;
+}
+
+/**
+ * How fast each kind of Data is coming in, as the goal card counts it: the income the adviser measured for
+ * the goal's wait when its answer is about that kind of Data (waitLine), else the game's own rate.
+ */
+function dataRate(g: Game, k: DataTier): number {
+  const w = cardWait(g);
+  if (w && TIER_OF[w.unit] === k && isFinite(w.eta) && w.eta > 0 && w.need > w.have) return (w.need - w.have) / w.eta;
+  return g.dataRate[k];
+}
+
+/**
+ * Seconds until this tech can be researched. For the tech the goal is saving for, the card's own number when
+ * the card shows one (waitLine counts the same Data at the same income), so the two never disagree.
+ */
+export function etaOf(g: Game, t: Tech): number {
+  const w = cardWait(g);
+  const k = w ? TIER_OF[w.unit] : undefined;
+  if (w && k && goalSaving(g)?.tech?.id === t.id && t.cost[k] === w.need) return w.eta;
+  return techEta(g, t);
+}
+
+/** Seconds until the goal's Data is in hand, having spent `spend` first (Infinity when some of it is not coming in). */
+function savedIn(g: Game, s: GoalSaving, spend: Partial<Record<DataTier, number>>): number {
+  let eta = 0;
+  for (const k of TIERS) {
+    const short = (s.need[k] ?? 0) - (g.data[k] - (spend[k] ?? 0));
+    if (short <= 1e-9) continue;
+    const r = dataRate(g, k);
+    eta = Math.max(eta, r > 1e-9 ? short / r : Infinity);
+  }
+  return eta;
+}
+
+/**
+ * Seconds until the credits the goal's step needs after its research (`then`) are in hand: 0 when there are
+ * none or they are in hand already, Infinity when nothing is bringing credits in. Counted at the income the goal
+ * card counts with when its wait is about credits (waitLine), else at the game's own rate.
+ */
+function creditsIn(g: Game, s: GoalSaving): number {
+  const short = (s.then ?? 0) - g.credits;
+  if (short <= 1e-9) return 0;
+  const w = cardWait(g);
+  const rate = w && w.unit === '¢' && isFinite(w.eta) && w.eta > 0 && w.need > w.have ? (w.need - w.have) / w.eta : g.creditRate;
+  return rate > 1e-9 ? short / rate : Infinity;
+}
+
+/**
+ * How much researching `t` now would put off the goal: the kinds of Data it takes from what the goal is saving,
+ * and by how many seconds (Infinity when nothing is bringing that Data in). null when it takes nothing the goal
+ * needs, is the goal's tech itself, or puts nothing off because the goal waits longer for the credits its step
+ * needs after the research (goal 21: Fabrication's α is in hand well before the Fabricator's 7,100¢).
+ */
+export function goalDelay(g: Game, t: Tech): { tiers: DataTier[]; seconds: number; saving: GoalSaving } | null {
+  const s = goalSaving(g);
+  if (!s || s.tech?.id === t.id) return null;
+  const tiers = TIERS.filter((k) => (t.cost[k] ?? 0) > 0 && (s.need[k] ?? 0) > 0 && g.data[k] - (t.cost[k] ?? 0) < (s.need[k] ?? 0) - 1e-9);
+  if (!tiers.length) return null;
+  const before = savedIn(g, s, {});
+  const after = savedIn(g, s, t.cost);
+  // The step is done when both its Data and its credits are in. (Credits that are not coming in at all say
+  // nothing about when: the Data alone is counted then, as for a step with no credits.)
+  const credits = creditsIn(g, s);
+  const c = isFinite(credits) ? credits : 0;
+  // (When `before` never ends, neither does `after`: the price is short of a kind nothing is bringing in.)
+  const seconds = after === Infinity ? Infinity : Math.max(0, Math.max(after, c) - Math.max(before, c));
+  return seconds > 0.5 || seconds === Infinity ? { tiers, seconds, saving: s } : null;
+}
+
+/** "Spends α you are saving for Ember Deposits: about 1 min later." */
+export function delayText(d: NonNullable<ReturnType<typeof goalDelay>>): string {
+  const what = listText(d.tiers.map((k) => DATA_NAMES[k]));
+  const target = d.saving.tech ? `you are saving for ${d.saving.tech.name}` : 'your goal is counting';
+  const later = d.seconds === Infinity ? '' : `: ${aboutTime(d.seconds)} later`;
+  return `Spends ${what} ${target}${later}.`;
+}
+
+/**
+ * How many techs the top bar's badge counts as ready: those that can be researched now and take nothing from
+ * what the goal is saving for. (A tech that would put the goal off is not an invitation; its detail says so.)
+ */
+export function readyCount(g: Game): number {
+  return readyTechs(g).filter((t) => pricedInMet(g, t) && !goalDelay(g, t)).length;
 }
 
 /** The machines of the goal chain's spine, in the order it unlocks them. */
@@ -116,9 +283,12 @@ export function teasedSlot(g: Game): { type: NodeType; tech: Tech; goal: boolean
 
 const ORDER: Record<TileState, number> = { rdy: 0, sav: 1, goal: 3, lck: 4, own: 5 };
 
-/** Ready first, then saving, then what is still closed, with owned techs last. Inside a group: the goal's tech, then tree order. */
+/**
+ * Ready first, then saving, then what is still closed, with owned techs last. Inside a group: the goal's tech,
+ * then tree order, with what would put the goal off at the end of its group.
+ */
 function sortTiles(tiles: Tile[], want: string | null): Tile[] {
-  const rank = (x: Tile) => (x.state === 'lck' && !x.veiled ? 2 : ORDER[x.state]) - (x.t.id === want ? 0.5 : 0);
+  const rank = (x: Tile) => (x.state === 'lck' && !x.veiled ? 2 : ORDER[x.state]) - (x.t.id === want ? 0.5 : 0) + (x.slows ? 0.25 : 0);
   return tiles.slice().sort((a, b) => rank(a) - rank(b) || a.t.col - b.t.col || a.t.row - b.t.row);
 }
 
@@ -133,8 +303,6 @@ function groupTiles(tiles: Tile[], want: string | null): { branch: (typeof BRANC
 }
 
 // ---------- wording ----------
-
-const TIERS: DataTier[] = ['a', 'b', 'g'];
 
 /** How to start earning a kind of Data, for a tech that waits on one nothing is making yet. */
 const HOW: Record<DataTier, string> = {
@@ -158,13 +326,8 @@ function needsText(x: Tile): string {
 /** A tech's description as written says "one click"; a finger taps. */
 const forInput = (text: string) => (isTouch() ? text.replace(/\b([Oo])ne click\b/g, '$1ne tap') : text);
 
-/** A wait in round, calm numbers: "about 40 s", "about 3 min". */
-function aboutText(seconds: number): string {
-  if (seconds <= 5) return 'a few seconds';
-  if (seconds < 90) return `about ${Math.ceil(seconds / 5) * 5} s`;
-  if (seconds < 3600) return `about ${Math.ceil(seconds / 60)} min`;
-  return 'over an hour';
-}
+/** A wait in round, calm numbers ("about 40 s", "about 3 min"), worded as the goal card words its own. */
+const aboutText = (seconds: number) => aboutTime(seconds) || 'over an hour';
 
 /** The kind of Data this tech is short of that nothing is making, if any. */
 function dryTier(g: Game, t: Tech): DataTier | null {
@@ -238,22 +401,107 @@ const isPhone = () => !!app()?.classList.contains('phone');
 /**
  * What the stylesheets need to know about the tree, as classes on #app: `tech-open` while it is open, and
  * `tech-seat` while it is open with a goal ready (outside the phone layout the HUD's slim Claim bar then
- * lies over the top of the tree, and the tree's own bar is the seat for it: see tech.css).
+ * lies over the top of the tree, and the tree's own bar is the seat for it: see tech.css). It also keeps
+ * what lies behind the open tree out of reach (coverBehindTree).
  */
 function markApp(open: boolean, goalReady: boolean) {
   const el = app();
   if (!el) return;
   setClass(el, 'tech-open', open);
   setClass(el, 'tech-seat', open && goalReady);
+  if (open) coverBehindTree(goalReady);
+}
+
+/** What the tree last made inert ('' = nothing). */
+let coveredKey = '';
+let uncoverTimer = 0;
+
+/**
+ * While the tree is open nothing behind it can be reached by Tab, Enter or a pointer: the build bar, the
+ * board with everything on it, the inspector, the card. What stays in reach is the tree itself, the toasts,
+ * the top bar where it is in sight above the tree (not on a phone, where the tree covers it), and the
+ * HUD's Claim bar where it lies over the tree (a ready goal, outside the phone layout).
+ */
+function coverBehindTree(goalReady: boolean) {
+  const root = app();
+  if (!root) return;
+  const phone = isPhone();
+  const key = `${phone ? 1 : 0}${goalReady ? 1 : 0}`;
+  clearTimeout(uncoverTimer);
+  if (key === coveredKey) return;
+  coveredKey = key;
+  const out: Element[] = [];
+  const keep = new Set(['tech', 'start', 'summary', 'modal']);
+  for (const e of Array.from(root.children)) {
+    if (keep.has(e.id) || (e.id === 'top' && !phone)) continue;
+    if (e.id !== 'stage') {
+      out.push(e);
+      continue;
+    }
+    for (const s of Array.from(e.children)) {
+      if (s.id !== 'hud') {
+        out.push(s);
+        continue;
+      }
+      for (const h of Array.from(s.children)) if (h.id !== 'hud-strip' && h.id !== 'toasts') out.push(h);
+    }
+  }
+  for (const id of ['order', 'hud-alert']) {
+    const e = document.getElementById(id);
+    if (e) out.push(e);
+  }
+  const goal = document.getElementById('goal');
+  if (goal && (phone || !goalReady)) out.push(goal);
+  coverFor('tech', out);
+}
+
+/** The tree has closed: what it covered can be reached again, at once or (after a press) a moment later. */
+function uncoverBehindTree(later: boolean, then: () => void) {
+  clearTimeout(uncoverTimer);
+  coveredKey = '';
+  const done = () => {
+    coverFor('tech', null);
+    then();
+  };
+  // A press that closed the tree (Back, Claim) is often pressed twice: the second press must not land on
+  // whatever was under the button.
+  if (later) uncoverTimer = window.setTimeout(done, UNCOVER_DELAY);
+  else done();
+}
+
+/**
+ * Where the focus was when the tree opened: it goes back there when the tree closes. Panels are patched in
+ * place, so the element may have come to stand for something else meanwhile (research added a slot to the
+ * build bar before it): its test id says what it was.
+ */
+let returnFocus: { el: HTMLElement; id: string | null } | null = null;
+let focusTimer = 0;
+
+/** Put the focus on the selected tile (or, with none, the way back to the board). */
+function focusTree() {
+  if (!ui.techOpen) return;
+  const target = host.querySelector<HTMLElement>('.tt.sel') ?? host.querySelector<HTMLElement>('[data-testid="close-tech"]');
+  target?.focus({ preventScroll: true });
+}
+
+/** A key press that means "research the selected tech": Enter or Space, unless a control of its own takes it. */
+function researchKey(e: KeyboardEvent): boolean {
+  if (e.key !== 'Enter' && e.key !== ' ') return false;
+  const control = (e.target as HTMLElement | null)?.closest?.('button, a, input, textarea, select, [role="button"]');
+  // A focused control answers Enter and Space itself (Research, Back, a tab, another tile: that one is
+  // selected by it), except the selected tile: there the key means "research this".
+  return !control || (control.classList.contains('tt') && control.getAttribute('data-key') === ui.techSel);
 }
 
 export function initTech(el: HTMLElement) {
   host = el;
   panel = makePanel(host);
-  delegate(host, (a, args) => {
+  delegate(host, (a, args, _el, ev) => {
     const g = ui.g;
-    if (a === 'close') closeTech();
-    else if (a === 'sel') selectTech(args[0]);
+    const pressed = ev.type !== 'click' || (ev as MouseEvent).detail > 0;
+    if (a === 'close') return closeTech(pressed);
+    if (a === 'claim') return claimFromTree(pressed);
+    if (a === 'sel') selectTech(args[0]);
     else if (a === 'tab') {
       tab = args[0] as Branch;
       ringed = null;
@@ -270,17 +518,18 @@ export function initTech(el: HTMLElement) {
     }
     renderTech(true); // answer the press at once, even though the pointer is still down in here
   });
-  // Enter researches the selected tech, so a player with Data to spend can keep going from the keyboard.
+  // Enter and Space research the selected tech, so a player with Data to spend can keep going from the
+  // keyboard. (Opening the tree put the focus on that tech's tile, wherever it was before.)
   window.addEventListener('keydown', (e) => {
-    if (!ui.techOpen || e.key !== 'Enter' || e.repeat || e.ctrlKey || e.metaKey || e.altKey) return;
-    // A focused control answers Enter itself, except the selected tile: Enter there means "research this".
-    const control = (e.target as HTMLElement | null)?.closest?.('button, a, input, textarea, select');
-    if (control && !(control.classList.contains('tt') && control.getAttribute('data-key') === ui.techSel)) return;
-    if (document.getElementById('modal')?.classList.contains('open')) return;
-    if (!ui.techSel) return;
+    if (!ui.techOpen || e.ctrlKey || e.metaKey || e.altKey || !researchKey(e)) return;
+    if (document.getElementById('modal')?.classList.contains('open') || document.getElementById('summary')?.hidden === false) return;
+    // The key is the tree's either way: it must not scroll the list, nor press anything else as well.
     e.preventDefault();
+    if (e.repeat || !ui.techSel) return;
     doResearch(ui.techSel);
     renderTech(true);
+    // The focus follows the selection, which may have moved on to the next tech that is ready.
+    focusTree();
   });
   // "Show me" on a tip about research: the tree is already open on the tech; its Research button gets the ring.
   onSignal('showme', (d) => {
@@ -292,10 +541,13 @@ export function initTech(el: HTMLElement) {
   // drawn at once, in step with the HUD, not at the next half-second refresh.
   onGame((ev) => {
     if (ui.techOpen && (ev.kind === 'goal-ready' || ev.kind === 'goal-claimed')) renderTech(true);
+    // The first Lens ends the demo: its celebration and the summary play on the board, not behind the tree.
+    if (ev.kind === 'demo-end' && ui.techOpen) closeTech();
   });
   onNewGame(() => {
     // A different game: nothing remembered about the old one applies.
     if (ui.techOpen) closeTech();
+    returnFocus = null;
     ringed = null;
     ui.techSel = null;
     tab = null;
@@ -315,16 +567,34 @@ function selectTech(id: string) {
   scrollTo = 'show';
 }
 
-/** Research, then move on to the next tech in the same branch that can be researched right away. */
+/**
+ * Research, then move on: to the goal's tech when that can be researched now, else to the next tech in the same
+ * branch that can be researched right away without putting the goal off.
+ */
 function doResearch(id: string) {
   const g = ui.g;
   const t = TECHS[id];
   if (id === ringed) ringed = null; // pressed: the ring has done its work
   if (!t || !research(g, id)) return; // (the tree itself shows what was researched; no toast while it is open)
-  const next = sortTiles(techTiles(g).filter((x) => x.t.branch === t.branch), goalTech(g)).find((x) => x.state === 'rdy');
+  const tiles = techTiles(g);
+  const want = goalTech(g);
+  const next = tiles.find((x) => x.t.id === want && x.state === 'rdy')
+    ?? sortTiles(tiles.filter((x) => x.t.branch === t.branch), want).find((x) => x.state === 'rdy' && !x.slows);
   if (!next) return; // nothing more to buy here: stay on what was just researched
   ui.techSel = next.t.id;
   scrollTo = 'show';
+}
+
+/**
+ * The tree's own "Goal complete" bar, on a phone: one press claims the goal and goes back to the board, where
+ * the claim is celebrated. (Elsewhere the HUD's slim Claim bar lies over the tree and is the way to claim.)
+ */
+function claimFromTree(pressed: boolean) {
+  const g = ui.g;
+  if (!g.goal.ready) return closeTech(pressed);
+  closeTech(pressed);
+  claimGoal(g);
+  touch();
 }
 
 /**
@@ -365,7 +635,7 @@ function bestWaiting(g: Game, tiles: Tile[], want: string | null): Tile | null {
   let bestEta = Infinity;
   for (const x of tiles) {
     if (x.state !== 'sav') continue;
-    const eta = techEta(g, x.t);
+    const eta = etaOf(g, x.t);
     if (!best || eta < bestEta) {
       best = x;
       bestEta = eta;
@@ -374,9 +644,10 @@ function bestWaiting(g: Game, tiles: Tile[], want: string | null): Tile | null {
   return best ?? tiles.find((x) => x.state !== 'own') ?? tiles[0] ?? null;
 }
 
+/** The first tech that can be researched now without putting the goal off. */
 const firstReady = (groups: { list: Tile[] }[]) => {
   for (const grp of groups) {
-    const x = grp.list.find((y) => y.state === 'rdy');
+    const x = grp.list.find((y) => y.state === 'rdy' && !y.slows);
     if (x) return x;
   }
   return null;
@@ -384,13 +655,15 @@ const firstReady = (groups: { list: Tile[] }[]) => {
 
 /**
  * Open the tree. With an id (a locked hotbar slot, "View tech" in the inspector) it opens on that tech,
- * or on the nearest step toward it when it is too far ahead to be shown. Without one it opens on the
- * first tech that can be researched now, so the next step is one press away.
+ * or on the nearest step toward it when it is too far ahead to be shown. Without one it opens on the tech
+ * the goal on the card is saving for (or the nearest step toward it), else on the first tech that can be
+ * researched now, so the next step is one press away.
  */
 export function openTech(id?: string) {
   const g = ui.g;
   // Asked to open while already open (the top-bar button again): leave the player's place alone.
   if (ui.techOpen && !id) return;
+  const wasOpen = ui.techOpen;
   ui.techOpen = true;
   const tiles = techTiles(g);
   const want = goalTech(g);
@@ -399,25 +672,49 @@ export function openTech(id?: string) {
   if (asked && id && asked.t.id !== id) {
     toast(`<span><b>${esc(TECHS[id].name)}</b> comes later. Next step: <b>${esc(asked.t.name)}</b>.</span>`, 'info', 4500);
   }
-  const pick = asked ?? firstReady(groups) ?? bestWaiting(g, tiles, want);
+  const forGoal = !id && want ? stepToward(tiles, want) : null;
+  const pick = asked ?? forGoal ?? firstReady(groups) ?? bestWaiting(g, tiles, want);
   ui.techSel = pick?.t.id ?? null;
   tab = pick?.t.branch ?? null;
-  sheet = !!asked || pick?.state === 'rdy';
+  sheet = !!asked || !!forGoal || pick?.state === 'rdy';
   // Nothing "wakes up" merely because the tree was opened.
   seen.clear();
   fresh.clear();
   scrollTo = 'top';
+  // The focus goes into the tree and comes back to where it was when the tree closes. (A press on the top
+  // bar's button gives that button the focus after this has run, so the move waits a moment.)
+  if (!wasOpen) {
+    const active = document.activeElement;
+    returnFocus = active instanceof HTMLElement && active !== document.body && !host.contains(active) ? { el: active, id: active.getAttribute('data-testid') } : null;
+    clearTimeout(focusTimer);
+    focusTimer = window.setTimeout(focusTree, 0);
+  }
   setClass(host, 'open', true);
   markApp(true, g.goal.ready);
   renderTech(true);
   touch();
 }
 
-export function closeTech() {
+/**
+ * Close the tree. `pressed`: it was closed by a press (of Back, or of the goal's bar), which may well be pressed
+ * twice: what lay behind the tree is then given back a moment later. The focus goes back where it was.
+ */
+export function closeTech(pressed = false) {
   ui.techOpen = false;
   ringed = null;
+  clearTimeout(focusTimer);
+  const back = returnFocus;
+  returnFocus = null;
+  const inTree = host.contains(document.activeElement);
   setClass(host, 'open', false);
   markApp(false, false);
+  uncoverBehindTree(pressed, () => {
+    if (ui.techOpen) return;
+    let to = back?.el ?? null;
+    if (back?.id && to?.getAttribute('data-testid') !== back.id) to = document.querySelector<HTMLElement>(`[data-testid="${back.id}"]`);
+    if (to?.isConnected && !to.closest('[inert]')) to.focus({ preventScroll: true });
+    else if (inTree && document.activeElement instanceof HTMLElement && host.contains(document.activeElement)) document.activeElement.blur();
+  });
   touch();
 }
 
@@ -434,11 +731,13 @@ function subline(g: Game, x: Tile): string {
   if (x.state === 'own') return 'Owned';
   if (x.state === 'goal') return `From a goal: ${esc(goalTitle(t))}`;
   if (x.veiled) return esc(needsText(x));
-  if (x.state === 'rdy') return `${costHtml(t)}<span class="st"> · Ready</span>`;
+  // (What would put the goal off says so in the list too; its detail says by how much.)
+  const slow = x.slows ? '<span class="slow"> · slows your goal</span>' : '';
+  if (x.state === 'rdy') return `${costHtml(t)}<span class="st"> · Ready</span>${slow}`;
   if (x.state === 'lck') return `${costHtml(t)}<span class="st"> · ${esc(needsText(x))}</span>`;
   const dry = dryTier(g, t);
-  const wait = dry ? (g.data[dry] > 0 ? `no ${DATA_NAMES[dry]} coming in` : `no ${DATA_NAMES[dry]} yet`) : aboutText(techEta(g, t));
-  return `${costHtml(t)}<span class="st"> · ${wait}${x.queued ? ' · auto' : ''}</span>`;
+  const wait = dry ? (g.data[dry] > 0 ? `no ${DATA_NAMES[dry]} coming in` : `no ${DATA_NAMES[dry]} yet`) : aboutText(etaOf(g, t));
+  return `${costHtml(t)}<span class="st"> · ${wait}${x.queued ? ' · auto' : ''}</span>${slow}`;
 }
 
 function tileHtml(g: Game, x: Tile, want: string | null): string {
@@ -448,6 +747,7 @@ function tileHtml(g: Game, x: Tile, want: string | null): string {
   if (x.veiled) cls += ' veil';
   if (sel) cls += ' sel';
   if (x.queued) cls += ' queued';
+  if (x.slows) cls += ' slows';
   if (t.id === want) cls += ' want';
   const f = fresh.get(t.id);
   if (f) cls += ` ${f.kind}`;
@@ -498,11 +798,14 @@ function detailHtml(g: Game, x: Tile | undefined, want: string | null): string {
     if (x.state !== 'rdy') {
       body += `<button class="qbox${x.queued ? ' on' : ''}" data-act="queue:${t.id}" role="switch" aria-checked="${x.queued}"><span class="sw"></span>Research it for me when ready</button>`;
     }
+    // Spending the Data the goal on the card is saving up: said where the player decides, with what it costs in time.
+    const delay = x.slows ? goalDelay(g, t) : null;
+    if (delay) body += `<p class="slows" data-testid="tech-slows">${icon('warn', 15)}<span>${esc(delayText(delay))}</span></p>`;
     foot = `<div class="costs">${costRows(g, t)}</div>${dry ? `<p class="hint">${HOW[dry]}</p>` : ''}`;
     if (x.state === 'rdy') {
       foot += `<button class="rbtn ok${fresh.has(t.id) ? ' wake' : ''}${t.id === ringed ? ' hl' : ''}" data-act="research:${t.id}" data-testid="research"><span class="lab">Research</span><span class="kbd">Enter</span></button>`;
     } else {
-      const label = x.state === 'lck' ? needsText(x) : dry ? `Not enough ${DATA_NAMES[dry]} yet` : `Ready in ${aboutText(techEta(g, t))}`;
+      const label = x.state === 'lck' ? needsText(x) : dry ? `Not enough ${DATA_NAMES[dry]} yet` : `Ready in ${aboutText(etaOf(g, t))}`;
       foot += `<button class="rbtn${t.id === ringed ? ' hl' : ''}" data-act="research:${t.id}" data-testid="research" disabled>`
         + `<span class="fill" style="transform:scaleX(${frac(techProgress(g, t))})"></span><span class="lab">${esc(label)}</span></button>`;
     }
@@ -567,9 +870,10 @@ export function renderTech(force = false) {
     seen.set(x.t.id, x.state);
   }
 
+  // (A tab's dot invites like the top bar's badge: a tech that would put the goal off does not light it.)
   const tabs = phone
     ? groups.map(({ branch, list }) => `<button class="ttab${branch.id === tab ? ' on' : ''}" data-key="${branch.id}" data-act="tab:${branch.id}" data-testid="tab-${branch.id}" role="tab" aria-selected="${branch.id === tab}">`
-      + `${esc(branch.name)}${list.some((x) => x.state === 'rdy') ? '<i class="dot" title="Something is ready here"></i>' : ''}</button>`).join('')
+      + `${esc(branch.name)}${list.some((x) => x.state === 'rdy' && !x.slows) ? '<i class="dot" title="Something is ready here"></i>' : ''}</button>`).join('')
     : '';
   // Inside a branch, what can still be done comes first; what is already owned follows as a quieter group.
   const sections = groups.filter(({ branch }) => !phone || branch.id === tab).map(({ branch, list }) => {
@@ -580,20 +884,25 @@ export function renderTech(force = false) {
   }).join('');
   // Whatever is further ahead is not drawn at all; one quiet line says the tree will grow.
   const hiddenLeft = tiles.length < Object.values(TECHS).filter((t) => !techHidden(g, t)).length;
-  // A goal that is waiting to be claimed sits on the board, behind this screen. On a phone this bar says so and
-  // leads back to Claim. Elsewhere the HUD lifts its own slim Claim bar above the tree, and this element is
+  // A goal that is waiting to be claimed. On a phone this bar says so, and one press on it claims the goal and
+  // goes back to the board. Elsewhere the HUD lifts its own slim Claim bar above the tree, and this element is
   // only the empty seat that bar lands on (tech.css): one way to claim on either layout, never two.
   const waiting = g.goal.ready ? GOALS[g.goal.i] : null;
-  const claim = `<button class="tgoal" data-act="close"${waiting ? '' : ' hidden'}>`
-    + `${waiting ? `${glyph(FLAG, 18)}<span class="gt"><b>Goal complete</b><span>${esc(waiting.title)}</span></span><span class="go">Claim on the board</span>` : ''}</button>`;
+  const claim = phone
+    ? `<button class="tgoal" data-act="claim" data-testid="tree-claim"${waiting ? '' : ' hidden'}>`
+      + `${waiting ? `${glyph(FLAG, 18)}<span class="gt"><b>Goal complete</b><span>${esc(waiting.title)}</span></span><span class="go">Claim</span>` : ''}</button>`
+    : `<div class="tgoal" aria-hidden="true"${waiting ? '' : ' hidden'}></div>`;
   const html = `${headHtml(g, tiles)}${claim}<div class="ttabs" role="tablist"${phone ? '' : ' hidden'}>${tabs}</div>`
     + `<div class="tree">${sections}${hiddenLeft ? '<p class="more">More shows up as you research.</p>' : ''}</div>`
     + `<aside class="tdetail" aria-label="Selected tech">${detailHtml(g, sel, want)}</aside>`;
 
   setClass(host, 'sheet', sheet);
   markApp(true, !!waiting);
+  // A refresh can replace the element that has the focus (a tile that moved): the focus stays in the tree.
+  const focused = host.contains(document.activeElement);
   if (panel.render(html, force)) {
     for (const f of fresh.values()) if (!f.until) f.until = now + FRESH_MS;
+    if (focused && !host.contains(document.activeElement)) focusTree();
   }
   if (force && scrollTo) {
     settleScroll(scrollTo === 'top');

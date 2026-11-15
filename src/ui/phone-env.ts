@@ -42,4 +42,9 @@ export const env = {
    * stage: everything right of `x0` and below `y0` (stage pixels) is theirs. Null when they are not shown.
    */
   corner: (): { x0: number; y0: number } | null => null,
+  /**
+   * Fold the goal card's hint away on a phone, where the card folds it (as a press on the board does): for a
+   * "Show me" that takes the player to the board. Does nothing where the hint does not fold. (phone.ts)
+   */
+  foldHint: (): void => undefined,
 };

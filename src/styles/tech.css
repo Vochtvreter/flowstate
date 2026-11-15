@@ -51,15 +51,24 @@ html[data-input='touch'] #tech .tt.own, html[data-input='touch'] #tech .qbox { m
    written with a has() selector on #app, these rules were looked up again for every element whose
    style changed, each time searching the whole board, and took more of a frame than everything else in
    the stylesheets together. */
-#app:not(.phone).tech-seat #tech { grid-template-areas: 'goal goal' 'head head' 'tree detail'; grid-template-rows: auto auto minmax(0, 1fr); }
-#app:not(.phone).tech-seat #tech .tgoal { min-height: 86px; pointer-events: none; animation: none; background: transparent; border-bottom-color: var(--line); }
-#app:not(.phone).tech-seat #tech .tgoal .gt, #app:not(.phone).tech-seat #tech .tgoal .go, #app:not(.phone).tech-seat #tech .tgoal > svg { display: none; }
+/* The seat is the header's own band, grown by 22 px at its foot: the title and "Back to board" stay exactly
+   where they were (a press aimed at Back a moment after a research turned the goal ready still lands on it),
+   and the bar lies over the middle of the band, clear of both. */
+#app:not(.phone).tech-seat #tech .thead { min-height: 86px; padding-bottom: 30px; }
+#app:not(.phone).tech-seat #tech .ttl p { visibility: hidden; }
+#app:not(.phone).tech-seat #hud-strip.over-tech { padding-left: 64px; }
+#app:not(.phone) #tech .tgoal { display: none; }
 /* The seat runs the whole width of the tree, so on a narrow window the bar may too, instead of keeping to
-   the tree's left column (at 768 px that left 179 px for a 286 px title). Where even that is short (the
-   inspector open beside a narrow stage) the title takes two lines and the reward chips step aside. */
+   the tree's left column (at 768 px that left 179 px for a 286 px title), up to Back on the right. Where
+   even that is short (the inspector open beside a narrow stage) the title takes two lines and the reward
+   chips step aside. With the inspector open the stage ends well left of Back already. */
 @media (max-width: 1100px) {
   #app:not(.phone) #hud-strip.over-tech { padding-right: 0; }
+  #app:not(.phone):not(.insp-open).tech-seat #hud-strip.over-tech { padding-right: 196px; }
   #app:not(.phone) #hud-strip.over-tech .gc-title { white-space: normal; display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 2; line-height: 18px; }
+  /* Between the title and Back the bar is short of room: three reward chips ("Fill three orders" at 768 px)
+     left the title 18 px wide, cut to "F… t…". The chips wrap onto a second row instead. */
+  #app:not(.phone) #hud-strip.over-tech div.gc-rewards { flex: 0 1 auto; flex-wrap: wrap; min-width: min-content; row-gap: 4px; }
 }
 @media (max-width: 1000px) {
   #app:not(.phone).insp-open #hud-strip.over-tech div.gc-rewards { display: none; }
@@ -113,6 +122,15 @@ html[data-input='touch'] #tech .tt.own, html[data-input='touch'] #tech .qbox { m
 #tech .tt.rdy .st { color: var(--rdy); font-weight: 600; }
 #tech .tt.rdy::after { content: ''; position: absolute; inset: -1px; border-radius: inherit; pointer-events: none; box-shadow: 0 0 0 3px rgba(94, 234, 212, 0.2), 0 0 22px rgba(94, 234, 212, 0.32); animation: tt-breathe 2.2s ease-in-out infinite; }
 @keyframes tt-breathe { 0%, 100% { opacity: 0.3; } 50% { opacity: 1; } }
+
+/* Ready, but it would spend Data the goal on the card is saving: no glow, a quiet note, and a plain warning on
+   its detail with how much later the goal's tech comes (tech.ts, goalDelay). */
+#tech .tt.rdy.slows { background: #121929; border-color: #2c3854; }
+#tech .tt.rdy.slows::after { display: none; }
+#tech .tt.rdy.slows .ti { background: #1b2438; color: var(--rdy); }
+#tech .tt .slow { color: #fcd34d; }
+#tech .slows { display: flex; align-items: flex-start; gap: 8px; margin: 6px 0 0; padding: 10px 12px; border-radius: 10px; border: 1px solid #5a4718; background: #2a2110; color: #fde7a6; font-size: 12.5px; line-height: 17px; }
+#tech .slows svg { flex: none; margin-top: 1px; color: #fcd34d; }
 
 /* Saving up: a bar along the bottom edge. */
 #tech .tt .pb { position: absolute; left: 12px; right: 12px; bottom: 5px; height: 3px; border-radius: 2px; background: #222c44; overflow: hidden; }

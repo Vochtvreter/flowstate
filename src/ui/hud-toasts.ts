@@ -12,24 +12,13 @@
 // What is left: refusals, the answer to a press that has no other (a refund, "Upgraded 3 Refiners"), a
 // tech the queue researched while the tree was shut, a first material that is not what the card is about,
 // an order that filled behind the open tech tree, and the one-off introduction of demand.
-import { DATA_COLORS, DATA_NAMES, DataTier, MATERIALS, MatId, RULES, TECHS } from '../content';
-import { fmt } from '../economy';
+import { MATERIALS, MatId, RULES, TECHS } from '../content';
 import { GOALS } from '../goals';
-import { GameEvent, Order, Reward } from '../state';
+import { GameEvent, Order } from '../state';
 import { pressWord } from './hud-words';
 import { esc, icon, matGlyph } from './icons';
 import { env } from './phone-env';
 import { onBeat, toast, ui } from './ui';
-
-/** "+45¢ +30α", each part in its own colour. */
-export function payHtml(r: Reward): string {
-  const parts: string[] = [];
-  if (r.credits) parts.push(`<span class="mono" style="color:#FFC857">+${fmt(r.credits)}¢</span>`);
-  for (const k of ['a', 'b', 'g'] as DataTier[]) {
-    if (r[k]) parts.push(`<span class="mono" style="color:${DATA_COLORS[k]}">+${fmt(r[k]!)}${DATA_NAMES[k]}</span>`);
-  }
-  return parts.join(' ');
-}
 
 /** The goal whose card is about making (or first selling) this material: "Make your first Spark" for Spark. -1 when there is none. */
 const goalAbout = (m: MatId) => GOALS.findIndex((x) => x.id === (m === 'shard' ? 'sell-shard' : `make-${m}`));

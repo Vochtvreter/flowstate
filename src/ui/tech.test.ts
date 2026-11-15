@@ -5,15 +5,23 @@ import { BRANCHES, TECHS } from '../content';
 import { research, techAvailable, techHidden } from '../economy';
 import { GOALS } from '../goals';
 import { Game, newGame } from '../state';
-import { Tile, goalTech, teasedSlot, techTiles } from './tech';
+import { Tile, delayText, goalDelay, goalSaving, goalTech, readyCount, setCardWait, teasedSlot, techTiles } from './tech';
 
 const show = (g: Game) => Object.fromEntries(techTiles(g).map((x) => [x.t.id, x.veiled ? 'veil' : x.state]));
 const ids = (g: Game) => techTiles(g).map((x) => x.t.id).sort();
 const byId = (g: Game, id: string): Tile | undefined => techTiles(g).find((x) => x.t.id === id);
 
+/** Make β and γ known to the player (some of each in hand), so that what is priced in them may show. */
+const meetAll = (g: Game) => {
+  g.data.b = Math.max(g.data.b, 1);
+  g.data.g = Math.max(g.data.g, 1);
+};
+
 /** The rule written out a second time, from the plan's wording, to check the implementation against. */
 function allowed(g: Game): string[] {
-  const all = Object.values(TECHS).filter((t) => !techHidden(g, t));
+  // Nothing priced in β or γ before the player has met that kind of Data (α is known from the start).
+  const met = (k: 'a' | 'b' | 'g') => k === 'a' || g.data[k] > 0 || g.dataRate[k] > 0 || g.techs.some((id) => (TECHS[id]?.cost[k] ?? 0) > 0);
+  const all = Object.values(TECHS).filter((t) => !techHidden(g, t) && (g.techs.includes(t.id) || (['a', 'b', 'g'] as const).every((k) => !t.cost[k] || met(k))));
   const own = (id: string) => g.techs.includes(id);
   const full = new Set(all.filter((t) => own(t.id) || techAvailable(g, t) || (!t.auto && g.queue.includes(t.id))).map((t) => t.id));
   return all.filter((t) => full.has(t.id) || t.requires.every((r) => full.has(r))).map((t) => t.id).sort();
@@ -25,15 +33,16 @@ describe('tech tree: what is shown', () => {
     expect(show(g)).toEqual({ P1: 'goal', R1: 'goal' });
   });
 
-  it('the first visit shows 7 of 29: owned, researchable, goal rewards, and one step ahead as silhouettes', () => {
+  it('the first visit shows 6 of 29: owned, researchable, goal rewards, and one step ahead as silhouettes', () => {
     const g = newGame();
     g.techs = ['P1', 'R1'];
     g.data.a = 47;
+    // (Deep Analysis, one step behind Lab Speed, is priced in β: it stays out until the player has met β.)
     expect(show(g)).toEqual({
       P1: 'own', R1: 'own',
       P2: 'rdy', R2: 'sav',
       L1: 'goal',
-      P3: 'veil', R3: 'veil',
+      P3: 'veil',
     });
     expect(Object.keys(TECHS)).toHaveLength(29);
     // Nothing of Scale tools is visible and Commerce waits for the first surplus, so both are left out.
@@ -52,6 +61,7 @@ describe('tech tree: what is shown', () => {
   it('nothing beyond a goal reward shows until the goal has paid it out', () => {
     const g = newGame();
     g.techs = ['P1', 'R1'];
+    meetAll(g);
     for (const id of ['L3', 'L4', 'L2', 'S1', 'C2']) expect(byId(g, id)).toBeUndefined();
     g.techs.push('L1', 'C1');
     for (const id of ['L3', 'L4', 'L2', 'S1', 'C2']) expect(byId(g, id)?.veiled).toBe(false);
@@ -67,6 +77,7 @@ describe('tech tree: what is shown', () => {
   it('a tech two steps away is not shown, however many paths lead to it', () => {
     const g = newGame();
     g.techs = ['P1', 'R1', 'P2', 'P3', 'P4'];
+    meetAll(g);
     // Dynamo needs Reclamation (researchable) and Fabrication (a silhouette behind Breeze Deposits).
     expect(byId(g, 'P7')?.veiled).toBe(true);
     expect(byId(g, 'P8')).toBeUndefined();
@@ -101,7 +112,7 @@ describe('tech tree: what is shown', () => {
     g.queue = ['NOPE'];
     expect(() => techTiles(g)).not.toThrow();
     expect(ids(g)).toEqual(allowed(g));
-    expect(ids(g)).toHaveLength(7);
+    expect(ids(g)).toHaveLength(6);
   });
 
   it('researching in any order: the tree always matches the rule, and nothing shown ever disappears', () => {
@@ -214,5 +225,142 @@ describe('build bar: the one locked slot on show', () => {
         expect(s.tech.name).not.toMatch(/[0-9¢αβγ]/);
       }
     }
+  });
+});
+
+describe('tech tree: nothing priced in a kind of Data the player has not met', () => {
+  // Goal 13, "Route more to a Lab than to the Market": Routing is in, β does not exist yet.
+  const at13 = () => {
+    const g = newGame();
+    g.goal = { i: GOALS.findIndex((x) => x.id === 'route-lab'), ready: false };
+    g.techs = ['P1', 'R1', 'P2', 'P3', 'L1'];
+    g.data.a = 300;
+    return g;
+  };
+
+  it('Priority Routing (20β) and the other β techs stay out until the player has met β', () => {
+    const g = at13();
+    for (const id of ['L4', 'R3', 'L7']) expect(byId(g, id)).toBeUndefined();
+    // α techs show as before, and the tree says more is to come.
+    expect(byId(g, 'L3')?.state).toBe('rdy');
+    g.data.b = 4;
+    expect(byId(g, 'L4')?.state).toBe('sav');
+    // Once met, β stays met: spending it all does not take Priority Routing away again.
+    g.data.b = 0;
+    expect(byId(g, 'L4')?.state).toBe('sav');
+  });
+
+  it('a tech the goal on the card names is shown whatever it is priced in (Reclamation in free play needs γ)', () => {
+    const g = newGame();
+    g.goal = { i: GOALS.findIndex((x) => x.id === 'make-clay'), ready: false };
+    g.techs = ['P1', 'R1', 'P2', 'P3', 'P4', 'L1'];
+    g.ended = true;
+    expect(goalTech(g)).toBe('P6');
+    expect(byId(g, 'P6')?.state).toBe('sav');
+    expect(byId(g, 'U2')).toBeUndefined();
+  });
+});
+
+describe('tech tree: the goal\'s wait', () => {
+  // Goal 11, "Make your first Spark": saving 215α for Ember Deposits.
+  const at11 = (a: number, rate = 0.75) => {
+    const g = newGame();
+    g.goal = { i: GOALS.findIndex((x) => x.id === 'make-spark'), ready: false };
+    g.techs = ['P1', 'R1', 'P2'];
+    g.data.a = a;
+    g.dataRate.a = rate;
+    return g;
+  };
+
+  it('knows what the goal is saving for: the tech its step names, or a count of Data', () => {
+    expect(goalSaving(at11(78))?.tech?.id).toBe('P3');
+    expect(goalSaving(at11(78))?.need).toEqual({ a: 215 });
+    const g = newGame();
+    g.goal = { i: GOALS.findIndex((x) => x.id === 'study-glyph'), ready: false };
+    expect(goalSaving(g)).toEqual({ tech: null, need: { b: 40 } });
+    g.goal.ready = true;
+    expect(goalSaving(g)).toBeNull();
+  });
+
+  it('Lab Speed at goal 11 spends α Ember needs: it says by how much, and the badge leaves it out', () => {
+    const g = at11(78);
+    const d = goalDelay(g, TECHS.R2)!;
+    // 50α at 0.75α/s: Ember's 215α comes about 67 s later.
+    expect(d.tiers).toEqual(['a']);
+    expect(d.seconds).toBeCloseTo(50 / 0.75, 3);
+    expect(delayText(d)).toBe('Spends α you are saving for Ember Deposits: about 1 min later.');
+    expect(byId(g, 'R2')).toMatchObject({ state: 'rdy', slows: true });
+    expect(readyCount(g)).toBe(0);
+    // With Ember's price in hand and 50α to spare, it takes nothing from the goal.
+    const rich = at11(265 + 1);
+    expect(goalDelay(rich, TECHS.R2)).toBeNull();
+    expect(readyCount(rich)).toBe(2); // Ember Deposits itself, and Lab Speed
+    // Nothing coming in: it says so without a time.
+    const dry = at11(78, 0);
+    expect(delayText(goalDelay(dry, TECHS.R2)!)).toBe('Spends α you are saving for Ember Deposits.');
+  });
+
+  it('the goal\'s own tech never warns about itself; a goal that saves credits warns about nothing', () => {
+    expect(goalDelay(at11(300), TECHS.P3)).toBeNull();
+    const g = newGame();
+    g.goal = { i: GOALS.findIndex((x) => x.id === 'route-lab'), ready: false };
+    g.techs = ['P1', 'R1', 'P2', 'P3', 'L1'];
+    g.data.a = 100;
+    expect(goalSaving(g)).toBeNull();
+    expect(goalDelay(g, TECHS.L3)).toBeNull();
+  });
+
+  it('a goal counting β ("Study Glyph for β"): Priority Routing would take from that count', () => {
+    const g = newGame();
+    g.goal = { i: GOALS.findIndex((x) => x.id === 'study-glyph'), ready: false };
+    g.techs = ['P1', 'R1', 'P2', 'P3', 'L1', 'P4'];
+    g.data.b = 25;
+    g.dataRate.b = 0.5;
+    expect(delayText(goalDelay(g, TECHS.L4)!)).toBe('Spends β your goal is counting: about 40 s later.');
+  });
+
+  it('counts with the income the goal card counts with, when the card has a wait to show', () => {
+    const g = at11(78, 0.75);
+    // The card measured 1α/s: 137α in about 137 s.
+    setCardWait(() => ({ unit: 'α', have: 78, need: 215, eta: 137 }));
+    try {
+      expect(goalDelay(g, TECHS.R2)!.seconds).toBeCloseTo(50, 3);
+    } finally {
+      setCardWait(() => null);
+    }
+  });
+
+  it('puts nothing off while the goal waits longer for the credits its step needs after the research (goal 21)', () => {
+    // "Research Fabrication, then save up and build a Fabricator": Fabrication's 720α come well before the 7,100¢.
+    const at21 = (credits: number, creditRate: number) => {
+      const g = newGame();
+      g.goal = { i: GOALS.findIndex((x) => x.id === 'build-fabricator'), ready: false };
+      g.techs = ['P1', 'R1', 'P2', 'P3', 'L1', 'P4', 'P5', 'S1'];
+      meetAll(g);
+      g.data.a = 362;
+      g.dataRate.a = 3.68;
+      g.data.b = 335;
+      g.credits = credits;
+      g.creditRate = creditRate;
+      return g;
+    };
+    const slow = at21(3931, 9);
+    expect(goalSaving(slow)?.tech?.id).toBe('P7');
+    expect(goalSaving(slow)?.then).toBeGreaterThan(7000);
+    // 50α for Lab Speed puts Fabrication's α off by about 14 s, but the Fabricator's credits are 6 min away.
+    expect(goalDelay(slow, TECHS.R2)).toBeNull();
+    expect(byId(slow, 'R2')).toMatchObject({ state: 'rdy', slows: false });
+    // The card's own income for those credits counts the same way.
+    setCardWait(() => ({ unit: '¢', have: 3931, need: 7100, eta: 221 }));
+    try {
+      expect(goalDelay(at21(3931, 0.01), TECHS.R2)).toBeNull();
+    } finally {
+      setCardWait(() => null);
+    }
+    // With the credits nearly in, the α is what the goal waits for: Lab Speed puts it off again.
+    const rich = at21(7090, 9);
+    expect(goalDelay(rich, TECHS.R2)!.seconds).toBeCloseTo(50 / 3.68, 1);
+    // No credits coming in at all says nothing about when: the Data alone is counted, as before.
+    expect(goalDelay(at21(3931, 0), TECHS.R2)!.seconds).toBeCloseTo(50 / 3.68, 1);
   });
 });

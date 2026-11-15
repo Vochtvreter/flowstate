@@ -15,8 +15,7 @@
 #top, #hud-strip, #start, #summary { user-select: none; -webkit-user-select: none; -webkit-touch-callout: none; }
 /* Toasts are centred by the column, not by a half-width offset, so they can use the whole stage on a narrow screen. */
 #hud #toasts { left: 12px; right: 12px; transform: none; }
-/* While the tech tree is open they keep to its left part: its right-hand column (340px) ends in the Research button. */
-#hud #toasts.over-tech { right: 352px; }
+/* (While the tech tree is open they keep out of its detail column: see the end of tech.css.) */
 /* While the tech tree covers the board, a goal that is ready rides above it (the tree is 40, toasts
    50) as one slim bar: title, reward, Claim. The order and the alert wait underneath. */
 #hud-strip.over-tech { z-index: 45; padding-right: var(--tech-side, 320px); }
@@ -360,6 +359,10 @@ html[data-input='touch'] #insp .step::after, html[data-input='touch'] #insp .fil
 html[data-input='touch'] #app:not(.phone) #hud #toasts { right: 228px; bottom: calc(16px + var(--toast-up, 0px)); }
 #app:not(.phone) .toast { text-align: left; }
 #toasts .toast:nth-last-child(n + 4) { display: none; }
+/* The one-off "Best played upright" line on a phone held sideways (hud-screens.ts): it can be dismissed. */
+.toast.upright { padding-right: 4px; }
+.toast.upright > svg { flex: none; color: #9db8ff; }
+.toast.upright .up-x { flex: none; pointer-events: auto; width: 44px; height: 44px; margin: -8px 0; padding: 0; border: 0; border-radius: 50%; background: transparent; color: #9db8ff; display: flex; align-items: center; justify-content: center; }
 @media (max-width: 900px) {
   /* (No key hints at this width.) */
   #app:not(.phone) #hud #toasts { bottom: calc(16px + var(--toast-up, 0px)); }

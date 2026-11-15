@@ -1,8 +1,12 @@
-import { MATERIALS, MatId } from '../content';
+// What is wrong with a node, and where the cause lies: the inspector's status box, the board's pill and the
+// HUD's alert chip all read diagnose().
+import { MATERIALS, MatId, NODE_DEFS, RULES } from '../content';
 import { materialsAt } from '../actions';
 import { recipeOf } from '../economy';
+import { activeGoal, goalAge, goalFocus } from '../goals';
 import { graph, isMachine, isPass } from '../sim';
 import { Game, GNode } from '../state';
+import { freePlay } from './hud-screens';
 
 export type Problem = 'starved' | 'blocked' | 'idle' | null;
 
@@ -45,9 +49,20 @@ function supplier(g: Game, id: number, m: MatId, depth = 0): GNode | null {
   return null;
 }
 
+/**
+ * Between the first Lens and free play (the ending's celebration and its summary), a machine that makes nothing
+ * but the capstone has done what the demo asked of it: its Lens with nowhere to go, or its next one short of
+ * Glyph, is no trouble to show at the victory moment (rev-consultant F7).
+ */
+function resting(g: Game, n: GNode): boolean {
+  if (!g.ended || !isMachine(n) || freePlay()) return false;
+  const r = recipeOf(n);
+  return !!r && r.outputs.length > 0 && r.outputs.every(([m]) => m === RULES.capstone);
+}
+
 export function diagnose(g: Game, n: GNode): Diagnosis {
   const none: Diagnosis = { problem: null, victim: false, mat: null, culprit: null, openPort: false };
-  if (n.status === 'working') return none;
+  if (n.status === 'working' || resting(g, n)) return none;
   if (n.type === 'well') {
     if (n.status !== 'blocked') return none;
     const wired = (graph(g).outs.get(n.id)?.[0]?.length ?? 0) > 0;
@@ -73,3 +88,55 @@ export function diagnose(g: Game, n: GNode): Diagnosis {
 }
 
 export const matName = (m: MatId | null) => (m ? MATERIALS[m].name : 'input');
+
+// ---------- the alert chip: which node it names ----------
+
+/** Seconds at the start of a goal during which the alert keeps quiet about what the goal card is telling the player. */
+export const ALERT_QUIET = 20;
+
+/**
+ * Is the goal card about this node? The nodes its hint or line is about (goalFocus), or, where the goal does
+ * not say (an empty list), any node whose kind the card's title or hint names ("Drag from the Refiner's port").
+ */
+function cardIsAbout(g: Game, n: GNode, focus: number[]): boolean {
+  if (focus.length) return focus.includes(n.id);
+  const goal = activeGoal(g);
+  if (!goal) return false;
+  const name = NODE_DEFS[n.type].name;
+  return goal.title.includes(name) || goal.hint.mouse.includes(name);
+}
+
+/**
+ * The node the HUD's alert chip names, with what it says (`textOf`: the chip's words for a node, null when
+ * there is nothing to say about it). In this order:
+ *  1. a node the active goal or its line is about (goalFocus), in the order the player meets them: the alert
+ *     points where the card points (rev-consultant F1: at goal 22 it named the Mist Refiner while the
+ *     Fabricator starved);
+ *  2. the node it named last, while that is still in trouble (two machines about as badly off would swap
+ *     places four times a second);
+ *  3. the worst off of the rest.
+ * For the first ALERT_QUIET seconds of a goal it says nothing about what the card is about: the card's hint
+ * is saying it already (goals 3 and 5, rev-consultant F9).
+ */
+export function alertPick(
+  g: Game, held: number, textOf: (n: GNode) => string | null, focus: number[] = goalFocus(g),
+): { n: GNode; text: string } | null {
+  const quiet = !g.goal.ready && goalAge(g) < ALERT_QUIET;
+  const say = (n: GNode) => (quiet && cardIsAbout(g, n, focus) ? null : textOf(n));
+  const byId = graph(g).byId;
+  for (const id of focus) {
+    const n = byId.get(id);
+    const text = n ? say(n) : null;
+    if (n && text) return { n, text };
+  }
+  const h = held >= 0 ? byId.get(held) : undefined;
+  const heldText = h ? say(h) : null;
+  if (h && heldText) return { n: h, text: heldText };
+  let worst: { n: GNode; text: string } | null = null;
+  for (const n of g.nodes) {
+    if (worst && worst.n.util <= n.util) continue;
+    const text = say(n);
+    if (text) worst = { n, text };
+  }
+  return worst;
+}

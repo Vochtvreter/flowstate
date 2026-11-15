@@ -3,7 +3,7 @@ import { describe, expect, it } from 'vitest';
 import { MATERIALS } from '../content';
 import { GOALS } from '../goals';
 import { newGame } from '../state';
-import { clockTime, nextMaterials, resultText } from './hud-screens';
+import { awayLine, awayText, clockTime, nextMaterials, resultText } from './hud-screens';
 
 describe('summary: the time to the first Lens', () => {
   it('reads as minutes and seconds, with hours only when there are any', () => {
@@ -42,5 +42,23 @@ describe('summary: Copy result', () => {
   it('still reads sensibly for a save that has no Lens time', () => {
     const g = newGame();
     expect(resultText(g).split('\n')).toEqual(['Flowstate: demo complete', '0 things built · 0% of income from sales']);
+  });
+});
+
+describe('time away', () => {
+  it('reads a long time in a word or two', () => {
+    expect(awayText(45 * 60)).toBe('45 minutes');
+    expect(awayText(5 * 3600)).toBe('5 hours');
+    expect(awayText(86400)).toBe('1 day');
+    expect(awayText(30 * 86400)).toBe('30 days');
+  });
+
+  it('says how long the player was gone when the line ran for its whole limit, and how to raise it', () => {
+    const g = newGame();
+    g.ended = true;
+    expect(awayLine(g, 3600, 3600)).toBe('Your supply line kept running for <b>1h 0m</b>.');
+    expect(awayLine(g, 7200, 86400)).toBe('You were away for <b>1 day</b>. Your supply line ran for its <b>2-hour</b> limit. Long Absence in the tech tree raises it to 8 hours.');
+    g.techs.push('R4');
+    expect(awayLine(g, 8 * 3600, 3 * 86400)).toBe('You were away for <b>3 days</b>. Your supply line ran for its <b>8-hour</b> limit.');
   });
 });

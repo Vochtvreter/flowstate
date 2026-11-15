@@ -12,13 +12,14 @@ import {
 } from '../actions';
 import {
   TRACK_INFO, costText, cycleTime, dataYield, fmt, fmtInt, fmtRate, has, labRate, maxLevel, maxPipeTier,
-  nodeCost, nodeUnlocked, readyTechs, recipeOf, techAvailable, trackAvailable, upgradeCost, wellRate,
+  nodeCost, nodeUnlocked, recipeOf, techAvailable, trackAvailable, upgradeCost, wellRate,
 } from '../economy';
 import { graph, isMachine, passCap } from '../sim';
 import { Game, GNode, RouterMode, Wire } from '../state';
 import { isMuted, setMuted } from './audio';
 import { boardRect, jumpTo, startPlacing, fitView, zoomBy } from './board';
 import { marked, pressedMark, tendMark } from './advice-show';
+import { waitLine } from './advice-tip';
 import { Panel, cachedRect, el, invalidateLayout, makePanel, setAnchor, setAttr, setClass, setHTML, setHidden, setText } from './dom';
 import { nodeSize } from './geom';
 import { marketSection } from './hud-market';
@@ -27,7 +28,7 @@ import { isTouch, withKey } from './hud-words';
 import { esc, icon, matGlyph, nodeIcon } from './icons';
 import { env } from './phone-env';
 import { diagnose, matName } from './status';
-import { teasedSlot } from './tech';
+import { metData, pricedInMet, readyCount, setCardWait, teasedSlot } from './tech';
 import { delegate, select, signal, toast, touch, ui } from './ui';
 
 let topEl: HTMLElement;
@@ -55,6 +56,8 @@ export function initPanels(refs: {
   mini = refs.mini;
   zoomEl = refs.zoom;
   hotPanel = makePanel(hotEl);
+  // The tech tree counts the goal's wait exactly as the goal card does.
+  setCardWait(waitLine);
   // The inspector's own frame: a grab handle (shown when it is a bottom sheet) and the body that
   // is patched. The frame is never rebuilt, so the sheet can be dragged while its contents refresh.
   inspEl.innerHTML = `<div class="sheet-grab" aria-hidden="true"></div><div class="insp-body"></div>`;
@@ -89,6 +92,18 @@ export function initPanels(refs: {
     touch();
   }, true);
 
+  hotEl.addEventListener('scroll', hotMoreSoon, { passive: true });
+  window.addEventListener('resize', () => {
+    winW = window.innerWidth;
+    hotMoreSoon();
+  });
+  // The web fonts arrive after the first frames (they do not hold up the first paint): widths measured with
+  // the fallback font are measured again.
+  document.fonts?.addEventListener?.('loadingdone', () => {
+    roomKey = '';
+    hotMoreSoon();
+    touch();
+  });
   delegate(hotEl, (a, args) => {
     if (a === 'place') startPlacing(args[0] as never);
     else if (a === 'locked') hooks.openTech(args[0]);
@@ -286,19 +301,15 @@ export function tickPanels(dt: number) {
   setText(creditsNum, creditsText(whole));
 }
 
-// A Data chip stays out of the bar until the player has had that kind of Data, and then stays in.
-const dataSeen = new WeakMap<Game, Partial<Record<DataTier, boolean>>>();
+// A Data chip stays out of the bar until the player has had that kind of Data, and then stays in (metData, tech.ts).
+const everHad = metData;
 
-function everHad(g: Game, k: DataTier): boolean {
-  let seen = dataSeen.get(g);
-  if (!seen) dataSeen.set(g, (seen = {}));
-  if (!seen[k] && (g.data[k] > 0 || g.dataRate[k] > 0 || g.techs.some((t) => (TECHS[t]?.cost[k] ?? 0) > 0))) seen[k] = true;
-  return !!seen[k];
-}
-
-/** A tech the player can research now and whose price is in kinds of Data they have met: worth pointing at. */
+/**
+ * A tech the player can research now and whose price is in kinds of Data they have met: worth pointing at.
+ * (The tree shows nothing priced in a kind of Data the player has not met either: see techTiles.)
+ */
 function techInSight(g: Game, t: Tech | undefined): boolean {
-  return !!t && techAvailable(g, t) && (['a', 'b', 'g'] as DataTier[]).every((k) => !t.cost[k] || everHad(g, k));
+  return !!t && techAvailable(g, t) && pricedInMet(g, t);
 }
 
 const DATA_ABOUT: Record<DataTier, string> = {
@@ -402,15 +413,14 @@ function buildTop() {
       if (setHidden(techBtn, !on)) invalidateLayout();
       setAttr(techBtn, 'data-testid', on ? 'open-tech' : null);
       if (!on) return;
-      const ready = readyTechs(g).length;
+      // (Only what takes nothing from the Data the goal on the card is saving up: see readyCount.)
+      const ready = readyCount(g);
       setClass(techBtn, 'ready', ready > 0);
       setHidden(badge, !ready);
       setAttr(techBtn, 'data-ready', String(ready));
       setText(badgeNum, String(ready));
       setAttr(techBtn, 'aria-label', ready ? `Tech tree, ${ready} ready to research` : 'Tech tree');
-      // Early on, a phone's bar has room for the word (the goal card says "Tap Tech"). Once the Flow
-      // bonus or a second kind of Data has joined the bar it has not, and by then the button is familiar.
-      setClass(topEl, 'roomy', !g.flowOn && !dataShown.b && !dataShown.g);
+      fitTechWord(g);
     },
   });
 
@@ -454,6 +464,40 @@ function buildTop() {
 function renderTop() {
   const g = ui.g;
   for (const item of topItems) item.update(g);
+}
+
+/** What decides whether the phone's bar has room for the word "Tech": its width and how long its numbers are. */
+let roomKey = '';
+/** The numbers in the bar (they patch their own text, so the elements stay), and the window's width. */
+let roomTexts: Element[] | null = null;
+/** (Kept from resize events: reading innerWidth in the middle of a refresh makes the browser lay the page out.) */
+let winW = typeof window !== 'undefined' ? window.innerWidth : 0;
+
+/**
+ * On a phone the Tech button carries its word while the bar has room for it (`#top.roomy`, phone.css): at
+ * 390 px it has, with the Flow bonus and all three kinds of Data on show; at 360 px it has not once those have
+ * joined the bar. Measured, with the word in, whenever something that changes the bar's widths has changed (the
+ * window, the Flow bonus, a kind of Data, a number growing a digit): the word stays out if it would touch the
+ * numbers to its left.
+ */
+function fitTechWord(g: Game) {
+  if (!env.phone) {
+    roomKey = '';
+    roomTexts = null;
+    return;
+  }
+  const res = topSlots.res!;
+  roomTexts ??= Array.from(res.querySelectorAll('.nums b, .nums i, .flowpct'));
+  let lens = '';
+  for (const e of roomTexts) lens += `${e.textContent?.length ?? 0},`;
+  const key = `${winW}|${g.flowOn ? 1 : 0}|${dataShown.a ? 1 : 0}${dataShown.b ? 1 : 0}${dataShown.g ? 1 : 0}|${lens}`;
+  if (key === roomKey) return;
+  roomKey = key;
+  setClass(topEl, 'roomy', true);
+  let right = 0;
+  for (const e of Array.from(res.children) as HTMLElement[]) if (e.offsetWidth) right = Math.max(right, e.getBoundingClientRect().right);
+  const left = topSlots.actions!.getBoundingClientRect().left;
+  setClass(topEl, 'roomy', right + 6 <= left);
 }
 
 // ---------- hotbar ----------
@@ -519,6 +563,12 @@ function renderHot(force: boolean) {
   const room = env.phone || hotRect().height >= slots * HOT_SLOT + HOT_PAD + HOT_SLOT;
   const tip = touchy || !room ? '' : `<div class="grow"></div><div class="hb tip" title="Select a node and press Delete. Everything is refunded in full.">${icon('trash')}<span class="p">Del = refund</span></div>`;
   hotPanel.render(items + tip, force);
+  // (Only when the slots themselves change: a price filling up must not make the browser lay the page out.)
+  const slotsKey = `${env.phone ? 1 : 0}|${slots}|${tease?.type ?? ''}|${tip ? 1 : 0}`;
+  if (slotsKey !== hotSlotsKey) {
+    hotSlotsKey = slotsKey;
+    hotMoreSoon();
+  }
   for (const type of became) {
     const btn = hotEl.querySelector<HTMLElement>(`[data-testid="hot-${type}"]`);
     if (!btn) continue;
@@ -526,6 +576,28 @@ function renderHot(force: boolean) {
     signal('afford', { type, at: { x: r.left + r.width / 2, y: r.top + r.height / 2 } });
   }
 }
+
+/**
+ * On a phone the build bar scrolls sideways once it holds more than fits (Market, Lab and Void went off its
+ * right edge unseen: rev-phone F6). It says so: `more-r` while there is more to the right, `more-l` to the left
+ * (phone.css fades that edge and puts a chevron on it). Looked at when its slots change, when it scrolls and when
+ * the window does.
+ */
+function hotMore() {
+  const phone = env.phone;
+  const more = phone && hotEl.scrollWidth > hotEl.clientWidth + 2;
+  setClass(hotEl, 'more-r', more && hotEl.scrollLeft + hotEl.clientWidth < hotEl.scrollWidth - 4);
+  setClass(hotEl, 'more-l', more && hotEl.scrollLeft > 4);
+}
+let hotMoreFrame = 0;
+/** The build bar's slots as they were when its overflow was last looked at. */
+let hotSlotsKey = '';
+const hotMoreSoon = () => {
+  if (!hotMoreFrame) hotMoreFrame = requestAnimationFrame(() => {
+    hotMoreFrame = 0;
+    hotMore();
+  });
+};
 
 /** Hotbar node types in key order (unlocked only). */
 export function hotbarTypes(g: Game) {
@@ -613,7 +685,7 @@ function upgradeSection(g: Game, n: GNode): string {
       // The track is behind a tech (Efficiency: Efficiency Tuning). It is only mentioned once that tech can
       // be researched: before then its price is in a kind of Data the player has not met.
       const tech = TECHS.U1;
-      if (t !== 'eff' || !tech || !techAvailable(g, tech)) return '';
+      if (t !== 'eff' || !techInSight(g, tech)) return '';
       return `<div class="uprow locked"><div><b>${TRACK_INFO[t].name}</b><small>Research ${esc(tech.name)} · ${techPrice(tech)}</small></div><button class="buy dashed" data-act="tech:${tech.id}"><span class="lab">View tech</span></button></div>`;
     }
     const lv = n.lv[t];
@@ -761,7 +833,14 @@ function renderInspector(force: boolean) {
     clearTimeout(inspEmpty);
     inspEmpty = 0;
     inspPanel.render(html, force);
+    // A node has just been opened: its panel shows the part the player most likely came for.
+    const opened = sel ? `${sel.kind}${sel.id}` : '';
+    if (opened !== inspOpenedFor) {
+      inspOpenedFor = opened;
+      if (sel?.kind === 'node' && html) requestAnimationFrame(() => revealInInspector(opened));
+    }
   } else if (!inspEmpty) {
+    inspOpenedFor = '';
     // The sheet slides away with its contents still in it; they are cleared once it is out of sight.
     inspEmpty = window.setTimeout(() => {
       inspEmpty = 0;
@@ -771,6 +850,40 @@ function renderInspector(force: boolean) {
 }
 
 let inspEmpty = 0;
+/** The selection the inspector was last opened for ('' = closed). */
+let inspOpenedFor = '';
+
+/**
+ * Scroll the inspector, just opened, so what the player most likely came for is in view: on a Router the rows of
+ * its wires with their Favour buttons, on anything else the first upgrade they can afford. Below the fold of a
+ * phone's sheet those were missed (rev-phone F5, rev-wide F2). Nothing moves when it is in view already, nor
+ * once a finger is on the panel.
+ */
+function revealInInspector(opened: string) {
+  if (opened !== inspOpenedFor || inspPanel.busy()) return;
+  const box = inspEl.querySelector<HTMLElement>('.scroll');
+  if (!box) return;
+  // (The panel is patched in place: without this a node would open where the last one was scrolled to.)
+  box.scrollTop = 0;
+  if (box.scrollHeight <= box.clientHeight + 1) return;
+  const rows = Array.from(box.querySelectorAll<HTMLElement>('.rrow.hasfav'));
+  const want = rows.length ? rows : Array.from(box.querySelectorAll<HTMLElement>('.uprow .buy.ok')).slice(0, 1).map((b) => b.closest<HTMLElement>('.uprow') ?? b);
+  if (!want.length) return;
+  // (Measured against the scroller itself: a sheet still sliding in has the same offset for both.)
+  const b = box.getBoundingClientRect();
+  const room = box.clientHeight;
+  const span = (els: HTMLElement[]) => ({ top: els[0].getBoundingClientRect().top - b.top, bottom: els[els.length - 1].getBoundingClientRect().bottom - b.top });
+  let { top, bottom } = span(want);
+  // Where all the rows do not fit (a phone held sideways), the ones that can still be favoured come first.
+  if (bottom - top + 24 > room && rows.length) {
+    const open = rows.filter((r) => r.querySelector('button.fav'));
+    if (open.length) ({ top, bottom } = span(open));
+  }
+  if (top >= 0 && bottom <= room) return;
+  // The whole of it where it fits, its top where it does not; 12 px clear of the edge.
+  const shift = bottom - top + 24 <= room ? bottom - room + 12 : top - 12;
+  box.scrollTop = Math.max(0, Math.min(box.scrollHeight - room, box.scrollTop + shift));
+}
 
 // ---------- minimap + zoom ----------
 

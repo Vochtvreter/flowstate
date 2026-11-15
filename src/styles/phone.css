@@ -130,6 +130,19 @@ html.phone body { position: fixed; inset: 0; width: 100%; }
 #app.phone .hb.locked { color: #8894ad; background: transparent; }
 #app.phone .hb.locked .p { font-size: 11px; letter-spacing: 0; color: #5eead4; }
 #app.phone .hb.tip, #app.phone #hot .grow { display: none; }
+/* More slots than fit: the edge with more beyond it fades out, and a chevron stands on it (panels.ts sets
+   `more-r` and `more-l`). The chevron (#hot-more, after #hot in index.html) takes no press: a tap there still
+   reaches the slot under it. */
+#hot-more { display: none; }
+#app.phone #hot.more-r { -webkit-mask-image: linear-gradient(to left, transparent 0, #000 48px); mask-image: linear-gradient(to left, transparent 0, #000 48px); }
+#app.phone #hot.more-l { -webkit-mask-image: linear-gradient(to right, transparent 0, #000 48px); mask-image: linear-gradient(to right, transparent 0, #000 48px); }
+#app.phone #hot.more-l.more-r { -webkit-mask-image: linear-gradient(to right, transparent 0, #000 48px, #000 calc(100% - 48px), transparent 100%); mask-image: linear-gradient(to right, transparent 0, #000 48px, #000 calc(100% - 48px), transparent 100%); }
+#app.phone #hot.more-r + #hot-more {
+  display: flex; grid-row: 3; grid-column: 1; justify-self: end; align-self: start; z-index: 21; pointer-events: none;
+  align-items: center; justify-content: center; width: 26px; height: 26px; margin: 23px calc(var(--edge-r) + 2px) 0 0;
+  border-radius: 50%; background: #1a2338; border: 1px solid #3a4a70; box-shadow: 0 2px 10px rgba(0, 0, 0, 0.5);
+}
+#app.phone #hot.more-r + #hot-more::before { content: ''; width: 7px; height: 7px; margin-left: -3px; border-right: 2px solid #dbe6ff; border-top: 2px solid #dbe6ff; transform: rotate(45deg); }
 
 /* ----- one strip at the top of the board: goal, order, alert, toasts ----- */
 /* The strip is the HUD's (#hud-strip in #hud: the goal card, the order chip, the alert chip, then
@@ -155,7 +168,15 @@ html.phone body { position: fixed; inset: 0; width: 100%; }
    just under the strip (--strip-b, measured in phone.ts): the foot of the board belongs to toasts. */
 html[data-input='touch'] #app:not(.phone) #thumb-slot { display: flex; position: absolute; left: 50%; top: calc(var(--strip-b, 0px) + 10px); z-index: 12; transform: translateX(-50%); max-width: calc(100% - 32px); pointer-events: none; }
 #tap-hint { display: flex; align-items: center; gap: 4px; min-height: 44px; padding: 0 0 0 14px; border-radius: 22px; background: #17213a; border: 1px solid #34467a; color: #dbe6ff; font-size: 13px; line-height: 17px; box-shadow: 0 10px 30px rgba(0, 0, 0, 0.5); }
-#tap-hint button { flex: none; width: 44px; height: 44px; border: 0; border-radius: 50%; background: transparent; color: #9db8ff; display: flex; align-items: center; justify-content: center; padding: 0; }
+/* The line asks the player to tap the board, so a tap on the line goes through to the board under it. Only
+   Cancel answers, and only to a press that came down inside its circle: a finger beside it, which the browser
+   would hand to the nearest button, does nothing (phone.ts). */
+#thumb-slot > #tap-hint { pointer-events: none; }
+#tap-hint button { flex: none; width: 44px; height: 44px; border: 0; border-radius: 50%; background: transparent; color: #9db8ff; display: flex; align-items: center; justify-content: center; padding: 0; pointer-events: auto; }
+/* Its other place, when its usual one lies over what it asks the player to tap (phone.ts, placeHint): on a
+   phone just under the strip, on a wider touch screen at the foot of the board. */
+#app.phone #thumb-slot.alt { bottom: auto; top: calc(var(--strip-h, 0px) + 8px); transform: none; }
+html[data-input='touch'] #app:not(.phone) #thumb-slot.alt { top: auto; bottom: 16px; }
 #app.phone #fabs {
   display: flex; flex-direction: row; gap: 8px;
   position: absolute; right: var(--edge-r); bottom: 8px; z-index: 12;
