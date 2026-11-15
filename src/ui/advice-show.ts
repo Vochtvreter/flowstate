@@ -251,7 +251,7 @@ function beacon(at: () => Pt | null, color = '#7AA2FF') {
   stills.push({ at, color, t0: performance.now() / 1000 });
 }
 
-/** For scripts: the still marks on show, where they are on screen and how opaque. */
+/** For scripts: the still marks on show: where each is on screen, and how long it has stood (s). */
 export const stillMarks = () => stills.map((s) => {
   const p = s.at();
   const q = p ? toClient(p) : null;

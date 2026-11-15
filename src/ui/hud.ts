@@ -568,9 +568,9 @@ const problemKey = (g: Game, n: GNode) => {
 
 /**
  * The problem the chip names, or null: the one the goal on the card meets first, else the one named last while it
- * lasts, else the worst off (alertPick in status.ts, which also keeps quiet about what the card is about in a goal's
- * first seconds, and about everything while the card's own machine stands idle). Nothing is flagged before the first
- * wire. A problem the player has put away (alertPut) is passed over for the others.
+ * lasts, else the worst off (alertPick in status.ts, which names nothing at all while the card's own machine stands
+ * idle, is settling after a change, or is in trouble in a goal's first seconds: the card is speaking of it). Nothing
+ * is flagged before the first wire. A problem the player has put away (alertPut) is passed over for the others.
  */
 function pickProblem(g: Game): { n: GNode; text: string } | null {
   const worst = !g.wires.length && g.stats.wiresMade === 0 ? null
