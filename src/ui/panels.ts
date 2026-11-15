@@ -12,13 +12,14 @@ import {
 } from '../actions';
 import {
   TRACK_INFO, costText, cycleTime, dataYield, fmt, fmtInt, fmtRate, has, labRate, maxLevel, maxPipeTier,
-  nodeCost, nodeUnlocked, readyTechs, recipeOf, techAvailable, trackAvailable, upgradeCost, wellRate,
+  nodeCost, nodeUnlocked, recipeOf, techAvailable, trackAvailable, upgradeCost, wellRate,
 } from '../economy';
 import { graph, isMachine, passCap } from '../sim';
 import { Game, GNode, RouterMode, Wire } from '../state';
 import { isMuted, setMuted } from './audio';
 import { boardRect, jumpTo, startPlacing, fitView, zoomBy } from './board';
 import { marked, pressedMark, tendMark } from './advice-show';
+import { waitLine } from './advice-tip';
 import { Panel, cachedRect, el, invalidateLayout, makePanel, setAnchor, setAttr, setClass, setHTML, setHidden, setText } from './dom';
 import { nodeSize } from './geom';
 import { marketSection } from './hud-market';
@@ -27,7 +28,7 @@ import { isTouch, withKey } from './hud-words';
 import { esc, icon, matGlyph, nodeIcon } from './icons';
 import { env } from './phone-env';
 import { diagnose, matName } from './status';
-import { teasedSlot } from './tech';
+import { metData, pricedInMet, readyCount, setCardWait, teasedSlot } from './tech';
 import { delegate, select, signal, toast, touch, ui } from './ui';
 
 let topEl: HTMLElement;
@@ -55,6 +56,8 @@ export function initPanels(refs: {
   mini = refs.mini;
   zoomEl = refs.zoom;
   hotPanel = makePanel(hotEl);
+  // The tech tree counts the goal's wait exactly as the goal card does.
+  setCardWait(waitLine);
   // The inspector's own frame: a grab handle (shown when it is a bottom sheet) and the body that
   // is patched. The frame is never rebuilt, so the sheet can be dragged while its contents refresh.
   inspEl.innerHTML = `<div class="sheet-grab" aria-hidden="true"></div><div class="insp-body"></div>`;
@@ -286,19 +289,15 @@ export function tickPanels(dt: number) {
   setText(creditsNum, creditsText(whole));
 }
 
-// A Data chip stays out of the bar until the player has had that kind of Data, and then stays in.
-const dataSeen = new WeakMap<Game, Partial<Record<DataTier, boolean>>>();
+// A Data chip stays out of the bar until the player has had that kind of Data, and then stays in (metData, tech.ts).
+const everHad = metData;
 
-function everHad(g: Game, k: DataTier): boolean {
-  let seen = dataSeen.get(g);
-  if (!seen) dataSeen.set(g, (seen = {}));
-  if (!seen[k] && (g.data[k] > 0 || g.dataRate[k] > 0 || g.techs.some((t) => (TECHS[t]?.cost[k] ?? 0) > 0))) seen[k] = true;
-  return !!seen[k];
-}
-
-/** A tech the player can research now and whose price is in kinds of Data they have met: worth pointing at. */
+/**
+ * A tech the player can research now and whose price is in kinds of Data they have met: worth pointing at.
+ * (The tree shows nothing priced in a kind of Data the player has not met either: see techTiles.)
+ */
 function techInSight(g: Game, t: Tech | undefined): boolean {
-  return !!t && techAvailable(g, t) && (['a', 'b', 'g'] as DataTier[]).every((k) => !t.cost[k] || everHad(g, k));
+  return !!t && techAvailable(g, t) && pricedInMet(g, t);
 }
 
 const DATA_ABOUT: Record<DataTier, string> = {
@@ -402,7 +401,8 @@ function buildTop() {
       if (setHidden(techBtn, !on)) invalidateLayout();
       setAttr(techBtn, 'data-testid', on ? 'open-tech' : null);
       if (!on) return;
-      const ready = readyTechs(g).length;
+      // (Only what takes nothing from the Data the goal on the card is saving up: see readyCount.)
+      const ready = readyCount(g);
       setClass(techBtn, 'ready', ready > 0);
       setHidden(badge, !ready);
       setAttr(techBtn, 'data-ready', String(ready));
@@ -613,7 +613,7 @@ function upgradeSection(g: Game, n: GNode): string {
       // The track is behind a tech (Efficiency: Efficiency Tuning). It is only mentioned once that tech can
       // be researched: before then its price is in a kind of Data the player has not met.
       const tech = TECHS.U1;
-      if (t !== 'eff' || !tech || !techAvailable(g, tech)) return '';
+      if (t !== 'eff' || !techInSight(g, tech)) return '';
       return `<div class="uprow locked"><div><b>${TRACK_INFO[t].name}</b><small>Research ${esc(tech.name)} · ${techPrice(tech)}</small></div><button class="buy dashed" data-act="tech:${tech.id}"><span class="lab">View tech</span></button></div>`;
     }
     const lv = n.lv[t];

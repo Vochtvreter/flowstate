@@ -72,6 +72,29 @@ export const isStarted = () => started;
 /** A full-screen card is up: keyboard shortcuts for the board are ignored. */
 export const screenOpen = () => !started || summaryOpen || modalOpen;
 
+// ---------- what cannot be reached behind a card or the tech tree ----------
+
+/** Each layer that covers part of the page (a full-screen card, the tech tree), with what it covers. */
+const covers = new Map<string, Element[]>();
+/** The elements that are `inert` because of a layer here. */
+let inertNow = new Set<Element>();
+
+/**
+ * Make these elements `inert` for as long as the layer `who` is up (null or an empty list: it is down). An
+ * inert element and everything in it can be neither focused nor pressed: Tab walks past it, a key press
+ * cannot reach it, and a pointer goes through it. The layers are kept apart, so one of them closing never
+ * opens up what another still covers.
+ */
+export function coverFor(who: string, els: Element[] | null) {
+  if (els?.length) covers.set(who, els);
+  else covers.delete(who);
+  const want = new Set<Element>();
+  for (const list of covers.values()) for (const e of list) want.add(e);
+  for (const e of inertNow) if (!want.has(e)) e.removeAttribute('inert');
+  for (const e of want) if (!e.hasAttribute('inert')) e.setAttribute('inert', '');
+  inertNow = want;
+}
+
 /**
  * While a full-screen card is up, nothing behind it can be reached: the cards already catch every
  * pointer, and `inert` keeps Tab from walking to the pause button or the hotbar underneath, where
@@ -79,11 +102,7 @@ export const screenOpen = () => !started || summaryOpen || modalOpen;
  * whatever another module adds there is covered too.
  */
 function coverBehind() {
-  const set = (covered: boolean) => {
-    for (const e of Array.from(app.children)) {
-      if (e !== startEl && e !== summaryEl && e !== modalEl) e.toggleAttribute('inert', covered);
-    }
-  };
+  const set = (covered: boolean) => coverFor('screen', covered ? Array.from(app.children).filter((e) => e !== startEl && e !== summaryEl && e !== modalEl) : null);
   clearTimeout(uncoverTimer);
   if (screenOpen()) set(true);
   // The game comes back a moment after the card has gone: the second press of a double press on
@@ -91,7 +110,7 @@ function coverBehind() {
   else uncoverTimer = window.setTimeout(() => set(false), UNCOVER_DELAY);
 }
 /** Shorter than the start screen's fade (START_FADE), so the board answers by the time `#start` is hidden. */
-const UNCOVER_DELAY = 240;
+export const UNCOVER_DELAY = 240;
 const START_FADE = 260;
 let uncoverTimer = 0;
 

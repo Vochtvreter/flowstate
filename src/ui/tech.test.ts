@@ -11,9 +11,17 @@ const show = (g: Game) => Object.fromEntries(techTiles(g).map((x) => [x.t.id, x.
 const ids = (g: Game) => techTiles(g).map((x) => x.t.id).sort();
 const byId = (g: Game, id: string): Tile | undefined => techTiles(g).find((x) => x.t.id === id);
 
+/** Make β and γ known to the player (some of each in hand), so that what is priced in them may show. */
+const meetAll = (g: Game) => {
+  g.data.b = Math.max(g.data.b, 1);
+  g.data.g = Math.max(g.data.g, 1);
+};
+
 /** The rule written out a second time, from the plan's wording, to check the implementation against. */
 function allowed(g: Game): string[] {
-  const all = Object.values(TECHS).filter((t) => !techHidden(g, t));
+  // Nothing priced in β or γ before the player has met that kind of Data (α is known from the start).
+  const met = (k: 'a' | 'b' | 'g') => k === 'a' || g.data[k] > 0 || g.dataRate[k] > 0 || g.techs.some((id) => (TECHS[id]?.cost[k] ?? 0) > 0);
+  const all = Object.values(TECHS).filter((t) => !techHidden(g, t) && (g.techs.includes(t.id) || (['a', 'b', 'g'] as const).every((k) => !t.cost[k] || met(k))));
   const own = (id: string) => g.techs.includes(id);
   const full = new Set(all.filter((t) => own(t.id) || techAvailable(g, t) || (!t.auto && g.queue.includes(t.id))).map((t) => t.id));
   return all.filter((t) => full.has(t.id) || t.requires.every((r) => full.has(r))).map((t) => t.id).sort();
@@ -25,15 +33,16 @@ describe('tech tree: what is shown', () => {
     expect(show(g)).toEqual({ P1: 'goal', R1: 'goal' });
   });
 
-  it('the first visit shows 7 of 29: owned, researchable, goal rewards, and one step ahead as silhouettes', () => {
+  it('the first visit shows 6 of 29: owned, researchable, goal rewards, and one step ahead as silhouettes', () => {
     const g = newGame();
     g.techs = ['P1', 'R1'];
     g.data.a = 47;
+    // (Deep Analysis, one step behind Lab Speed, is priced in β: it stays out until the player has met β.)
     expect(show(g)).toEqual({
       P1: 'own', R1: 'own',
       P2: 'rdy', R2: 'sav',
       L1: 'goal',
-      P3: 'veil', R3: 'veil',
+      P3: 'veil',
     });
     expect(Object.keys(TECHS)).toHaveLength(29);
     // Nothing of Scale tools is visible and Commerce waits for the first surplus, so both are left out.
@@ -52,6 +61,7 @@ describe('tech tree: what is shown', () => {
   it('nothing beyond a goal reward shows until the goal has paid it out', () => {
     const g = newGame();
     g.techs = ['P1', 'R1'];
+    meetAll(g);
     for (const id of ['L3', 'L4', 'L2', 'S1', 'C2']) expect(byId(g, id)).toBeUndefined();
     g.techs.push('L1', 'C1');
     for (const id of ['L3', 'L4', 'L2', 'S1', 'C2']) expect(byId(g, id)?.veiled).toBe(false);
@@ -67,6 +77,7 @@ describe('tech tree: what is shown', () => {
   it('a tech two steps away is not shown, however many paths lead to it', () => {
     const g = newGame();
     g.techs = ['P1', 'R1', 'P2', 'P3', 'P4'];
+    meetAll(g);
     // Dynamo needs Reclamation (researchable) and Fabrication (a silhouette behind Breeze Deposits).
     expect(byId(g, 'P7')?.veiled).toBe(true);
     expect(byId(g, 'P8')).toBeUndefined();
@@ -101,7 +112,7 @@ describe('tech tree: what is shown', () => {
     g.queue = ['NOPE'];
     expect(() => techTiles(g)).not.toThrow();
     expect(ids(g)).toEqual(allowed(g));
-    expect(ids(g)).toHaveLength(7);
+    expect(ids(g)).toHaveLength(6);
   });
 
   it('researching in any order: the tree always matches the rule, and nothing shown ever disappears', () => {
