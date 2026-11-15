@@ -148,30 +148,22 @@ export const ADVICE = {
   /** No tip for a wait that ends within this time anyway. */
   minWait: 12,
   /**
-   * A tip must save at least `minSaves` seconds, and `minShare` of the wait up to `shareMax` seconds. Smaller
-   * savings are real too, but a tip takes a player ten seconds to read and do: in a run of 19 followed tips,
-   * eight saved under five seconds each and seven carried 313 of the 356 seconds promised. Two cases need no
-   * saving at all: a wait that would never end without the tip, and a Flow tip that gets its producer flowing.
+   * A tip must save at least this many seconds (and this share of a very long wait). Smaller savings are real
+   * too, but a tip takes a player ten seconds to read and do: in a run of 19 followed tips, eight saved under
+   * five seconds each and seven carried 313 of the 356 seconds promised. Two cases need no saving at all: a
+   * wait that would never end without the tip, and a Flow tip that gets its producer flowing.
    *
-   * In practice: 15 s in a wait of up to three minutes, and 8% of it in one of up to five (a wait that ends
-   * inside the look-ahead's horizon is measured to its end). A longer wait is an estimate: the first look has
-   * to show `shareMax` (30 s), and the estimate then has to hold `estSaves` and `estShare` below.
-   *
-   * Why a share: in a wait of five minutes a promise of 15 or 20 s is inside what the orders' lumps of pay move
-   * the real outcome by, and those were the tips that could turn out worse than doing nothing. Replayed in the
-   * real game on seeds 0 to 14 (two order sequences each) for the player who follows tips and ignores the
-   * cards' lines, a share of 1% against this: 14 worse timings of 730 (the worst by 103 s) against 5 of 708
-   * (the worst by 6 s) at 6 s an action, 6 of 634 against 1 of 614 at 10 s. The card-following players are
-   * offered, and follow, exactly the same tips either way. The price is paid by the player who ignores the
-   * lines: a tenth fewer tips followed, and on four or five seeds of fifteen a Lens two to five minutes later
-   * (24:36 to 29:04 for 24:33 to 26:31 at 6 s an action, 26:35 to 30:27 for 25:42 to 28:09 at 10 s).
-   * Why the ceiling: without it the first look refuses, in a wait of twenty minutes, every tip under a minute
-   * and a half, and the player furthest from the path hears least (a 19-minute save heard three tips instead
-   * of nine and took three minutes longer); on the replayed boards the ceiling changes one timing in 708.
+   * The share stays at 1%. A share of 8%, up to 30 s (so that a promise of 15 or 20 s in a wait of five minutes,
+   * which is inside what the orders' lumps of pay move the real outcome by, is not made) was tried and measured
+   * in the real game on seeds 0 to 14, and not adopted. The card-following players are offered and follow exactly the
+   * same tips either way. For the player who follows tips and ignores the cards' lines it did not reliably
+   * make the tips truer (worse timings: 6 of 688 at 1% against 13 of 650 at 8% at 6 s an action, 10 of 644
+   * against 4 of 632 at 10 s; on the boards of the hints as they were a commit earlier, 14 against 5 and 6
+   * against 1), and it took a tenth of that player's tips away, true ones among them: their slowest Lens went
+   * from 26:20 to 28:50, and from 27:49 to 31:00 at 10 s an action. `npm run pacing -- --minShare=0.08` tries a share.
    */
   minSaves: 15,
-  minShare: 0.08,
-  shareMax: 30,
+  minShare: 0.01,
   /**
    * When the wait outlasts the look-ahead its end is worked out from the income at the horizon, which is good
    * to a few per cent: a tip then has to save this share of the wait as well.
@@ -1168,7 +1160,7 @@ function tryOut(copy: Game, w: Wait, seconds: number, step = ADVICE.step): Outco
 function worth(base: number, tip: number, measured = true): boolean {
   if (!isFinite(tip)) return false;
   if (!isFinite(base)) return true;
-  return base - tip >= (measured ? Math.max(ADVICE.minSaves, Math.min(ADVICE.shareMax, ADVICE.minShare * base)) : Math.max(ADVICE.estSaves, ADVICE.estShare * base));
+  return base - tip >= (measured ? Math.max(ADVICE.minSaves, ADVICE.minShare * base) : Math.max(ADVICE.estSaves, ADVICE.estShare * base));
 }
 
 interface Verdict { cand: Cand; base: number; tip: number; cut?: { wire: number; from: number; to: number } }

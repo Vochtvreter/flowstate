@@ -116,9 +116,11 @@ Wells and machines count once they are at least 20 s old and some path of wires 
 
 **The Flow goal asks for 95% for 10 seconds** (`RULES.flow.holdShare`, `holdSeconds`). On a board of fewer than nineteen producers that is every one of them. It has to be earned: when the meter unlocks, a card player usually has one or two producers short. The Spark Refiner is short of Ember (an Ember Well makes 0.8/s, the Refiner wants 1), and on most seeds the Ink Refiner is short of Murk. Each is one fix, named by the adviser ("The Spark Refiner needs more Ember: buy Speed on the Ember Well (50¢)."). The first Flow State arrives with the goal. At the old 75% the goal completed with no action in every run; at 90% it still did for a newcomer with ten producers. A fast player has usually fixed everything already and passes in a quarter of a minute.
 
-**The valve.** Once the goal has been on the card for 90 s (`RULES.flow.valveAfter`; `goalAge(g)`, from the saved `Game.goalAt`), all but one producer flowing, held for the same 10 s, also completes it. The bar itself does not move. The valve is for the board with one producer nobody can honestly fix: a machine fed through a Router that favours a Lab (goal 13's card asked for that Router, and no tip turns it back) dips under 90% however its Wells are upgraded. The adviser says nothing about such a board, because a Flow tip has to get the producer it names flowing and keep it so; the valve passes it at 90 s (tested in `tests/advice.test.ts` and `tests/goals.test.ts`). It is also what carries a player who never follows a tip: the pacing tool's card-only player has nine of ten producers flowing when the meter unlocks, on all fifteen seeds, and spends 98–108 s on the goal doing nothing. The valve is "all but one" and no more: with two producers short (five of nine flowing was tried for 400 s) the goal waits for a fix, and a player who takes no tip then has only the Flow ring to go by. The 90 s run on game time, so a pause or time away does not open it, and they are saved with the game: a save made at second 80 completes 10 s after it is loaded; a save from before this rule starts its 90 s when it is loaded.
+**The valve.** Once the goal has been on the card for 90 s (`RULES.flow.valveAfter`; `goalAge(g)`, from the saved `Game.goalAt`), all but one producer flowing, held for the same 10 s, also completes it. The bar itself does not move. The ten seconds are counted from the moment the valve opens, however long the board has been at "all but one" before: the goal's count starts at 0 at second 90 and the goal is ready at second 100, never sooner. (Until this round the seconds held before the valve counted, and the goal completed the instant it opened, with nothing on the card to show for it.) If the board drops under "all but one" the count stops, and starts from nothing when it is back.
 
-**What the card can show.** `goalView(g).flow` is `{ pct, running, of, need }` while the Flow goal is active: the smoothed Flow, how many producers are flowing out of how many counted, and the share needed right now (0.95, or "all but one" once the valve is open).
+The valve is for the board with one producer nobody can honestly fix: a machine fed through a Router that favours a Lab (goal 13's card asked for that Router, and no tip turns it back) dips under 90% however its Wells are upgraded. The adviser says nothing about such a board, because a Flow tip has to get the producer it names flowing and keep it so; the valve passes it at 100 s (tested in `tests/advice.test.ts` and `tests/goals.test.ts`). It is also what carries a player who never follows a tip: the pacing tool's card-only player has nine of ten producers flowing when the meter unlocks, on all fifteen seeds, and spends 108–116 s on the goal doing nothing (100 s, and the Claim 8–16 s after; `tests/pacing.test.ts` pins 108–118 s on seeds 0–3). The valve is "all but one" and no more: with two producers short (five of nine flowing was tried for 400 s) the goal waits for a fix, and a player who takes no tip then has only the Flow ring to go by. The 90 s run on game time, so a pause or time away does not open it, and they are saved with the game: a save made at second 80 completes 20 s after it is loaded, a save made while the count is running picks it up where it was, and a save from before this rule starts its 90 s when it is loaded.
+
+**What the card can show.** `goalView(g).flow` is `{ pct, running, of, need, valve? }` while the Flow goal is active: the smoothed Flow, how many producers are flowing out of how many counted, the share needed right now (0.95, or "all but one" once the valve is open), and `valve: true` from the moment the valve opens (absent before). `goalView(g).progress` is the count itself, `[held, 10, 's']`: under the valve it runs from 0 to 10 between second 90 and second 100.
 
 ## Orders
 
@@ -147,23 +149,33 @@ One goal at a time; a finished goal waits for Claim. Rewards are the only source
 | 8 | Research Murk Deposits | 40¢ |
 | 9 | Refine Murk into Ink | 40¢ |
 | 10 | Give the Silt somewhere to go | 20α |
-| 11 | Make your first Spark | Orders + 25α |
+| 11 | Make your first Spark | Orders + 25α ★ |
 | 12 | Fill your first order | Routing + 200¢ |
 | 13 | Route more to a Lab than to the Market (a Router on the Spark Refiner, one press of Favour on the Lab's wire) | 30α |
 | 14 | Expand the board | 60¢ |
 | 15 | Assemble your first Glyph | Flow meter + 150¢ ★ |
-| 16 | Hold 95% Flow for 10 seconds (after 90 s: all but one producer) | 150¢ |
+| 16 | Hold 95% Flow for 10 seconds (after 90 s: all but one producer, for 10 s counted from then) | 150¢ |
 | 17 | Study Glyph for β (40 β in hand) | 50α |
 | 18 | Make your first Mist | 50α |
-| 19 | Assemble your first Prism | 600¢ + 40β |
+| 19 | Assemble your first Prism | 600¢ + 40β ★ |
 | 20 | Fill three orders | Bulk Upgrade + 1,200¢ + 60β |
 | 21 | Build a Fabricator | 40β |
 | 22 | Make your first Lens | demo complete ★ |
 | free play | Clay · Coil · Dynamo · Paradox | 200¢ · 600¢ · 1,800¢ · 7,500¢ |
 
-★ = big celebration; the fifth is the first Flow State.
+★ = big celebration (`Goal.big`, and `big: true` on the goal's `goal-claimed` event): six goals, and the seventh is the first Flow State. The first Spark and the first Prism were added to fill the two longest stretches without one. Where the peaks fall for the newcomer on seed 0 (claims): Shard 1:42, Lab 2:23, Spark 5:42, Glyph 11:00, the first Flow State about 11:40, Prism 16:39, the Lens 19:15. For a fast player: Spark 3:06, Glyph 6:44, Prism 11:40, the Lens 15:03. The longest stretch between two is a little over five minutes (Spark to Glyph for the newcomer); without the two new ones it was eight and a half (Lab to Glyph) and seven and a half (Flow State to Lens).
 
-**Every card that has the player make something new also says to sell it.** Goals 11, 15, 18 and 19 end "…and sell the Spark", "…sell its Glyph at the Market", "…sell the Mist", "…sell its Prism at the Market" (goal 10 already said so for Ink). A newcomer does what the card says to the letter: without those words Spark, Glyph and Prism were never sold, the Spark Refiner sat blocked for minutes, and the Fabricator had to be paid for out of Shard and Ink.
+**Every card that has the player make something new also says to sell it.** Goals 11 and 18 end "…and sell the Spark", "…sell the Mist"; goals 15 and 19 say "…wire it to the Market, then wire Spark into it to make Glyph" (goal 10 already said so for Ink). A newcomer does what the card says to the letter: without those words Spark, Glyph and Prism were never sold, the Spark Refiner sat blocked for minutes, and the Fabricator had to be paid for out of Shard and Ink.
+
+**The Assembler and Fabricator cards say where to build from, and put the Market before the wire that completes the goal.** The hints of goals 15, 19 and 21 used to say "build an Assembler" and leave the place to the player. They now read:
+
+| Goal | Hint (the same for mouse and touch) |
+|---|---|
+| 15 | "Research Assembly, build an Assembler from the Ink Refiner's Ink port, wire it to the Market, then wire Spark into it to make Glyph." |
+| 19 | "Build another Assembler from the Mist Refiner's port, wire it to the Market, then wire Shard into it to make Prism (two for every Mist)." |
+| 21 | "Research Fabrication, then save up and build a Fabricator from the Prism Assembler's port: orders and a high Flow get you there faster." |
+
+Built from the named port (dragged into empty space, or tapped on a phone), the machine is the first choice on the menu, arrives wired and set to its recipe, and costs one gesture less than placing it and wiring it. The Market comes second in the sentence on purpose. A goal completes with the first Glyph (or Prism), and a card that is ready shows Claim and no hint: with "…wire Spark into it too and sell its Glyph" the gesture still to come when the card turned was the sale. The pacing tool's newcomer at 10 s an action left it out on three seeds of fifteen (an order's Claim took the turn), sold no Glyph for six minutes until a tip said so, and spent 214–220 s on the Fabricator goal instead of 95–129 s. In the new order the goal cannot complete before the wire to the Market exists. Goal 22's hint is unchanged ("Feed the Fabricator one Prism and two Glyph for every Lens."): the Prism is wired by then, and the Glyph wire is what is left. The three hints are 131–135 characters; the longest in the game are 141 (goal 13, mouse) and 148 (goal 10, touch), and they take the same number of lines on the card at every size tried (two at 1440 px and on a phone held sideways, three at 390 and 360 px). The scripted card players (`tests/cardPlayer.ts`, the pacing tool's `cardStep`) build and wire in the order the hints give.
 
 **A goal that asks for a research and then a machine says so to the adviser.** `Goal.step(g)` returns `{ tech, then }`, where `then` is the price of what the card has the player buy straight after the research: the Assembler for goal 15, a Well and a Refiner for goals 11 and 18, the Fabricator for goal 21. What the card shows is unchanged (Data toward the research). A step also names what the credits are for (`what`, `thenWhat`: "the Fabricator", "the expansion"), and `waitInfo(g).name` passes that on, so a card or a tip can say what is being saved for.
 
@@ -175,19 +187,36 @@ Four goals have a wait of minutes. Each carries one standing line for that wait 
 
 | Goal | Line | Done when | Worth to the tests' card player | Worth to the pacing tool's card-only player |
 |---|---|---|---|---|
-| 11 Make Spark | "Drag from the Ink Refiner's Ink port to the Lab too: studied Ink is 3 α each." (touch: "Tap the Ink Refiner's Ink port, then tap the Lab too: studied Ink is 3 α each.") | the Ink port is wired to a Lab | 101 s of the wait | 92–100 s |
-| 15 Make Glyph | "Give each new deposit a Well and a Lab built from its port: each pair is 1 α a second." | two Labs fed only by Wells | 106–136 s | 100–145 s |
-| 18 Make Mist | "Expand the board again, then give a new deposit a Well and a Lab of its own." | a deposit of the second expansion (or a later one) has a Well with a Lab of its own, or three Labs are fed only by Wells | 23–38 s | 14–48 s |
-| 21 Build a Fabricator | "You have the β you need: remove the wire from the Glyph Assembler to the Lab." | no wire from a Glyph Assembler into a Lab | 28–47 s | 10–31 s |
+| 11 Make Spark | "Drag from the Ink Refiner's Ink port to the Lab too: studied Ink is 3 α each." (touch: "Tap the Ink Refiner's Ink port, then tap the Lab too: studied Ink is 3 α each.") | Ink reaches a Lab: the Ink port is wired to one, or to a Router that is | 101 s of the wait | @SPARK@ |
+| 15 Make Glyph | "Give each new deposit a Well and a Lab built from its port: each pair is 1 α a second." | two Wells have a Lab each (a pair is one Well and one Lab fed by Wells alone, each counted once) | 106–136 s | @GLYPH@ |
+| 18 Make Mist | "Expand the board again, then give a new deposit a Well and a Lab of its own." | a deposit of the second expansion (or a later one) has a Well with a Lab of its own, or three Wells have a Lab each | 20–33 s | @MIST@ |
+| 21 Build a Fabricator | "You have the β you need: cut the wire from the Glyph Assembler to the Lab." | no wire takes Glyph into a Lab, straight from the Assembler or through a Router, Merger or Silo | 31–47 s | @FAB@ |
 
-The two columns are two players and two ways of measuring. The tests' card player (`tests/cardPlayer.ts`) claims at once; from the board it has when a line comes up, the wait is timed in the real game with the line done and with it left alone (two order sequences). The pacing tool's card-only player claims 8–16 s late and is the one the targets judge; its column is the time on that goal in a whole run with the line and in one that leaves it out (`npm run pacing -- --policies=cardonly --skipLine=make-glyph`), on order seeds 0–14. Every line is worth something to that player on every seed. `tests/meanwhile.test.ts` holds both.
+The two columns are two players and two ways of measuring. The tests' card player (`tests/cardPlayer.ts`) claims at once; from the board it has when a line comes up, the wait is timed in the real game with the line done and with it left alone (two order sequences). The pacing tool's card-only player claims 8–16 s late and is the one the targets judge; its column is the time on that goal in a whole run with the line and in one that leaves it out (`npm run pacing -- --policies=cardonly --skipLine=make-glyph`), on order seeds 0–14. `tests/meanwhile.test.ts` holds both on seeds 0–3.
 
-- **A Well gets a Lab of its own.** A Lab studies one item a second and takes its inbox in the order the materials first arrived there. A raw material wired into the Lab the player already has pushes the dearer Shard and Ink out of it, and a late arrival can be starved for a quarter of an hour (Glyph, in one trial). A Well with its own Lab is a plain 1 α a second.
+- **A Well gets a Lab of its own.** A Lab studies one item a second and takes its inbox in the order the materials first arrived there. A raw material wired into the Lab the player already has pushes the dearer Shard and Ink out of it, and a late arrival can be starved for a quarter of an hour (Glyph: see "Glyph in a crowded Lab" under the adviser). A Well with its own Lab is a plain 1 α a second.
+- **A pair is one Well and one Lab.** One Well wired into two Labs has 1 α a second to give, not 2, and used to tick goal 15's line; so did Glyph that reached a Lab through a Router for goal 21's. Both are counted properly now: pairs are matched one Well to one Lab, and "studied" follows the material through Routers, Mergers and Silos. `Meanwhile.cuts(g)` lists the wire into the Lab in that case (the Router's), which is the one to cut.
 - **The lines were found from data, not written from taste:** every single move a card could ask for was tried on the card player's board at the start of each long wait, then every pair of the best ones (360 combinations). What limits that player's α is Lab capacity and the crowding above, not Wells or Speed.
-- **The Glyph line is the only place a wire into a Lab is removed, and it is the card that says so.** It shows only while Fabrication's β is covered, no Fabricator stands and the credits for one are short (`Meanwhile.when`); `Meanwhile.cuts(g)` names the wires. The adviser removes a wire into a Lab only from that list. The line trades study for credits, so it is only true for a player whose wait is for the Fabricator's price and not for Fabrication's α: that is what Fabrication's price is set by (below).
-- **After the demo the β is needed again.** Dynamo and Paradox cost 300 and 500 β. A player who has taken the Glyph wire away and runs out of β there is told "Wire the Glyph Assembler's port to a Lab: Glyph is 5 β each in a Lab." (a wait that would never end is never met with silence). That is the one tip that goes against a card's line, and only in free play.
-- **A line read late or left out** costs what the table says and no more: the card-only player who gets to each line a minute after it appears reaches the Lens at 20:49–22:17, two minutes late at 22:08–23:35; leaving out the Spark line alone gives 22:36–24:04, the Glyph line alone 24:02–25:10 (and 322–365 s on that goal), the Mist line 20:46–22:28, the Fabricator line 20:19–21:34. Leaving out all four is the game without lines: 46:11–52:45.
+- **The Glyph line is the only place a wire into a Lab is cut, and it is the card that says so.** It shows only while Fabrication's β is covered, no Fabricator stands and the credits for one are short (`Meanwhile.when`); `Meanwhile.cuts(g)` names the wires. The line trades study for credits, so it is only true for a player whose wait is for the Fabricator's price and not for Fabrication's α: that is what Fabrication's price is set by (below). The word is "cut" everywhere, as on the inspector's button ("Cut wire").
+- **After the demo the β is needed again.** Dynamo and Paradox cost 300 and 500 β. A player who has cut the Glyph wire and runs out of β there is told "Wire the Glyph Assembler's port to a Lab: Glyph is 5 β each in a Lab." (a wait that would never end is never met with silence). That is the one tip that goes against a card's line, and only in free play.
+- **A line read late or left out** costs what the table says and no more: @LATE@
 - The card players (`tests/cardPlayer.ts`, the pacing tool's newcomers) follow a line like a hint, one gesture at a time, before any tip.
+
+**The line's next step: `lineAdvice(g)`.** So that the card can put a "Show me" on the line, `lineAdvice(g)` in `src/advice.ts` returns the next concrete step of the active goal's line as an `Advice`, the shape a tip has: something the interface can point at and `applyAdvice(g, a)` can carry out. One step at a time, read to the letter:
+
+| Goal | Steps, in order | The sentence (`text.mouse === text.touch`) | What the `Advice` carries |
+|---|---|---|---|
+| 11 | the Ink Refiner's Ink port to the Lab (the one with the most room, if there are several) | "Wire the Ink Refiner's Ink port to the Lab: Ink is 3 α each in a Lab." | `wire { from, to, port }`, `node` = from |
+| 15 | a Well that stands unwired gets a Lab from its port; otherwise the first free deposit gets a Well. Four steps for the two deposits | "Place a Well on the free Glint deposit (17¢), then build a Lab from its port." then "Build a Lab from the new Glint Well's port (130¢): a Lab of its own is 1 α a second." | `build: 'well'`, `deposit` (no `to`); then `build: 'lab'`, `node` = the Well, `port: 0` |
+| 18 | the same on a deposit of the second expansion or a later one; when none of those is free, the board first. Three steps | "Expand the board (500¢): it brings new deposits for a Well and a Lab of its own." then the two above | `expand: true`, `cost` = the expansion's price; then as for goal 15 |
+| 21 | the first wire that still takes Glyph into a Lab | "Cut the wire from the Glyph Assembler to the Lab: sold, each Glyph is 20¢." | `cut { wire, from, to }`, `node` = from |
+
+- It is `null` when the goal has no line, the line is done or does not apply, the goal is ready, or the step cannot be paid for right now (it is back the moment the credits are there).
+- `Advice.expand` is new and optional, and only ever comes from here: no tip expands the board. `applyAdvice` presses Expand for it.
+- It promises nothing: `saves` is absent and `eta` is 0, because nothing is measured. It runs no copy of the game and leaves the game untouched: about 20 to 40 microseconds a call (`tests/meanwhile.test.ts` times it on 52 boards), so it can be asked on the page at every refresh. It is not held back by the 20 s of quiet after a change.
+- Goal 18's step is the expansion even when a deposit of the first expansion is still free: that is what the line says, and it is the shortest way to the tick.
+- Followed from the card players' boards (the tests' player with and without tips, and the pacing tool's card-only player and newcomer, seeds 0–3: 52 boards), every line ends done in exactly 1, 4, 3 and 1 steps, every step could be paid for and done when it was given, and the board that results is the board the scripted players build when they read the line themselves. Through whole runs it never gives a step without a line or for a line that is done.
+- **A tip never says what the line is saying.** While a step is on offer here, `advice(g)` does not give it as a tip (the same action, or the same sentence about another node of the same name), nor another ending to its first gesture: a Well on the deposit the line wants a Well on, wired into the Lab the player already has (the adviser's own "Place a Well on the free Glint deposit (17¢), wired to the Lab: 1 α each." pointed at the same deposit as the line and said the opposite), or a wire from the Well the line wants a Lab on. What that does to the player who reads tips and never the lines is under "The adviser" below.
 
 ## Tech tree
 
@@ -271,7 +300,7 @@ Nothing before the first Lens. After it: 50% of the live rate, measured on a cop
 - **mainline, greedy:** fast players who know the game: one action per 3–4 s. From the moment a new machine cannot be paid for they bank half of what comes in and may spend the other half on upgrades; once they own Bulk Upgrade, nodes of a kind that want the same upgrade get one press of "Upgrade all" when they are at least half of that kind.
 - **newcomer:** does only what the goal card says, hint and "while you wait" line, one action per 6 s, claims 8–16 s late, and follows a tip once it has been on offer for 15 s of a wait. Never builds a Router, upgrades or wires anything unprompted.
 - **newcomer10:** the same person at 10 s per action.
-- **cardonly:** the newcomer who never follows a tip, not even on the Flow goal. The cards have to carry the game alone, so this player has targets too. Their Flow goal is passed by its valve.
+- **cardonly:** the newcomer who never follows a tip, not even on the Flow goal. The cards have to carry the game alone, so this player has targets too. Their Flow goal is passed by its valve: ready 100 s after it came up, claimed 8–16 s later.
 
 Every target holds on all fifteen seeds. Measured (seeds 0–3, then the range over seeds 4–14):
 
@@ -289,27 +318,31 @@ Every target holds on all fifteen seeds. Measured (seeds 0–3, then the range o
 
 | The card players (4 + 11 runs each) | Seeds 0–3 | Seeds 4–14 | Target |
 |---|---|---|---|
-| **newcomer:** first Lens | 19:29–19:44 | 19:12–20:15 | 18:30–23:00 |
-| longest time on any one goal | 197–215 s (Glyph) | 194–220 s | 240 s |
-| time on "Build a Fabricator" | 136–157 s | 127–171 s | 240 s |
+| **newcomer:** first Lens | 19:15–19:43 | 19:03–20:06 | 18:30–23:00 |
+| longest time on any one goal | 200–214 s (Glyph; Mist on one seed) | 194–220 s (Glyph) | 240 s |
+| time on "Build a Fabricator" | 139–154 s | 118–172 s | 240 s |
 | tips offered / followed in a run | 2 / 2 | 2 / 1–2 | — |
-| smallest / median saving of the tips followed | 16 s / 41–54 s | 15–56 s / 49–56 s | at least 15 s |
-| longest stretch with free hands | 73–103 s | 64–108 s | — |
-| credits from sales and orders at the Lens | 77% | 77–78% | 65% |
-| **newcomer10:** first Lens | 21:27–21:50 | 21:38–21:58 | by 30:00 |
-| longest time on any one goal | 217–241 s | 218–242 s | 300 s |
-| **cardonly:** first Lens | 20:04–20:37 | 20:24–21:22 | by 32:00 |
-| longest time on any one goal | 208–230 s (Glyph) | 212–226 s | 360 s |
-| time on "Build a Fabricator" | 114–141 s | 107–151 s | (360 s) |
-| time on the Flow goal (no tip: the valve) | 98–106 s | 99–108 s | (360 s) |
-| longest stretch with free hands | 90–118 s | 89–144 s | — |
+| smallest / median saving of the tips followed | 16 s / 64–65 s | 15–66 s / 59–66 s | at least 15 s |
+| longest stretch with free hands | 76–103 s | 63–105 s | — |
+| credits from sales and orders at the Lens | 77% | 77% | 65% |
+| **newcomer10:** first Lens | 21:26–21:36 | 21:27–22:14 | by 30:00 |
+| longest time on any one goal | 216–237 s | 212–236 s | 300 s |
+| time on "Build a Fabricator" | 94–124 s | 95–129 s | (300 s) |
+| **cardonly:** first Lens | 20:18–20:28 | 19:58–21:03 | by 32:00 |
+| longest time on any one goal | 208–230 s (Glyph) | 212–226 s (Glyph) | 360 s |
+| time on "Build a Fabricator" | 112–140 s | 107–142 s | (360 s) |
+| time on the Flow goal (no tip: the valve) | 114–116 s | 108–116 s | 108–118 s on seeds 0–3 (pinned) |
+| longest stretch with free hands | 90–107 s | 89–138 s | — |
+
+The fast players' numbers are, to the second, those of the round before: nothing in this round touches what they do.
 
 Where the time goes (seed 0, seconds on each goal):
 
 | | goals 1–10 | Spark | first order | Router | expand | Glyph | Flow | β | Mist | Prism | three orders | Fabricator | Lens |
 |---|---|---|---|---|---|---|---|---|---|---|---|---|---|
-| newcomer | 3:49 | 111 | 56 | 35 | 16 | 213 | 54 | 96 | 158 | 38 | 9 | 136 | 39 |
-| cardonly | 3:49 | 130 | 56 | 36 | 16 | 230 | 106 | 68 | 149 | 38 | 9 | 141 | 40 |
+| newcomer | 3:51 | 111 | 56 | 35 | 16 | 211 | 51 | 97 | 151 | 40 | 14 | 139 | 34 |
+| newcomer10 | 4:30 | 138 | 55 | 52 | 20 | 237 | 56 | 73 | 210 | 50 | 13 | 102 | 30 |
+| cardonly | 3:51 | 130 | 56 | 36 | 16 | 230 | 114 | 69 | 143 | 40 | 9 | 140 | 34 |
 
 The newcomer's two tips on seed 0: "Wire a Glint Well's port to the Lab: Glint is 1 α each in a Lab." during the Spark wait (16 s promised) and "The Spark Refiner needs more Ember: buy Speed on the Ember Well (50¢)." on the Flow goal.
 
