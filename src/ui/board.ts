@@ -290,7 +290,7 @@ function applyView() {
   lean = big && k < LEAN_BELOW;
   // Icons and wires are a fixed size in board units, so they are drawn larger in steps as the camera
   // pulls back: an icon is never under 24 px on screen, a wire never under 1.4 px.
-  ovStep = !over ? 0 : k >= 0.55 ? 1 : k >= 0.4 ? 2 : k >= 0.26 ? 3 : 4;
+  ovStep = !over ? 0 : k >= 0.55 ? 1 : k >= 0.4 ? 2 : k >= 0.26 ? 3 : k >= 0.19 ? 4 : 5;
   if (over !== wasOver) boardEl.classList.toggle('ov', over);
   if (ovStep !== wasStep) {
     if (ovStep) boardEl.dataset.ov = String(ovStep);
@@ -998,7 +998,7 @@ const EXPAND_W = 260, EXPAND_H = 64;
  * How much larger than life the button is drawn in its natural place at each step of the overview, so
  * that it can still be found and pressed there: 64 px tall, it is never under 44 px on screen.
  */
-const OV_SCALE = [1, 1.5, 1.9, 2.8, 3.6];
+const OV_SCALE = [1, 1.5, 1.9, 2.8, 3.6, 4.5];
 /** Docked, the button keeps this far from the edge of what the player can see, and from every control. */
 const DOCK_EDGE = 10, DOCK_GAP = 10;
 /** In its natural place it may come this close to the edge of the stage and to a control before it docks. */
@@ -1103,8 +1103,8 @@ function measureExpand() {
   };
   if (env.phone) {
     // (The strip, an open sheet and the thumb row are left out of the area itself: see `dockArea`.)
-    // Tidy stands above the thumb row; toasts come up under the strip.
-    add(fabsEl?.querySelector('[data-testid="fab-tidy"]:not([hidden])'));
+    // The floating buttons (Tidy stands above the thumb row); toasts come up under the strip.
+    for (const b of fabsEl?.querySelectorAll('.fab:not([hidden])') ?? []) add(b);
     if (toastsEl?.childElementCount) add(toastsEl);
     // The strip as it is laid out this moment (an alert chip that has just come in makes it taller
     // before the cover is measured again).
@@ -1279,7 +1279,8 @@ function rowSeat(row: { x1: number; y: number }): number | null {
     if (sy1 < y0 || sy0 > y1) continue;
     const sx0 = b.x0 * k + vx, sx1 = b.x1 * k + vx;
     if (sx1 < 0 || sx0 > row.x1) continue;
-    taken.push([sx0 - 4, sx1 + 4]);
+    // (A finger aiming at a port lands up to a fingertip beside it: the button keeps that far off too.)
+    taken.push([sx0 - 4, sx1 + 30]);
   }
   taken.sort((a, b) => b[1] - a[1]);
   let right = row.x1;
@@ -3294,7 +3295,7 @@ function touchHit(p: Pt): Hit {
  * margin. (The icon can stand out past the card's box, and icons of neighbouring cards come close.)
  */
 function iconAt(p: Pt): GNode | null {
-  const scale = [1, 1.5, 1.9, 2.4, 3.2][ovStep] ?? 1;
+  const scale = [1, 1.5, 1.9, 2.4, 3.2, 4][ovStep] ?? 1;
   const reach = 20 * scale + 8 / ui.view.k;
   let best: GNode | null = null;
   let bestD = reach;
@@ -4139,6 +4140,8 @@ export function pickRadial(i: number) {
     toast(`${NODE_DEFS[o.type].name} costs <b>${fmt(o.cost)}¢</b>`, 'bad');
     return;
   }
+  // The menu goes first: an open sheet is not something the new card has to keep out from under.
+  closeRadial();
   // The card goes where the wire was dropped, or the nearest free spot from there: further along the
   // wire for preference, then a row above or below.
   const { w, h } = sizeFor(o.type, o.recipe);
