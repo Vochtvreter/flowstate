@@ -62,6 +62,8 @@
 /* What it costs, after the sentence. */
 /* (Its own font must not make its line of the sentence a pixel taller than the others.) */
 .gc-tipcost { color: var(--credits); font-weight: 600; line-height: 1; white-space: nowrap; }
+/* (The tip's own first words, kept unseen in a row that has been done: only where the lead runs in, hud.css.) */
+.gc-tipwas { display: none; }
 /* Followed: for a while the row says what that bought, over the sentence that has been done. */
 .gc-tip.done .gc-tiplead strong { color: #4ade80; }
 .gc-tip.done .gc-tiptxt { color: #7d8aa6; }

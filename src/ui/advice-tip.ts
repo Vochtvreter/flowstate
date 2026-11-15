@@ -120,7 +120,7 @@ let pinned = false;
 let announce: 'shown' | 'stale' | null = null;
 let buttonAt = { x: 0, y: 0 };
 /** What a tip that was followed has bought: its row says so until `until` (game time). */
-let after: { text: string; lead: string; flow?: number; goal: number; from: number; until: number } | null = null;
+let after: { text: string; lead: string; was: string; flow?: number; goal: number; from: number; until: number } | null = null;
 /** A row on its way out: what it last showed, until its closing animation is over (real time). */
 let tipOut: { html: string; until: number } | null = null;
 /** The inside of the tip row as it was last drawn. */
@@ -231,7 +231,7 @@ function tendTip(g: Game, now: number, changed: boolean, sameGoal: boolean, narr
       } else if (did?.state === 'done') {
         // The tip was followed: for the length of the adviser's quiet its row says what that bought.
         const lead = shown.kind === 'flow' && !(quoted != null && quoted >= TIP.minSaves) ? '' : boughtText(quoted);
-        after = { text: priced(shown).text, lead, goal: g.goal.i, from: g.time, until: g.time + RULES.tips.quiet, ...(lead ? {} : shown.kind === 'flow' ? { flow: g.flow } : {}) };
+        after = { text: priced(shown).text, lead, was: leadText(shown), goal: g.goal.i, from: g.time, until: g.time + RULES.tips.quiet, ...(lead ? {} : shown.kind === 'flow' ? { flow: g.flow } : {}) };
       }
     }
     quietFrom = g.time;
@@ -343,7 +343,9 @@ export function tipHtml(g: Game): string {
         const was = Math.round(after.flow * 100), is = Math.round(g.flow * 100);
         lead = is > was ? `Flow up from ${was}% to ${is}%` : 'Done: Flow follows in a few seconds';
       }
-      tipInner = `<div class="gc-tipbody"><span class="gc-tiplead"><b class="gc-tipbadge ok">${icon('check', 11)}</b><strong data-testid="tip-bought">${esc(lead || 'Done')}</strong></span><span class="gc-tiptxt">${esc(after.text)}</span></div>${GONE}`;
+      // (Where the lead runs in before the sentence, hud.css, the tip's own first words keep their place unseen,
+      // so that the row is exactly as tall as it was.)
+      tipInner = `<div class="gc-tipbody"><span class="gc-tiplead"><b class="gc-tipbadge ok">${icon('check', 11)}</b><strong data-testid="tip-bought">${esc(lead || 'Done')}</strong></span><span class="gc-tipwas" aria-hidden="true"><b class="gc-tipbadge">Tip</b><strong>${esc(after.was)}</strong></span><span class="gc-tiptxt">${esc(after.text)}</span></div>${GONE}`;
       return `<div class="gc-tip gc-row done" data-testid="advice-done"><div class="gc-in">${tipInner}</div></div>`;
     }
     return tipOut ? `<div class="gc-tip gc-row out" aria-hidden="true"><div class="gc-in">${tipOut.html}</div></div>` : '';

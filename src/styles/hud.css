@@ -332,6 +332,9 @@ html[data-input='touch'] .claim-ghost { animation-name: claim-sink-touch; }
 #hud-strip.tight:not(.over-tech) #hud-alert { grid-area: alert; justify-self: start; }
 #hud-strip.tight:not(:has(#hud-alert:not([hidden]))) #order, #hud-strip.tight:not(:has(#order:not([hidden]))) #hud-alert { grid-column: 1 / -1; justify-self: center; }
 #hud-strip.tight .alertchip { min-height: 40px; border-radius: 12px; }
+/* (An order none of which is sold says so in a sentence: it and the alert then get half the row each, or the
+   alert would be left a sliver four lines tall.) */
+#hud-strip.tight:not(.over-tech):has(#order[data-stuck='1']) { grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); }
 /* With a window of 1000 px or more the squeezed card is still wide enough for the pips to ride in its head
    row, after the step (as on a phone held sideways): no line of their own. */
 @media (min-width: 1000px) {
@@ -433,6 +436,8 @@ html[data-input='mouse'] #hud-strip.tight .claim.sm { height: 32px; }
 #app.phone .gc-hint { font-size: 12.5px; line-height: 16px; }
 #app.phone .gc-prog { margin-top: 1px; gap: 0 8px; font-size: 11.5px; line-height: 14px; }
 #app.phone .gc-eta::before { margin-right: 6px; }
+/* ("nothing is being sold yet" often drops to a line of its own on a phone: no separator to start that line with.) */
+#app.phone .gc-eta.never::before { content: none; }
 #app.phone .gc-valve { line-height: 14px; }
 #app.phone div.gc-rewards { margin-top: 1px; }
 #app.phone [data-ready='1'] .rw { height: 22px; padding: 0 8px; font-size: 12.5px; line-height: 22px; }
@@ -521,6 +526,18 @@ html[data-input='mouse'] #hud-strip.tight .claim.sm { height: 32px; }
   #app.phone .gc-line.said .gc-linetxt { visibility: hidden; }
   #app.phone .gc-tip { grid-area: tip; }
   #app.phone .gc-tip > .gc-in { margin-top: 2px; padding-top: 3px; }
+  /* The tip's lead runs in before its sentence too. Done, the row says what that bought where the lead stood,
+     and the tip's own words keep their room unseen: the row is as tall as it was. */
+  #app.phone .gc-tipbody { display: block; }
+  #app.phone .gc-tiplead, #app.phone .gc-tipwas { display: inline; height: auto; white-space: normal; margin-right: 6px; }
+  #app.phone .gc-tiplead .gc-tipbadge, #app.phone .gc-tipwas .gc-tipbadge { margin-right: 6px; vertical-align: 1px; }
+  #app.phone .gc-tiptxt { display: inline; }
+  #app.phone .gc-tipold { display: none; }
+  #app.phone .gc-tip.done .gc-tiplead { position: absolute; left: 0; top: 0; white-space: nowrap; }
+  #app.phone .gc-tip.done .gc-tipwas, #app.phone .gc-tip.done .gc-tiptxt { visibility: hidden; }
+  /* An order none of which is sold: its sentence a little smaller, and no room kept for the bar it does not have. */
+  #app.phone #order[data-stuck='1'] { padding-bottom: 4px; }
+  #app.phone .oc-warn { font-size: 11px; line-height: 13px; padding-bottom: 0; }
   /* Claim keeps to the right-hand thumb, beside Fit and Undo, and to the left of a sheet at the side. */
   #app.phone #goal .claim { left: auto; right: calc(var(--edge-r, 8px) + 104px + var(--shift, 0px)); width: min(300px, calc(100% - var(--edge-l, 8px) - var(--edge-r, 8px) - 104px - var(--shift, 0px))); bottom: 6px; height: 52px; transform: none; }
 }
