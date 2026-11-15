@@ -595,6 +595,14 @@ html[data-input='mouse'] #hud-strip.tight .claim.sm { height: 32px; }
 #app.phone .gc-valve { line-height: 14px; }
 #app.phone div.gc-rewards { margin-top: 1px; }
 #app.phone [data-ready='1'] .rw { height: 22px; padding: 0 8px; font-size: 12.5px; line-height: 22px; }
+/* The narrowest phones (360 px) have the least stage under the strip: a few pixels less padding round the card's rows
+   and in a ready order keep the busiest strip (goal 19: the hint, the line and a ready order) inside 40% of it. */
+@media (max-width: 370px) {
+  #app.phone #goal { padding-top: 4px; padding-bottom: 4px; }
+  #app.phone .gc-prog { margin-top: 0; }
+  #app.phone .gc-line > .gc-in, #app.phone .gc-tip > .gc-in { margin-top: 0; padding-top: 2px; }
+  #app.phone #order[data-ready='1'] { padding-top: 0; padding-bottom: 0; }
+}
 /* The two rows of guidance (a phone shows one at a time: the line while it is not done, the tip otherwise).
    Show me answers a 44 px press: 36 px to look at, and its ::after reaches the rest. */
 #app.phone .gc-show { height: 36px; padding: 0 12px; }
