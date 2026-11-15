@@ -132,8 +132,12 @@ export function pinchView(v0: View, m0: Pt, d0: number, m1: Pt, d1: number, clam
   return { x: m1.x - ((m0.x - v0.x) / v0.k) * k, y: m1.y - ((m0.y - v0.y) / v0.k) * k, k };
 }
 
-/** The zoom at which each view tier ends. Below `floor` cards are icons (the overview); `min` is as far out as the board ever goes. */
-export const ZOOM = { floor: 0.7, phoneFloor: 0.74, min: 0.25 };
+/**
+ * The zoom at which each view tier ends. Below `floor` cards are icons (the overview); `min` is as far out
+ * as the board goes for a factory that fits at it; `least` is as far out as it ever goes (a factory so wide
+ * that a phone could not show all of it otherwise).
+ */
+export const ZOOM = { floor: 0.7, phoneFloor: 0.74, min: 0.25, least: 0.15 };
 
 export interface Box { x0: number; y0: number; x1: number; y1: number }
 
@@ -186,6 +190,48 @@ export function frameBox(v: View, box: Box, area: Box, floor: number): View {
   y += slide(box.y0 * k + y, box.y1 * k + y, area.y0, area.y1);
   if (Math.abs(x - v.x) < 0.5 && Math.abs(y - v.y) < 0.5 && k === v.k) return v;
   return { x, y, k };
+}
+
+/**
+ * At zoom `k`, the camera that shows the most of these world boxes whole inside a screen area, with every
+ * one of `must` among them (when that is possible at all). Ties go to the camera nearest the middle of all
+ * the boxes. For a factory too big to read at once: the stretch of it with the most cards on screen. Null
+ * when no box can be shown whole.
+ */
+export function bestWindow(boxes: Box[], must: Box[], area: Box, k: number): View | null {
+  if (!boxes.length) return null;
+  const aw = area.x1 - area.x0, ah = area.y1 - area.y0;
+  // Every camera worth trying puts some box's left or right edge on the area's left or right side, and
+  // likewise top and bottom: a best window can always be slid until it does.
+  const xs = new Set<number>(), ys = new Set<number>();
+  for (const b of boxes) {
+    xs.add(area.x0 - b.x0 * k);
+    xs.add(area.x1 - b.x1 * k);
+    ys.add(area.y0 - b.y0 * k);
+    ys.add(area.y1 - b.y1 * k);
+  }
+  let all: Box | null = null;
+  for (const b of boxes) all = boxUnion(all, b);
+  const mid = centreView(all!, area, k);
+  const inside = (b: Box, x: number, y: number) =>
+    b.x0 * k + x >= area.x0 - 0.5 && b.x1 * k + x <= area.x1 + 0.5 && b.y0 * k + y >= area.y0 - 0.5 && b.y1 * k + y <= area.y1 + 0.5;
+  let best: View | null = null;
+  let bestN = 0, bestD = Infinity;
+  for (const x of xs) {
+    for (const y of ys) {
+      if (must.some((b) => !inside(b, x, y))) continue;
+      let n = 0;
+      for (const b of boxes) if (inside(b, x, y)) n++;
+      const d = Math.hypot(x - mid.x, y - mid.y);
+      if (n > bestN || (n === bestN && n > 0 && d < bestD)) {
+        bestN = n;
+        bestD = d;
+        best = { x, y, k };
+      }
+    }
+  }
+  // (Room for no box at all, or `must` cannot all be shown: nothing to choose.)
+  return best && aw > 0 && ah > 0 ? best : null;
 }
 
 // ---------- where a card may stand ----------
