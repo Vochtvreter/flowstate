@@ -3,8 +3,8 @@
 //    wires, the pulse on open ports, and particles that belong to the board (sale floaters, sparks);
 //  - the bar layer (`#fx-bar`, made here, a strip over the top bar and a little below it): whatever
 //    has to be seen up there, such as a coin on the last stretch of its way to the credits counter;
-//  - the top layer (`#fx-top`, made here, above every panel): a small window, about the size of a
-//    celebration card, through which particles are seen above the HUD. A particle that asks to be
+//  - the top layer (`#fx-top`, made here, above every panel): a small window, a little larger than a
+//    celebration card (440 by 360 px), through which particles are seen above the HUD. A particle that asks to be
 //    on top is drawn there while it is inside the window and on the board or the strip once it has
 //    left, so a spark can start over the card and fly off across the board. The window is moved to
 //    wherever the next effect is whenever it is empty.
@@ -131,7 +131,7 @@ const BOARD = 0, TOP = 1, BAR = 2, AUTO = -1;
  * small moving shapes), and is this large at most, in CSS px.
  */
 const TOP_RATIO = 1;
-const TOP_W = 520, TOP_H = 420;
+const TOP_W = 440, TOP_H = 360;
 /** How far the bar layer reaches below the top bar, in px. */
 const BAR_SKIRT = 44;
 let appEl: HTMLElement | null = null;
@@ -541,7 +541,7 @@ function kill(p: Particle) {
 /**
  * `top` draws above every panel instead of only on the board (where the HUD covers it).
  * Above the panels means: on the strip over the top bar when it is up there, and otherwise through
- * the top layer's window, about 520 by 420 px, which is centred on the first effect that uses it and
+ * the top layer's window, about 440 by 360 px, which is centred on the first effect that uses it and
  * stays there until it is empty again. Outside the window the particle is drawn on the board as usual.
  */
 export interface LayerOpt { top?: boolean }

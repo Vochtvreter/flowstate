@@ -172,10 +172,10 @@ function start(spec: Spec) {
  * WASH_MAX. A wash is a large see-through layer whose opacity changes on every frame, and the browser
  * has to blend it over the board for as long as it does; the Lens card stays up for three seconds and
  * more, and a wash that lasted with it cost a fifth of the frame rate under the CPU throttle. A flash
- * that fades in under two seconds says the same. (The Flow State wash breathes for the whole of its card:
+ * that fades in a second and a half says the same. (The Flow State wash breathes for the whole of its card:
  * that slow swell is the point of it, and its card is short.)
  */
-const WASH_MAX = 1700;
+const WASH_MAX = 1400;
 const washLife = (spec: Spec) => (spec.kind === 'flow' ? spec.life + OUT_MS : Math.min(spec.life + OUT_MS, WASH_MAX));
 
 /**
