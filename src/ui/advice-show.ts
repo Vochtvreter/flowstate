@@ -12,6 +12,7 @@ import { expansionCost, has, nodeUnlocked } from '../economy';
 import { goalFocus } from '../goals';
 import { Game, GNode } from '../state';
 import { armedPort, boardRect, frameNodes as boardFrames, gestureActive, radialOpen, toClient, toWorld, zoomBy } from './board';
+import { celebrating } from './celebrate';
 import { ring } from './fx';
 import { nodeSize, outPorts } from './geom';
 import { isStarted, screenOpen } from './hud-screens';
@@ -322,8 +323,13 @@ export function showAdvice(g: Game, a: Advice, render: () => void): boolean {
 // When a goal comes up, and after a sheet or the tech tree has closed, the nodes its hint or line is about
 // (goalFocus in src/goals.ts) are brought into view if any of them is off screen or covered: through the board's
 // frameNodes, which moves the camera as little as it can. Never while the player is in the middle of something
-// on the board (a drag, a pinch, an armed port, a node being placed, the build menu), and never behind the start
-// screen or the summary. Nothing happens when they are all in view already, or when the goal names no node.
+// on the board (a drag, a pinch, an armed port, a node being placed, the build menu), never behind the start
+// screen or the summary, and not while a celebration card is up (a research's, a claim's): the look waits until it
+// has gone, so the board never glides under it, where a press made to put the card away would land on whatever the
+// glide had brought under the finger. Nothing happens when they are all in view already, or when the goal names no
+// node. A goal coming up brings its nodes in among the cards from the overview (it shows no ports); after a sheet or
+// the tree, an overview the player chose (zoomed out to by hand, or within by hand) is theirs: it counts as in view,
+// and only nodes off screen or covered are brought in, at the overview's zoom.
 
 /**
  * Real milliseconds after a goal comes up, or after a sheet or the tree has gone, before the nodes are looked for:
@@ -339,6 +345,47 @@ let sheetSeen = false;
 let treeSeen = false;
 /** Real time at which to look (0: nothing to do). */
 let focusDue = 0;
+/** What the look is for: a goal that came up (the overview is no view of its ports), or a sheet or the tree that closed. */
+let focusFor: 'goal' | 'sheet' = 'goal';
+/** When the player last changed the zoom by hand: the wheel, a pinch, the zoom or Fit buttons, a key (ms). */
+let zoomedAt = -1e9;
+/**
+ * The board is in the overview because the player took it there, or zoomed within it, by hand: theirs. (One the game
+ * opened in, for a big factory on a tablet, or a celebration's, is not.) Looked at every frame in tendFocus.
+ */
+let ownOverview = false;
+let listening = false;
+
+/** Hear the player's own zooming: the board's handlers do the zooming, this only notes when it happened. */
+function listenForZoom() {
+  if (listening) return;
+  listening = true;
+  const hand = () => void (zoomedAt = performance.now());
+  const stage = document.getElementById('stage');
+  stage?.addEventListener('wheel', hand, { capture: true, passive: true });
+  // (Two fingers on the board are a pinch.)
+  const fingers = new Set<number>();
+  stage?.addEventListener('pointerdown', (e) => {
+    if (e.pointerType !== 'touch') return;
+    fingers.add(e.pointerId);
+    if (fingers.size >= 2) hand();
+  }, { capture: true, passive: true });
+  stage?.addEventListener('pointermove', (e) => {
+    if (fingers.size >= 2 && fingers.has(e.pointerId)) hand();
+  }, { capture: true, passive: true });
+  const lift = (e: PointerEvent) => void fingers.delete(e.pointerId);
+  window.addEventListener('pointerup', lift, { capture: true, passive: true });
+  window.addEventListener('pointercancel', lift, { capture: true, passive: true });
+  document.addEventListener('click', (e) => {
+    if ((e.target as Element | null)?.closest?.('#zoom [data-act], [data-testid="fab-fit"]')) hand();
+  }, { capture: true, passive: true });
+  window.addEventListener('keydown', (e) => {
+    if (!e.ctrlKey && !e.metaKey && !e.altKey && /^[f+=-]$/i.test(e.key)) hand();
+  }, { capture: true, passive: true });
+}
+
+/** How long after the player's zooming the board may still be getting there (a Fit glides for 0.6 s). */
+const ZOOM_SETTLES = 1200;
 /** For scripts: what the last look found and did. */
 let focusLast: { at: number; goal: number; ids: number[]; inView: boolean; framed: boolean; why?: string } | null = null;
 
@@ -354,11 +401,12 @@ function sheetUp(): boolean {
 
 /**
  * Are these nodes on screen, with their ports, in the part of the board nothing covers (the strip, a sheet,
- * the floating controls, the corner controls)? Not in the overview, which draws no ports.
+ * the floating controls, the corner controls)? Not in the overview, which draws no ports, unless `overview` says an
+ * overview will do (the player's own: then on screen and uncovered is enough).
  */
-export function focusInView(ids: number[]): boolean {
+export function focusInView(ids: number[], overview = false): boolean {
   const boardEl = document.getElementById('board');
-  if (!boardEl || boardEl.classList.contains('ov')) return false;
+  if (!boardEl || (!overview && boardEl.classList.contains('ov'))) return false;
   const b = boardEl.getBoundingClientRect();
   const c = env.cover();
   const left = b.left + c.left, top = b.top + c.top, right = b.right - c.right, bottom = b.bottom - c.bottom - c.row;
@@ -380,6 +428,10 @@ export function focusInView(ids: number[]): boolean {
 /** Call once a frame. */
 export function tendFocus(g: Game) {
   const now = performance.now();
+  listenForZoom();
+  const ov = !!document.getElementById('board')?.classList.contains('ov');
+  if (!ov) ownOverview = false;
+  else if (now - zoomedAt < ZOOM_SETTLES) ownOverview = true;
   if (g !== focusGame) {
     focusGame = g;
     focusGoal = -1;
@@ -396,11 +448,18 @@ export function tendFocus(g: Game) {
   if (g.goal.i !== focusGoal) {
     focusGoal = g.goal.i;
     focusDue = now + AFTER_GOAL;
+    focusFor = 'goal';
   }
-  if ((sheetSeen && !sheet) || (treeSeen && !tree)) focusDue = Math.max(focusDue, now + AFTER_SHEET);
+  if ((sheetSeen && !sheet) || (treeSeen && !tree)) {
+    // (A goal's own look, still to come, stays a goal's.)
+    if (!focusDue) focusFor = 'sheet';
+    focusDue = Math.max(focusDue, now + AFTER_SHEET);
+  }
   sheetSeen = sheet;
   treeSeen = tree;
   if (!focusDue || now < focusDue) return;
+  // (Still due: looked at once the card has gone.)
+  if (celebrating()) return;
   focusDue = 0;
   const ids = goalFocus(g);
   const busy = sheet ? 'a sheet is up' : radialOpen() ? 'the build menu is up' : tree ? 'the tree is open' : gestureActive() ? 'a gesture'
@@ -409,10 +468,13 @@ export function tendFocus(g: Game) {
     focusLast = { at: g.time, goal: g.goal.i, ids, inView: false, framed: false, why: busy || 'no nodes' };
     return;
   }
-  const inView = focusInView(ids);
-  // (The board's frameNodes keeps the camera still when they are in view; it is not even asked then.)
-  if (!inView) boardFrames([...ids].reverse(), true);
-  focusLast = { at: g.time, goal: g.goal.i, ids, inView, framed: !inView };
+  // After a sheet or the tree, an overview the player chose is theirs: it counts as a view of the nodes.
+  const theirs = focusFor === 'sheet' && ov && ownOverview;
+  const inView = focusInView(ids, theirs);
+  // (The board's frameNodes keeps the camera still when they are in view; it is not even asked then. From the player's
+  // overview it brings them in at the same zoom; otherwise in among the cards, where the ports are.)
+  if (!inView) boardFrames([...ids].reverse(), !theirs);
+  focusLast = { at: g.time, goal: g.goal.i, ids, inView, framed: !inView, ...(theirs ? { why: 'overview' } : {}) };
 }
 
 /** For scripts: the last look at the goal's nodes. */
