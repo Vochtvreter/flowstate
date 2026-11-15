@@ -39,6 +39,8 @@ import { Signals, onBeat, onFrame, onNewGame, ui } from './ui';
 const IDLE_MS = 5000;
 /** A gesture that was asked for but cannot be shown yet (a sheet still sliding, a pointer still down) waits this long (ms). */
 const WAIT_MS = 4000;
+/** Show me waits this long (ms) for both ends of a wire to come into view before it shows the start alone. */
+const HALF_MS = 700;
 /** Height of the hand on screen, in px. */
 const HAND_PX = 38;
 /** How often Show me is acted out before the hand leaves. */
@@ -89,6 +91,8 @@ interface Plan {
   ghost: boolean;
   color: string;
   loops: number;
+  /** Only the start of the gesture is shown, because its far end is off the screen (see firstHalf). */
+  half?: boolean;
 }
 
 let record: (kind: 'hand', name: string, detail?: string | number) => void = () => {};
@@ -179,8 +183,15 @@ function firstWirePlan(g: Game): Plan | null {
   return well && market ? wirePlan(g, well, 0, market, 'goal', Infinity) : null;
 }
 
-/** Offsets from the port (world px) to try for "an empty spot", nearest and most natural first. */
-const SPOTS: [number, number][] = [[210, 40], [210, 130], [210, -80], [150, 110], [150, -100], [280, 0], [160, 180], [160, -140], [110, 150], [110, -130], [340, 90]];
+/**
+ * Offsets from the port (world px) to try for "an empty spot", nearest and most natural first: to the
+ * right of the port, and when there is no room there (a Well on a new deposit sits against the edge
+ * of the board) under or over its own card, then to the left of it.
+ */
+const SPOTS: [number, number][] = [
+  [210, 40], [210, 130], [210, -80], [150, 110], [150, -100], [280, 0], [160, 180], [160, -140], [110, 150], [110, -130], [340, 90],
+  [-190, 130], [-190, -130], [-190, 220], [-190, -220], [-430, 30], [-430, -90], [-430, 150],
+];
 
 /** A build from `from`'s output port into empty space. */
 function buildPlan(g: Game, from: GNode, portIndex: number, source: Source, loops: number): Plan | null {
@@ -330,6 +341,31 @@ function onScreen(p: Plan): boolean {
   return true;
 }
 
+/**
+ * A wire whose two ends cannot be seen together (a long line on a phone, at the closest the board
+ * lets the camera stand back): the start of the gesture, which can. With a finger that is the first
+ * tap, on the port, with the wire it would make reaching off toward the target. With a mouse it is
+ * the drag, as far as the edge of the board in the target's direction (where the board scrolls on).
+ * null when the port itself is not in view either: then there is nothing true to show.
+ */
+function firstHalf(p: Plan): Plan | null {
+  if (p.kind !== 'wire' || !p.a || !p.wire || p.half) return null;
+  const free = freeBox(30);
+  const from = client(p.a), to = client(p.b);
+  if (!inBox(from, freeBox(8)) || !document.elementFromPoint(from.x, from.y)?.closest('#board')) return null;
+  if (usesTouch()) return { ...p, mode: 'tap', a: null, b: p.a, card: null, half: true };
+  // Where the straight line from the port to the target leaves the part of the board that shows.
+  let t = 1;
+  const dx = to.x - from.x, dy = to.y - from.y;
+  if (dx > 0) t = Math.min(t, (free.x1 - from.x) / dx);
+  if (dx < 0) t = Math.min(t, (free.x0 - from.x) / dx);
+  if (dy > 0) t = Math.min(t, (free.y1 - from.y) / dy);
+  if (dy < 0) t = Math.min(t, (free.y0 - from.y) / dy);
+  const edge = { x: from.x + dx * t, y: from.y + dy * t };
+  if (t <= 0 || Math.hypot(edge.x - from.x, edge.y - from.y) < 60 || !document.elementFromPoint(edge.x, edge.y)?.closest('#board')) return null;
+  return { ...p, mode: 'drag', b: world(toWorld(edge.x, edge.y)), card: null, half: true };
+}
+
 // ---------- show and hide ----------
 
 function hide(why: string) {
@@ -349,7 +385,7 @@ function show(p: Plan) {
   visible = true;
   clock = 0;
   rung = -1;
-  record('hand', 'show', p.source === 'goal' ? p.kind : `${p.source}:${p.kind}:${p.mode}`);
+  record('hand', 'show', p.source === 'goal' ? p.kind : `${p.source}:${p.kind}:${p.mode}${p.half ? ':half' : ''}`);
   if (handEl) setClass(handEl, 'on', true);
 }
 
@@ -364,11 +400,13 @@ function evaluate() {
   const now = performance.now();
   if (act) {
     const a = act;
-    const p = resolve(g, a);
+    const whole = resolve(g, a);
+    // All of it when all of it can be seen; failing that, once the camera has had time to settle, its start.
+    const p = !whole || whole === 'done' || onScreen(whole) ? whole : now - a.born > HALF_MS ? firstHalf(whole) : null;
     if (p === 'done') {
       drop('done');
       hide('done');
-    } else if (p && onScreen(p)) {
+    } else if (p) {
       a.shown = true;
       return show(p);
     } else if (a.shown) {
@@ -520,6 +558,8 @@ export const handState = () => ({
   tip: visible ? { x: tip.x, y: tip.y } : null,
   a: visible && plan?.a ? client(plan.a) : null, b: visible && plan ? client(plan.b) : null,
   round: visible && plan ? Math.floor(clock / PERIOD[plan.mode]) : 0,
+  /** Only the start of the gesture is being shown (its far end is off the screen). */
+  half: visible && !!plan?.half,
 });
 
 // ---------- the hand itself ----------
@@ -594,7 +634,7 @@ function step(dt: number) {
     const u = clock - round * period;
     pose = poseAt(p.mode, u, a, b);
     // A tap on something that is not on the board (a button) opens a ring above the panels.
-    const ringAt = p.mode === 'taps' ? (p.a && !p.a.world ? a : null) : p.mode === 'tap' || (p.mode === 'tap2' && !p.b.world) ? b : null;
+    const ringAt = p.mode === 'taps' ? (p.a && !p.a.world ? a : null) : (p.mode === 'tap' && !p.half) || (p.mode === 'tap2' && !p.b.world) ? b : null;
     if (ringAt && rung !== round && u >= TAP_AT[p.mode]) {
       rung = round;
       ring(ringAt, '#ffffff', { top: true, size: 26, life: 0.5 });
@@ -737,20 +777,28 @@ const overlay: Overlay = {
       if (p.wire) drawWire(c, p.wire.from, p.wire.end, p.color, (landed ? 0.95 : 0.4) * fade, !landed);
       target(fade, landed);
       drawRing(c, b, seg(v, 0.5, 0.95), '#fff', fade);
+    } else if (p.mode === 'tap' && p.half && p.wire) {
+      // Only the first tap, on the port: it lights up, and the wire it would make reaches off toward the target.
+      const fade = seg(u, 0, 0.25) * (1 - seg(u, 1.2, 1.5));
+      drawRing(c, b, seg(u, 0.5, 0.95), '#fff', fade);
+      if (u > 0.65) drawArmed(c, b, fade);
+      drawWire(c, p.wire.from, p.wire.end, p.color, 0.55 * seg(u, 0.65, 0.9) * fade, true);
     } else if (p.mode === 'drag' && p.a && p.wire) {
       const a = client(p.a);
       const fade = seg(u, 0, 0.3) * (1 - seg(u, 2.15, 2.5));
       const go = ease(seg(u, 0.62, 1.6));
       drawRing(c, a, seg(u, 0.42, 0.8), '#fff', fade);
-      const released = u >= 1.66;
+      // (A drag of which only the start is shown never lets go: it holds at the edge, the wire still reaching for a target that is out of sight.)
+      const released = u >= 1.66 && !p.half;
       if (u > 0.6) {
         // While dragging the wire follows the finger; let go and it snaps onto the target.
         const endWorld = released ? p.wire.end : mix(p.wire.from, p.b, go);
         drawWire(c, p.wire.from, endWorld, p.color, 0.95 * fade, !released && go < 0.82);
+        if (p.half && go >= 1) drawWire(c, p.b, p.wire.end, p.color, 0.5 * fade, true);
       }
       if (p.card) drawCard(c, p.card, seg(go, 0.75, 0.9) * fade, false, '#fff');
       else if (p.ghost) drawGhostCard(c, p.b, seg(u, 1.66, 1.8) * fade);
-      drawRing(c, released && p.card ? toClient(p.wire.end) : b, seg(u, 1.66, 2.05), released ? p.color : '#fff', fade);
+      if (!p.half) drawRing(c, released && p.card ? toClient(p.wire.end) : b, seg(u, 1.66, 2.05), released ? p.color : '#fff', fade);
     }
     c.globalAlpha = 1;
   },

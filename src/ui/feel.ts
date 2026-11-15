@@ -20,7 +20,7 @@ import { anchorPt, el, setAttr, setClass, setHTML } from './dom';
 import { FloaterOpts, FlyOpts, Overlay, addOverlay, burst, clearParticles, endFloater, floater, floaterSize, fly, pop, ring, setMood } from './fx';
 import { Pt, bezierAt, matColor, nodeSize, outPorts, wireEnds } from './geom';
 import { actOut, handState, initHand, tipSignal } from './hand';
-import { addTopItem } from './panels';
+import { addTopItem, renderPanels } from './panels';
 import { onBeat, onFrame, onGame, onNewGame, onPress, onSignal, signal, ui } from './ui';
 
 const GOLD = '#FFC857';
@@ -628,8 +628,12 @@ function addMuteButton() {
   };
   onPress(btn, () => setMuted(!isMuted()));
   // Painted whenever sound is switched, by this button or by anything else (the phone's gear menu
-  // calls setMuted too), and again with every refresh of the top bar.
-  onMuteChange(paint);
+  // calls setMuted too), and again with every refresh of the top bar. The bar is refreshed at the same
+  // moment, so the gear menu's Sound row (which a phone shows instead of this button) never lags behind.
+  onMuteChange(() => {
+    paint();
+    renderPanels();
+  });
   addTopItem('actions', { el: btn, update: paint }, document.querySelector('#top .menuwrap'));
 }
 
