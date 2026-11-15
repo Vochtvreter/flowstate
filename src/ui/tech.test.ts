@@ -2,7 +2,7 @@
 // These run without a browser: techTiles() and goalTech() only read the game.
 import { describe, expect, it } from 'vitest';
 import { BRANCHES, TECHS } from '../content';
-import { research, techAvailable } from '../economy';
+import { research, techAvailable, techHidden } from '../economy';
 import { GOALS } from '../goals';
 import { Game, newGame } from '../state';
 import { Tile, goalTech, techTiles } from './tech';
@@ -13,7 +13,7 @@ const byId = (g: Game, id: string): Tile | undefined => techTiles(g).find((x) =>
 
 /** The rule written out a second time, from the plan's wording, to check the implementation against. */
 function allowed(g: Game): string[] {
-  const all = Object.values(TECHS).filter((t) => !(t.needsEnd && !g.ended));
+  const all = Object.values(TECHS).filter((t) => !techHidden(g, t));
   const own = (id: string) => g.techs.includes(id);
   const full = new Set(all.filter((t) => own(t.id) || techAvailable(g, t) || (!t.auto && g.queue.includes(t.id))).map((t) => t.id));
   return all.filter((t) => full.has(t.id) || t.requires.every((r) => full.has(r))).map((t) => t.id).sort();
@@ -25,20 +25,20 @@ describe('tech tree: what is shown', () => {
     expect(show(g)).toEqual({ P1: 'goal', R1: 'goal' });
   });
 
-  it('the first visit shows 10 of 29: owned, researchable, goal rewards, and one step ahead as silhouettes', () => {
+  it('the first visit shows 7 of 29: owned, researchable, goal rewards, and one step ahead as silhouettes', () => {
     const g = newGame();
     g.techs = ['P1', 'R1'];
     g.data.a = 47;
     expect(show(g)).toEqual({
       P1: 'own', R1: 'own',
-      P2: 'rdy', R2: 'sav', U1: 'sav',
-      L1: 'goal', C1: 'goal',
-      P3: 'veil', U2: 'veil', R3: 'veil',
+      P2: 'rdy', R2: 'sav',
+      L1: 'goal',
+      P3: 'veil', R3: 'veil',
     });
     expect(Object.keys(TECHS)).toHaveLength(29);
-    // Nothing of Scale tools is visible, so the branch is left out.
+    // Nothing of Scale tools is visible and Commerce waits for the first surplus, so both are left out.
     const branches = new Set(techTiles(g).map((x) => x.t.branch));
-    expect(BRANCHES.filter((b) => branches.has(b.id)).map((b) => b.id)).toEqual(['processing', 'logistics', 'commerce', 'research']);
+    expect(BRANCHES.filter((b) => branches.has(b.id)).map((b) => b.id)).toEqual(['processing', 'logistics', 'research']);
   });
 
   it('a silhouette names what to research first', () => {
@@ -101,7 +101,7 @@ describe('tech tree: what is shown', () => {
     g.queue = ['NOPE'];
     expect(() => techTiles(g)).not.toThrow();
     expect(ids(g)).toEqual(allowed(g));
-    expect(ids(g)).toHaveLength(10);
+    expect(ids(g)).toHaveLength(7);
   });
 
   it('researching in any order: the tree always matches the rule, and nothing shown ever disappears', () => {
