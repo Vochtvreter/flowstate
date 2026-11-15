@@ -85,8 +85,7 @@ export function initHud() {
       // The player is being taken to the board: on a phone the card gives it room first.
       foldHint();
       return a === 'show' ? showTip(g, () => renderPanels(true)) : showLine(g, () => renderPanels(true));
-    }
-    else if (a === 'jump') jumpTo(Number(args[0]));
+    } else if (a === 'jump') jumpTo(Number(args[0]));
     renderPanels(true);
   });
   // A Claim button gives under the finger for as long as it is down (class `down`, hud.css). A browser shows
