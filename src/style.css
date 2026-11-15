@@ -282,10 +282,19 @@ g.wire.dim:hover .base { stroke-opacity: 0.6; }
 .deposit.pop { animation: deposit-pop 0.42s cubic-bezier(0.2, 1.5, 0.4, 1) backwards; }
 @keyframes deposit-pop { from { transform: scale(0.4); opacity: 0; } 60% { opacity: 1; } }
 
-/* The zoom cluster carries a fifth button, Tidy (added by board.ts once there is something to tidy):
-   it grows to the left by the button's width, and stays the width of the minimap without it. */
+/* The zoom cluster carries a fifth button, Tidy (added by board.ts once there is something to tidy, at the
+   far end from Fit): it grows to the left by the button's width, and stays the width of the minimap without it.
+   While the layout is being worked out the button says so. */
+#zoom [data-testid='tidy'][aria-busy='true'] { opacity: 0.55; cursor: progress; }
 #zoom:has([data-testid='tidy']:not([hidden])) { width: 196px; }
 html[data-input='touch'] #zoom:has([data-testid='tidy']:not([hidden])) { width: 244px; }
+
+/* With the inspector open the stage is narrow (under 1200 px whenever the window is under 1596 px): the
+   minimap goes, and the zoom buttons drop into its corner, so that less of the board lies under them. */
+@media (max-width: 1595px) {
+  #app:not(.phone).insp-open #mini { display: none; }
+  #app:not(.phone).insp-open #zoom { bottom: 16px; }
+}
 
 /* Keys mean nothing to a finger: the hint row is for mouse and keyboard. */
 html[data-input='touch'] #hints { display: none; }
@@ -328,6 +337,7 @@ html[data-input='touch'] .slot .key { display: none; }
 .toast.out { opacity: 0; transition: opacity 0.3s; }
 @keyframes pop { from { transform: translateY(8px); opacity: 0; } }
 #hints { position: absolute; left: 16px; bottom: 16px; display: flex; gap: 14px; font-size: 11px; color: var(--muted); pointer-events: none; }
+/* (board.ts hides the row with the `hidden` attribute once goal 5 is claimed, and before that whenever a card lies under it.) */
 #zoom { position: absolute; right: 16px; bottom: 132px; width: 160px; display: flex; gap: 4px; align-items: center; }
 #zoom .ibtn { width: 32px; height: 32px; }
 /* A finger gets full-size buttons here too (the phone layout has none of this: pinch, and a Fit button). */

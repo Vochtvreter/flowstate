@@ -300,6 +300,7 @@ function applyView() {
   if (lean !== wasLean) boardEl.classList.toggle('lean', lean);
   placeExpand(true);
   if (!renderedGame) return;
+  if (hintsBox && ui.g.goal.i < HINTS_UNTIL) syncHints(ui.g, false);
   // Back in among the cards by the player's own hand: Fit has nothing left to return to.
   if (wasOver && !over) fitBack = fitAt = null;
   // The deposits' second line is worded for the type size.
@@ -1043,6 +1044,8 @@ const ex = {
   miniW: 160,
   /** Shown at all: from the goal that asks for it on (see `expandShown`). */
   shown: false,
+  /** What the last measurement was taken for (see `expandKey`), and when. */
+  key: '', measuredAt: 0,
 };
 
 /** The goal that first asks for the expansion: before it the button is not shown (it would compete with the first steps). */
@@ -1075,9 +1078,16 @@ function expandAsked(g: Game): boolean {
   return goal.id === 'expand' || (!!goal.meanwhile && !!lineAdvice(g)?.expand);
 }
 
+/** What the button's surroundings depend on that can be read without reading layout: when it changes, they are measured again. */
+function expandKey(g: Game): string {
+  const c = env.cover(), s = env.strip(), k = env.corner();
+  return `${c.top}|${c.right}|${c.bottom}|${c.row}|${s ? `${s.x0},${s.x1},${s.bottom}` : ''}|${k ? `${k.x0},${k.y0}` : ''}|${ui.uiRev}|${g.goal.i}${g.goal.ready ? 'r' : ''}|${toastsEl?.childElementCount ?? 0}|${hintsEl?.hidden ? 1 : 0}`;
+}
+
 /** What stands on the stage that the button must keep clear of. Reads layout: only when something may have changed. */
 function measureExpand() {
   ex.stale = false;
+  ex.measuredAt = performance.now();
   watchStage();
   const r = rectOf();
   const out: Box[] = [];
@@ -1496,61 +1506,141 @@ let tidyBtn: HTMLButtonElement | null = null;
 
 /**
  * Lay the board out again so that wires are short, cross as little as possible, and nothing overlaps
- * (the layout itself is `tidy` in layout.ts). Wells stay on their deposits. The cards glide to their
- * new places and the camera pulls back to show the result; one undo puts every card back. Returns
- * false when the board cannot be bettered.
+ * (the layout itself is `tidy` in layout.ts, worked out in a Worker so that a big factory never holds the
+ * page up). Wells stay on their deposits. The cards glide to their new places; the camera stays among the
+ * cards, where their text can be read, on the part of the factory the player was looking at; one undo puts
+ * every card back. Returns false when there is nothing to tidy, true when the work has been started (the
+ * answer comes back a moment later; "Already tidy." is said then if the board cannot be bettered).
  */
 export function tidyBoard(): boolean {
   const g = ui.g;
-  if (!g || !renderedGame) return false;
+  if (!g || !renderedGame || g.nodes.length < 2) return false;
   // Whatever the pointer was in the middle of ends first.
   settleGesture();
   cancelGesture();
-  const moves = tidy(tidyInput(g, GRID));
+  if (tidyJob && tidyJob.g === g) return true;
+  // What the player is looking at now: the cards whose middle is in view.
+  const v = viewAhead();
+  const f = freeArea();
+  const seen = g.nodes.filter((n) => {
+    const b = cardBox(n);
+    const x = ((b.x0 + b.x1) / 2) * v.k + v.x, y = ((b.y0 + b.y1) / 2) * v.k + v.y;
+    return x > f.x0 && x < f.x1 && y > f.y0 && y < f.y1;
+  }).map((n) => n.id);
+  tidyJob = { id: ++tidySeq, g, rev: g.rev, tries: 0, seen };
+  setTidyBusy(true);
+  askTidy(tidyJob);
+  return true;
+}
+
+/** The layout being worked out, and the board it is for (`rev`: as it was when asked). */
+interface TidyJob { id: number; g: Game; rev: number; tries: number; seen: number[] }
+let tidyJob: TidyJob | null = null;
+let tidySeq = 0;
+/** The Worker that lays boards out: made on first use; null where one cannot be made (then the page does it). */
+let layoutWorker: Worker | null | undefined;
+
+function askTidy(job: TidyJob) {
+  const input = tidyInput(job.g, GRID);
+  if (layoutWorker === undefined) {
+    layoutWorker = null;
+    if (typeof Worker === 'function') {
+      try {
+        layoutWorker = new Worker(new URL('./layout.worker.ts', import.meta.url), { type: 'module' });
+        layoutWorker.onmessage = (e: MessageEvent<{ id: number; moves: [number, Pt][] }>) => tidyAnswer(e.data.id, new Map(e.data.moves));
+        // A Worker that fails is not asked again; the job in hand is done on the page.
+        layoutWorker.onerror = () => {
+          layoutWorker = null;
+          const j = tidyJob;
+          if (j) askTidy(j);
+        };
+      } catch {
+        layoutWorker = null;
+      }
+    }
+  }
+  if (layoutWorker) layoutWorker.postMessage({ id: job.id, input });
+  else setTimeout(() => tidyAnswer(job.id, tidy(input)), 0);
+}
+
+/** The new places for a board. If the board changed while they were worked out, they are worked out again. */
+function tidyAnswer(id: number, moves: Map<number, Pt>) {
+  const job = tidyJob;
+  if (!job || job.id !== id) return;
+  const g = ui.g;
+  if (g !== job.g) {
+    tidyJob = null;
+    setTidyBusy(false);
+    return;
+  }
+  if (g.rev !== job.rev) {
+    if (job.tries++ < 2) {
+      job.rev = g.rev;
+      askTidy(job);
+      return;
+    }
+    tidyJob = null;
+    setTidyBusy(false);
+    return;
+  }
+  tidyJob = null;
+  setTidyBusy(false);
+  // A drag that began while the answer was on its way is let go first.
+  settleGesture();
+  cancelGesture();
   const from = new Map<number, Pt>();
-  for (const [id] of moves) {
-    const n = nodeById(g, id);
-    if (n && n.type !== 'well') from.set(id, { x: n.x, y: n.y });
+  for (const [nid] of moves) {
+    const n = nodeById(g, nid);
+    if (n && n.type !== 'well') from.set(nid, { x: n.x, y: n.y });
   }
   if (!from.size) {
     toast('Already tidy.', 'info');
-    return false;
+    return;
   }
   act(g, () => {
-    for (const [id] of from) {
-      const n = nodeById(g, id)!;
-      const to = moves.get(id)!;
+    for (const [nid] of from) {
+      const n = nodeById(g, nid)!;
+      const to = moves.get(nid)!;
       n.x = to.x;
       n.y = to.y;
     }
     return 0;
   });
-  for (const [id, was] of from) {
-    const to = moves.get(id)!;
-    settleFrom(id, was.x - to.x, was.y - to.y, TIDY_MS);
+  for (const [nid, was] of from) {
+    const to = moves.get(nid)!;
+    settleFrom(nid, was.x - to.x, was.y - to.y, TIDY_MS);
   }
-  // Show what it did: the whole factory, as Fit would (and Fit, pressed next, goes back to where the player was).
+  // The camera: on the cards the player was looking at (all of them, if none was in view), where they
+  // stand now, at a zoom where card text is drawn, never further in than before.
+  let box: Box | null = null;
+  for (const nid of job.seen.length ? job.seen : g.nodes.map((n) => n.id)) {
+    const n = nodeById(g, nid);
+    if (n) box = boxUnion(box, cardBox(n));
+  }
+  if (!box) return;
   const now = viewAhead();
-  const t = fitTarget(builtBox() ?? { x0: 0, y0: 0, x1: g.board.w, y1: g.board.h });
-  if (t.k < zoomFloor()) {
-    if (!fitBack || !over) fitBack = { ...now };
-    fitAt = t;
-  } else fitBack = fitAt = null;
+  const t = fitTarget(box, true, now.k >= zoomFloor() ? Math.max(zoomFloor(), Math.min(1, now.k)) : 1);
+  fitBack = fitAt = null;
   moveView(t.x, t.y, t.k, true, TIDY_MS);
   toast(`Tidied. <b>${isTouch() ? 'Undo' : 'Ctrl Z'}</b> puts it back.`, 'good');
-  return true;
+}
+
+/** The Tidy buttons say they are working while the layout is worked out. */
+function setTidyBusy(on: boolean) {
+  for (const b of [tidyBtn, fabsEl?.querySelector('[data-testid="fab-tidy"]')]) if (b) setAttr(b, 'aria-busy', on ? 'true' : null);
 }
 
 /**
  * The Tidy button, in the zoom cluster (which the panels build after the board starts, so it is added
- * when the board first draws). It shows once there is something to tidy.
+ * when the board first draws), at the cluster's far end from Fit. It shows once there is something to tidy.
  */
 function syncTidyControl() {
   if (!tidyBtn) {
     const zoom = document.getElementById('zoom');
     if (!zoom || !zoom.firstElementChild) return;
     tidyBtn = el<HTMLButtonElement>(`<button class="ibtn" data-testid="tidy"><svg class="ic" viewBox="0 0 24 24" width="14" height="14" aria-hidden="true"><path d="M3 4.5h6v5H3zM3 14.5h6v5H3zM15 9.5h6v5h-6zM9 7h3v5h3M9 17h3v-5"/></svg></button>`);
-    zoom.appendChild(tidyBtn);
+    // (At the far end from Fit, so that Fit keeps the place the player has learned.)
+    zoom.insertBefore(tidyBtn, zoom.firstChild);
     onPress(tidyBtn, () => void tidyBoard());
   }
   setHidden(tidyBtn, ui.g.nodes.length < TIDY_FROM);
@@ -1896,7 +1986,10 @@ function layoutWires() {
   const avoid = boxes.concat(depositBoxes());
   const cs = chipScale();
   let offChanged = false;
-  for (const refs of wireEls.values()) {
+  // Chips on show are placed first, each keeping off those placed before it: two wires leaving the same
+  // port (a Router's, with its weights on them) would otherwise put their chips one on top of the other.
+  const order = [...wireEls.values()].sort((a, b) => Number(b.shown) - Number(a.shown));
+  for (const refs of order) {
     const f = refs.flow;
     const hw = Math.max(24, refs.cChip.length * 3.3 + 9) * cs, hh = 11 * cs;
     let spot: Pt | null = null;
@@ -1914,6 +2007,7 @@ function layoutWires() {
         break;
       }
     }
+    if (spot && refs.shown) avoid.push({ x0: spot.x - hw - 3, y0: spot.y - hh - 2, x1: spot.x + hw + 3, y1: spot.y + hh + 2 });
     // No clear place on this wire: better no chip than one covering a card.
     if (!spot !== refs.chipOff) {
       refs.chipOff = !spot;
@@ -2233,6 +2327,7 @@ export function updateSlow(part?: 'nodes' | 'wires') {
     expandEl.innerHTML = `${icon('plus', 20)}<span><b>Expand<em> board</em> <i class="mono">${fmt(cost)}¢</i></b><small>New plot · reveals deposits</small></span>`;
   }
   setClass(expandEl, 'ok', g.credits >= cost);
+  syncHints(g);
   // Whether the goal card is sending the player to it: looked at twice a second at most.
   const now = performance.now();
   if (now - ex.askedAt > 500) {
@@ -2240,11 +2335,41 @@ export function updateSlow(part?: 'nodes' | 'wires') {
     ex.asked = expandAsked(g);
   }
   // What the button keeps clear of (the goal card, an open sheet or inspector, toasts...) is measured
-  // again here, a few times a second, not every frame.
-  ex.stale = true;
+  // again when something it depends on may have moved (the ResizeObserver catches size changes), and at
+  // least every two seconds: reading layout here costs a full layout of the board after its text changed.
+  const key = expandKey(g);
+  if (key !== ex.key || now - ex.measuredAt > 2000) {
+    ex.key = key;
+    ex.stale = true;
+  }
   placeExpand();
   if (ui.placing) updateGhost();
   if (radial) refreshBuildSheet();
+}
+
+/** The key hints are for the first steps: from this goal on (goal 5 claimed) they are gone. */
+const HINTS_UNTIL = GOALS.findIndex((x) => x.id === 'sell-shard') + 1;
+/** Where the hint row stands on the stage, as last measured while it showed. */
+let hintsBox: Box | null = null;
+
+/** The key-hint row shows for the first five goals, and never over a card. */
+function syncHints(g: Game, measure = true) {
+  if (!hintsEl) return;
+  if (g.goal.i >= HINTS_UNTIL || env.phone) {
+    if (setHidden(hintsEl, true)) ex.stale = true;
+    return;
+  }
+  // (Measured on the slow beat only: while the camera moves, the last measurement is used.)
+  if (measure && !hintsEl.hidden) hintsBox = stageBoxOf(hintsEl, 6) ?? hintsBox;
+  let under = false;
+  if (hintsBox) {
+    const { x: vx, y: vy, k } = ui.view;
+    under = g.nodes.some((n) => {
+      const b = cardBox(n);
+      return b.x0 * k + vx < hintsBox!.x1 && b.x1 * k + vx > hintsBox!.x0 && b.y0 * k + vy < hintsBox!.y1 && b.y1 * k + vy > hintsBox!.y0;
+    });
+  }
+  if (setHidden(hintsEl, under)) ex.stale = true;
 }
 
 let gainTimer = 0;
