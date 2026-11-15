@@ -223,9 +223,9 @@ g.wire.dim:hover .base { stroke-opacity: 0.6; }
    as it pulls back further). Every card is its icon and status ring on a plain tile, wires are thin
    lines of one width, and nothing has to be read. Icons and wires are sized in board units, so each
    step draws them larger: an icon is never under 24 px on screen. */
-#board[data-ov='1'] { --ovs: 1.5; --ovw: 3px; }
-#board[data-ov='2'] { --ovs: 1.9; --ovw: 4px; }
-#board[data-ov='3'] { --ovs: 2.4; --ovw: 5.5px; }
+#board[data-ov='1'] { --ovs: 1.5; --ovw: 3px; --ovx: 1.5; }
+#board[data-ov='2'] { --ovs: 1.9; --ovw: 4px; --ovx: 1.9; }
+#board[data-ov='3'] { --ovs: 2.4; --ovw: 5.5px; --ovx: 2.8; }
 /* Going in and out of the overview, the icon slides to the middle of its card and grows while the text fades. */
 .node .ring { transition: transform 0.2s cubic-bezier(0.2, 0.8, 0.2, 1); }
 .node .txt { transition: opacity 0.12s; }
@@ -246,8 +246,9 @@ g.wire.dim:hover .base { stroke-opacity: 0.6; }
 #board.ov .deposit { justify-content: center; padding: 0; }
 #board.ov .deposit > div { display: none; }
 #board.ov .deposit > svg { transform: scale(var(--ovs)); }
-/* The Expand button is drawn larger too, so it can still be found and pressed from out here. */
-#board.ov #expand { transform: scale(var(--ovs)); transform-origin: 50% 0; }
+/* The Expand button is drawn larger too (--ovx; board.ts knows the same numbers), so that it can still be
+   found and pressed from out here: it is never under 44 px tall on screen. */
+#board.ov #expand { transform: scale(var(--ovx)); transform-origin: 50% 0; }
 
 /* Expanding the board: each deposit it reveals pops in at its turn (the delay is set inline). */
 .deposit.pop { animation: deposit-pop 0.42s cubic-bezier(0.2, 1.5, 0.4, 1) backwards; }

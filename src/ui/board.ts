@@ -696,8 +696,11 @@ const hintsRect = cachedRect(() => hintsEl);
 const fabsRect = cachedRect(() => fabsEl);
 const tidyFabRect = cachedRect(() => fabsEl?.querySelector('[data-testid="fab-tidy"]:not([hidden])') ?? null);
 const EXPAND_W = 260, EXPAND_H = 64;
-/** How much larger than life the button is drawn at each step of the overview, so it can still be found and pressed. */
-const OV_SCALE = [1, 1.5, 1.9, 2.4];
+/**
+ * How much larger than life the button is drawn at each step of the overview (--ovx in the stylesheet),
+ * so that it can still be found and pressed: 64 px tall, it is never under 44 px on screen.
+ */
+const OV_SCALE = [1, 1.5, 1.9, 2.8];
 
 function placeExpand() {
   const g = ui.g;

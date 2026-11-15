@@ -317,8 +317,9 @@ function sync() {
   seenRev = g.rev;
   sizeSeen = sizeRev;
   setAttr(undoBtn, 'disabled', canUndo() ? null : '');
-  // Tidy is offered once there is something to tidy (the same count as the desktop button: see board.ts).
-  setHidden(tidyBtn, g.nodes.length < 6);
+  // Tidy is offered once there is something to tidy (the same count as the desktop button: see board.ts),
+  // and not while something is selected: it stands above the row, where the selected node may be.
+  setHidden(tidyBtn, g.nodes.length < 6 || !!ui.sel);
   const line = env.phone || env.touch ? hintLine() : '';
   setHidden(hint, !line);
   if (line) setHTML(hintText, line);
