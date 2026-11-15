@@ -4,17 +4,33 @@ import {
   canRedo, canUndo, claimOrder, clearHistory, connect, cutWire, deleteNode, expandBoard, favour, favouredWire, placeNode, redo, setMode, undo,
   upgrade, upgradeAll,
 } from '../src/actions';
-import { ADVICE, Advice, SAY, advice, adviceQuiet, adviceTrials, applyAdvice, lineAdvice, waitInfo, waitKind } from '../src/advice';
+import { ADVICE, Advice, SAY, advice, adviceQuiet, adviceTrials, applyAdvice, lineAdvice, researchDelay, savingFor, waitInfo, waitKind } from '../src/advice';
 import { DATA_NAMES, DATA_YIELD, MATERIALS, MAT_IDS, NODE_DEFS, RECIPES, RULES, TECHS } from '../src/content';
 import { costText, demandInfo, nodeCost, nodeCostAt, research, techAffordable, upgradeCostAt } from '../src/economy';
 import { countsForFlow, flowInfo, isFlowing } from '../src/flow';
 import { forecast, lookahead } from '../src/forecast';
-import { GOALS, activeGoal, goalView } from '../src/goals';
+import { GOALS, activeGoal, goalById, goalView, meanwhileOf } from '../src/goals';
 import { makeOrder, marketRates, orderReward, orderView, startOrders } from '../src/orders';
 import { tick } from '../src/sim';
 import { Game, cloneGame, deserialize, serialize } from '../src/state';
 import { playByTheCard } from './cardPlayer';
 import { fresh, market, realWaitEnds, rich, run, well } from './helpers';
+
+/**
+ * The adviser on its own judgement: the goal's "while you wait" lines taken off for the length of `fn`. On the
+ * Flow goal the card's line names the same fix first (and a tip never says what the card says), so these tests of
+ * the adviser's Flow judgement put the line aside.
+ */
+function withoutLines<T>(goalId: string, fn: () => T): T {
+  const goal = goalById(goalId)!;
+  const lines = goal.meanwhile;
+  goal.meanwhile = undefined;
+  try {
+    return fn();
+  } finally {
+    goal.meanwhile = lines;
+  }
+}
 
 const at = (g: Game, id: string) => { g.goal = { i: GOALS.findIndex((x) => x.id === id), ready: false }; };
 const state = (g: Game) => serialize(g).replace(/"savedAt":\d+/, '');
@@ -517,8 +533,8 @@ describe('advice: the repertoire, one board at a time', () => {
     const lab = g.nodes.find((n) => n.type === 'lab')!;
     const wire = g.wires.find((w) => w.from === glyph.id && w.to === lab.id)!;
     // The card says it: its "while you wait" line.
-    expect(goalView(g)!.meanwhile).toEqual({ text: 'You have the β you need: cut the wire from the Glyph Assembler to the Lab.', done: false });
-    expect(activeGoal(g)!.meanwhile!.cuts!(g)).toEqual([wire.id]);
+    expect(goalView(g)!.meanwhile).toEqual({ text: 'You have the β you need: cut the wire from the Glyph Assembler to the Lab.', done: false, step: 1, of: 2 });
+    expect(meanwhileOf(g)!.cuts!(g)).toEqual([wire.id]);
     // The line's step says which wire, in the words of the button ("Cut wire"), for the card's "Show me".
     const a = lineAdvice(g)!;
     expect(a.kind).toBe('credits');
@@ -559,7 +575,7 @@ describe('advice: the repertoire, one board at a time', () => {
     two.edits = [];
     at(two, 'build-fabricator');
     run(two, 0.1);
-    const cuts = activeGoal(two)!.meanwhile!.cuts!(two);
+    const cuts = meanwhileOf(two)!.cuts!(two);
     expect(cuts.length).toBe(2);
     expect(cuts).toContain(extra.id);
     expect(lineAdvice(two)!.cut!.wire).toBe(cuts[0]);
@@ -585,7 +601,7 @@ describe('advice: the repertoire, one board at a time', () => {
     h.data.b = 5000;
     h.credits = 1e6;
     expect(goalView(h)!.meanwhile).toBeUndefined();
-    // And on any other goal there is no such tip at all, whatever the board studies.
+    // On "Assemble your first Prism" the card asks it too (the β to come covers Fabrication), and the step is the card's.
     const k = glyphGame();
     k.data = { a: 5000, b: 5000, g: 0 };
     k.credits = 0;
@@ -593,7 +609,13 @@ describe('advice: the repertoire, one board at a time', () => {
     at(k, 'make-prism'); // an Assembler to save for: 1,500¢
     run(k, 0.1);
     expect(waitKind(k)).toBe('credits');
-    expect(lineAdvice(k)).toBeNull();
+    expect(lineAdvice(k)!.cut).toBeDefined();
+    expect(adviceTrials(k)!.trials.some((x) => /^(Cut|Remove) /.test(x.text))).toBe(false);
+    // And on any other goal there is no such tip at all, whatever the board studies.
+    at(k, 'make-mist'); // a Well and a Refiner to save for
+    run(k, 0.1);
+    expect(waitKind(k)).toBe('credits');
+    expect(lineAdvice(k)?.cut).toBeUndefined();
     expect(adviceTrials(k)!.trials.some((x) => /^(Cut|Remove) /.test(x.text))).toBe(false);
   });
 
@@ -622,7 +644,7 @@ describe('advice: the repertoire, one board at a time', () => {
     g.stats.ordersFilled = 1;
     startOrders(g);
     g.order = { ...makeOrder(g), mat: 'ink', need: 40, base: g.sold.ink ?? 0, reward: orderReward(g, 'ink', 40) };
-    at(g, 'three-orders');
+    at(g, 'first-order');
     expect(waitKind(g)).toBe('order');
     expect(adviceTrials(g)!.trials.some((x) => /^Favour /.test(x.text))).toBe(false);
     // A Router the player turned toward the Market by hand can still be turned toward the Lab in a wait for α.
@@ -650,7 +672,8 @@ describe('advice: the repertoire, one board at a time', () => {
     startOrders(g);
     g.order = { ...makeOrder(g), mat: 'spark', need: 8, base: g.sold.spark ?? 0, reward: orderReward(g, 'spark', 8) };
     expect(orderView(g)!.reachesMarket).toBe(false);
-    at(g, 'three-orders');
+    g.stats.ordersFilled = 0; // ("Fill your first order" is the order goal)
+    at(g, 'first-order');
     expect(waitKind(g)).toBe('order');
     const a = advice(g)!;
     expect(a.kind).toBe('credits');
@@ -671,7 +694,7 @@ describe('advice: the repertoire, one board at a time', () => {
     expect(tb.tip).toBeLessThan(tb.idle);
   });
 
-  it('Flow goal: names the producer that is furthest from flowing, and its fix', () => {
+  it('Flow goal: names the producer that is furthest from flowing, and its fix', () => withoutLines('hold-flow', () => {
     // Three Wells sell; three feed Refiners that take less than they make, and back up.
     const g = rich();
     g.techs = ['P1', 'R1', 'P2', 'P3', 'P5'];
@@ -722,9 +745,10 @@ describe('advice: the repertoire, one board at a time', () => {
     expect(new Set(fixes).size).toBe(3);
     expect(g.goal.ready).toBe(true);
     expect(advice(g)).toBeNull();
-  });
+  }));
 
   it('Flow goal: a starved machine is traced to the Well that cannot keep up', () => {
+    // The card's line says it first, in the same words; with the line put aside, the adviser says it.
     const g = rich();
     g.techs = ['P1', 'R1', 'P2', 'P3'];
     g.flowOn = true;
@@ -737,7 +761,11 @@ describe('advice: the repertoire, one board at a time', () => {
     run(g, 40);
     expect(flowInfo(g)).toMatchObject({ producers: 3, flowing: 2 });
     at(g, 'hold-flow');
-    const a = advice(g)!;
+    const step = lineAdvice(g)!;
+    expect(step.text.mouse).toBe('The Spark Refiner needs more Ember: buy Speed on the Ember Well (50¢).');
+    expect(step).toMatchObject({ node: ember.id, upgrade: 'speed', culprit: spark.id });
+    expect(advice(g)).toBeNull(); // the card says it: no tip
+    const a = withoutLines('hold-flow', () => advice(cloneGame(g)!)!);
     expect(a.kind).toBe('flow');
     expect(a.text.mouse).toBe('The Spark Refiner needs more Ember: buy Speed on the Ember Well (50¢).');
     expect(a.text.touch).toBe(a.text.mouse);
@@ -1273,7 +1301,7 @@ describe('the words: every sentence of the repertoire fits the card', () => {
     widerDemand: [[TECHS.C2.name], [costText(TECHS.C2)], mats],
     // A wire into a Lab from the machine that makes the thing, or from a Router, Merger or Silo it passes through.
     cut: [[...machines, ...['Router', 'Merger', 'Silo'].flatMap(both)], labs, mats, values],
-    labFull: [ports, [buildPrice]],
+    labFull: [ports, [buildPrice], ['the Lab you have', 'the Lab it feeds', 'every Lab studying α', 'every Lab studying β', 'every Lab studying γ']],
     labNone: [ports, [buildPrice], mats, units],
     market: [ports, [buildPrice, 0]],
     refiner: [wells.flatMap(both).map((n) => `${n}'s port`), [buildPrice], mats, values],
@@ -1292,6 +1320,11 @@ describe('the words: every sentence of the repertoire fits the card', () => {
     lineWell: [raws, [buildPrice]],
     lineLab: [raws, [buildPrice]],
     lineExpand: [[buildPrice * 10]],
+    lineOwnLab: [ports, [buildPrice]],
+    lineFeed: [ports, [...both('Fabricator'), ...both('Lens Fabricator')], ['one', 'two'], mats],
+    linePairWell: [wells.flatMap(both), [upgradePrice]],
+    linePairLab: [raws, [upgradePrice]],
+    lineSell: [wells.flatMap(both).map((n) => `${n}'s port`), markets, raws],
   };
 
   it('the largest prices are eight digits, and the tech names are the real ones', () => {
@@ -1573,12 +1606,14 @@ describe('every tip on a real board is affordable, can be done, and is true', ()
   const what = (a: Advice) => (a.cut ? 'cut' : a.favour ? 'favour' : a.research ? 'research' : a.build ? `build ${a.build}` : a.upgrade ? (a.all ? 'upgrade all' : 'upgrade') : 'wire');
 
   it('there are plenty of them, of every kind and for most of the repertoire', () => {
-    expect(cases.length).toBeGreaterThan(30);
+    // (Fewer than before the cards' lines came in sequence: the lines now take several of the moves tips used to make.)
+    expect(cases.length).toBeGreaterThan(20);
     const count: Record<string, number> = {};
     for (const c of cases) count[`${c.a.kind}: ${what(c.a)}`] = (count[`${c.a.kind}: ${what(c.a)}`] ?? 0) + 1;
     // Which parts of the repertoire real boards exercised; the rest is covered on built boards above.
     console.info(`adviser: ${cases.length} tips collected from real boards, by kind and action: ${Object.entries(count).map(([k, n]) => `${k} ${n}`).join(', ')}`);
-    for (const x of ['data: wire', 'data: upgrade', 'data: build lab', 'data: build well', 'flow: upgrade']) expect(Object.keys(count), x).toContain(x);
+    // (A Flow fix is the card's own line on these boards now, so no Flow tip; the adviser's Flow judgement is tried on built boards above.)
+    for (const x of ['data: wire', 'data: upgrade', 'data: build lab', 'data: build well']) expect(Object.keys(count), x).toContain(x);
   });
 
   it('left alone in the middle of a long wait, no tip goes and comes back, and two tips never take turns', () => {
@@ -1651,7 +1686,7 @@ describe('every tip on a real board is affordable, can be done, and is true', ()
         // 21 s after the wire, 9 s before the half minute is up: the one thing that ends it, by name.
         const a = advice(g)!;
         expect(a, from).not.toBeNull();
-        expect(a.text.mouse, from).toMatch(/^Build a Lab from the Glyph Assembler's port \(\d+¢\): the Lab you have is full\.$/);
+        expect(a.text.mouse, from).toMatch(/^Build a Lab from the Glyph Assembler's port \(\d+¢\): (the Lab you have|the Lab it feeds) is full\.$/);
         expect(a).toMatchObject({ kind: 'data', build: 'lab', node: glyph.id, port: 0, steps: 1 });
         expect(a.cost!).toBeLessThanOrEqual(g.credits);
         expect(a.saves!, from).toBeGreaterThanOrEqual(60);
@@ -1683,7 +1718,7 @@ describe('every tip on a real board is affordable, can be done, and is true', ()
       expect(a.eta, from).toBeGreaterThan(ADVICE.minWait);
       if (a.kind === 'flow') expect(a.culprit, from).toBeDefined();
       // "Cut this wire" only where the active card's own line asks for that wire to go.
-      if (a.cut) expect(activeGoal(g)!.meanwhile?.cuts?.(g) ?? [], `${from}: ${a.text.mouse}`).toContain(a.cut.wire);
+      if (a.cut) expect((activeGoal(g)!.meanwhile ?? []).flatMap((l) => l.cuts?.(g) ?? []), `${from}: ${a.text.mouse}`).toContain(a.cut.wire);
       // A Router that favours a Lab (as "Route more to a Lab" asks) is left that way.
       if (a.favour) {
         const now = favouredWire(g, a.favour.router);
@@ -1692,7 +1727,7 @@ describe('every tip on a real board is affordable, can be done, and is true', ()
       }
       // Nothing the active card asks the player to take away is put back.
       if (a.wire) {
-        const asked = (activeGoal(g)!.meanwhile?.cuts?.(g) ?? []).map((id) => g.wires.find((w) => w.id === id)!);
+        const asked = (activeGoal(g)!.meanwhile ?? []).flatMap((l) => l.cuts?.(g) ?? []).map((id) => g.wires.find((w) => w.id === id)!);
         expect(asked.some((w) => w.from === a.wire!.from && g.nodes.find((n) => n.id === a.wire!.to)?.type === 'lab'), `${from}: ${a.text.mouse}`).toBe(false);
       }
       // The player had not touched the board for 20 s when it was said.
@@ -1711,7 +1746,7 @@ describe('every tip on a real board is affordable, can be done, and is true', ()
       }
       for (const t of tips) if (t.kind !== 'flow') expect(t.saves!, `${name}: ${t.text}`).toBeGreaterThanOrEqual(ADVICE.minSaves);
     }
-    expect(followed).toBeGreaterThan(20);
+    expect(followed).toBeGreaterThan(15);
   });
 
   it('can be done, and in the real game the wait ends sooner with it than without', () => {
@@ -1780,5 +1815,33 @@ describe('every tip on a real board is affordable, can be done, and is true', ()
     console.info(`adviser: ${outcomes.length / 2} tips timed in the real game on real boards, under two order sequences each: ${better} of ${outcomes.length} outcomes better, `
       + `worst ${Math.min(...outcomes).toFixed(0)} s; on average ${(100 * delivered / promised).toFixed(0)}% of what was promised; for the card-following player the smallest saving was ${smallestOwn.toFixed(1)} s; `
       + `${rescued} ended a wait that would not have ended.`);
+  });
+});
+
+describe('for the tech tree: what the card is saving for, and what another research costs it', () => {
+  it('savingFor names the research of the card\'s step; researchDelay is the seconds a purchase pushes it back', () => {
+    const g = rich();
+    g.techs = ['P1', 'R1', 'P2', 'P3'];
+    const m = market(g);
+    connect(g, well(g).id, 0, m.id);
+    const shard = placeNode(g, 'refiner', 400, 100, { recipe: 'shard' })!;
+    connect(g, well(g).id, 0, shard.id);
+    connect(g, shard.id, 0, placeNode(g, 'lab', 900, 100)!.id);
+    g.goal = { i: GOALS.findIndex((x) => x.id === 'make-glyph'), ready: false };
+    run(g, 20);
+    expect(savingFor(g)).toBe('P4');
+    g.data.a = 600;
+    const rate = waitInfo(g)!.eta > 0 ? (TECHS.P4.cost.a! - g.data.a) / waitInfo(g)!.eta : 0;
+    expect(rate).toBeGreaterThan(0);
+    // Lab Speed (50α) out of the 600α saved: Assembly 50α further off.
+    expect(researchDelay(g, 'R2')).toBeCloseTo(50 / rate, 0);
+    // Spent from Data the card does not need: no delay. The card's own research: none either.
+    expect(researchDelay(g, 'P4')).toBe(0);
+    g.data.a = TECHS.P4.cost.a! + 100;
+    expect(researchDelay(g, 'R2')).toBe(0);
+    // Ready to claim, or the research owned: nothing is being saved for.
+    g.techs.push('P4');
+    expect(savingFor(g)).toBeNull();
+    expect(researchDelay(g, 'R2')).toBe(0);
   });
 });

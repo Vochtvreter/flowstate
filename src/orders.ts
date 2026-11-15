@@ -3,8 +3,11 @@
 // Once unlocked (g.ordersOn, a goal reward) there is always exactly one order: "deliver `need` of `mat`",
 // counted from items sold at any Market after the order appeared. No timer and no failure. A filled order
 // waits for claimOrder(g), which pays it and rolls the next one. An order nobody delivers to for
-// RULES.orders.staleSeconds is quietly replaced. The next order never asks for the same material as the
-// one it replaces, as long as the player makes something else.
+// RULES.orders.staleSeconds is quietly replaced, and so is one that, at the rate its material sells now,
+// would take more than RULES.orders.retire.eta seconds to fill (for `retire.hold` seconds running: a new
+// Assembler takes all the Spark an order was counting, and the order read "about 24 min", then "over an
+// hour"). The next order never asks for the same material as the one it replaces, as long as the player
+// makes something else.
 //
 // An order is sized from what actually reaches Markets (marketRates), not from what is made: a material
 // that machines use up, or that is studied, fills an order only as fast as the rest is sold. Until one has
@@ -197,6 +200,24 @@ export function tickOrders(g: Game) {
     o.ready = true;
     g.events.push({ kind: 'order-ready', order: o, text: `Order filled: ${orderText(o)}` });
   } else if (g.time - o.lastProgress >= O.staleSeconds) roll(g, o.mat, true);
+  else if (hopeless(g, o)) roll(g, o.mat, true);
+}
+
+/**
+ * Has this order stood for a while, and been out of reach for `retire.hold` seconds running: at the rate its
+ * material sells now it would take more than `retire.eta` seconds to fill? Keeps the time it was first seen so
+ * in o.slowSince (saved with the order).
+ */
+function hopeless(g: Game, o: Order): boolean {
+  const R = O.retire;
+  const rate = g.soldRate[o.mat] ?? 0;
+  const eta = rate > 1e-6 ? (o.need - o.got) / rate : Infinity;
+  if (g.time - o.created < R.after || eta <= R.eta) {
+    delete o.slowSince;
+    return false;
+  }
+  if (o.slowSince == null || o.slowSince > g.time) o.slowSince = g.time;
+  return g.time - o.slowSince >= R.hold;
 }
 
 /** Pay out the filled order and roll the next one. Returns false when there is nothing to claim. */

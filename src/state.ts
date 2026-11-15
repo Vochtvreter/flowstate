@@ -1,4 +1,4 @@
-import { DataTier, MATERIALS, MatId, NODE_DEFS, NodeType, RECIPES, RULES, TECHS } from './content';
+import { DataTier, MATERIALS, MatId, NODE_DEFS, NodeType, PIPES, RECIPES, RULES, TECHS } from './content';
 
 export type Status = 'working' | 'blocked' | 'starved' | 'idle';
 export type RouterMode = 'even' | 'ratio' | 'priority' | 'filter';
@@ -16,6 +16,11 @@ export interface GNode {
   lv: { speed: number; eff: number; buffer: number };
   /** Credits spent on this node (purchase + upgrades). Informational: refunds are worked out by refundOf(). */
   paid: number;
+  /**
+   * For a node from a save of the public version (which priced things lower): what it cost there, plus what has
+   * been spent on it since. Its refund is never more than that (refundOf in src/actions.ts).
+   */
+  legacyPaid?: number;
   mode: RouterMode;
   /** Game time when the node was built or its recipe last changed. Flow ignores producers younger than RULES.flow.minAge. */
   born: number;
@@ -118,6 +123,8 @@ export interface Order {
   lastProgress: number;
   /** Filled and waiting for claimOrder(). */
   ready: boolean;
+  /** Since when it has looked out of reach (src/orders.ts, RULES.orders.retire), if it does. */
+  slowSince?: number;
 }
 
 export interface Stats {
@@ -208,6 +215,8 @@ export interface Game {
    * the bar the "hold Flow" goal also accepts once it has been on the card for RULES.flow.valveAfter seconds.
    */
   flowNear: number;
+  /** The same for "all but two producers flowing" (nearShare(producers, 2)), the valve's second step (RULES.flow.valveAfter2). */
+  flowNear2?: number;
   // --- goals and orders ---
   /** Active goal: index into GOALS (GOALS.length when all are claimed) and whether it is waiting for claimGoal(). */
   goal: { i: number; ready: boolean };
@@ -307,7 +316,7 @@ export function newGame(): Game {
     paused: false, time: 0, savedAt: Date.now(),
     creditRate: 0, dataRate: { a: 0, b: 0, g: 0 },
     madeAt: { glint: 0 }, demandLeft: {},
-    flow: 0, flowOn: false, flowStreak: 0, flowBest: 0, flowHold: 0, flowNear: 0,
+    flow: 0, flowOn: false, flowStreak: 0, flowBest: 0, flowHold: 0, flowNear: 0, flowNear2: 0,
     goal: { i: 0, ready: false }, goalAt: { i: 0, t: 0 },
     ordersOn: false, order: null, orderSeed: RULES.orders.seed >>> 0,
     ended: false, seenSurplus: false,
@@ -374,6 +383,7 @@ function loadOrder(o: Partial<Order> | null | undefined): Order | null {
     // A reward can never take anything away.
     reward: { credits: pos(r.credits), a: pos(r.a), b: pos(r.b), g: pos(r.g) },
     created: num(o.created, 0), lastProgress: num(o.lastProgress, 0), ready: !!o.ready,
+    ...(typeof o.slowSince === 'number' && isFinite(o.slowSince) ? { slowSince: o.slowSince } : {}),
   };
 }
 
@@ -394,17 +404,69 @@ export function deserialize(json: string): Game | null {
     g.data = { a: pos(raw.data?.a), b: pos(raw.data?.b), g: pos(raw.data?.g) };
     g.sold = loadBag(raw.sold);
     g.soldRate = loadBag(raw.soldRate);
-    // Drop anything that references content that no longer exists.
-    for (const n of g.nodes) {
-      if (n.recipe && !RECIPES[n.recipe]) n.recipe = null;
-      if (n.material && !MATERIALS[n.material]) n.material = null;
-      n.gain = 0;
-      n.gainB = {};
-      n.grace = 3;
-      n.born = num(n.born, 0);
-    }
-    const ids = new Set(g.nodes.map((n) => n.id));
-    g.wires = (Array.isArray(g.wires) ? g.wires : []).filter((w) => ids.has(w.from) && ids.has(w.to));
+    // The board's shape and its deposits: rebuilt from the new-game defaults where the save has none that make sense.
+    const b = raw.board && typeof raw.board === 'object' ? raw.board : {};
+    g.board = { w: pos(b.w, base.board.w) || base.board.w, h: pos(b.h, base.board.h) || base.board.h, expansions: Math.floor(pos(Number(b.expansions), 0)) };
+    const deposits = (Array.isArray(raw.deposits) ? raw.deposits : base.deposits)
+      .filter((d: Partial<Deposit> | null) => !!d && typeof d === 'object' && typeof d.id === 'number' && isFinite(d.id) && !!MATERIALS[d.mat as MatId])
+      .map((d: Deposit) => ({ id: d.id, x: num(d.x, 0), y: num(d.y, 0), mat: d.mat }));
+    g.deposits = deposits.length ? deposits : base.deposits;
+    // Nodes: a node of a kind this version does not know (a save from a later one), or an entry that is not a
+    // node at all, is dropped rather than refusing the whole save; every field gets a sound value; a second node
+    // with an id already in use is dropped. Anything that references content that no longer exists is cleared.
+    const legacy = !('goal' in raw);
+    const seen = new Set<number>();
+    g.nodes = (Array.isArray(raw.nodes) ? raw.nodes : []).filter((n: Partial<GNode> | null) => {
+      if (!n || typeof n !== 'object' || !NODE_DEFS[n.type as NodeType] || typeof n.id !== 'number' || !isFinite(n.id) || seen.has(n.id)) return false;
+      seen.add(n.id);
+      return true;
+    }).map((n: GNode) => {
+      const fresh = makeNode(base, n.type, 0, 0);
+      const lv = n.lv && typeof n.lv === 'object' ? n.lv : fresh.lv;
+      const level = (v: unknown) => Math.floor(pos(v, 0));
+      const out: GNode = {
+        ...fresh, ...n,
+        x: num(n.x, 0), y: num(n.y, 0),
+        recipe: typeof n.recipe === 'string' && RECIPES[n.recipe] ? n.recipe : null,
+        material: n.material && MATERIALS[n.material] ? n.material : null,
+        depositId: typeof n.depositId === 'number' && isFinite(n.depositId) ? n.depositId : null,
+        lv: { speed: level(lv.speed), eff: level(lv.eff), buffer: level(lv.buffer) },
+        paid: pos(n.paid), mode: (['even', 'ratio', 'priority', 'filter'] as RouterMode[]).includes(n.mode) ? n.mode : 'even',
+        born: num(n.born, 0), inb: loadBag(n.inb), outb: loadBag(n.outb),
+        prog: pos(n.prog), crafting: !!n.crafting, cycles: pos(n.cycles), util: Math.min(1, pos(n.util)), rate: pos(n.rate),
+        fBlocked: Math.min(1, pos(n.fBlocked)), fStarved: Math.min(1, pos(n.fStarved)),
+        status: (['working', 'blocked', 'starved', 'idle'] as Status[]).includes(n.status) ? n.status : 'idle',
+        missing: n.missing && MATERIALS[n.missing] ? n.missing : null, blockedOn: n.blockedOn && MATERIALS[n.blockedOn] ? n.blockedOn : null,
+        gain: 0, gainB: {}, grace: 3,
+      };
+      // A save from the public version, which charged less: what was paid there caps the refund (refundOf).
+      if (legacy) out.legacyPaid = out.paid;
+      else if (typeof n.legacyPaid === 'number' && isFinite(n.legacyPaid)) out.legacyPaid = Math.max(0, n.legacyPaid);
+      else delete out.legacyPaid;
+      return out;
+    });
+    const byId = new Map(g.nodes.map((n) => [n.id, n]));
+    /** Output ports a node has: one per output of its recipe, one for a Well or a junction, none for a sink. */
+    const portsOf = (n: GNode) => (n.type === 'market' || n.type === 'lab' || n.type === 'void' ? 0 : n.recipe ? RECIPES[n.recipe].outputs.length : 1);
+    g.wires = (Array.isArray(raw.wires) ? raw.wires : []).filter((w: Partial<Wire> | null) => {
+      if (!w || typeof w !== 'object' || typeof w.id !== 'number' || !isFinite(w.id) || seen.has(w.id)) return false;
+      const from = byId.get(w.from as number);
+      if (!from || !byId.has(w.to as number) || w.from === w.to) return false;
+      const port = num(w.port, 0);
+      if (port < 0 || port >= Math.max(1, portsOf(from))) return false;
+      seen.add(w.id);
+      return true;
+    }).map((w: Wire): Wire => ({
+      ...w, port: Math.floor(num(w.port, 0)),
+      // A pipe tier this version does not have is the best one it has.
+      tier: Math.min(PIPES.length - 1, Math.floor(pos(w.tier))), paid: pos(w.paid), weight: Math.min(99, Math.floor(pos(w.weight, 1))),
+      filter: w.filter && MATERIALS[w.filter] ? w.filter : null, mat: w.mat && MATERIALS[w.mat] ? w.mat : null,
+      mixed: !!w.mixed, budget: num(w.budget, 0), flow: num(w.flow, 0),
+    }));
+    // Ids are handed out from nextId: never one that is already in use.
+    let top = 0;
+    for (const x of [...g.nodes, ...g.wires, ...g.deposits]) top = Math.max(top, x.id);
+    g.nextId = Math.max(Math.floor(num(raw.nextId, 0)), top + 1, base.nextId);
     for (const w of g.wires) {
       // The rate and its bookkeeping are display only: anything odd is dropped and measured afresh.
       w.rate = pos(w.rate);
@@ -442,6 +504,7 @@ export function deserialize(json: string): Game | null {
     g.flowBest = num(raw.flowBest, 0);
     g.flowHold = num(raw.flowHold, 0);
     g.flowNear = pos(raw.flowNear);
+    g.flowNear2 = pos(raw.flowNear2);
     g.orderSeed = num(raw.orderSeed, base.orderSeed) >>> 0;
     g.order = loadOrder(raw.order);
     // A save from before the `ended` flag that already has a Lens is past the demo.
@@ -470,10 +533,24 @@ export function saveGame(g: Game) {
   }
 }
 
+/** Where a save that cannot be read is kept, before anything can overwrite it (a new game saves under KEY). */
+export const BACKUP_KEY = `${KEY}.bak`;
+
 export function loadGame(): Game | null {
   try {
     const json = localStorage.getItem(KEY);
-    return json ? deserialize(json) : null;
+    if (!json) return null;
+    const g = deserialize(json);
+    if (!g) {
+      // Not readable by this version (damaged, or from one that is too different): keep it, so that the new game
+      // the start screen offers does not destroy it.
+      try {
+        localStorage.setItem(BACKUP_KEY, json);
+      } catch {
+        /* storage full or unavailable */
+      }
+    }
+    return g;
   } catch {
     return null;
   }
@@ -507,19 +584,24 @@ export const isLookahead = (g: Game) => lookaheads.has(g);
 // ---------- structure snapshots (undo) ----------
 
 export interface Snapshot {
-  nodes: Pick<GNode, 'id' | 'type' | 'x' | 'y' | 'recipe' | 'material' | 'depositId' | 'lv' | 'paid' | 'mode' | 'born'>[];
+  nodes: Pick<GNode, 'id' | 'type' | 'x' | 'y' | 'recipe' | 'material' | 'depositId' | 'lv' | 'paid' | 'legacyPaid' | 'mode' | 'born'>[];
   wires: Pick<Wire, 'id' | 'from' | 'port' | 'to' | 'tier' | 'paid' | 'weight' | 'filter'>[];
+  /** The board's size and its deposits: an expansion is undone with the rest (actions.ts expandBoard). */
+  board?: Game['board'];
+  deposits?: Deposit[];
 }
 
 export function snapshot(g: Game): Snapshot {
   return {
     nodes: g.nodes.map((n) => ({
       id: n.id, type: n.type, x: n.x, y: n.y, recipe: n.recipe, material: n.material,
-      depositId: n.depositId, lv: { ...n.lv }, paid: n.paid, mode: n.mode, born: n.born,
+      depositId: n.depositId, lv: { ...n.lv }, paid: n.paid, ...(n.legacyPaid != null ? { legacyPaid: n.legacyPaid } : {}), mode: n.mode, born: n.born,
     })),
     wires: g.wires.map((w) => ({
       id: w.id, from: w.from, port: w.port, to: w.to, tier: w.tier, paid: w.paid, weight: w.weight, filter: w.filter,
     })),
+    board: { ...g.board },
+    deposits: g.deposits.map((d) => ({ ...d })),
   };
 }
 
@@ -575,5 +657,7 @@ export function restore(g: Game, s: Snapshot) {
     g.nextId--;
     return { ...(prev ?? fresh), ...sw };
   });
+  if (s.board) g.board = { ...s.board };
+  if (s.deposits) g.deposits = s.deposits.map((d) => ({ ...d }));
   g.rev++;
 }

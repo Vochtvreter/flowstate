@@ -52,7 +52,7 @@ export function throughput(g: Game, seconds: number, wireIds: number[], dt = 0.0
  * player who claims a filled order ten seconds after it fills and does the card's research the moment it is
  * affordable. Returns the seconds until the wait the game was in has ended, or Infinity after `limit`.
  */
-export function realWaitEnds(copy: Game, limit: number, dt = 0.1): number {
+export function realWaitEnds(copy: Game, limit: number, dt = 0.1, act?: (g: Game) => number): number {
   const kind = waitKind(copy);
   const goal = copy.goal.i;
   const filled = copy.stats.ordersFilled;
@@ -66,7 +66,14 @@ export function realWaitEnds(copy: Game, limit: number, dt = 0.1): number {
     return waitInfo(copy) === null;
   };
   if (over()) return 0;
+  // `act`: the player's own gestures meanwhile (a card's line, say), asked once their hands are free again; it
+  // returns the seconds the gesture keeps them busy (0: nothing done).
+  let freeAt = copy.time;
   for (let t = dt; t <= limit; t += dt) {
+    if (act && copy.time >= freeAt) {
+      const busy = act(copy);
+      freeAt = copy.time + (busy > 0 ? busy : 1);
+    }
     tick(copy, dt);
     if (copy.order?.ready) {
       if (readySince == null) readySince = copy.time;

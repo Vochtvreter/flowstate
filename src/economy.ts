@@ -1,6 +1,7 @@
 import {
   DATA_YIELD, DataTier, MATERIALS, MatId, NODE_DEFS, NodeType, PIPES, RECIPES, RULES, Recipe, TECHS, Tech, Track,
 } from './content';
+import { graph, isMachine, isPass } from './graph';
 import { Game, GNode, noteEdit } from './state';
 
 export const has = (g: Game, tech: string | undefined) => !tech || g.techs.includes(tech);
@@ -79,6 +80,63 @@ export const effEvery = (n: GNode) => (n.lv.eff > 0 ? 7 - n.lv.eff : 0);
 
 export function recipeOf(n: GNode): Recipe | null {
   return n.recipe ? RECIPES[n.recipe] ?? null : null;
+}
+
+/** Materials that can come out of a node's output port, following pass-through nodes upstream. */
+export function materialsAt(g: Game, id: number, port = 0, seen = new Set<number>()): MatId[] {
+  const n = graph(g).byId.get(id);
+  if (!n || seen.has(id)) return [];
+  seen.add(id);
+  if (n.type === 'well') return n.material ? [n.material] : [];
+  if (isMachine(n)) {
+    const m = recipeOf(n)?.outputs[port]?.[0];
+    return m ? [m] : [];
+  }
+  if (isPass(n)) {
+    const out = new Set<MatId>();
+    for (const w of graph(g).ins.get(id) ?? []) for (const m of materialsAt(g, w.from, w.port, seen)) out.add(m);
+    return [...out];
+  }
+  return [];
+}
+
+export function recipesFor(g: Game, type: NodeType): Recipe[] {
+  return Object.values(RECIPES).filter((r) => r.machine === type && recipeUnlocked(g, r));
+}
+
+/**
+ * The unlocked recipe a machine of this type takes from the materials wired into it: of those that use any of
+ * them, the one that uses the largest share of its inputs from them, then the one with the fewest inputs, then
+ * the earliest in the tech tree (RECIPES order). So a Fabricator built from the Prism Assembler's port makes
+ * Lens even once Dynamo is researched, and an Assembler built from the Spark Refiner's port makes Glyph after
+ * Reclamation: what the cards say. (It used to be the dearest output, which picked Dynamo and Coil there.)
+ */
+export function pickRecipe(g: Game, type: NodeType, mats: MatId[]): Recipe | null {
+  const order = Object.keys(RECIPES);
+  const share = (r: Recipe) => r.inputs.filter((i) => mats.includes(i[0])).length / r.inputs.length;
+  const fits = recipesFor(g, type).filter((r) => r.inputs.some((i) => mats.includes(i[0])));
+  fits.sort((a, b) => share(b) - share(a) || a.inputs.length - b.inputs.length || order.indexOf(a.id) - order.indexOf(b.id));
+  return fits[0] ?? null;
+}
+
+/**
+ * Machines that stand without a recipe with something wired into them take the recipe that research has since
+ * made possible for what they get (a Refiner on the Silt port picks Clay once Reclamation is researched).
+ * Called after every grant of a tech, and once a tick (src/sim.ts) for a board loaded or changed otherwise: it
+ * costs a look at each machine without a recipe, and there are hardly ever any.
+ */
+export function adoptRecipes(g: Game) {
+  const c = graph(g);
+  for (const n of g.nodes) {
+    if (!isMachine(n) || n.recipe || !(c.ins.get(n.id)?.length)) continue;
+    const mats = new Set<MatId>();
+    for (const w of c.ins.get(n.id) ?? []) for (const m of materialsAt(g, w.from, w.port)) mats.add(m);
+    const r = mats.size ? pickRecipe(g, n.type, [...mats]) : null;
+    if (!r) continue;
+    n.recipe = r.id;
+    n.born = g.time;
+    g.rev++;
+  }
 }
 
 // ---------- market ----------
@@ -233,6 +291,7 @@ export function grantTech(g: Game, id: string) {
   g.queue = g.queue.filter((q) => q !== id);
   g.events.push({ kind: 'tech', id });
   g.rev++;
+  adoptRecipes(g);
 }
 
 /** The demo is complete (first Lens). Sets `ended` once and raises 'demo-end'; later calls do nothing. */
