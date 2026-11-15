@@ -37,12 +37,14 @@
 .res.pop .sym, .res.pop .nums b { animation: feel-pop-a 0.12s cubic-bezier(0.3, 0, 0.6, 1); }
 .res.pop.pop2 .sym, .res.pop.pop2 .nums b { animation-name: feel-pop-b; }
 .res.pop .nums b { transform-origin: 0 50%; }
-@keyframes feel-pop-a { from { transform: scale(1.2); } to { transform: none; } }
-@keyframes feel-pop-b { from { transform: scale(1.2); } to { transform: none; } }
-/* On a narrow bar the Data counters are lines of one block, each number against the block's right edge: it grows leftwards. */
+@keyframes feel-pop-a { from { transform: scale(var(--feel-pop, 1.2)); } to { transform: none; } }
+@keyframes feel-pop-b { from { transform: scale(var(--feel-pop, 1.2)); } to { transform: none; } }
+/* On a narrow bar the Data counters are lines of one block, each number against the block's right
+   edge: it grows leftwards. Three lines leave 1 px between them, so there the jump is 1.15. */
 @media (max-width: 900px) {
   .datas .res.pop .nums b { transform-origin: 100% 50%; }
   .datas .res.pop .sym { transform-origin: 0 50%; }
+  .datas[data-n='3'] .res { --feel-pop: 1.15; }
 }
 
 /* ---------- board polish ---------- */

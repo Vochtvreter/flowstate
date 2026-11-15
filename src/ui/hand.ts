@@ -6,10 +6,12 @@
 //    on the goal that teaches wiring, or on the one that teaches building from a port, it shows the
 //    gesture over and over until they move. It never comes back for a gesture they have done once.
 //  - A tip that has gone stale ("tip"). It appears at the tip's Show me button and taps it once in
-//    the air.
+//    the air. The goal card can carry two such buttons (a tip's, and the "while you wait" line's):
+//    the hand goes to whichever was last reported stale, and leaves only when that one goes.
 //  - Show me ("showme"). It acts the tip's suggestion out twice and leaves: a wire from a port to a
 //    node, a build from a port into empty space, a Well from the build bar onto a deposit, or a
-//    press on a control in the inspector or the tech tree.
+//    press on a control: in the inspector, in the tech tree, or on the board itself (Expand board,
+//    which it stays on while the camera moves).
 //
 // How a gesture looks follows the pointer in use. With a mouse a wire is a drag (press on the port,
 // drag, let go). With a finger it is two taps, as the phone shell wires: tap the port, tap the
@@ -26,7 +28,7 @@ import { NodeType } from '../content';
 import { goalView } from '../goals';
 import { graph } from '../sim';
 import { Game, GNode } from '../state';
-import { armedPort, boardRect, radialOpen, toClient } from './board';
+import { armedPort, boardRect, radialOpen, toClient, toWorld } from './board';
 import { el, setClass, setStyle } from './dom';
 import { Overlay, addOverlay, ring } from './fx';
 import { Pt, bezierAt, inPorts, matColor, nodeSize, outPorts } from './geom';
@@ -61,6 +63,8 @@ interface Act {
   deposit?: number;
   testid?: string;
   at?: Pt;
+  /** The button a stale tip is about, as found where the signal said it was. */
+  el?: Element | null;
   loops: number;
   born: number;
   shown: boolean;
@@ -222,21 +226,32 @@ function wanted(g: Game): Plan | null {
 
 // ---------- controls ----------
 
+/** The middle of an element, if it is on screen and nothing lies over it there. Reads layout. */
+function spotOf(e: Element): Pt | null {
+  const r = e.getBoundingClientRect();
+  if (r.width < 4 || r.height < 4) return null;
+  const p = { x: r.left + r.width / 2, y: r.top + r.height / 2 };
+  if (p.x < 0 || p.y < 0 || p.x > window.innerWidth || p.y > window.innerHeight) return null;
+  const hit = document.elementFromPoint(p.x, p.y);
+  return hit && (e === hit || e.contains(hit)) ? p : null;
+}
+
 /**
- * The middle of a control, if it is on screen and nothing lies over it there. Reads layout, so it is
- * only called on the beat.
+ * A control and its middle, if it is on screen and nothing lies over it there. Reads layout, so it
+ * is only called on the beat.
  */
-function controlAt(selector: string): Pt | null {
+function controlHit(selector: string): { at: Pt; el: HTMLElement } | null {
   for (const e of document.querySelectorAll<HTMLElement>(selector)) {
-    const r = e.getBoundingClientRect();
-    if (r.width < 4 || r.height < 4) continue;
-    const p = { x: r.left + r.width / 2, y: r.top + r.height / 2 };
-    if (p.x < 0 || p.y < 0 || p.x > window.innerWidth || p.y > window.innerHeight) continue;
-    const hit = document.elementFromPoint(p.x, p.y);
-    if (hit && (e === hit || e.contains(hit))) return p;
+    const at = spotOf(e);
+    if (at) return { at, el: e };
   }
   return null;
 }
+
+const controlAt = (selector: string): Pt | null => controlHit(selector)?.at ?? null;
+
+/** The button under a point of the screen, if there is one. Reads layout. */
+const buttonAt = (p: Pt): Element | null => document.elementFromPoint(p.x, p.y)?.closest('button') ?? null;
 
 const byTestId = (id: string) => `[data-testid="${id.replace(/["\\]/g, '')}"]`;
 
@@ -278,15 +293,20 @@ function resolve(g: Game, a: Act): Plan | 'done' | null {
     }
     case 'press': {
       if (blockedAnywhere()) return null;
-      const p = controlAt(byTestId(a.testid!));
-      return p ? { kind: 'press', source: a.source, mode: 'tap', a: null, b: screen(p), wire: null, card: null, ghost: false, color: '#fff', loops: a.loops } : null;
+      const hit = controlHit(byTestId(a.testid!));
+      if (!hit) return null;
+      // A control that is part of the board (Expand board) moves with the camera: the hand stays on it.
+      const b = hit.el.closest('#board') ? world(toWorld(hit.at.x, hit.at.y)) : screen(hit.at);
+      return { kind: 'press', source: a.source, mode: 'tap', a: null, b, wire: null, card: null, ghost: false, color: '#fff', loops: a.loops };
     }
     case 'point': {
       if (blockedAnywhere()) return null;
-      // The tip's Show me button, measured afresh (the card may have moved since the signal); where
-      // the signal said it was when there is no such button to measure.
-      const sel = byTestId('advice-show');
-      const p = document.querySelector(sel) ? controlAt(sel) : a.at && a.at.x > 0 && a.at.y > 0 && a.at.x < window.innerWidth && a.at.y < window.innerHeight ? a.at : null;
+      // The Show me button the signal was about, measured afresh (the card may have moved since). If
+      // the card has redrawn it, the button now at that spot; and where the signal said it was when
+      // there is no button there at all.
+      if (!a.el?.isConnected) a.el = a.at ? buttonAt(a.at) : null;
+      const onScreen = (p: Pt) => p.x > 0 && p.y > 0 && p.x < window.innerWidth && p.y < window.innerHeight;
+      const p = a.el ? spotOf(a.el) : a.at && onScreen(a.at) ? a.at : null;
       return p ? { kind: 'point', source: a.source, mode: 'tap', a: null, b: screen(p), wire: null, card: null, ghost: false, color: '#fff', loops: a.loops } : null;
     }
   }
@@ -409,6 +429,7 @@ export function initHand(hooks: { record: typeof record; busy: () => boolean }) 
   onNewGame(() => {
     builtOnce = false;
     act = null;
+    offers.length = 0;
     pointersDown.clear();
     lastInput = performance.now();
     hide('new game');
@@ -432,19 +453,56 @@ export function actOut(d: Signals['showme']) {
   soon();
 }
 
-/** A tip has gone stale: appear at its Show me button and tap it once in the air. `null`: the tip has gone. */
-export function pointAt(at: Pt | null) {
-  if (!at) {
-    if (act?.source === 'tip') {
-      drop('gone');
-      hide('gone');
-    }
-    return;
+/** Where each Show me button on the goal card was last reported (shown or stale), newest last. A handful at most. */
+const offers: Pt[] = [];
+const apart = (a: Pt, b: Pt) => Math.hypot(a.x - b.x, a.y - b.y);
+/** Two reports this close together are about the same button. */
+const SAME_PX = 12;
+
+function noteOffer(at: Pt) {
+  const i = offers.findIndex((o) => apart(o, at) < SAME_PX);
+  if (i >= 0) offers.splice(i, 1);
+  offers.push({ x: at.x, y: at.y });
+  if (offers.length > 4) offers.shift();
+}
+
+/**
+ * The goal card's Show me buttons (the tip's, and the "while you wait" line's) each report through
+ * the 'tip' signal: shown, stale, gone, with the middle of the button.
+ *  - stale: the hand goes to that button and taps it once in the air. A later report for the other
+ *    button takes the hand there instead.
+ *  - gone: the hand leaves only if the button that went is the one it is at. Which button a 'gone'
+ *    is about is told by where it was last reported: the nearest of the reports on record.
+ */
+export function tipSignal(d: Signals['tip']) {
+  if (d.state === 'shown') return noteOffer(d.at);
+  if (d.state === 'stale') {
+    noteOffer(d.at);
+    return pointAt(d.at);
   }
+  let nearest = -1;
+  offers.forEach((o, i) => {
+    if (nearest < 0 || apart(o, d.at) < apart(offers[nearest], d.at)) nearest = i;
+  });
+  const went = nearest >= 0 ? offers.splice(nearest, 1)[0] : null;
+  if (act?.source === 'tip' && act.at && (!went || apart(went, act.at) < SAME_PX)) {
+    drop('gone');
+    hide('gone');
+  }
+}
+
+/** A tip has gone stale: appear at its Show me button (whose middle is `at`) and tap it once in the air. */
+function pointAt(at: Pt) {
   // Show me in progress is the player's own request: a reminder does not cut it short.
-  if (act) return;
-  act = { source: 'tip', kind: 'point', at: { x: at.x, y: at.y }, loops: 1, born: performance.now(), shown: false };
-  record('hand', 'ask', 'tip:point');
+  if (act?.source === 'showme') return;
+  // (Already at the other button: this one is the later report, and the hand goes to it.)
+  if (act) {
+    drop('other');
+    hide('other');
+  }
+  // The button itself is looked up now, while the card is as the signal found it; it is measured again when the hand shows.
+  act = { source: 'tip', kind: 'point', at: { x: at.x, y: at.y }, el: buttonAt(at), loops: 1, born: performance.now(), shown: false };
+  record('hand', 'ask', `tip:point ${Math.round(at.x)},${Math.round(at.y)}`);
   soon();
 }
 

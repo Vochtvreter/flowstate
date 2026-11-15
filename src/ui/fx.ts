@@ -700,7 +700,10 @@ export function endFloater(handle: object | null, text: string) {
   if (p && p.kind === TEXT && p.text === text) kill(p);
 }
 
-/** How large a floater's picture is on screen, in px: for placing one where it covers nothing. */
+/**
+ * How large a floater's picture is on screen, in px: for placing one where it covers nothing.
+ * (As it pops in it is a fifth larger for a tenth of a second: a tenth of its width more on each side.)
+ */
 export function floaterSize(text: string, size = 13, o?: FloaterOpts): { w: number; h: number } {
   const sp = textSprite(text, '#ffffff', floaterPx(size, o), 1, !!o?.plate);
   return { w: sp.w, h: sp.h };
@@ -928,7 +931,8 @@ function drawOne(c: CanvasRenderingContext2D, p: Particle, ratio: number) {
       const s = p.flags & F_STILL ? 1 : v < 0.1 ? 0.6 + v * 6 : v < 0.22 ? 1.2 - ((v - 0.1) / 0.12) * 0.2 : 1;
       const left = p.ttl - p.t;
       c.globalAlpha = left >= p.fade ? 1 : Math.max(0, left / p.fade);
-      if (p.flags & F_LEFT) c.drawImage(sp.canvas, p.x, p.y - rise - (sp.h * s) / 2, sp.w * s, sp.h * s);
+      // (Left-aligned text swells about its own middle, so it overshoots its box by the same little on each side.)
+      if (p.flags & F_LEFT) c.drawImage(sp.canvas, p.x - (sp.w * (s - 1)) / 2, p.y - rise - (sp.h * s) / 2, sp.w * s, sp.h * s);
       else c.drawImage(sp.canvas, p.x - (sp.w * s) / 2, p.y - rise - sp.base * s, sp.w * s, sp.h * s);
       break;
     }

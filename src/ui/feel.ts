@@ -12,14 +12,14 @@ import { Game, GameEvent, GoalReward } from '../state';
 import {
   audioState, buzz, cueAfford, cueClaim, cueConnect, cueError, cueExpand, cueExpandPop, cueFlowIn, cueLineDone, cuePayout, cuePlace,
   cueReady, cueSales, cueStart, cueSurplus, cueTip, freshenSales, initAudio, isMuted, onMuteChange, renderCue, renderPeak, renderSales,
-  resetAudio, setDrone, setMuted,
+  resetAudio, saleLevel, saleStep, setDrone, setMuted,
 } from './audio';
 import { boardRect, toClient } from './board';
 import { celebrateEnd, celebrateFlow, celebrateGoal, cancelCelebrations, celebrating, initCelebrate } from './celebrate';
 import { anchorPt, el, setAttr, setClass, setHTML } from './dom';
 import { FloaterOpts, FlyOpts, Overlay, addOverlay, burst, clearParticles, endFloater, floater, floaterSize, fly, pop, ring, setMood } from './fx';
 import { Pt, bezierAt, matColor, nodeSize, outPorts, wireEnds } from './geom';
-import { actOut, handState, initHand, pointAt } from './hand';
+import { actOut, handState, initHand, tipSignal } from './hand';
 import { addTopItem } from './panels';
 import { onBeat, onFrame, onGame, onNewGame, onPress, onSignal, signal, ui } from './ui';
 
@@ -100,12 +100,12 @@ function popCounter(testid: string) {
 }
 
 /**
- * Where "+12¢" may stand, as the middle of its left edge: beside the counter's number, on its line,
+ * Where "+12¢" may stand, as the middle of its left edge (and how large it is): beside the counter
  * when nothing else is there (it may lie over the counter's own Flow bonus); otherwise tucked under
  * the counter, against the foot of the bar. Never over another counter or a button, never past the
  * edge of the window. Reads layout: called once for each counter a payout lands on.
  */
-function labelSpot(testid: string, text: string): { at: Pt; where: 'beside' | 'under' } | null {
+function labelSpot(testid: string, text: string): { at: Pt; where: 'beside' | 'under'; w: number; h: number } | null {
   const chip = counterEl(testid);
   const bar = document.getElementById('top');
   if (!chip || !bar) return null;
@@ -119,19 +119,27 @@ function labelSpot(testid: string, text: string): { at: Pt; where: 'beside' | 'u
     const r = e.getBoundingClientRect();
     if (r.width && r.height) others.push(r);
   }
-  const fits = (x: number) => x >= 4 && x + w <= window.innerWidth - 4;
-  const clear = (x: number, y: number) => !others.some((r) => x < r.right + 3 && x + w > r.left - 3 && y - h / 2 < r.bottom && y + h / 2 > r.top);
-  // Beside: just outside the counter, level with its middle; or, when something else is there, just
-  // right of the number inside it (over the Flow bonus, which is the counter's own).
-  const y = Math.round(c.top + c.height / 2);
-  for (const x of [Math.round(c.right + 5), Math.round(num.right + 6)]) if (fits(x) && clear(x, y)) return { at: { x, y }, where: 'beside' };
-  // Under: the Data counters of a narrow bar are lines of one block, and the amount goes under the block.
+  // Clear of everything else by 3 px at rest, and not touching it while it pops in (a tenth wider on each side for a moment).
+  const m = Math.max(3, w * 0.1);
+  const fits = (x: number) => x >= m && x + w <= window.innerWidth - m;
+  const clear = (x: number, y: number) => !others.some((r) => x < r.right + m && x + w > r.left - m && y - h / 2 < r.bottom && y + h / 2 > r.top);
+  // The Data counters of a narrow bar are lines of one block: "beside" and "under" are then beside and under the block.
   const block = chip.parentElement?.classList.contains('datas') ? chip.parentElement.getBoundingClientRect() : null;
   const box = block && block.height > c.height ? block : c;
-  const x = Math.round(Math.max(4, Math.min(window.innerWidth - 4 - w, box.left + box.width / 2 - w / 2)));
-  // Its top overlaps the counter's foot by a few px while it is no wider than the counter; a wider one stays clear of the row.
-  const top = x >= box.left - 3 && x + w <= box.right + 3 ? box.bottom - 7 : box.bottom + 1;
-  return { at: { x, y: Math.round(top + h / 2) }, where: 'under' };
+  // Beside: just outside the counter, level with its middle; or, when something else is there, just
+  // right of the number inside it (over the Flow bonus, which is the counter's own).
+  const y = Math.round(Math.max(h / 2 + 2, c.top + c.height / 2));
+  for (const x of box === c ? [Math.round(c.right + 5), Math.round(num.right + 6)] : [Math.round(box.right + 5)]) {
+    if (fits(x) && clear(x, y)) return { at: { x, y }, where: 'beside', w, h };
+  }
+  // Under: in the middle of the counter, its top a few px into the counter's foot (under the rate
+  // line); or just clear of the bar's row when that would touch anything else (another line of a
+  // Data block, a neighbour it is wider than).
+  const x = Math.round(Math.max(m, Math.min(window.innerWidth - m - w, box.left + box.width / 2 - w / 2)));
+  const tucked = Math.round(box.bottom - 7 + h / 2);
+  // (Its own number counts too: the last line of a Data block reaches down to the block's foot.)
+  const free = clear(x, tucked) && !(x < num.right && x + w > num.left && tucked - h / 2 < num.bottom);
+  return { at: { x, y: free ? tucked : Math.round(box.bottom + 1 + h / 2) }, where: 'under', w, h };
 }
 
 /** The amount standing at each counter right now: a second payout to the same counter adds to it instead of writing over it. */
@@ -148,7 +156,7 @@ function showAmount(testid: string, amount: number, unit: string, color: string)
   const text = `+${fmt(total)}${unit}`;
   const spot = labelSpot(testid, text);
   if (!spot) return;
-  record('pay', 'label', `${testid} ${text} ${spot.where} ${spot.at.x},${spot.at.y}`);
+  record('pay', 'label', `${testid} ${text} ${spot.where} ${spot.at.x},${spot.at.y} ${spot.w}x${spot.h}`);
   standing.set(testid, { handle: floater(spot.at, text, color, LABEL_PX, LABEL), text, amount: total, until: now + (LABEL.life! - LABEL.fade!) * 1000 });
 }
 
@@ -345,19 +353,26 @@ function handleEvents(events: GameEvent[]) {
 
 // ---------- interface signals ----------
 
-/** Credits each Market earned in the second just gone; played as one soft run of ticks. */
+/** The pitch step of each Market that sold in the second just gone; played as one soft run of ticks. */
 const sales: number[] = [];
 /**
- * Each Market's takings, smoothed. Items arrive in bursts, so one second's takings jump about even
- * when the line is steady; the tick's pitch follows the smoothed figure and stays put.
+ * Each Market's takings, smoothed, and the pitch step they are held at. Items arrive in bursts (a
+ * machine that makes one every two seconds pays every other second), so one second's takings jump
+ * about even when the line is steady. The step follows the smoothed figure, and it holds: it moves
+ * only when the takings are clearly on another step (three quarters of the way there), so the ticks'
+ * figure is heard around one note instead of hopping between two.
  */
-const takings = new Map<number, number>();
+const takings = new Map<number, { smooth: number; n: number; step: number }>();
 
 function onSale(d: { id: number; amount: number }) {
-  const before = takings.get(d.id);
-  const smooth = before == null ? d.amount : before + (d.amount - before) * 0.3;
-  takings.set(d.id, smooth);
-  sales.push(smooth);
+  let t = takings.get(d.id);
+  if (!t) takings.set(d.id, (t = { smooth: d.amount, n: 0, step: saleStep(saleLevel(d.amount)) }));
+  // A plain average over the first few seconds, then a slow follower.
+  t.n++;
+  t.smooth += (d.amount - t.smooth) * Math.max(0.15, 1 / t.n);
+  const level = saleLevel(t.smooth);
+  if (Math.abs(level - t.step) > 0.75) t.step = saleStep(level);
+  sales.push(t.step);
   if (reduced() || ui.techOpen) return;
   // The Market's coin pops. (The floating "+N¢" and the coins to the counter are the board's.)
   const n = nodeById(ui.g, d.id);
@@ -485,6 +500,7 @@ const worldRingOverlay: Overlay = {
 const expandTimers: number[] = [];
 
 function onExpand(d: { deposits: number[]; stagger: number }) {
+  for (const t of expandTimers.splice(0)) clearTimeout(t);
   record('celebrate', 'expand', d.deposits.join(','));
   cueExpand();
   buzz('expand', 15);
@@ -664,7 +680,7 @@ export function initFeel() {
   // at its Show me button when it has gone stale, and the hand acting it out when Show me is pressed.
   onSignal('tip', (d) => {
     if (d.state === 'shown') cueTip();
-    else pointAt(d.state === 'stale' ? d.at : null);
+    tipSignal(d);
   });
   onSignal('showme', actOut);
   onSignal('expand', onExpand);

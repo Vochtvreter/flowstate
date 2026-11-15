@@ -379,8 +379,10 @@ function tick(g: Graph, step: number, t: number, peak: number, out?: AudioNode) 
   tone(g, 'triangle', f * 2, t, peak * 0.22, 0.002, 0.04, { out });
 }
 
-/** Pitch step for a sale worth `amount` credits: about one step for every doubling. */
-export const saleStep = (amount: number) => Math.max(0, Math.min(TOP_STEP, Math.round(Math.log2(1 + Math.max(0, amount)) * 1.25) - 1));
+/** Where on the scale a sale worth `amount` credits lies, as a number: about one step for every doubling. */
+export const saleLevel = (amount: number) => Math.log2(1 + Math.max(0, amount)) * 1.25 - 1;
+/** The pitch step nearest to a level: a whole number from 0 to 9. */
+export const saleStep = (level: number) => Math.max(0, Math.min(TOP_STEP, Math.round(level)));
 
 /** The most ticks one second of sales may make, however many Markets sold. */
 const SALE_TICKS = 3;
@@ -392,6 +394,8 @@ const SALE_FIGURE = [0, 1, 2, 1];
 const SALE_JITTER = 0.015;
 /** A tick is scheduled this far ahead on the audio clock, so that "a little early" is still in the future. */
 const SALE_LEAD = 0.018;
+/** The least time from a tick to the third tick after it, in seconds: a second, and a hair for safety. */
+const SALE_APART = 1.002;
 /** Peak of one sale tick into the sale voice. */
 const SALE_PEAK = 0.05;
 /** Seconds of nothing new before the sale voice steps back, how far it steps back, and how long that takes. */
@@ -445,10 +449,13 @@ function freshen(v: SaleVoice, t: number) {
  *  - A step that has not sounded for SALE_TIRE seconds is news: the voice comes back to full level.
  *    With nothing new for that long it steps back to half over SALE_FALL seconds.
  *  - No tick starts less than a second after the tick three before it, so there are never more than
- *    three in any second, jitter and all. (A tick that would have to wait more than the jitter for
- *    that is left out.)
+ *    three in any second, jitter and all. With three Markets' worth of ticks every second that means
+ *    a tick may not come sooner after its counterpart of the second before than that one came after
+ *    its own: its random place is moved later when it would. (The seconds are never quite a second
+ *    apart: the board's timer overruns by part of a frame, and that is the room the jitter has to
+ *    move back in.) A tick that would have to be more than the jitter late for this is left out.
  */
-function saleBatch(g: Graph, v: SaleVoice, now: number, steps: number[], rand: () => number = Math.random): { t: number; step: number }[] {
+function saleBatch(g: Graph, v: SaleVoice, now: number, steps: number[], rand: () => number = Math.random): { t: number; step: number; due: number }[] {
   // One batch a second: a second batch inside 600 ms (two games in one page, a test poking signals) is dropped.
   if (!steps.length || now - v.lastBatch < 0.6) return [];
   v.lastBatch = now;
@@ -464,16 +471,16 @@ function saleBatch(g: Graph, v: SaleVoice, now: number, steps: number[], rand: (
     v.gain.gain.linearRampToValueAtTime(SALE_BACK, now + SALE_FALL);
   }
   const up = SALE_FIGURE[v.beat++ % SALE_FIGURE.length];
-  const out: { t: number; step: number }[] = [];
+  const out: { t: number; step: number; due: number }[] = [];
   picked.forEach((step, i) => {
     const due = now + SALE_LEAD + i * SALE_GAP;
     let t = due + (rand() * 2 - 1) * SALE_JITTER;
-    if (v.times.length >= SALE_TICKS) t = Math.max(t, v.times[v.times.length - SALE_TICKS] + 1.001);
-    if (t > due + SALE_JITTER + 1e-6) return;
+    if (v.times.length >= SALE_TICKS) t = Math.max(t, v.times[v.times.length - SALE_TICKS] + SALE_APART);
+    if (t > due + SALE_JITTER + 0.0005) return;
     v.times.push(t);
     if (v.times.length > SALE_TICKS) v.times.shift();
     tick(g, step + up, t, SALE_PEAK, v.gain);
-    out.push({ t, step: step + up });
+    out.push({ t, step: step + up, due });
   });
   return out;
 }
@@ -481,20 +488,20 @@ function saleBatch(g: Graph, v: SaleVoice, now: number, steps: number[], rand: (
 let saleVoice: SaleVoice | null = null;
 
 /**
- * What the Markets sold in the last second, as credits per Market. However many Markets there are,
- * at most three soft ticks are played, low to high and a moment apart, and from one second to the
- * next they walk a four-note figure (the step, one up, two up, one up): a patter with a tune in it,
- * never a buzz and never a metronome. See saleBatch for the rest.
+ * What the Markets sold in the last second, as one pitch step per Market (saleStep). However many
+ * Markets there are, at most three soft ticks are played, low to high and a moment apart, and from
+ * one second to the next they walk a four-note figure (the step, one up, two up, one up): a patter
+ * with a tune in it, never a buzz and never a metronome. See saleBatch for the rest.
  */
-export function cueSales(amounts: number[]) {
+export function cueSales(steps: number[]) {
   const g = live();
-  if (!amounts.length || !g) return;
+  if (!steps.length || !g) return;
   // Sales give way like any everyday cue: when the second is already full, this second's are left out.
   const now = performance.now();
   prune(now);
   if (recent.length >= MAX_PER_SECOND) return;
   saleVoice ??= makeSaleVoice(g);
-  const played = saleBatch(g, saleVoice, g.ctx.currentTime, amounts.map(saleStep));
+  const played = saleBatch(g, saleVoice, g.ctx.currentTime, steps);
   for (const p of played) {
     recent.push(now);
     recorder('cue', 'sale', p.step);
@@ -1074,53 +1081,52 @@ export interface SalesReport {
   /** The most ticks in any one second, by the schedule and by the sound. */
   mostPerSecond: number;
   mostPerSecondHeard: number;
-  /** How far each tick is from where it would be with no jitter, in ms: smallest and largest. */
+  /** How far each tick is from where it would be with no jitter, in ms: smallest and largest, and every one. */
   jitterMs: [number, number];
+  offsets: number[];
   /** The peak of the rendered sound in each whole second. */
   peakBySecond: number[];
 }
 
 /**
  * Render `seconds` of sales on an offline copy of the signal path, driven by the code that drives
- * the live one: a batch of sales every `every` seconds (1 in play), whose steps `stepsAt(second)`
- * gives; `freshAt` are the seconds at which Flow State starts. For checking, without ears, that the
- * figure cycles, that the voice steps back and comes back, and that there are never more than three
- * ticks in a second.
+ * the live one: a batch of sales every `every` seconds plus a random overrun of up to `overrun`
+ * seconds (in play the board sends one a second, late by part of a frame: 1 and 1/60), whose steps
+ * `stepsAt(second)` gives; `freshAt` are the seconds at which Flow State starts. For checking,
+ * without ears, that the figure cycles, that the voice steps back and comes back, and that there
+ * are never more than three ticks in a second.
  */
-export async function renderSales(seconds: number, stepsAt: (second: number) => number[], freshAt: number[] = [], every = 1): Promise<SalesReport> {
+export async function renderSales(seconds: number, stepsAt: (second: number) => number[], freshAt: number[] = [], every = 1, overrun = 1 / 60): Promise<SalesReport> {
   const rate = 22050;
   const ctx = offlineCtx(seconds + 1, rate);
   const g = build(ctx);
+  // (Nothing ends on an offline path until it is rendered, so the cap on live voices would count every tick of the whole stretch.)
+  g.voices = -1e9;
   const v = makeSaleVoice(g);
   const ticks: { t: number; step: number }[] = [];
   const offs: number[] = [];
   const fresh = freshAt.slice().sort((a, b) => a - b);
-  for (let k = 0; k * every < seconds; k++) {
-    const now = k * every;
+  for (let now = 0; now < seconds; now += every + Math.random() * overrun) {
     while (fresh.length && fresh[0] <= now) freshen(v, fresh.shift()!);
-    saleBatch(g, v, now, stepsAt(now)).forEach((p, i) => {
+    for (const p of saleBatch(g, v, now, stepsAt(Math.floor(now)))) {
       ticks.push(p);
-      offs.push((p.t - (now + SALE_LEAD + i * SALE_GAP)) * 1000);
-    });
+      offs.push(+((p.t - p.due) * 1000).toFixed(2));
+    }
   }
   const out = await ctx.startRendering();
   const data = out.getChannelData(0);
-  // Onsets: the envelope (peak over 4 ms) rising through a tenth of the loudest tick after 25 ms below it.
-  const hop = Math.round(rate * 0.004);
-  const env: number[] = [];
+  // Onsets: the first sample at which the sound is over a twentieth of the loudest tick after 6 ms under it.
+  // (A tick is back under that 40 ms after it starts, and the next of its batch comes 55 ms after it at the soonest.)
   let top = 0;
-  for (let i = 0; i + hop <= data.length; i += hop) {
-    let m = 0;
-    for (let j = i; j < i + hop; j++) m = Math.max(m, Math.abs(data[j]));
-    env.push(m);
-    top = Math.max(top, m);
-  }
+  for (let i = 0; i < data.length; i++) top = Math.max(top, Math.abs(data[i]));
   const onsets: number[] = [];
-  let quiet = 99;
-  for (let i = 0; i < env.length; i++) {
-    // (A tick decays in 70 ms; the next one of its batch starts 70 to 115 ms after it, well above what is left of it.)
-    const rising = i > 0 && env[i] > top * 0.08 && env[i] > env[i - 1] * 1.8;
-    if (rising && quiet >= 6) { onsets.push(+((i * hop) / rate).toFixed(3)); quiet = 0; } else quiet++;
+  const hold = Math.round(rate * 0.006);
+  let under = hold;
+  for (let i = 0; i < data.length; i++) {
+    if (Math.abs(data[i]) > top / 20) {
+      if (under >= hold) onsets.push(+(i / rate).toFixed(4));
+      under = 0;
+    } else under++;
   }
   const most = (times: number[]) => {
     let best = 0;
@@ -1140,6 +1146,6 @@ export async function renderSales(seconds: number, stepsAt: (second: number) => 
   return {
     ticks: ticks.map((p) => ({ t: +p.t.toFixed(4), step: p.step })), onsets,
     mostPerSecond: most(ticks.map((p) => p.t)), mostPerSecondHeard: most(onsets),
-    jitterMs: [+Math.min(...offs).toFixed(2), +Math.max(...offs).toFixed(2)], peakBySecond,
+    jitterMs: [+Math.min(...offs).toFixed(2), +Math.max(...offs).toFixed(2)], offsets: offs, peakBySecond,
   };
 }
