@@ -1212,16 +1212,14 @@ function placeExpand(byCamera = false) {
   // it that no card or port lies under. A phone held sideways has no board to spare: while there is no
   // such stretch (the row full, the build menu open, cards all along the row) it waits off the board.
   const rowX = docked && env.phone && ex.row ? rowSeat(ex.row) : null;
-  if (docked && env.phone && ex.short && rowX == null) {
-    hideExpand();
-    return;
-  }
-  setHidden(expandEl, false);
   const afford = g.credits + 1e-6 >= expansionCost(g);
   const call = ex.asked && afford;
-  // (In the thumb row it takes its one-line form, whatever is asked: the row is 44 px tall.)
+  // (In the thumb row it takes its one-line form, whatever is asked: the row is 44 px tall. So it does on a
+  // phone held sideways, where the board is a strip.)
   const inRow = rowX != null;
-  const mini = docked && (!call || inRow);
+  const mini = docked && (!call || inRow || (env.phone && ex.short));
+  // (Shown before it is measured: a hidden element has no size. Hidden again below, before anything is drawn, if it has no place.)
+  setHidden(expandEl, false);
   setClass(expandEl, 'dock', docked);
   setClass(expandEl, 'mini', mini);
   setClass(expandEl, 'call', call);
@@ -1234,6 +1232,7 @@ function placeExpand(byCamera = false) {
     if (mini) ex.miniW = ex.w;
   }
   let target = home;
+  let overCard = false;
   if (rowX != null && ex.row) target = { x: Math.min(rowX, ex.row.x1) - ex.w / 2, y: ex.row.y, s: 1 };
   else if (docked) {
     // (Docked over the board it keeps off the cards on screen too, with their ports, when there is room
@@ -1246,6 +1245,13 @@ function placeExpand(byCamera = false) {
     }
     const p = dockSpot({ home, w: ex.w, h: ex.h, area, blocks: cards.length < 40 ? ex.blocks.concat(cards) : ex.blocks, gap: DOCK_GAP });
     target = { x: p.x + ex.w / 2, y: p.y + ex.h / 2, s: 1 };
+    overCard = cards.some((b) => p.x < b.x1 && p.x + ex.w > b.x0 && p.y < b.y1 && p.y + ex.h > b.y0);
+  }
+  // A phone held sideways has no board to spare: when neither the thumb row nor the board has a place for
+  // it clear of every card and port, it waits off the board (Fit, which pulls the cards together, brings it back).
+  if (docked && env.phone && ex.short && rowX == null && overCard) {
+    hideExpand();
+    return;
   }
   // A change of place is slid: from one place to the other, to a docked place that jumped, and to any new
   // place the camera did not cause. (Not while the board is being opened, nor when motion is reduced.)
