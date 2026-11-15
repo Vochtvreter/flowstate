@@ -774,6 +774,9 @@ function reveal(bx: number, by: number, bw: number, bh: number) {
  */
 export function ensureVisible(id: number) {
   if (!nodeById(ui.g, id)) return;
+  // While the window is being resized the view keeps its anchor (see `stageResized`): the selected node is
+  // looked at once the resizing has stopped, where the window ended up.
+  if (performance.now() < resizingUntil) return;
   // (Called straight after a panel opened or closed: the stage's size is read afresh.)
   invalidateLayout();
   frameNodes([id]);
@@ -970,6 +973,10 @@ let resizeAnchor: Anchor | null = null;
 let resizeLeft: View | null = null;
 /** The opening view is waiting for the stage to have a size (it opened behind a full-screen panel). */
 let openPending = false;
+/** Until when the window counts as being resized (performance.now), and the check on the selection after it. */
+let resizingUntil = 0;
+let resizeSettle = 0;
+const RESIZE_REST = 400;
 
 const anchorOf = (v: View, w: number, h: number): Anchor => ({ wx: (w / 2 - v.x) / v.k, wy: (h / 2 - v.y) / v.k, k: v.k });
 
@@ -1012,6 +1019,14 @@ function stageResized() {
   if (before.w < 2 || before.h < 2 || (before.w === w && before.h === h) || !winChanged) return;
   const v = viewAhead();
   standOn(resizeAnchor && resizeLeft && sameView(v, resizeLeft) ? resizeAnchor : anchorOf(v, before.w, before.h));
+  // A selected node that the narrower window covers is not chased step by step (each chase would move the
+  // anchor, and a window dragged narrow and wide again would not come back to where it was): it is looked at
+  // once, when the resizing stops.
+  resizingUntil = performance.now() + RESIZE_REST;
+  clearTimeout(resizeSettle);
+  resizeSettle = window.setTimeout(() => {
+    if (ui.sel?.kind === 'node' && !drag) ensureVisible(ui.sel.id);
+  }, RESIZE_REST + 50);
 }
 
 // ---------- the Expand button ----------
