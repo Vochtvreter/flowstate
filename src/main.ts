@@ -19,7 +19,7 @@ import { closeTech, initTech, openTech, renderTech } from './ui/tech';
 import { initFeel } from './ui/feel';
 import { adviserStats, boardKey, holdAdviser } from './ui/advice-client';
 import { TIP, lineShown, offerTip, tipBought, tipShown } from './ui/advice-tip';
-import { focusSeen, markedControl } from './ui/advice-show';
+import { focusSeen, markedControl, stillMarks } from './ui/advice-show';
 import { alertState, hudAnchors, initHud, setElsewhere } from './ui/hud';
 import { backToStart, initScreens, isStarted, screenOpen, screensApi, showStart } from './ui/hud-screens';
 import { initPhone } from './ui/phone';
@@ -128,11 +128,12 @@ function boot() {
     ui, tick, fx, view: { fit: fitView, zoomBy, jumpTo, frame: frameNodes, tidy: tidyBoard }, onSignal,
     // (The HUD: the screens, where effects start from, what the alert slot says, and the last look at the goal's nodes.)
     hud: { ...screensApi, anchors: hudAnchors, alert: alertState, focus: focusSeen },
-    // The adviser: how it is run and what it cost; the tip on the card and its timing; the control "Show me" ringed;
-    // the goal card's "while you wait" line with its next step; what the tip row says a followed tip bought.
+    // The adviser: how it is run and what it cost; the tip on the card and its timing; the control "Show me" ringed,
+    // and the still marks it stood on the board under reduced motion; the goal card's "while you wait" line with its
+    // next step; what the tip row says a followed tip bought.
     adviser: {
       stats: adviserStats, hold: holdAdviser, key: () => boardKey(ui.g), tip: tipShown, offer: (a: Parameters<typeof offerTip>[1]) => { offerTip(ui.g, a); renderPanels(true); },
-      marked: markedControl, TIP, line: lineShown, bought: tipBought,
+      marked: markedControl, stills: stillMarks, TIP, line: lineShown, bought: tipBought,
     },
   };
   requestAnimationFrame(frame);

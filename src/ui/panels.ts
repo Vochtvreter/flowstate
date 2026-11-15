@@ -864,8 +864,9 @@ let inspEmpty = 0;
 let inspOpenedFor = '';
 
 /**
- * Scroll the inspector, just opened, so what the player most likely came for is in view: the "Upgrade all" the goal
- * on the card asks for (goal 20, whether it can be afforded yet or not), on a Router the rows of its wires with their
+ * Scroll the inspector, just opened, so what the player most likely came for is in view: the control "Show me" has
+ * ringed, the "Upgrade all" the goal on the card asks for (goal 20, whether it can be afforded yet or not), on a
+ * Router the rows of its wires with their
  * Favour buttons, on anything else the first upgrade they can afford. Below the fold of a phone's sheet those were
  * missed, or showed a sliver over Duplicate and Delete (rev-phone F5, rev-wide F2, fr-rules). Nothing moves when it is
  * in view already, nor once a finger is on the panel.
@@ -881,11 +882,14 @@ function revealInInspector(opened: string, again = false) {
   revealedAt = box.scrollTop;
   if (box.scrollHeight <= box.clientHeight + 1) return;
   const g = ui.g;
+  // (A control "Show me" has put its ring on comes first: the player was sent here for it.)
+  const ringed = Array.from(box.querySelectorAll<HTMLElement>('.hl')).slice(0, 1);
   // (The button itself: its row, with its words, may be taller than a phone's sheet has room for.)
   const bulk = activeGoal(g)?.id === 'bulk-upgrade' && !g.goal.ready
     ? Array.from(box.querySelectorAll<HTMLElement>('[data-testid^="upgall-"]')).slice(0, 1) : [];
   const rows = Array.from(box.querySelectorAll<HTMLElement>('.rrow.hasfav'));
-  const want = bulk.length ? bulk : rows.length ? rows : Array.from(box.querySelectorAll<HTMLElement>('.uprow .buy.ok')).slice(0, 1).map((b) => b.closest<HTMLElement>('.uprow') ?? b);
+  const want = ringed.length ? ringed : bulk.length ? bulk : rows.length ? rows
+    : Array.from(box.querySelectorAll<HTMLElement>('.uprow .buy.ok')).slice(0, 1).map((b) => b.closest<HTMLElement>('.uprow') ?? b);
   if (!want.length) return;
   // (Measured against the scroller itself: a sheet still sliding in has the same offset for both.)
   const b = box.getBoundingClientRect();
@@ -893,7 +897,7 @@ function revealInInspector(opened: string, again = false) {
   const span = (els: HTMLElement[]) => ({ top: els[0].getBoundingClientRect().top - b.top, bottom: els[els.length - 1].getBoundingClientRect().bottom - b.top });
   let { top, bottom } = span(want);
   // Where all the rows do not fit (a phone held sideways), the ones that can still be favoured come first.
-  if (bottom - top + 24 > room && rows.length) {
+  if (bottom - top + 24 > room && rows.length && want === rows) {
     const open = rows.filter((r) => r.querySelector('button.fav'));
     if (open.length) ({ top, bottom } = span(open));
   }
