@@ -1369,6 +1369,19 @@ export function adviceLife(g: Game): number {
   return hit ? Math.max(0, hit.until - g.time) : 0;
 }
 
+/**
+ * The next concrete step of the active goal's "while you wait" line (Goal.meanwhile in src/goals.ts), in the
+ * shape of a tip: something the interface can point at with "Show me" exactly as it does for advice(g), and
+ * that applyAdvice(g, a) can carry out. One step at a time: for "give each new deposit a Well and a Lab built
+ * from its port" that is the Well first, then, once it stands, the Lab from its port. null when the goal has no
+ * line, the line is done or does not apply, or its next step cannot be done right now (not affordable, nothing
+ * to build it on). Unlike advice(g) it is not held back by the quiet after an edit, costs no look-ahead, and
+ * promises no saving (`saves` is absent): the line's worth is tested once, in tests/meanwhile.test.ts.
+ */
+export function lineAdvice(_g: Game): Advice | null {
+  return null;
+}
+
 export interface AdviceTrial {
   /** The tip as it would read, its price, and whether trying it on a copy worked at all. */
   text: string;

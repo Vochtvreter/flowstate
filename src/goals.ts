@@ -239,6 +239,8 @@ export interface FlowGoalView {
   of: number;
   /** The share needed right now: the goal's bar, or "all but one" once the valve is open. */
   need: number;
+  /** The valve is open: the bar has come down to "all but one running" because the goal has been up a while. */
+  valve?: boolean;
 }
 
 function flowGoalView(g: Game): FlowGoalView {
