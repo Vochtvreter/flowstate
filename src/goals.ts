@@ -421,16 +421,6 @@ const cheapestWellSpeed = (g: Game) => {
 
 const hint = (mouse: string, touch: string = mouse) => ({ mouse, touch });
 
-/** Wells that feed a Lab studying what Wells give it and nothing else: the Wells of "a Well and a Lab of its own". */
-export function pairedWells(g: Game): GNode[] {
-  const c = graph(g);
-  const out = new Set<number>();
-  for (const lab of g.nodes) {
-    const fed = lab.type === 'lab' ? c.ins.get(lab.id) ?? [] : [];
-    if (fed.length > 0 && fed.every((w) => c.byId.get(w.from)?.type === 'well')) for (const w of fed) out.add(w.from);
-  }
-  return g.nodes.filter((n) => out.has(n.id));
-}
 /**
  * The pairs of "a Well and a Lab of its own" in the strict sense: a Lab fed by Wells alone, whose Wells send
  * nothing anywhere else. For each: its Wells, its Lab, what the pair studies a second now and at no Speed at
