@@ -10,13 +10,19 @@
    is taken out. */
 .gc-row { display: grid; grid-template-rows: 1fr; }
 .gc-row > .gc-in { min-height: 0; }
+/* (The row's own top padding, rule and margin go to nothing with it: a track of 0fr cannot be smaller than the
+   padding of what is in it, and the card would end the move with a 7 px snap.) */
 .gc-row.open { animation: row-in 0.24s cubic-bezier(0.2, 0.8, 0.2, 1); }
-.gc-row.open > .gc-in { animation: row-clip 0.24s; }
+.gc-row.open > .gc-in { animation: row-clip 0.24s cubic-bezier(0.2, 0.8, 0.2, 1); }
 .gc-row.out { animation: row-out 0.24s ease-in forwards; pointer-events: none; }
-.gc-row.out > .gc-in { clip-path: inset(0 -8px); }
+.gc-row.out > .gc-in { clip-path: inset(0 -8px); animation: row-unpad 0.24s ease-in forwards; }
+/* A row that gives way to another opening in its place closes on the opening row's curve: the two heights add up
+   to a steady glide from the one to the other, with no bump in between. */
+.gc-row.out.swap, .gc-row.out.swap > .gc-in { animation-timing-function: cubic-bezier(0.2, 0.8, 0.2, 1); }
 @keyframes row-in { from { grid-template-rows: 0fr; opacity: 0; margin-top: calc(-1 * var(--gc-gap, 5px)); } }
 @keyframes row-out { to { grid-template-rows: 0fr; opacity: 0; margin-top: calc(-1 * var(--gc-gap, 5px)); } }
-@keyframes row-clip { from, to { clip-path: inset(0 -8px); } }
+@keyframes row-clip { from { clip-path: inset(0 -8px); padding-top: 0; margin-top: 0; border-top-width: 0; } to { clip-path: inset(0 -8px); } }
+@keyframes row-unpad { to { padding-top: 0; margin-top: 0; border-top-width: 0; } }
 
 /* ---------- Show me ---------- */
 /* (Its outline is a shadow, not a border: the reach that touch adds around it, in hud.css, is measured from the
@@ -100,7 +106,8 @@
 /* Less motion: nothing opens, closes, pops or pulses. A row and what it bought fade in; that is all. */
 @media (prefers-reduced-motion: reduce) {
   .gc-row.open { animation: tip-in 0.3s ease-out; }
-  .gc-row.open > .gc-in, .gc-row.out, .gc-line.pop .gc-tick { animation: none; }
+  .gc-row.open > .gc-in, .gc-row.out, .gc-row.out > .gc-in, .gc-line.pop .gc-tick { animation: none; }
+  .gc-tick, .gc-linetxt { transition: none; }
   .gc-tip .gc-tiptxt, .gc-tip .gc-tiplead strong, .gc-tip .gc-tipbadge, .gc-show::before, #insp .hl, #expand.hl { animation: none !important; }
   .gc-tipold { display: none; }
 }

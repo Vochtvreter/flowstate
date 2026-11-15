@@ -9,11 +9,12 @@ import { canFavour, freeDeposits, nodeById } from '../actions';
 import type { Advice } from '../advice';
 import { NodeType, TECHS } from '../content';
 import { expansionCost, has, nodeUnlocked } from '../economy';
+import { goalFocus } from '../goals';
 import { Game, GNode } from '../state';
-import * as board from './board';
-import { boardRect, toClient, toWorld, zoomBy } from './board';
+import { armedPort, boardRect, frameNodes as boardFrames, gestureActive, radialOpen, toClient, toWorld, zoomBy } from './board';
 import { ring } from './fx';
 import { nodeSize, outPorts } from './geom';
+import { isStarted, screenOpen } from './hud-screens';
 import { env } from './phone-env';
 import { closeTech, openTech } from './tech';
 import { Signals, select, signal, ui } from './ui';
@@ -132,15 +133,13 @@ export function carriedOut(g: Game, a: Advice, o: Offered): { state: 'done' | 'h
 
 interface Box { x: number; y: number; w: number; h: number }
 
-const boxOf = (n: GNode): Box => ({ x: n.x - 12, y: n.y - 12, ...grow(nodeSize(n), 24) });
-const grow = (s: { w: number; h: number }, by: number) => ({ w: s.w + by, h: s.h + by });
-
 /**
  * Move the camera so that all of these (world boxes) can be seen: a pan when they fit at the current zoom,
  * otherwise as far out as it takes. Never zooms in. Whatever lies over the board is kept clear: the sheets
  * and the strip on a phone (env.cover), the goal card on a desktop. When they are too far apart to be seen
  * together at the smallest zoom the board allows (a phone does not go below what can be read), the first
- * one is shown: it is where the gesture starts.
+ * one is shown: it is where the gesture starts. (For what is not a node, which the board's frameNodes does
+ * not take: a free deposit, and the Expand button in its place under the plot.)
  */
 function frame(boxes: Box[]) {
   if (!boxes.length) return;
@@ -185,24 +184,16 @@ function frameAll(boxes: Box[]): number {
   return needed;
 }
 
-const BOARD_FRAMES = ['frame', 'Nodes'].join('');
-
 /**
- * Bring these nodes on screen. The board does it when it can (frameNodes glides, and keeps clear of the
- * strip, an open sheet and the corner controls); a board without it gets the framing above. `room` is extra
- * space to the right of the first node, for a node that is about to be built from its port.
+ * Bring these nodes on screen, through the board's frameNodes: it glides, moves the camera as little as it
+ * can (not at all when they are in view already), and keeps clear of the strip, an open sheet and the corner
+ * controls. When they cannot all be seen together it shows the last one named; here the first is where the
+ * gesture starts, so they are named back to front. `readable`: ports are about to be pointed at, so from the
+ * overview, which shows none, the board comes back in among the cards. (Where the new node will be built
+ * from a port, the board's own framing of that node leaves room around it: no extra room is asked for.)
  */
-function frameNodes(nodes: GNode[], room = 0) {
-  // (Looked up by name at run time: this file is built against boards with and without it.)
-  const byBoard = (board as unknown as Record<string, unknown>)[BOARD_FRAMES] as ((ids: number[], readable?: boolean) => void) | undefined;
-  // (The board's own: when they cannot all be seen together it shows the last one named. Here the first is
-  // where the gesture starts, so they are named back to front. `readable`: ports are about to be pointed
-  // at, so from its overview, which shows none, the board comes back in among the cards.)
-  if (byBoard) return byBoard(nodes.map((n) => n.id).reverse(), true);
-  frame(nodes.map((n, i) => {
-    const b = boxOf(n);
-    return i === 0 ? { ...b, w: b.w + room } : b;
-  }));
+function frameNodes(nodes: GNode[]) {
+  boardFrames(nodes.map((n) => n.id).reverse(), true);
 }
 
 /**
@@ -265,9 +256,13 @@ export function showAdvice(g: Game, a: Advice, render: () => void): boolean {
       after = () => {
         const b = expandButton();
         if (!b) return;
-        const r = b.getBoundingClientRect();
-        const p = toWorld(r.left, r.top), k = ui.view.k || 1;
-        frame([{ x: p.x - 16, y: p.y - 16, w: r.width / k + 32, h: r.height / k + 32 }]);
+        // Docked (class `dock`, board.ts), it stands fixed in the free part of the stage, where it can always be
+        // pressed: moving the camera would not bring it any nearer, so the board stays where the player left it.
+        if (!b.classList.contains('dock')) {
+          const r = b.getBoundingClientRect();
+          const p = toWorld(r.left, r.top), k = ui.view.k || 1;
+          frame([{ x: p.x - 16, y: p.y - 16, w: r.width / k + 32, h: r.height / k + 32 }]);
+        }
         b.classList.add('hl');
       };
     } else if (a.cut) {
@@ -309,8 +304,7 @@ export function showAdvice(g: Game, a: Advice, render: () => void): boolean {
         const port = a.port ?? 0;
         detail = { build: { type, from: from.id, port } };
         after = () => {
-          // With room to its right, where the new node will go.
-          frameNodes([from], env.phone ? 80 : 220);
+          frameNodes([from]);
           beacon(() => outPorts(g, from)[port] ?? null);
         };
       }
@@ -322,3 +316,104 @@ export function showAdvice(g: Game, a: Advice, render: () => void): boolean {
   signal('showme', detail);
   return true;
 }
+
+// ---------- the nodes the goal is about, brought into view ----------
+//
+// When a goal comes up, and after a sheet or the tech tree has closed, the nodes its hint or line is about
+// (goalFocus in src/goals.ts) are brought into view if any of them is off screen or covered: through the board's
+// frameNodes, which moves the camera as little as it can. Never while the player is in the middle of something
+// on the board (a drag, a pinch, an armed port, a node being placed, the build menu), and never behind the start
+// screen or the summary. Nothing happens when they are all in view already, or when the goal names no node.
+
+/**
+ * Real milliseconds after a goal comes up, or after a sheet or the tree has gone, before the nodes are looked for:
+ * a few frames, for the new card to take its height (a sheet counts as gone the moment it starts to slide away).
+ * Short on purpose: the camera's glide is over before a player has the next press ready, and is never under it.
+ */
+const AFTER_GOAL = 120;
+const AFTER_SHEET = 60;
+
+let focusGoal = -1;
+let focusGame: Game | null = null;
+let sheetSeen = false;
+let treeSeen = false;
+/** Real time at which to look (0: nothing to do). */
+let focusDue = 0;
+/** For scripts: what the last look found and did. */
+let focusLast: { at: number; goal: number; ids: number[]; inView: boolean; framed: boolean; why?: string } | null = null;
+
+/**
+ * A sheet the player works in lies over the board: on a phone, the inspector or the build menu. (Elsewhere the build
+ * menu is a menu at the pointer, not a sheet: it moves nothing, and once a node has been built from it the camera
+ * stays on what the player is building. While it is up nothing is looked for either: see tendFocus.)
+ */
+function sheetUp(): boolean {
+  const app = document.getElementById('app');
+  return env.phone && !!app && (radialOpen() || app.classList.contains('insp-open') || app.classList.contains('building'));
+}
+
+/**
+ * Are these nodes on screen, with their ports, in the part of the board nothing covers (the strip, a sheet,
+ * the floating controls, the corner controls)? Not in the overview, which draws no ports.
+ */
+export function focusInView(ids: number[]): boolean {
+  const boardEl = document.getElementById('board');
+  if (!boardEl || boardEl.classList.contains('ov')) return false;
+  const b = boardEl.getBoundingClientRect();
+  const c = env.cover();
+  const left = b.left + c.left, top = b.top + c.top, right = b.right - c.right, bottom = b.bottom - c.bottom - c.row;
+  const s = env.phone ? null : env.strip();
+  const corner = env.phone ? null : env.corner();
+  for (const id of ids) {
+    const e = boardEl.querySelector(`.node[data-id="${id}"]`);
+    if (!e) return false;
+    const r = e.getBoundingClientRect();
+    // (The ports stand out of the card's sides by about 8 px.)
+    const x0 = r.left - 10, x1 = r.right + 10, y0 = r.top, y1 = r.bottom;
+    if (x0 < left || x1 > right || y0 < top || y1 > bottom) return false;
+    if (s && x0 < b.left + s.x1 && x1 > b.left + s.x0 && y0 < b.top + s.bottom) return false;
+    if (corner && x1 > b.left + corner.x0 && y1 > b.top + corner.y0) return false;
+  }
+  return true;
+}
+
+/** Call once a frame. */
+export function tendFocus(g: Game) {
+  const now = performance.now();
+  if (g !== focusGame) {
+    focusGame = g;
+    focusGoal = -1;
+    focusDue = 0;
+  }
+  // Behind the start screen, the summary or the time-away card nothing is looked at; the goal on the card when
+  // the player gets to it counts as coming up then.
+  if (!isStarted() || screenOpen()) {
+    focusGoal = -1;
+    return;
+  }
+  const sheet = sheetUp();
+  const tree = ui.techOpen;
+  if (g.goal.i !== focusGoal) {
+    focusGoal = g.goal.i;
+    focusDue = now + AFTER_GOAL;
+  }
+  if ((sheetSeen && !sheet) || (treeSeen && !tree)) focusDue = Math.max(focusDue, now + AFTER_SHEET);
+  sheetSeen = sheet;
+  treeSeen = tree;
+  if (!focusDue || now < focusDue) return;
+  focusDue = 0;
+  const ids = goalFocus(g);
+  const busy = sheet ? 'a sheet is up' : radialOpen() ? 'the build menu is up' : tree ? 'the tree is open' : gestureActive() ? 'a gesture'
+    : armedPort() ? 'a port is armed' : ui.placing ? 'placing' : '';
+  if (busy || !ids.length) {
+    focusLast = { at: g.time, goal: g.goal.i, ids, inView: false, framed: false, why: busy || 'no nodes' };
+    return;
+  }
+  const inView = focusInView(ids);
+  // (The board's frameNodes keeps the camera still when they are in view; it is not even asked then.)
+  if (!inView) boardFrames([...ids].reverse(), true);
+  focusLast = { at: g.time, goal: g.goal.i, ids, inView, framed: !inView };
+}
+
+/** For scripts: the last look at the goal's nodes. */
+export const focusSeen = () => focusLast;
