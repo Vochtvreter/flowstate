@@ -71,6 +71,11 @@ export interface Signals {
     build?: { type: NodeType; from?: number; port?: number; deposit?: number };
     press?: string;
   };
+  /**
+   * The board has just been expanded: a new plot is on the board and the camera is about to glide out to
+   * show it. `deposits` are the deposits it revealed, in the order they pop in, `stagger` milliseconds apart.
+   */
+  expand: { deposits: number[]; stagger: number };
 }
 
 const listeners: { [K in keyof Signals]?: ((detail: Signals[K]) => void)[] } = {};
