@@ -325,10 +325,13 @@ export function showAdvice(g: Game, a: Advice, render: () => void): boolean {
 // on the board (a drag, a pinch, an armed port, a node being placed, the build menu), and never behind the start
 // screen or the summary. Nothing happens when they are all in view already, or when the goal names no node.
 
-/** Real milliseconds after a goal comes up before its nodes are looked for: the new card has taken its height. */
-const AFTER_GOAL = 450;
-/** And after a sheet or the tree has gone: the sheet has slid away and the stage has its size again. */
-const AFTER_SHEET = 320;
+/**
+ * Real milliseconds after a goal comes up, or after a sheet or the tree has gone, before the nodes are looked for:
+ * a few frames, for the new card to take its height (a sheet counts as gone the moment it starts to slide away).
+ * Short on purpose: the camera's glide is over before a player has the next press ready, and is never under it.
+ */
+const AFTER_GOAL = 120;
+const AFTER_SHEET = 60;
 
 let focusGoal = -1;
 let focusGame: Game | null = null;
