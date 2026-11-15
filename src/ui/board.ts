@@ -446,6 +446,19 @@ function freeArea(row = false): { x0: number; y0: number; x1: number; y1: number
   return { x0, y0, x1: Math.max(x0 + 40, r.width - c.right), y1: Math.max(y0 + 40, r.height - c.bottom - (row ? c.row : 0)) };
 }
 
+/**
+ * The part of the stage nothing covers, for finding its middle (stage pixels): on a phone the free area; elsewhere
+ * the stage under the strip (the goal card, with room for the alert chip under it), where the strip hangs over
+ * the middle of the top edge.
+ */
+function uncoveredArea(): Box {
+  if (env.phone) return freeArea();
+  const r = rectOf();
+  const s = env.strip();
+  const y0 = s ? Math.min(r.height * 0.5, Math.max(s.bottom, s.goalBottom + ALERT_ROOM)) : 0;
+  return { x0: 0, y0, x1: r.width, y1: r.height };
+}
+
 const inset = (b: Box, by: number): Box => {
   const x = Math.min(by, (b.x1 - b.x0) / 2 - 20), y = Math.min(by, (b.y1 - b.y0) / 2 - 20);
   return { x0: b.x0 + Math.max(0, x), y0: b.y0 + Math.max(0, y), x1: b.x1 - Math.max(0, x), y1: b.y1 - Math.max(0, y) };
@@ -1808,10 +1821,12 @@ export function tidyBoard(): boolean {
   settleGesture();
   cancelGesture();
   if (tidyJob && tidyJob.g === g) return true;
-  // What the player is looking at now: the cards whose middle is in view, and the one nearest the middle of it.
+  // What the player is looking at now: the cards whose middle is in view, and the one nearest the middle of what
+  // nothing covers (under the strip, on a wide screen: not the middle of the whole stage, which the strip hangs over).
   const v = viewAhead();
   const f = freeArea();
-  const mx = (f.x0 + f.x1) / 2, my = (f.y0 + f.y1) / 2;
+  const u = uncoveredArea();
+  const mx = (u.x0 + u.x1) / 2, my = (u.y0 + u.y1) / 2;
   let centre = -1, near = Infinity;
   const seen = g.nodes.filter((n) => {
     const b = cardBox(n);
@@ -1915,13 +1930,41 @@ function tidyAnswer(id: number, moves: Map<number, Pt>) {
   }
   if (!box) return;
   const now = viewAhead();
-  const t = fitTarget(box, true, now.k >= zoomFloor() ? Math.max(zoomFloor(), Math.min(1, now.k)) : 1);
+  const floor = zoomFloor();
+  const kMax = now.k >= floor ? Math.max(floor, Math.min(1, now.k)) : 1;
+  let t = fitTarget(box, true, kMax);
+  // A card that frame would cut at the edge of the stage (or leave half under the strip or the corner controls) is
+  // taken in too, while everything still fits whole at a readable zoom: a column cut at the edge reads as a column
+  // under the build bar. (Three rounds at most: each can only add cards.)
+  const covers = coverBoxes();
+  const whole = (n: GNode, v: View) => inClear(onStage(cardBox(n), v), covers);
+  // (One card at a time, nearest the frame first; a card that does not fit with the rest is left out.)
+  const tried = new Set<number>();
+  for (let round = 0; round < 3; round++) {
+    const r = rectOf();
+    const cut = g.nodes.filter((n) => {
+      const b = onStage(cardBox(n), t);
+      return !tried.has(n.id) && b.x1 > 0 && b.x0 < r.width && b.y1 > 0 && b.y0 < r.height && !whole(n, t);
+    });
+    if (!cut.length) break;
+    const mid = { x: (box.x0 + box.x1) / 2, y: (box.y0 + box.y1) / 2 };
+    cut.sort((a, b) => Math.hypot(a.x - mid.x, a.y - mid.y) - Math.hypot(b.x - mid.x, b.y - mid.y));
+    for (const n of cut) {
+      tried.add(n.id);
+      const more = boxUnion(box, cardBox(n));
+      const next = fitTarget(more, true, kMax);
+      const inside = g.nodes.filter((m) => { const b = cardBox(m); return b.x0 >= more.x0 && b.x1 <= more.x1 && b.y0 >= more.y0 && b.y1 <= more.y1; });
+      if (next.k < floor - 1e-6 || !inside.every((m) => whole(m, next))) continue;
+      box = more;
+      t = next;
+    }
+  }
   // Where they have spread too far apart to be seen together at that zoom (a phone, a big board: the two cards
   // in view went to opposite ends, and the camera on the middle of them showed neither), the card the view was
   // centred on stays in view: the least move from there that brings it in, clear of what covers the board.
   const mid = nodeById(g, job.centre);
   if (mid) {
-    const b = cardBox(mid), a = inset(freeArea(), 12);
+    const b = cardBox(mid), a = inset(uncoveredArea(), 12);
     const x0 = b.x0 * t.k + t.x, x1 = b.x1 * t.k + t.x, y0 = b.y0 * t.k + t.y, y1 = b.y1 * t.k + t.y;
     if (x1 - x0 <= a.x1 - a.x0) t.x += x0 < a.x0 ? a.x0 - x0 : x1 > a.x1 ? a.x1 - x1 : 0;
     if (y1 - y0 <= a.y1 - a.y0) t.y += y0 < a.y0 ? a.y0 - y0 : y1 > a.y1 ? a.y1 - y1 : 0;
