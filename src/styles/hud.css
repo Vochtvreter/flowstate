@@ -649,7 +649,7 @@ html[data-input='mouse'] #hud-strip.tight .claim.sm { height: 32px; }
 /* The line: the tick, its label over the sentence (at the hint's size), and the button. */
 #app.phone .gc-line > .gc-in { margin-top: 1px; padding-top: 3px; }
 #app.phone .gc-linebody { line-height: 16px; }
-#app.phone .gc-linehead { height: 14px; line-height: 14px; }
+#app.phone .gc-linehead { height: 14px; min-height: 0; line-height: 14px; }
 #app.phone .gc-linehead .gc-lbl { font-size: 10px; }
 /* What the line bought takes the label's place while it is said (there is no room beside it), and may run on
    over where the button was: the row does not grow by a line when the box is ticked. */
