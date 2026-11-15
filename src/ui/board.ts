@@ -4113,12 +4113,16 @@ function wantedType(g: Game, from?: number): NodeType | null {
   const names = new Map<string, NodeType>();
   for (const t of Object.keys(NODE_DEFS) as NodeType[]) names.set(NODE_DEFS[t].name.toLowerCase(), t);
   const said = /\b(?:pick|build(?:\s+(?:a|an|another))?)\s+([A-Za-z]+)/gi;
-  // (A goal that keeps no account of what it buys goes by its words alone.)
+  // (A goal that keeps no account of what it buys goes by its words alone, until a node of that kind stands:
+  // once the Void of "Give the Silt somewhere to go" is built, what is left is selling the Ink, and a menu
+  // opened from the Ink port must not offer a Void first.)
   const buying = goal.step ? goal.step(g) : undefined;
   const named = buying === undefined ? null : buying === null ? '' : 'tech' in buying ? buying.thenWhat ?? '' : buying.what ?? '';
   for (const m of goal.hint.mouse.matchAll(said)) {
     const t = names.get(m[1].toLowerCase());
-    if (t) return named == null || named.includes(`the ${NODE_DEFS[t].name}`) ? t : null;
+    if (!t) continue;
+    if (named == null) return g.nodes.some((n) => n.type === t) ? null : t;
+    return named.includes(`the ${NODE_DEFS[t].name}`) ? t : null;
   }
   return null;
 }
