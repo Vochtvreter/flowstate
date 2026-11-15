@@ -63,6 +63,14 @@ export function initPanels(refs: {
   // is patched. The frame is never rebuilt, so the sheet can be dragged while its contents refresh.
   inspEl.innerHTML = `<div class="sheet-grab" aria-hidden="true"></div><div class="insp-body"></div>`;
   inspPanel = makePanel(inspEl.querySelector<HTMLElement>('.insp-body')!);
+  // A phone's sheet is as tall as the strip above it leaves room for: when the strip grows a row after the sheet has
+  // opened (a tip coming in, seconds later), what was revealed there could end up cut at its foot. It is revealed
+  // again, unless the player has moved the scroller meanwhile (revealInInspector).
+  if (typeof ResizeObserver !== 'undefined') {
+    new ResizeObserver(() => {
+      if (inspOpenedFor) revealInInspector(inspOpenedFor, true);
+    }).observe(inspEl);
+  }
   buildTop();
   zoomEl.innerHTML = `<button class="ibtn" data-act="out" aria-label="Zoom out">${icon('minus', 14)}</button><span class="mono zl"></span><button class="ibtn" data-act="in" aria-label="Zoom in">${icon('plus', 14)}</button><button class="ibtn" data-act="fit" aria-label="Fit board (F)" title="Fit board (F)">${icon('fit', 14)}</button>`;
   zoomLabel = zoomEl.querySelector('.zl')!;
