@@ -494,7 +494,9 @@ function renderGoal(g: Game, force: boolean) {
     // A wait (what the goal asks for next has to be saved up for, or Flow has to be held): what there is to do
     // meanwhile is the line or the tip, and on a phone the hint folds behind a tap once the player has pressed the
     // board (hud.css, "phone seating"). Once it can be bought, the hint is what to do, and it is shown again.
-    setClass(goalEl, 'wait', !!wait || saving(v.progress) || flowView);
+    // "Make your first Lens" folds it too once there is a Fabricator: its inputs row and its line say what the hint
+    // says, wire by wire (with the hint open as well, the strip took 44.6% of a 360x740 stage).
+    setClass(goalEl, 'wait', !!wait || saving(v.progress) || flowView || !!inputs?.length);
   } else setClass(goalEl, 'wait', false);
   goalPanel.render(goalHtml(g, v, rows, prog), force);
   announceTips(goalEl);
