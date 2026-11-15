@@ -32,7 +32,7 @@ import {
   frameBox, freeSpot as nearestSpot, heldRate, inPorts, matColor, nodeSize, outPorts, pathD, pinchView, roomFor, segmentsCross, separate,
   wholeGain, wireEnds,
 } from './geom';
-import { screenOpen } from './hud-screens';
+import { isStarted, screenOpen } from './hud-screens';
 import { isTouch, pressWord, withKey } from './hud-words';
 import { esc, icon, matGlyph, matShape, nodeIcon } from './icons';
 import { tidy, tidyInput } from './layout';
@@ -1043,6 +1043,8 @@ function stageResized() {
 let hintsEl: HTMLElement | null = null;
 let fabsEl: HTMLElement | null = null;
 let toastsEl: HTMLElement | null = null;
+/** The time-away card ("While you were away", hud-screens.ts): up while it has the class `open`. */
+let modalEl: HTMLElement | null = null;
 const EXPAND_W = 260, EXPAND_H = 64;
 /**
  * How much larger than life the button is drawn in its natural place at each step of the overview, so
@@ -1475,6 +1477,7 @@ export function initBoard(root: HTMLElement) {
   appEl = boardEl.closest<HTMLElement>('#app');
   hintsEl = document.getElementById('hints');
   toastsEl = document.getElementById('toasts');
+  modalEl = document.getElementById('modal');
   buildEl = el(`<div id="build-sheet" role="dialog" aria-label="Build menu"></div>`);
   (boardEl.parentElement ?? boardEl).appendChild(buildEl);
 
@@ -2634,9 +2637,13 @@ export function updateBoard(dt: number) {
       showGains();
     }
   }
-  // The tech tree covers the whole board, so wire dots are not drawn behind it. With less motion asked
-  // for, the dots do not travel: the effects layer is told the board is paused (particles still run).
-  frameFx(dt, ui.view, g.paused || calm, ui.techOpen);
+  // The tech tree, the start screen and the time-away card cover the whole board, so wire dots are not drawn
+  // behind them, and they do not run on either: when the card goes they pick up where they were (fx.ts frameBoard).
+  // The summary does not count: it is a card at the foot of the screen (a sheet on a phone) with the factory
+  // framed above it and running, the picture the demo ends on. With less motion asked for, the dots do not
+  // travel: the effects layer is told the board is paused (particles still run).
+  const covered = ui.techOpen || !isStarted() || !!modalEl?.classList.contains('open');
+  frameFx(dt, ui.view, g.paused || calm, covered);
 }
 
 // ---------- placement ----------
