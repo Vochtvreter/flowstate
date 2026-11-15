@@ -1507,9 +1507,11 @@ export function initBoard(root: HTMLElement) {
   delegate(radialEl, (a, args, _el, ev) => {
     if (a === 'pick' && menuPressOk(ev)) pickRadial(Number(args[0]));
   });
+  // (The sheet's ✕ too: where the sheet appears at once, with reduced motion, the opening tap's click landed on it
+  // and shut the sheet before it was seen.)
   delegate(buildEl, (a, args, _el, ev) => {
     if (a === 'pick' && menuPressOk(ev)) pickRadial(Number(args[0]));
-    else if (a === 'close') closeRadial();
+    else if (a === 'close' && menuPressOk(ev)) closeRadial();
   });
   // The cached board rect (and the minimap's viewport box) follow the stage's size.
   if (typeof ResizeObserver !== 'undefined') {
