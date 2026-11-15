@@ -89,6 +89,15 @@ export function initHud() {
     else if (a === 'jump') jumpTo(Number(args[0]));
     renderPanels(true);
   });
+  // A Claim button gives under the finger for as long as it is down (class `down`, hud.css). A browser shows
+  // :active for a finger late or not at all, and a mouse never gets that far: it claims on the way down, and
+  // sees the button give on its ghost (pressClaim).
+  stripEl.addEventListener('pointerdown', (e) => {
+    if (e.pointerType !== 'mouse') (e.target as HTMLElement).closest?.('.claim')?.classList.add('down');
+  }, { passive: true });
+  const release = () => stripEl.querySelectorAll('.claim.down').forEach((b) => b.classList.remove('down'));
+  window.addEventListener('pointerup', release, { passive: true });
+  window.addEventListener('pointercancel', release, { passive: true });
   // The stage decides whether the card and the order fit side by side (see `tight`).
   const hud = document.getElementById('hud');
   if (hud && typeof ResizeObserver !== 'undefined') {

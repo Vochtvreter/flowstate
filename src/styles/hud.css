@@ -80,10 +80,11 @@ div.gc-rewards { justify-content: flex-start; margin-top: 2px; }
 .claim::after { content: ''; position: absolute; inset: -5px; border-radius: 19px; border: 2px solid #4ade80; opacity: 0; pointer-events: none; animation: claim-halo 1.5s ease-out infinite; }
 .claim:hover { background: #6cf09a; }
 /* Pressed: the button gives a little (the `scale` property, so the phone seat's own transform is left alone).
-   A finger sees this while it is down. A mouse claims on the way down, and sees the same on the button's
-   ghost (.claim-ghost, under "the card, this round"). */
+   A finger sees this while it is down (hud.ts sets `down`: a browser is late with :active for a finger, or
+   leaves it out). A mouse claims on the way down, and sees the same on the button's ghost (.claim-ghost,
+   under "the card, this round"). */
 .claim { transition: scale 80ms ease-out; }
-.claim:active { scale: 0.96; }
+.claim:active, .claim.down { scale: 0.96; }
 .claim.sm { min-width: 74px; height: 44px; padding: 0 14px; border-radius: 12px; font-size: 15px; }
 .claim.sm::before { border-radius: 16px; }
 .claim.sm::after { border-radius: 17px; }
@@ -375,7 +376,7 @@ html[data-input='mouse'] #hud-strip.tight .claim.sm { height: 32px; }
 /* Less motion: nothing lifts, rises, sinks or pops; the old card and the new one fade. */
 @media (prefers-reduced-motion: reduce) {
   .claim { transition: none; }
-  .claim:active { scale: none; opacity: 0.85; }
+  .claim:active, .claim.down { scale: none; opacity: 0.85; }
   .gc-ghost { animation: gc-fade-out 120ms linear forwards; }
   .gc-body.rise0 { animation: gc-fade-a 180ms linear 120ms backwards; }
   .gc-body.rise1 { animation: gc-fade-b 180ms linear 120ms backwards; }
