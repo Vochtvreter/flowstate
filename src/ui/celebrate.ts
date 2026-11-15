@@ -162,10 +162,12 @@ function start(spec: Spec) {
   const kicker = spec.kicker ? `<div class="cel-kicker">${esc(spec.kicker)}</div>` : '';
   wrap.innerHTML = `<div class="cel-card" role="status"><div class="cel-glyph">${spec.glyph}</div><div class="cel-words">${kicker}<div class="cel-title">${esc(spec.title)}</div><div class="cel-line">${esc(spec.line)}</div></div></div>`;
   // A press on the card is for the card: it sends it away (the window's listener, in initCelebrate, has
-  // already seen to that) and goes no further, and nor does the click that follows it.
+  // already seen to that) and goes no further, and nor does the click that follows it. (Nor does a right
+  // press bring up the browser's menu, which the board under the card keeps away too.)
   const card = wrap.firstElementChild as HTMLElement;
   card.addEventListener('pointerdown', swallow);
   card.addEventListener('click', swallow);
+  card.addEventListener('contextmenu', swallow);
   app.appendChild(wrap);
   const timers: number[] = [];
   // The glyph sits a little above the middle of the card, which is in the middle of the window; on a
