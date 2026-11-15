@@ -18,7 +18,7 @@ import { Game } from '../state';
 import { Panel, makePanel, setClass } from './dom';
 import { isTouch } from './hud-words';
 import { esc, icon } from './icons';
-import { delegate, onNewGame, onSignal, toast, touch, ui } from './ui';
+import { delegate, onGame, onNewGame, onSignal, toast, touch, ui } from './ui';
 
 // ---------- what is shown ----------
 
@@ -256,6 +256,11 @@ export function initTech(el: HTMLElement) {
     if (d.press !== 'research' || !ui.techOpen || !ui.techSel) return;
     ringed = ui.techSel;
     renderTech(true);
+  });
+  // A goal turning ready or being claimed changes the top of the tree (its bar, or the seat for the HUD's):
+  // drawn at once, in step with the HUD, not at the next half-second refresh.
+  onGame((ev) => {
+    if (ui.techOpen && (ev.kind === 'goal-ready' || ev.kind === 'goal-claimed')) renderTech(true);
   });
   onNewGame(() => {
     // A different game: nothing remembered about the old one applies.
