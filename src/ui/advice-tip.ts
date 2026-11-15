@@ -67,6 +67,24 @@ export const TIP = {
 };
 
 const actOf = (a: Advice) => JSON.stringify([a.upgrade, a.all, a.wire, a.build, a.node, a.port, a.deposit, a.to, a.favour, a.research, a.cut, a.expand]);
+/**
+ * Do these two ask for the same first move? The same action, or one that starts the same way: a Well on the same
+ * deposit, the same machine built from the same port, the same wire, the same upgrade, the same cut. ("Place a Well on
+ * the free Glint deposit, wired to a Lab" and "Place a Well on the free Glint deposit, then build a Lab from its port"
+ * are one voice: the second is not said as a tip while the first is the line.)
+ */
+function sameMove(a: Advice, b: Advice): boolean {
+  if (actOf(a) === actOf(b)) return true;
+  if (a.build && b.build && a.build === b.build) {
+    if (a.deposit != null) return a.deposit === b.deposit;
+    if (a.node != null) return a.node === b.node && (a.port ?? 0) === (b.port ?? 0);
+  }
+  if (a.wire && b.wire) return a.wire.from === b.wire.from && a.wire.to === b.wire.to && (a.wire.port ?? 0) === (b.wire.port ?? 0);
+  if (a.upgrade && b.upgrade) return a.upgrade === b.upgrade && a.node === b.node && !!a.all === !!b.all;
+  if (a.cut && b.cut) return a.cut.wire === b.cut.wire;
+  if (a.favour && b.favour) return a.favour.router === b.favour.router && a.favour.wire === b.favour.wire;
+  return !!a.expand && !!b.expand;
+}
 const sentence = (a: Advice) => (isTouch() ? a.text.touch : a.text.mouse);
 /** The HTML of a row that is closing or fading: nothing in it answers a press, and no script takes it for the real thing. */
 const inert = (html: string) => html.replace(/\s(?:data-testid|data-act|title)="[^"]*"/g, '');
@@ -252,8 +270,8 @@ function tendTip(g: Game, now: number, changed: boolean, sameGoal: boolean, narr
   // and the wait before a tip starts over when the board is back.
   const covered = ui.techOpen || screenOpen();
   if (covered && !shown) quietFrom = g.time;
-  // One voice: the line's own next step is not a tip as well, and a narrow card has room for one row.
-  const lineIs = line && !line.done && step ? actOf(step) : '';
+  // One voice: the line's own next move is not a tip as well, and a narrow card has room for one row.
+  const lineIs = line && !line.done ? step : null;
   const blocked = narrow && lineHolds(g);
   const a = adviserAnswer();
   // Is the adviser's last answer about the board as it is? If not, it is being asked again (a new order, say).
@@ -273,7 +291,7 @@ function tendTip(g: Game, now: number, changed: boolean, sameGoal: boolean, narr
     let tip = a.kind ? a.advice : null;
     // Not a wait at all: the card asks for something. The clock starts when the waiting does.
     if (!a.kind) quietFrom = g.time;
-    if (tip && lineIs && actOf(tip) === lineIs) tip = null;
+    if (tip && lineIs && sameMove(tip, lineIs)) tip = null;
     if (!tip) drop(g);
     else {
       const act = actOf(tip);
