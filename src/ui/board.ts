@@ -913,13 +913,26 @@ function placeExpand(byCamera = false) {
   drawExpand();
 }
 
+/**
+ * On its way from one place to the other the button keeps inside the stage. (The two ends are inside it,
+ * but the form can change as it sets off: the full form, centred where the one-line form stood, can
+ * stick out.)
+ */
+function keepIn(st: Stand): Stand {
+  const r = rectOf();
+  const hw = (ex.w * st.s) / 2 + 2, hh = (ex.h * st.s) / 2 + 2;
+  const x = r.width > 2 * hw ? Math.max(hw, Math.min(r.width - hw, st.x)) : st.x;
+  const y = r.height > 2 * hh ? Math.max(hh, Math.min(r.height - hh, st.y)) : st.y;
+  return { x, y, s: st.s };
+}
+
 /** A slide from one stand to the other keeps clear of every control on the way (sampled along it). */
 function slideClear(a: Stand, b: Stand): boolean {
   const all: Box = { x0: -1e7, y0: -1e7, x1: 1e7, y1: 1e7 };
   const n = Math.max(10, Math.ceil(Math.hypot(b.x - a.x, b.y - a.y) / 3));
-  for (let i = 1; i < n; i++) {
+  for (let i = 0; i < n; i++) {
     const u = i / n;
-    const x = a.x + (b.x - a.x) * u, y = a.y + (b.y - a.y) * u, sc = a.s + (b.s - a.s) * u;
+    const { x, y, s: sc } = keepIn({ x: a.x + (b.x - a.x) * u, y: a.y + (b.y - a.y) * u, s: a.s + (b.s - a.s) * u });
     const hw = (ex.w * sc) / 2, hh = (ex.h * sc) / 2;
     if (!boxClear({ x0: x - hw, y0: y - hh, x1: x + hw, y1: y + hh }, all, ex.blocks, 2)) return false;
   }
@@ -935,7 +948,7 @@ function drawExpand() {
   if (sl) {
     const u = Math.min(1, (performance.now() - sl.t0) / DOCK_MS);
     const e = 1 - (1 - u) * (1 - u) * (1 - u);
-    d = { x: sl.from.x + (t.x - sl.from.x) * e, y: sl.from.y + (t.y - sl.from.y) * e, s: sl.from.s + (t.s - sl.from.s) * e };
+    d = keepIn({ x: sl.from.x + (t.x - sl.from.x) * e, y: sl.from.y + (t.y - sl.from.y) * e, s: sl.from.s + (t.s - sl.from.s) * e });
     if (u >= 1) ex.slide = null;
   }
   ex.drawn = d;
