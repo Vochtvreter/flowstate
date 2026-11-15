@@ -19,24 +19,30 @@ describe('numbers (2.6)', () => {
   it('Shard is lime; machine and tech prices are the ones tuned with the pacing bot', () => {
     expect(MATERIALS.shard.color).toBe('#B8F26B');
     expect(NODE_DEFS.assembler.base).toBe(600);
-    expect(NODE_DEFS.fabricator.base).toBe(7250);
+    // (7,250¢ until the second fix round: the card player's longest wait, two minutes of nothing to do before the
+    // Lens. The fast players are the floor: their first Lens stays after 14:00.)
+    expect(NODE_DEFS.fabricator.base).toBe(4800);
     // The second Assembler (Prism) is a purchase in its own right: 1,500¢, so that part of what the Fabricator
     // used to ask for is paid before the Fabricator goal begins. The other machines grow gently.
     expect([0, 1, 2].map((n) => nodeCostAt('assembler', n))).toEqual([600, 1500, 3750]);
-    expect([0, 1].map((n) => nodeCostAt('fabricator', n))).toEqual([7250, 8338]);
+    expect([0, 1].map((n) => nodeCostAt('fabricator', n))).toEqual([4800, 5520]);
     expect([0, 1, 2].map((n) => nodeCostAt('refiner', n))).toEqual([50, 57, 66]);
+    // A Lab of its own for every Well is what the cards' lines build, five or six of them: Labs grow gently
+    // (×1.1; ×1.3 made the sixth 371¢, kept back for the Assembler while Assembly was minutes away).
+    expect([0, 1, 2, 3, 4, 5].map((n) => nodeCostAt('lab', n))).toEqual([100, 110, 121, 133, 146, 161]);
     // The Processing spine the goal chain asks for.
-    expect(TECHS.P2.cost).toEqual({ a: 45 });
-    expect(TECHS.P3.cost).toEqual({ a: 215 });
+    expect(TECHS.P2.cost).toEqual({ a: 40 }); // a player who claims at once waits under 30 s on goal 8
+    expect(TECHS.P3.cost).toEqual({ a: 195 }); // the card player's wait for it, under a minute
     // (Assembly and Breeze Deposits went up when the cards' lines came to turn the credits a card player used to
-    // leave idle into α: the same twenty minutes, with something to do in them.)
-    expect(TECHS.P4.cost).toEqual({ a: 1250 });
-    expect(TECHS.P5.cost).toEqual({ a: 1850 });
+    // leave idle into α; they were tuned again with the second fix round's cheaper Labs and Deep Analysis line.)
+    expect(TECHS.P4.cost).toEqual({ a: 1325 });
+    expect(TECHS.P5.cost).toEqual({ a: 1875 });
     expect(TECHS.P7.cost).toEqual({ a: 720, b: 100 }); // lower than the curve: the card players' last wait is for credits, not for α
     // Free play needs all three kinds of Data, and Reclamation cannot be had before the first Lens.
     expect(TECHS.P6.cost).toEqual({ a: 300, g: 25 });
     expect(TECHS.P8.cost).toEqual({ a: 1200, b: 300, g: 100 });
-    expect(TECHS.P9.cost).toEqual({ a: 2500, b: 250, g: 450 }); // β is what free play has least of: at 500 it was a 37-minute wait
+    // β is what free play has least of: at 500 it was a 37-minute wait. Its α keeps a fast player's first Paradox after 24:00.
+    expect(TECHS.P9.cost).toEqual({ a: 2800, b: 250, g: 450 });
   });
 
   it('side techs are impulse buys: none costs more than a third of the spine tech it competes with', () => {

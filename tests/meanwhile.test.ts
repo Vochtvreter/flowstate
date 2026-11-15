@@ -29,9 +29,9 @@ const ORDER: Record<string, string[]> = {
   'make-spark': ['ink-lab', 'glint-lab'],
   'make-glyph': ['well-labs', 'expand-labs'],
   'hold-flow': ['flow-fix'],
-  'make-mist': ['expand-labs', 'speed-pairs'],
+  'make-mist': ['expand-labs', 'speed-pairs', 'deep-analysis'],
   'make-prism': ['cut-glyph'],
-  'build-fabricator': ['cut-glyph', 'sell-raw'],
+  'build-fabricator': ['cut-glyph'],
   'make-lens': ['prism-fab', 'glyph-fab'],
 };
 const TEXT: Record<string, { mouse: string; touch: string }> = {
@@ -48,17 +48,19 @@ const TEXT: Record<string, { mouse: string; touch: string }> = {
     touch: 'Tap the Flow ring to find what holds Flow back, and give it what it lacks.',
   },
   'speed-pairs': { mouse: 'Buy Speed on each Well with a Lab of its own, and on that Lab when it is full.', touch: '' },
+  'deep-analysis': { mouse: 'Research Lab Speed, then Deep Analysis: every item studied gives half as much Data again.', touch: '' },
   'cut-glyph': { mouse: 'You have the β you need: cut the wire from the Glyph Assembler to the Lab.', touch: '' },
-  'sell-raw': { mouse: 'Fabrication is researched: wire each Well with a Lab of its own to the Market too.', touch: '' },
   'prism-fab': { mouse: 'Wire the Prism Assembler\'s port to the Fabricator: a Lens takes one Prism.', touch: '' },
   'glyph-fab': { mouse: 'Wire the Glyph Assembler\'s port to the Fabricator: a Lens takes two Glyph.', touch: '' },
 };
 for (const t of Object.values(TEXT)) if (!t.touch) t.touch = t.mouse;
+/** What "expand-labs" reads once its next step is no longer the board's expansion (Meanwhile.say). */
+const FREE = 'Give each free deposit a Well and a Lab of its own.';
 const lineOf = (id: string): Meanwhile => GOALS.flatMap((x) => x.meanwhile ?? []).find((l) => l.id === id)!;
 
 /** The most steps each line can take on the scripted boards (the board, then a Well and a Lab for each deposit; a pair is two presses). */
 const MOST: Record<string, number> = {
-  'ink-lab': 1, 'glint-lab': 1, 'well-labs': 4, 'expand-labs': 5, 'flow-fix': 3, 'speed-pairs': 10, 'cut-glyph': 1, 'sell-raw': 6, 'prism-fab': 1, 'glyph-fab': 1,
+  'ink-lab': 1, 'glint-lab': 1, 'well-labs': 4, 'expand-labs': 5, 'flow-fix': 3, 'speed-pairs': 10, 'deep-analysis': 2, 'cut-glyph': 1, 'prism-fab': 1, 'glyph-fab': 1,
 };
 
 describe('"while you wait": the lines', () => {
@@ -171,19 +173,34 @@ describe('"while you wait": the lines', () => {
     const expansions = g.board.expansions;
     expect(followMeanwhile(g)).toBe(true);
     expect(g.board.expansions).toBe(expansions + 1);
+    // Once the board has grown, the line reads what is left of it: the free deposits (it said "Expand the board
+    // again" on the Mist card while its Show me pointed at a Lab and a deposit, and was ticked with no expansion made).
+    expect(goalView(g)!.meanwhile).toEqual({ text: FREE, done: false, step: 2, of: 2 });
     for (let i = 0; i < 4; i++) expect(followMeanwhile(g), `step ${i}`).toBe(true);
     expect(wellLabs(g)).toBe(4);
-    expect(goalView(g)!.meanwhile).toEqual({ text: TEXT['expand-labs'].mouse, done: true, step: 2, of: 2 });
+    expect(goalView(g)!.meanwhile).toEqual({ text: FREE, done: true, step: 2, of: 2 });
     expect(followMeanwhile(g)).toBe(false); // nothing more to do
 
     // "Make your first Mist": the same expansion is done already, so the card goes on to Speed on the pairs.
     at(g, 'make-mist');
-    expect(goalView(g)!.meanwhile).toEqual({ text: TEXT['speed-pairs'].mouse, done: false, step: 2, of: 2 });
+    expect(goalView(g)!.meanwhile).toEqual({ text: TEXT['speed-pairs'].mouse, done: false, step: 2, of: 3 });
     let presses = 0;
-    while (followMeanwhile(g)) presses++;
+    while (meanwhileOf(g)?.id === 'speed-pairs' && followMeanwhile(g)) presses++;
     // Four pairs: a Well and then its Lab each, but the Ember Well alone (0.8 a second: its Lab had room).
     expect(presses).toBe(7);
-    expect(goalView(g)!.meanwhile).toEqual({ text: TEXT['speed-pairs'].mouse, done: true, step: 2, of: 2 });
+    // Then Lab Speed and Deep Analysis. With no α in hand the step is saved for in Data, and the card says so
+    // (contract C1: nothing is coming in on this board, so no time); with the Data, the two researches.
+    expect(goalView(g)!.meanwhile).toEqual({
+      text: TEXT['deep-analysis'].mouse, done: false, step: 3, of: 3, held: { cost: TECHS.R2.cost.a, sym: 'α', eta: Infinity },
+    });
+    expect(lineAdvice(g)).toBeNull();
+    g.data = { a: 1e4, b: 1e4, g: 0 };
+    expect(goalView(g)!.meanwhile!.held).toBeUndefined();
+    expect(followMeanwhile(g)).toBe(true);
+    expect(g.techs).toContain('R2');
+    expect(followMeanwhile(g)).toBe(true);
+    expect(g.techs).toContain('R3');
+    expect(goalView(g)!.meanwhile).toEqual({ text: TEXT['deep-analysis'].mouse, done: true, step: 3, of: 3 });
     clearHistory();
   });
 
@@ -196,7 +213,7 @@ describe('"while you wait": the lines', () => {
     expect(expandBoard(g)).toBe(true);
     at(g, 'make-mist');
     expect(wellLabs(g)).toBe(0);
-    expect(goalView(g)!.meanwhile).toEqual({ text: TEXT['expand-labs'].mouse, done: false, step: 1, of: 2 });
+    expect(goalView(g)!.meanwhile).toEqual({ text: TEXT['expand-labs'].mouse, done: false, step: 1, of: 3 });
     // A Well and a Lab of its own on a deposit of the FIRST expansion is not what this line asks for.
     const first = g.deposits[g.deposits.length - 2];
     const w0 = placeNode(g, 'well', first.x, first.y, { depositId: first.id })!;
@@ -237,7 +254,7 @@ describe('"while you wait": the lines', () => {
     expect(meanwhileOf(g)?.id).not.toBe('cut-glyph');
     expect(line.cuts!(g)).toEqual([]);
     g.data.b = need;
-    expect(goalView(g)!.meanwhile).toEqual({ text: TEXT['cut-glyph'].mouse, done: false, step: 1, of: 2 });
+    expect(goalView(g)!.meanwhile).toEqual({ text: TEXT['cut-glyph'].mouse, done: false });
     expect(line.cuts!(g)).toEqual([w.id]);
     // The research spends the β: the line stays (Fabrication is owned, nothing else in the demo needs β).
     g.data.b = 0;
@@ -268,6 +285,8 @@ interface Snap { goal: string; line: string; g: Game; from: string }
  */
 function snapshots(name: string, opts: Parameters<typeof playByTheCard>[0]) {
   const snaps: Snap[] = [];
+  /** The board the first time the player waited on each goal, line or none. */
+  const idle: Record<string, Game> = {};
   const bad: string[] = [];
   const seen = { seconds: 0, steps: 0, done: 0, none: 0 };
   const run = playByTheCard({
@@ -277,6 +296,7 @@ function snapshots(name: string, opts: Parameters<typeof playByTheCard>[0]) {
       const line = meanwhileOf(g);
       const step = lineAdvice(g);
       const where = `${name}, ${goal.id}/${line?.id ?? '-'} at ${Math.round(g.time)} s`;
+      idle[goal.id] ??= cloneGame(g)!;
       seen.seconds++;
       if (!line) seen.none++;
       else if (line.done(g)) seen.done++;
@@ -291,7 +311,7 @@ function snapshots(name: string, opts: Parameters<typeof playByTheCard>[0]) {
       snaps.push({ goal: goal.id, line: line.id, g: cloneGame(g)!, from: where });
     },
   });
-  return { run, snaps, bad, seen };
+  return { run, snaps, idle, bad, seen };
 }
 
 /** The tests' card player, with the cards alone and with the tips on four order sequences: played once, used by the blocks below. */
@@ -355,7 +375,9 @@ describe('"while you wait": each line is true, and nothing undoes it', () => {
       for (const x of gains) expect(x, from).toBeGreaterThan(0);
       expect((gains[0] + gains[1]) / 2, `${goal}/${line}: ${from}`).toBeGreaterThanOrEqual(15);
     }
-    expect([...measured].sort()).toEqual(['cut-glyph', 'expand-labs', 'flow-fix', 'glint-lab', 'ink-lab', 'sell-raw', 'speed-pairs', 'well-labs']);
+    // Not "cut-glyph": this player now has the Prism Assembler's price in hand on goal 19 and does the cut there,
+    // where it ends no wait; its worth is on goal 21, measured on the pacing tool's card-only player below.
+    expect([...measured].sort()).toEqual(['deep-analysis', 'expand-labs', 'flow-fix', 'glint-lab', 'ink-lab', 'speed-pairs', 'well-labs']);
     console.info(`"while you wait" lines, seconds each ends its wait sooner (two order sequences):\n  ${report.join('\n  ')}`);
   });
 
@@ -426,8 +448,9 @@ describe('"while you wait": worth it to the pacing tool\'s card-only player', ()
   it('the card-only player who leaves one line out spends at least 15 s longer on the goals it stands on, on every seed', () => {
     // Not the lines of "Make your first Lens": this player wires what the hint names anyway (the lines are for a
     // person who did not, and are checked on such boards below).
-    const lines = ['ink-lab', 'glint-lab', 'well-labs', 'expand-labs', 'flow-fix', 'speed-pairs', 'cut-glyph', 'sell-raw'];
+    const lines = ['ink-lab', 'glint-lab', 'well-labs', 'expand-labs', 'flow-fix', 'speed-pairs', 'deep-analysis', 'cut-glyph'];
     const report: string[] = [];
+    const gains: [string, number][] = [];
     for (const seed of SEEDS) {
       const plain = play('cardonly', seed);
       expect(plain.g.ended).toBe(true);
@@ -436,10 +459,13 @@ describe('"while you wait": worth it to the pacing tool\'s card-only player', ()
         expect(without.g.ended, `seed ${seed}, without ${line}`).toBe(true);
         const gain = spent(without, line) - spent(plain, line);
         report.push(`seed ${seed} ${line}: ${Math.round(spent(plain, line))} s with it, ${Math.round(spent(without, line))} s without`);
-        expect(gain, `seed ${seed}: ${line}`).toBeGreaterThanOrEqual(15);
+        gains.push([`seed ${seed}: ${line}`, gain]);
       }
     }
     console.info(`the card-only player of the pacing tool, each line left out in turn:\n  ${report.join('\n  ')}`);
+    // "glint-lab" is the exception: 13–25 s. Ember Deposits came down to 195α, so goal 11's wait is shorter, and
+    // what the Glint Well's Lab of its own brings after it (1 α a second, through goals 12 to 15) is not counted.
+    for (const [what, gain] of gains) expect(gain, what).toBeGreaterThanOrEqual(what.endsWith('glint-lab') ? 10 : 15);
   }, 600_000);
 });
 
@@ -462,9 +488,9 @@ function checkStep(a: Advice, from: string) {
   expect(a.saves, from).toBeUndefined();
   expect(a.eta, from).toBe(0);
   expect(a.steps, from).toBe(1);
-  // Exactly one thing to do.
-  expect([a.wire, a.build, a.cut, a.expand, a.upgrade].filter((x) => x != null).length, from).toBe(1);
-  expect(a.favour ?? a.research ?? a.to ?? a.all, from).toBeUndefined();
+  // Exactly one thing to do (a research too: Lab Speed, then Deep Analysis, on "Make your first Mist").
+  expect([a.wire, a.build, a.cut, a.expand, a.upgrade, a.research].filter((x) => x != null).length, from).toBe(1);
+  expect(a.favour ?? a.to ?? a.all, from).toBeUndefined();
 }
 
 /**
@@ -643,12 +669,15 @@ describe('lineAdvice: the next step of the card\'s line, for its "Show me"', () 
     expect(meanwhileOf(h)!.id).toBe('well-labs'); // one pair of two
 
     // The line keeps the credits the card's own next purchase needs: with Assembly researched and the
-    // Assembler not bought, only what is left over it.
+    // Assembler not bought, only what is left over it. And a Well and the Lab from its port are one step: the
+    // Well is offered only when its Lab can be paid for too, so that no goal ends with the Well standing alone.
     h.techs.push('P4');
-    h.credits = nodeCost(h, 'assembler') + nodeCost(h, 'well') - 1;
+    h.credits = nodeCost(h, 'assembler') + nodeCost(h, 'well') + nodeCost(h, 'lab') - 1;
     expect(lineAdvice(h)).toBeNull();
+    expect(goalView(h)!.meanwhile!.held).toEqual({ cost: nodeCost(h, 'assembler') + nodeCost(h, 'well') + nodeCost(h, 'lab'), sym: '¢', eta: expect.any(Number) });
     h.credits += 1;
     expect(lineAdvice(h)).toMatchObject({ build: 'well' });
+    expect(goalView(h)!.meanwhile!.held).toBeUndefined();
 
     // "Make your first Mist", second line: Speed on a Well with a Lab of its own, then on its Lab.
     h.credits = 1e9;
@@ -692,7 +721,7 @@ describe('"while you wait": done means done on any board', () => {
     g.data.b = TECHS.P7.cost.b!;
     const line = lineOf('cut-glyph');
     expect(g.wires.some((w) => w.from === glyph.id && w.to === lab.id)).toBe(false);
-    expect(goalView(g)!.meanwhile).toEqual({ text: TEXT['cut-glyph'].mouse, done: false, step: 1, of: 2 });
+    expect(goalView(g)!.meanwhile).toEqual({ text: TEXT['cut-glyph'].mouse, done: false });
     expect(line.cuts!(g)).toEqual([toLab.id]);
     const a = lineAdvice(g)!;
     expect(a.cut).toEqual({ wire: toLab.id, from: router.id, to: lab.id });
@@ -807,8 +836,9 @@ describe('"Make your first Lens": a line for each input the Fabricator lacks', (
   /** The board as the card players have it when "Build a Fabricator" is claimed, the Fabricator fed nothing but what the card built it from. */
   const board = (where: 'port' | 'apart') => {
     const { cards } = cardRuns();
-    const snap = cards.snaps.find((s) => s.line === 'sell-raw')!;
-    const g = cloneGame(snap.g)!;
+    // (The first moment the player waited on "Build a Fabricator": saving for it, Fabrication researched or not.)
+    const g = cloneGame(cards.idle['build-fabricator'])!;
+    g.techs = [...new Set([...g.techs, 'P7'])];
     g.credits = 1e5;
     const prism = g.nodes.find((n) => n.recipe === 'prism')!;
     const f = placeNode(g, 'fabricator', prism.x + 240, prism.y)!;
@@ -823,7 +853,8 @@ describe('"Make your first Lens": a line for each input the Fabricator lacks', (
   it('built from the Prism Assembler\'s port: "2 of 2" asks for the Glyph wire, the progress counts inputs, and the Lens follows within 30 s', () => {
     const { g, f } = board('port');
     const v = goalView(g)!;
-    expect(v.meanwhile).toEqual({ text: TEXT['glyph-fab'].mouse, done: false, step: 2, of: 2 });
+    // The goal's own requirement, not something to do while waiting: the card says "Next step" (contract C2).
+    expect(v.meanwhile).toEqual({ text: TEXT['glyph-fab'].mouse, done: false, step: 2, of: 2, required: true });
     expect(v.progress).toEqual([1, 2, 'inputs wired']);
     expect(v.inputs).toEqual([{ mat: 'prism', name: 'Prism', fed: true }, { mat: 'glyph', name: 'Glyph', fed: false }]);
     const glyph = g.nodes.find((n) => n.recipe === 'glyph')!;
@@ -847,7 +878,7 @@ describe('"Make your first Lens": a line for each input the Fabricator lacks', (
   it('built anywhere else: the Prism first ("1 of 2"), then the Glyph, and the Lens follows within 30 s', () => {
     const { g, f, prism } = board('apart');
     expect(g.nodes.find((n) => n.id === f.id)!.recipe).toBeNull();
-    expect(goalView(g)!.meanwhile).toEqual({ text: TEXT['prism-fab'].mouse, done: false, step: 1, of: 2 });
+    expect(goalView(g)!.meanwhile).toEqual({ text: TEXT['prism-fab'].mouse, done: false, step: 1, of: 2, required: true });
     expect(goalView(g)!.progress).toEqual([0, 2, 'inputs wired']);
     expect(goalFocus(g)).toEqual([prism.id, f.id]);
     let steps = 0;

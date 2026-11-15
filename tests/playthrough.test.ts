@@ -164,6 +164,9 @@ describe('scripted playthrough', () => {
 const on = (run: CardRun, id: string) => run.spent.find((x) => x.id === id)!;
 const lens = (r: CardRun) => r.g.stats.firstLensAt!;
 const SPINE = ['L1', 'P1', 'P2', 'P3', 'P4', 'P5', 'P7', 'R1', 'S1']; // what the goal chain grants or asks for
+/** ...and what a card's line asks the player to research: Lab Speed, then Deep Analysis ("Make your first Mist"). */
+const LINE_TECHS = ['R2', 'R3'];
+const lineTechs = (run: CardRun) => (run.lines.some((x) => x.line === 'deep-analysis') ? LINE_TECHS : []);
 const LONG = ['make-spark', 'make-glyph', 'make-mist', 'build-fabricator'];
 
 // The hints alone, without the "while you wait" lines: a wait can last a quarter of an hour. (One run, shared:
@@ -183,8 +186,8 @@ describe('the whole demo, by the card alone', () => {
       // No side techs, and no tip but the Flow ring's. The only upgrades are what the cards asked for: the Well's
       // of goal 6, one level on every Well with "Upgrade all" (goal 20), and the steps of the lines (the Flow fix,
       // Speed on the pairs), or the ring's fix where no line named it.
-      // (Market Lens comes by itself with the first sale over demand.)
-      expect(g.techs.filter((id) => id !== 'C1').sort()).toEqual(SPINE);
+      // (Market Lens comes by itself with the first sale over demand.) With the lines, Lab Speed and Deep Analysis too.
+      expect(g.techs.filter((id) => id !== 'C1').sort()).toEqual([...SPINE, ...lineTechs(run)].sort());
       expect(g.techs.includes('C1')).toBe(g.seenSurplus);
       expect(run.tips.every((t) => t.kind === 'flow')).toBe(true);
       const levels = g.nodes.reduce((s, n) => s + n.lv.speed + n.lv.eff + n.lv.buffer, 0);
@@ -192,6 +195,8 @@ describe('the whole demo, by the card alone', () => {
     }
     // With the lines the player never needs the ring's tip: the Flow goal's line names the fix.
     expect(plain.tips.length).toBe(0);
+    expect(lineTechs(plain)).toEqual(LINE_TECHS);
+    expect(lineTechs(bare)).toEqual([]);
     // The hints ask for one Lab. The lines add five more, four of them with a Well of their own, on a board expanded twice.
     expect(bare.g.nodes.filter((n) => n.type === 'lab').length).toBe(1);
     expect(bare.g.board.expansions).toBe(1);
@@ -231,18 +236,20 @@ describe('the whole demo, by the card alone', () => {
       'Make your first Mist: α for Breeze Deposits',
       'Build a Fabricator: α and β for Fabrication',
     ]);
-    // Most of an hour to the Lens with the hints alone, about twenty minutes with the lines: no tip involved.
+    // Most of an hour to the Lens with the hints alone, about seventeen minutes with the lines (this player claims
+    // within seconds; the pacing tool's card-only player, who claims 8–16 s late, at 17:34–18:14): no tip involved.
     expect(lens(bare)).toBeGreaterThan(40 * 60);
     expect(lens(bare)).toBeLessThan(70 * 60);
-    expect(lens(plain)).toBeGreaterThan(17 * 60);
-    expect(lens(plain)).toBeLessThan(22 * 60);
+    expect(lens(plain)).toBeGreaterThan(16 * 60);
+    expect(lens(plain)).toBeLessThan(20 * 60);
     for (const id of LONG) expect(on(plain, id).seconds, id).toBeLessThan(0.75 * on(bare, id).seconds);
     // No goal takes four and a half minutes (the pacing tool's card-only player, who claims late, has six).
     expect(Math.max(...plain.spent.map((x) => x.seconds))).toBeLessThan(270);
     expect(plain.g.stats.fromSales + plain.g.stats.fromGoals + plain.g.stats.fromOrders).toBeGreaterThan(9000);
-    // The two-price rule does not show itself to this player before the Fabricator is saved for (then the raw
-    // goods the last line sends to the Market can go over demand), and Market Lens comes with it.
-    if (plain.surplusAt != null) expect(plain.surplusAt).toBeGreaterThan(on(plain, 'bulk-upgrade').seconds + plain.spent.slice(0, GOALS.findIndex((x) => x.id === 'bulk-upgrade')).reduce((s, x) => s + x.seconds, 0) - 1);
+    // The two-price rule does not show itself to this player before the Lens: nothing the cards ask for sells over
+    // its demand (the Fabricator card's line that wired the raw Wells to the Market did, at minute 17). Market Lens
+    // comes with it, in free play.
+    if (plain.surplusAt != null) expect(plain.surplusAt).toBeGreaterThanOrEqual(lens(plain));
     expect(plain.g.techs.includes('C1')).toBe(plain.g.seenSurplus);
   });
 });
@@ -265,8 +272,9 @@ describe('the whole demo, by the card and the tips', () => {
       expect(levels, name).toBeGreaterThanOrEqual(0);
       expect(levels, name).toBeLessThanOrEqual(tips.filter((t) => /buy Speed|Upgrade all/.test(t.text)).length * 8);
       if (levels > 0) expect(tips.some((t) => /buy Speed|Upgrade all/.test(t.text)), name).toBe(true);
-      // No tech was researched that the card did not ask for, unless a tip said so. (Market Lens comes by itself.)
-      const side = g.techs.filter((id) => !SPINE.includes(id) && id !== 'C1');
+      // No tech was researched that the card did not ask for (its hints and its lines), unless a tip said so.
+      // (Market Lens comes by itself.)
+      const side = g.techs.filter((id) => !SPINE.includes(id) && !lineTechs(run).includes(id) && id !== 'C1');
       expect(side.length, name).toBe(tips.filter((t) => /^Research /.test(t.text)).length);
     }
   });

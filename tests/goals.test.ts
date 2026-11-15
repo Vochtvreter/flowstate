@@ -375,7 +375,7 @@ describe('goal chain: conditions and progress', () => {
 
     at(g, 'research-murk');
     g.data.a = 20;
-    expect(goalView(g)!.progress).toEqual([20, 45, 'α']);
+    expect(goalView(g)!.progress).toEqual([20, TECHS.P2.cost.a, 'α']);
 
     at(g, 'make-glyph');
     g.techs = ['P1', 'R1', 'P2', 'P3'];
@@ -577,11 +577,11 @@ describe('goal chain: conditions and progress', () => {
     expect(step('make-glyph')).toEqual({ credits: 600, what: 'the Assembler' });
     expect(step('make-mist')).toEqual({ tech: 'P5', then: nodeCost(g, 'well') + nodeCost(g, 'refiner'), thenWhat: 'the Well and the Refiner' });
     g.techs.push('P5');
-    expect(step('build-fabricator')).toEqual({ tech: 'P7', then: 7250, thenWhat: 'the Fabricator' });
+    expect(step('build-fabricator')).toEqual({ tech: 'P7', then: 4800, thenWhat: 'the Fabricator' });
     // What the card shows is still the Data for the research.
     expect(activeGoal(g)!.progress!(g)).toEqual([0, 720, 'α']);
     g.techs.push('P7');
-    expect(step('build-fabricator')).toEqual({ credits: 7250, what: 'the Fabricator' });
+    expect(step('build-fabricator')).toEqual({ credits: 4800, what: 'the Fabricator' });
     // A research with nothing to buy after it carries no price.
     g.techs = ['P1', 'R1'];
     expect(step('research-murk')).toEqual({ tech: 'P2' });
