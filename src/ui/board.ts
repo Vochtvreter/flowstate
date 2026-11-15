@@ -1033,7 +1033,36 @@ const ex = {
   movedAt: 0,
   /** The docked button as a world box: wire dots are not drawn over it (the first four numbers of every flow's `occ`). */
   occ: [0, 0, 0, 0],
+  /**
+   * On a phone: the right end and the middle of its seat in the thumb row, just left of the floating
+   * buttons (see `measureExpand`), or null while that row is taken (Claim, the "tap where…" line, the
+   * build menu). `short`: a phone held sideways, where the board has no room to spare for it.
+   */
+  row: null as { x1: number; y: number } | null, short: false,
+  /** The width of the one-line form, as last measured. */
+  miniW: 160,
+  /** Shown at all: from the goal that asks for it on (see `expandShown`). */
+  shown: false,
 };
+
+/** The goal that first asks for the expansion: before it the button is not shown (it would compete with the first steps). */
+const EXPAND_GOAL = GOALS.findIndex((x) => x.id === 'expand');
+
+/**
+ * Whether the button is on the board at all: from the goal "Expand the board" on (or once the board has been
+ * expanded, in free play, or when a "while you wait" line asks for it). Before that it would only be one more
+ * thing beside the first instructions, and a tap meant for an empty spot could buy a plot.
+ */
+function expandShown(g: Game): boolean {
+  return g.board.expansions > 0 || g.ended || EXPAND_GOAL < 0 || g.goal.i >= EXPAND_GOAL || ex.asked;
+}
+
+/**
+ * The player is in the middle of something (a port armed, a wire being drawn, a card being placed, the build
+ * menu open): the button stands back, faint and deaf to presses, in either form. A tap meant for an empty
+ * spot of the board must never buy a plot.
+ */
+const expandQuiet = () => !!tapWire || !!ui.placing || !!radial || (!!drag && (drag.kind === 'wire' || drag.kind === 'wireIn'));
 
 /**
  * The goal card is asking for the expansion: the goal is "Expand the board", or the next step of the
@@ -1068,6 +1097,13 @@ function measureExpand() {
       const b = strip.getBoundingClientRect();
       if (b.height > 1) out.push({ x0: -1e6, y0: -1e6, x1: 1e6, y1: b.bottom - r.top });
     }
+    // Its seat in the thumb row, beside Fit: a place that costs no working board. Taken while Claim or the
+    // "tap where…" line stands in the row, or the build menu is open (the floating buttons step aside then).
+    ex.short = r.height < 420 && r.width > r.height;
+    const fit = stageBoxOf(fabsEl?.querySelector('[data-testid="fab-fit"]'));
+    const busy = !!stageBoxOf(document.querySelector('#hud [data-testid="claim"]')) || !!stageBoxOf(document.getElementById('tap-hint'))
+      || !!appEl?.classList.contains('building');
+    ex.row = fit && !busy ? { x1: fit.x0 - 10, y: (fit.y0 + fit.y1) / 2 } : null;
   } else {
     // The goal card with the order beside it, over the middle of the top edge, and room under it for the
     // alert chip whether it is showing or not.
@@ -1127,6 +1163,11 @@ function placeExpand(byCamera = false) {
   const r = rectOf();
   if (r.width < 2 || r.height < 2) return;
   if (ex.stale) measureExpand();
+  ex.shown = expandShown(g);
+  if (!ex.shown) {
+    hideExpand();
+    return;
+  }
   const { x: vx, y: vy, k } = ui.view;
   // Its natural place: centred under the plot, at the board's scale (larger in the overview).
   const hs = OV_SCALE[ovStep] * k;
@@ -1140,9 +1181,20 @@ function placeExpand(byCamera = false) {
     { x0: area.x0 - by, y0: area.y0 - by, x1: area.x1 + by, y1: area.y1 + by }, ex.blocks, HOME_GAP + stick,
   );
   const docked = !seen;
+  // On a phone, docked, it stands in the thumb row beside Fit, in the nearest stretch of it that no card
+  // or port lies under. A phone held sideways has no board to spare: while that seat is taken (Claim, the
+  // "tap where…" line, the build menu, cards all along the row) it waits off the board.
+  const rowX = docked && env.phone && ex.row ? rowSeat(ex.row) : null;
+  if (docked && env.phone && ex.short && rowX == null) {
+    hideExpand();
+    return;
+  }
+  setHidden(expandEl, false);
   const afford = g.credits + 1e-6 >= expansionCost(g);
   const call = ex.asked && afford;
-  const mini = docked && !call;
+  // (In the thumb row it takes its one-line form, whatever is asked: the row is 44 px tall.)
+  const inRow = rowX != null;
+  const mini = docked && (!call || inRow);
   setClass(expandEl, 'dock', docked);
   setClass(expandEl, 'mini', mini);
   setClass(expandEl, 'call', call);
@@ -1152,9 +1204,11 @@ function placeExpand(byCamera = false) {
     ex.sized = sized;
     ex.w = mini ? expandEl.offsetWidth || 150 : EXPAND_W;
     ex.h = mini ? expandEl.offsetHeight || 36 : EXPAND_H;
+    if (mini) ex.miniW = ex.w;
   }
   let target = home;
-  if (docked) {
+  if (rowX != null && ex.row) target = { x: Math.min(rowX, ex.row.x1) - ex.w / 2, y: ex.row.y, s: 1 };
+  else if (docked) {
     const p = dockSpot({ home, w: ex.w, h: ex.h, area, blocks: ex.blocks, gap: DOCK_GAP });
     target = { x: p.x + ex.w / 2, y: p.y + ex.h / 2, s: 1 };
   }
@@ -1180,6 +1234,46 @@ function placeExpand(byCamera = false) {
   ex.call = call;
   ex.target = target;
   drawExpand();
+}
+
+/**
+ * The right end of the stretch of the thumb row nearest Fit, at most `row.x1`, where the one-line button
+ * (as last measured) lies over no card and no port; null when there is none.
+ */
+function rowSeat(row: { x1: number; y: number }): number | null {
+  const w = ex.miniW + 4, h = 44;
+  const y0 = row.y - h / 2, y1 = row.y + h / 2;
+  const { x: vx, y: vy, k } = ui.view;
+  // Cards (with their ports) that reach into the row, as stretches of it, right to left.
+  const taken: [number, number][] = [];
+  for (const n of ui.g.nodes) {
+    const b = cardBox(n);
+    const sy0 = b.y0 * k + vy, sy1 = b.y1 * k + vy;
+    if (sy1 < y0 || sy0 > y1) continue;
+    const sx0 = b.x0 * k + vx, sx1 = b.x1 * k + vx;
+    if (sx1 < 0 || sx0 > row.x1) continue;
+    taken.push([sx0 - 4, sx1 + 4]);
+  }
+  taken.sort((a, b) => b[1] - a[1]);
+  let right = row.x1;
+  for (const [a, b] of taken) {
+    if (b < right - w) break;
+    if (a < right) right = Math.min(right, a);
+  }
+  return right - w >= DOCK_EDGE ? right : null;
+}
+
+/** Off the board for now: hidden, and no longer a place wire dots keep away from. */
+function hideExpand() {
+  setHidden(expandEl, true);
+  ex.target = ex.drawn = null;
+  ex.slide = null;
+  ex.docked = false;
+  if (ex.occ[2] !== 0) {
+    ex.occ.fill(0);
+    for (const refs of wireEls.values()) if (refs.flow.occ.length >= 4) refs.flow.occ.fill(0, 0, 4);
+    invalidateFx();
+  }
 }
 
 /**
@@ -1355,7 +1449,7 @@ let popTimer = 0;
  */
 function expand(ev?: Event) {
   const g = ui.g;
-  if (performance.now() < ex.restUntil) return;
+  if (performance.now() < ex.restUntil || !ex.shown || expandQuiet()) return;
   // (A finger cannot see where the button is going: a tap on it while it slides is a tap meant for the board.)
   const finger = (ev as PointerEvent | undefined)?.pointerType === 'touch' || (ev as PointerEvent | undefined)?.pointerType === 'pen';
   if (finger && performance.now() - ex.movedAt < MOVE_REST) return;
@@ -2259,9 +2353,9 @@ export function updateBoard(dt: number) {
   if (freshUntil && performance.now() >= freshUntil && syncChips()) layoutWires();
   if (glide) stepGlide(dt);
   if (ex.slide) drawExpand();
-  // Docked over the board while a port is armed or a card is being placed, the button stands back (faint,
-  // and a press goes through it to the board): the tap is meant for the spot under it, not for a new plot.
-  setClass(expandEl, 'quiet', ex.docked && (!!tapWire || !!ui.placing));
+  // While a port is armed, a wire drawn, a card placed or the build menu open, the button stands back in
+  // either form (faint, and a press goes through it to the board): that tap is not meant for a new plot.
+  setClass(expandEl, 'quiet', expandQuiet());
   if (settling.size) stepSettle(dt);
   if (drag) edgeScroll(dt);
   if (drag && (drag.kind === 'wire' || drag.kind === 'wireIn')) drawTemp(drag, dt);
@@ -2584,6 +2678,34 @@ function snapTarget(p: Pt, ok: (n: GNode) => boolean, reach = SNAP_PX): GNode | 
   return best;
 }
 
+/** A mouse letting go of a wire takes a node only over its card or this close (screen px) to one of its ports. */
+const PORT_SNAP_PX = 12;
+
+/**
+ * Where a wire let go by a mouse attaches: the card under the pointer, or a card one of whose `side`
+ * ports (inputs for a wire drawn from an output, outputs for one drawn back from an input) is within
+ * PORT_SNAP_PX. A mouse points exactly: a release near a card, but not over it, is a release on empty
+ * board (which opens the build menu), never a wire into that card.
+ */
+function snapExact(p: Pt, ok: (n: GNode) => boolean, side: 'in' | 'out'): GNode | null {
+  const on = nodeAt(p);
+  if (on) return ok(on) ? on : null;
+  const g = ui.g;
+  let best: GNode | null = null;
+  let bestD = PORT_SNAP_PX / ui.view.k;
+  for (const n of g.nodes) {
+    if (!ok(n)) continue;
+    for (const q of side === 'in' ? inPorts(n) : outPorts(g, n)) {
+      const d = Math.hypot(q.x - p.x, q.y - p.y);
+      if (d < bestD) {
+        bestD = d;
+        best = n;
+      }
+    }
+  }
+  return best;
+}
+
 let tempD = '';
 
 function hideTemp() {
@@ -2859,7 +2981,7 @@ function tapEmpty(p: Pt) {
   const g = ui.g;
   // A mouse has been shown where the wire would snap: a click takes exactly that. A finger gets a
   // smaller margin, since nothing showed it which node a near miss would count for.
-  const near = snapTarget(p, (n) => wireOk(g, t.from, t.port, n.id), t.hover ? SNAP_PX : TAP_SNAP_PX);
+  const near = t.hover ? snapExact(p, (n) => wireOk(g, t.from, t.port, n.id), 'in') : snapTarget(p, (n) => wireOk(g, t.from, t.port, n.id), TAP_SNAP_PX);
   if (near) return tapNode(near.id);
   disarm();
   // Right beside the port there is no room to build: that tap only cancels.
@@ -3173,7 +3295,7 @@ function steer(cx: number, cy: number, hovering = false) {
     if (t && hovering && !radial) {
       t.hover = true;
       t.p = p;
-      const tn = snapTarget(p, (n) => wireOk(g, t.from, t.port, n.id));
+      const tn = snapExact(p, (n) => wireOk(g, t.from, t.port, n.id), 'in');
       t.target = tn?.id ?? null;
       if (tn) t.tp = inPortFor(tn, t.mats, p);
       highlightTarget(t.target);
@@ -3247,7 +3369,8 @@ function steer(cx: number, cy: number, hovering = false) {
       const d = drag;
       d.p = p;
       if (!d.armed && Math.hypot(cx - d.sx, cy - d.sy) > d.slop) wireUnderWay(d);
-      const tn = d.armed ? snapTarget(p, (n) => wireOk(g, d.from, d.port, n.id)) : null;
+      const can = (n: GNode) => wireOk(g, d.from, d.port, n.id);
+      const tn = !d.armed ? null : d.touch ? snapTarget(p, can) : snapExact(p, can, 'in');
       d.target = tn?.id ?? null;
       if (tn) d.tp = inPortFor(tn, d.mats, p);
       highlightTarget(d.target);
@@ -3261,7 +3384,8 @@ function steer(cx: number, cy: number, hovering = false) {
         if (tapWire) disarm();
         if (env.phone && ui.sel) select(null);
       }
-      const sn = d.armed ? snapTarget(p, (n) => !isSink(n) && n.id !== d.to && !noUse(g, n.id, portFor(n, d.mat), d.to)) : null;
+      const can = (n: GNode) => !isSink(n) && n.id !== d.to && !noUse(g, n.id, portFor(n, d.mat), d.to);
+      const sn = !d.armed ? null : d.slop >= TOUCH_SLOP ? snapTarget(p, can) : snapExact(p, can, 'out');
       d.target = sn?.id ?? null;
       if (sn) d.tp = outPorts(g, sn)[portFor(sn, d.mat)] ?? outPorts(g, sn)[0] ?? p;
       highlightTarget(d.target);
@@ -3497,6 +3621,34 @@ function onUp(e: PointerEvent) {
 
 // ---------- radial build menu ----------
 
+/**
+ * The kind of node the card is asking the player to build right now, if any: the next step of the goal's
+ * "while you wait" line when that is a build, or else what the goal's hint says to pick or to build
+ * ("…and pick Lab", "Build a Router from…"). The build menu puts it first and preselects it.
+ */
+function wantedType(g: Game): NodeType | null {
+  const step = lineAdvice(g);
+  if (step?.build && step.build in NODE_DEFS) return step.build as NodeType;
+  const goal = activeGoal(g);
+  if (!goal || g.goal.ready) return null;
+  const names = new Map<string, NodeType>();
+  for (const t of Object.keys(NODE_DEFS) as NodeType[]) names.set(NODE_DEFS[t].name.toLowerCase(), t);
+  const said = /\b(?:pick|build(?:\s+(?:a|an|another))?)\s+([A-Za-z]+)/gi;
+  for (const m of goal.hint.mouse.matchAll(said)) {
+    const t = names.get(m[1].toLowerCase());
+    if (t) return t;
+  }
+  return null;
+}
+
+/** The option the card asks for goes first (where it is preselected); the rest keep their order. */
+function wantedFirst(g: Game, opts: RadialOpt[]): RadialOpt[] {
+  const want = wantedType(g);
+  const i = want ? opts.findIndex((o) => o.type === want && !o.locked) : -1;
+  if (i <= 0) return opts;
+  return [opts[i], ...opts.slice(0, i), ...opts.slice(i + 1)];
+}
+
 function consumeOptions(g: Game, mats: MatId[]): RadialOpt[] {
   const opts: RadialOpt[] = [];
   const uses = (r: Recipe) => r.inputs.some((i) => mats.includes(i[0]));
@@ -3519,17 +3671,19 @@ function consumeOptions(g: Game, mats: MatId[]): RadialOpt[] {
   }
   sink('router', 'split');
   sink('silo', 'store');
-  const locked = recipes.find((r) => !recipeUnlocked(g, r));
+  // One thing still to research is shown locked, as a promise; not a machine already on offer for another
+  // recipe (a Fabricator that makes Lens beside a locked Fabricator would read as two of the same).
+  const locked = recipes.find((r) => !recipeUnlocked(g, r) && !opts.some((o) => o.type === r.machine));
   if (locked && opts.length < 8) {
     opts.push({ type: locked.machine, recipe: locked.id, label: `${NODE_DEFS[locked.machine].name} → ${locked.name}`, sub: '', cost: 0, locked: locked.tech, glyph: matGlyph(locked.outputs[0][0], 24) });
   }
-  return opts.slice(0, 8);
+  return wantedFirst(g, opts.slice(0, 8));
 }
 
 function produceOptions(g: Game, m: MatId): RadialOpt[] {
-  return Object.values(RECIPES)
+  return wantedFirst(g, Object.values(RECIPES)
     .filter((r) => r.outputs.some((o) => o[0] === m) && recipeUnlocked(g, r))
-    .map((r) => ({ type: r.machine, recipe: r.id, label: `${NODE_DEFS[r.machine].name} → ${r.name}`, sub: 'make', cost: nodeCost(g, r.machine), glyph: matGlyph(r.outputs[0][0], 26) }));
+    .map((r) => ({ type: r.machine, recipe: r.id, label: `${NODE_DEFS[r.machine].name} → ${r.name}`, sub: 'make', cost: nodeCost(g, r.machine), glyph: matGlyph(r.outputs[0][0], 26) })));
 }
 
 /**
@@ -3577,6 +3731,7 @@ function openBuildSheet(state: RadialState) {
       <button class="ibtn bare" data-act="close" aria-label="Close">${icon('close', 18)}</button></div>
     <div class="bopts">${opts}</div>`;
   buildEl.classList.add('open');
+  fitBuildSheet();
   touch();
   // The wire that was being drawn stays, ending where the new node will go.
   const from = state.dir === 'consume' ? state.a : state.at;
@@ -3593,6 +3748,48 @@ function openBuildSheet(state: RadialState) {
   tempD = '';
   // Room for the card that will appear there (a consumer grows to the right of the spot, a producer to the left).
   reveal(state.dir === 'consume' ? state.at.x - 16 : state.at.x - NODE_W, state.at.y - 46, NODE_W + 16, 92);
+}
+
+/** Room kept above the build sheet for the spot where the new node goes (a card is 72 to 112 px tall). */
+const SHEET_ROOM = 120;
+
+/**
+ * Size the build sheet to its options. It may grow past the inspector's limit (it needs room above it
+ * only for the new node, and the floating controls step aside while it is open), up to the strip less
+ * SHEET_ROOM. When even that cannot show every option, the list is cut halfway through a row, never at a
+ * sliver, and fades at its foot: the rest is plainly there to be scrolled to. (The option the goal asks for
+ * comes first: see `wantedFirst`.)
+ */
+function fitBuildSheet() {
+  const list = buildEl.querySelector<HTMLElement>('.bopts');
+  buildEl.style.maxHeight = '';
+  if (!list || !env.phone) return;
+  list.style.maxHeight = '';
+  const stage = boardEl.offsetHeight;
+  const c = env.cover();
+  // (A sheet that stands at the side, on a phone held sideways, has the stage's full height.)
+  const side = buildEl.offsetWidth < (boardEl.offsetWidth || 1) * 0.7;
+  const room = side ? stage - 6 : Math.max(190, stage - c.top - SHEET_ROOM);
+  const head = buildEl.offsetHeight - list.offsetHeight;
+  const need = head + list.scrollHeight;
+  buildEl.style.maxHeight = Math.min(need, room) + 'px';
+  list.classList.remove('more');
+  if (need <= room) return;
+  // Cut the list in the middle of the first row that does not fit.
+  const top = list.getBoundingClientRect().top;
+  const avail = room - head;
+  let cut = avail;
+  for (const o of list.querySelectorAll<HTMLElement>('.bopt')) {
+    const r = o.getBoundingClientRect();
+    const y0 = r.top - top + list.scrollTop, y1 = y0 + r.height;
+    if (y1 > avail) {
+      cut = Math.min(avail, Math.max(y0 - 8 + r.height * 0.5, 60));
+      break;
+    }
+  }
+  list.style.maxHeight = Math.round(cut) + 'px';
+  list.classList.add('more');
+  buildEl.style.maxHeight = Math.round(head + cut) + 'px';
 }
 
 /**
