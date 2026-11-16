@@ -50,6 +50,8 @@ let wiresSvg: SVGSVGElement;
 let nodesEl: HTMLElement;
 let chipsEl: HTMLElement;
 let ghostEl: HTMLElement;
+/** What the card in hand is and costs, in words: drawn on the stage, at the same size at every zoom (see `placeGhostCap`). */
+let ghostCap: HTMLElement;
 /** The outline of the card the build menu is about to build, where it will stand (under the phone's sheet; the fan draws its own). */
 let siteEl: HTMLElement;
 let expandEl: HTMLButtonElement;
@@ -332,13 +334,22 @@ function applyView() {
   if (lean !== wasLean) boardEl.classList.toggle('lean', lean);
   placeExpand(true);
   if (!renderedGame) return;
+  placePlotLabel();
+  if (ui.placing) {
+    // (In the overview the card in hand is an outline with its words beside it on the stage: see `updateGhost`.)
+    if (over !== wasOver) updateGhost();
+    else placeGhostCap();
+  }
   if (hintsBox && ui.g.goal.i < HINTS_UNTIL) syncHints(ui.g, false);
   // The camera has left the place the player's own Fit took it to (and is not on its way there): Fit has nothing left
   // to return to, and fits again. Back in among the cards, the zoom to come back in to is forgotten too.
   if (fitBack && fitAt && !(glide && glide === fitGlide) && !sameView(ui.view, fitAt)) fitBack = fitAt = null;
   if (wasOver && !over) ovFrom = null;
-  // The deposits' second line is worded for the type size.
-  if (big !== wasBig) syncDeposits(ui.g);
+  // The deposits' second line is worded for the type size (and so is the card in hand).
+  if (big !== wasBig) {
+    syncDeposits(ui.g);
+    if (ui.placing) updateGhost();
+  }
   // Text that was left alone in the overview is brought up to date on the way back in, and the second
   // line of a card is worded differently in the larger type.
   if ((wasOver && !over) || big !== wasBig) updateSlow();
@@ -571,6 +582,60 @@ function inClear(sb: Box, covers: Box[]): boolean {
 function cardBox(n: GNode): Box {
   const { w, h } = nodeSize(n);
   return { x0: n.x - 10, y0: n.y - 14, x1: n.x + w + 10, y1: n.y + h + 4 };
+}
+
+/** The plot's label as last placed: its width on the board once measured (for which words), where it stands along the plot's top side, whether it shows. */
+const plotTag = { text: '', big: false, w: 0, left: 16, on: true };
+let plotCovers: { at: number; boxes: Box[] } | null = null;
+
+/**
+ * Keep the plot's label ("Board · 3 plots") whole: it stands at the left end of the plot's top side, and when
+ * something that covers the stage (the goal card) would cut it there it moves along that side to the nearest place
+ * that is clear; with none, it is left out until there is one. Never half of it. (Not looked for in the overview,
+ * which does not show it.)
+ */
+function placePlotLabel(fresh = false) {
+  const g = ui.g;
+  if (!g || over || !plotLabel) return;
+  const text = plotLabel.textContent ?? '';
+  if (text !== plotTag.text || big !== plotTag.big || !plotTag.w) {
+    plotTag.text = text;
+    plotTag.big = big;
+    plotTag.w = plotLabel.offsetWidth;
+  }
+  if (!plotTag.w) return;
+  const now = performance.now();
+  if (fresh || !plotCovers || now - plotCovers.at > 400) plotCovers = { at: now, boxes: coverBoxes() };
+  const v = ui.view;
+  const y0 = (big ? -11 : -9) * v.k + v.y, y1 = y0 + (big ? 22 : 17) * v.k;
+  const w = plotTag.w;
+  const cut = (left: number) => {
+    const x0 = left * v.k + v.x, x1 = (left + w) * v.k + v.x;
+    return plotCovers!.boxes.some((c) => x0 < c.x1 + 6 && x1 > c.x0 - 6 && y0 < c.y1 + 2 && y1 > c.y0);
+  };
+  let left = 16;
+  let on = true;
+  if (cut(left)) {
+    // Just right of what covers it, or just left: whichever is nearer and clear, inside the plot's own side.
+    on = false;
+    let best = Infinity;
+    for (const c of plotCovers.boxes) {
+      for (const x of [(c.x1 + 10 - v.x) / v.k, (c.x0 - 10 - v.x) / v.k - w]) {
+        if (x < 16 || x + w > g.board.w - 16 || Math.abs(x - 16) >= best || cut(x)) continue;
+        best = Math.abs(x - 16);
+        left = Math.round(x);
+        on = true;
+      }
+    }
+  }
+  if (left !== plotTag.left) {
+    plotTag.left = left;
+    plotLabel.style.left = left + 'px';
+  }
+  if (on !== plotTag.on) {
+    plotTag.on = on;
+    plotLabel.style.visibility = on ? '' : 'hidden';
+  }
 }
 
 /** Every node as one box (with room for the ports that stick out), or null on an empty board. */
@@ -1713,6 +1778,7 @@ export function initBoard(root: HTMLElement) {
       <div id="ghost"></div>
       <div id="site"></div>
     </div>
+    <div id="ghost-cap" hidden></div>
     <button id="expand" data-testid="expand" style="transform:translate(-9999px,0)"></button>
     <div id="radial"></div>`;
   worldEl = boardEl.querySelector('#world')!;
@@ -1724,6 +1790,7 @@ export function initBoard(root: HTMLElement) {
   chipsEl = boardEl.querySelector('#chips')!;
   ghostEl = boardEl.querySelector('#ghost')!;
   siteEl = boardEl.querySelector('#site')!;
+  ghostCap = boardEl.querySelector('#ghost-cap')!;
   expandEl = boardEl.querySelector('#expand')!;
   radialEl = boardEl.querySelector('#radial')!;
   tempPath = boardEl.querySelector('#temp-wire')!;
@@ -2817,6 +2884,7 @@ export function updateSlow(part?: 'nodes' | 'wires') {
   }
   placeExpand();
   if (ui.placing) updateGhost();
+  placePlotLabel(true);
   syncFitControl();
   if (radial) {
     refreshBuildSheet();
@@ -3162,6 +3230,8 @@ function updateGhost() {
   const p = ui.placing;
   if (!p) {
     setStyle(ghostEl, 'display', 'none');
+    setHidden(ghostCap, true);
+    capFor = null;
     return;
   }
   const g = ui.g;
@@ -3193,21 +3263,63 @@ function updateGhost() {
       why = 'no room: expand the board';
     }
   }
+  // On a deposit the ghost is only an outline, so the deposit's own label stays readable; and in the overview, where
+  // nothing drawn at the board's scale can be read. Its words then stand beside it on the stage (`placeGhostCap`).
+  const bare = onDeposit || over;
   setStyle(ghostEl, 'display', 'flex');
   setStyle(ghostEl, 'left', pos.x + 'px');
   setStyle(ghostEl, 'top', pos.y + 'px');
   setStyle(ghostEl, 'width', w + 'px');
   setStyle(ghostEl, 'height', h + 'px');
   setClass(ghostEl, 'bad', !ok);
-  // On a deposit the ghost is only an outline with its caption underneath, so the deposit's own label stays readable.
-  setClass(ghostEl, 'outline', onDeposit);
+  setClass(ghostEl, 'outline', bare);
   const hint = ok ? `${fmt(cost)}¢ · ${pressWord()} to place` : why;
-  // In the phone layout a line above the hotbar already says "tap the board to place": the card
-  // itself has room for the price only at that type size.
-  const brief = ok && env.phone ? `${fmt(cost)}¢` : hint;
-  setHTML(ghostEl, onDeposit
-    ? `<span class="cap">${nodeIcon(p.type, 15)}${label} · <span class="mono">${hint}</span></span>`
-    : `${nodeIcon(p.type, 20)}<span>${label}<small class="mono">${brief}</small></span>`);
+  // In the phone layout a line above the hotbar already says "tap the board to place": the card itself has room for
+  // the price only at that type size. The same under 100% elsewhere, where the ghost is set in the larger type too.
+  const brief = ok && (env.phone || big) ? `${fmt(cost)}¢` : hint;
+  setHTML(ghostEl, bare ? '' : `${nodeIcon(p.type, 20)}<span>${label}<small class="mono">${brief}</small></span>`);
+  setHidden(ghostCap, !bare);
+  setClass(ghostCap, 'bad', !ok);
+  if (bare) {
+    if (setHTML(ghostCap, `${nodeIcon(p.type, 15)}${label} · <span class="mono">${hint}</span>`)) capSize = null;
+    capFor = { x0: pos.x, y0: pos.y, x1: pos.x + w, y1: pos.y + h };
+    placeGhostCap();
+  } else capFor = null;
+}
+
+/** The ghost the words belong to (board units), their size on the stage once measured, and what covers the stage (looked at now and then). */
+let capFor: Box | null = null;
+let capSize: { w: number; h: number } | null = null;
+let capCovers: { at: number; boxes: Box[] } | null = null;
+
+/**
+ * Put the words of the card in hand ("Breeze Well · 31¢ · tap to place") beside its ghost, on the stage: the same
+ * size at every zoom (drawn at the board's scale they were 3 px tall in the overview), under the ghost when that
+ * is clear of the goal card, the build bar and the floating controls, else above it, else as near as is clear.
+ */
+function placeGhostCap() {
+  const b = capFor;
+  if (!b || !ui.placing) return;
+  capSize ??= { w: ghostCap.offsetWidth, h: ghostCap.offsetHeight };
+  const now = performance.now();
+  if (!capCovers || now - capCovers.at > 400) capCovers = { at: now, boxes: coverBoxes(4, false) };
+  const { w, h } = capSize;
+  const r = rectOf();
+  const s = onStage(b, ui.view);
+  const mid = (s.x0 + s.x1) / 2;
+  const x = Math.max(6, Math.min(r.width - w - 6, mid - w / 2));
+  const clear = (y: number) => y >= 4 && y + h <= r.height - 4 && !capCovers!.boxes.some((c) => x < c.x1 && x + w > c.x0 && y < c.y1 && y + h > c.y0);
+  let y = s.y1 + 7;
+  if (!clear(y)) {
+    const above = s.y0 - 7 - h;
+    if (clear(above)) y = above;
+    else {
+      // Neither: inside what the player can see, as near under the ghost as that allows.
+      const f = env.phone ? freeArea(true) : uncoveredArea();
+      y = Math.max(f.y0 + 6, Math.min(f.y1 - h - 6, y));
+    }
+  }
+  setStyle(ghostCap, 'transform', `translate(${Math.round(x)}px, ${Math.round(y)}px)`);
 }
 
 export function startPlacing(type: NodeType, recipe?: string | null, deposit?: number) {
