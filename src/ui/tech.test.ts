@@ -331,7 +331,7 @@ describe('tech tree: the goal\'s wait', () => {
   });
 
   it('puts nothing off while the goal waits longer for the credits its step needs after the research (goal 21)', () => {
-    // "Research Fabrication, then save up and build a Fabricator": Fabrication's 720α come well before the 4,800¢.
+    // "Research Fabrication, then save up and build a Fabricator": Fabrication's 720α come well before the 5,000¢.
     const at21 = (credits: number, creditRate: number) => {
       const g = newGame();
       g.goal = { i: GOALS.findIndex((x) => x.id === 'build-fabricator'), ready: false };
@@ -346,7 +346,7 @@ describe('tech tree: the goal\'s wait', () => {
     };
     const slow = at21(1000, 9);
     expect(goalSaving(slow)?.tech?.id).toBe('P7');
-    expect(goalSaving(slow)?.then).toBe(4800);
+    expect(goalSaving(slow)?.then).toBe(5000);
     // 50α for Lab Speed puts Fabrication's α off by about 14 s, but the Fabricator's credits are 7 min away.
     expect(goalDelay(slow, TECHS.R2)).toBeNull();
     expect(byId(slow, 'R2')).toMatchObject({ state: 'rdy', slows: false });
