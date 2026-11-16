@@ -589,7 +589,9 @@ function cardBox(n: GNode): Box {
 }
 
 /** The plot's label as last placed: its width on the board once measured (for which words), where it stands along the plot's top side, whether it shows. */
-const plotTag = { text: '', big: false, w: 0, left: 16, on: true };
+const plotTag = { text: '', big: false, w: 0, left: 16, on: true, away: false, timer: 0 };
+/** How long the camera rests before the plot's label is set in a new place (ms). */
+const PLOT_SETTLE = 150;
 
 /**
  * Keep the plot's label ("Board · 3 plots") whole: it stands at the left end of the plot's top side, and when
@@ -646,14 +648,32 @@ function placePlotLabel() {
       }
     }
   }
-  if (left !== plotTag.left) {
+  if (left === plotTag.left && on === plotTag.on) {
+    // Back where it stands (or never moved): nothing waits, and it shows again if it was put away for the move.
+    if (plotTag.timer) clearTimeout(plotTag.timer);
+    plotTag.timer = 0;
+    if (plotTag.away) {
+      plotTag.away = false;
+      plotLabel.style.visibility = on ? '' : 'hidden';
+    }
+    return;
+  }
+  // Moving the label repaints the board's whole layer, so it is not slid along the plot's edge frame by frame while
+  // the camera moves (that took a pan at 70% on a slow machine from 49 to 41 frames a second): it is put away at the
+  // first frame and set in its new place once the camera has rested for a moment.
+  if (!plotTag.away && plotTag.on) {
+    plotTag.away = true;
+    plotLabel.style.visibility = 'hidden';
+  }
+  if (plotTag.timer) clearTimeout(plotTag.timer);
+  plotTag.timer = window.setTimeout(() => {
+    plotTag.timer = 0;
+    plotTag.away = false;
     plotTag.left = left;
-    plotLabel.style.left = left + 'px';
-  }
-  if (on !== plotTag.on) {
     plotTag.on = on;
+    plotLabel.style.left = left + 'px';
     plotLabel.style.visibility = on ? '' : 'hidden';
-  }
+  }, PLOT_SETTLE);
 }
 
 /** Every node as one box (with room for the ports that stick out), or null on an empty board. */
