@@ -22,6 +22,8 @@ const at = (g: Game, id: string) => {
   g.goalAt = { i: g.goal.i, t: g.time };
 };
 
+/** The dwell as shipped, in game seconds (the checks count against this, not against whatever a control has set). */
+const HOLD = 10;
 /** Credits a second at the top and at the bottom of the ripple (what Game.creditRate swings between on a card player's board of minute seven). */
 const HIGH = 4.3;
 const LOW = 3.3;
@@ -114,13 +116,13 @@ function dwellCase(name: string, body: () => void) {
   it(name, () => {
     body();
     expect(() => withHold(0, body), 'with ADVICE.lineHold = 0 the same checks must fail').toThrow();
-    expect(ADVICE.lineHold).toBe(10);
+    expect(ADVICE.lineHold).toBe(HOLD);
   });
 }
 
 describe('the step of a card\'s line does not blink with the reserve (ADVICE.lineHold)', () => {
   it('the constant: ten game seconds', () => {
-    expect(ADVICE.lineHold).toBe(10);
+    expect(ADVICE.lineHold).toBe(HOLD);
   });
 
   dwellCase('through a ripple of the credits a second the step stays on offer; with no dwell it comes and goes, saying "about 2½ min" each time', () => {
@@ -155,11 +157,11 @@ describe('the step of a card\'s line does not blink with the reserve (ADVICE.lin
     // Covered once, at the first look; from then on the income stays at the bottom of the ripple.
     const steady = (t: number) => (t === 0 ? HIGH : LOW);
     const looks = watch(cloneGame(g)!, 30, 0.5, steady);
-    for (const x of looks) expect(x.face, `at ${x.t} s`).toBe(x.t < ADVICE.lineHold ? 'step' : 'held');
+    for (const x of looks) expect(x.face, `at ${x.t} s`).toBe(x.t < HOLD ? 'step' : 'held');
     expect(changes(looks)).toBe(1); // ...and once withdrawn it does not come back by itself
     // Covered again for one look at 6 s: ten seconds from there.
     const again = watch(cloneGame(g)!, 30, 0.5, (t) => (t === 0 || t === 6 ? HIGH : LOW));
-    for (const x of again) expect(x.face, `at ${x.t} s`).toBe(x.t < 6 + ADVICE.lineHold ? 'step' : 'held');
+    for (const x of again) expect(x.face, `at ${x.t} s`).toBe(x.t < 6 + HOLD ? 'step' : 'held');
     // What the row says once it has let go: the Assembler and the step together.
     const h = cloneGame(g)!;
     watch(h, 12, 0.5, steady);
@@ -290,9 +292,9 @@ describe('the step of a card\'s line does not blink with the reserve (ADVICE.lin
     const seldom = watch(cloneGame(g)!, 60, 2.5, bursts);
     const last = Math.max(...often.filter((x) => bursts(x.t) === HIGH).map((x) => x.t));
     expect(last).toBe(28.45);
-    for (const x of often) expect(x.face, `at ${x.t} s`).toBe(x.t < last + ADVICE.lineHold ? 'step' : 'held');
+    for (const x of often) expect(x.face, `at ${x.t} s`).toBe(x.t < last + HOLD ? 'step' : 'held');
     expect(seldom.filter((x) => bursts(x.t) === HIGH).map((x) => x.t)).toEqual([0]);
-    for (const x of seldom) expect(x.face, `at ${x.t} s`).toBe(x.t < ADVICE.lineHold ? 'step' : 'held');
+    for (const x of seldom) expect(x.face, `at ${x.t} s`).toBe(x.t < HOLD ? 'step' : 'held');
     const faceAt = new Map(often.map((x) => [x.t, x.face]));
     for (const x of seldom) if (x.face === 'step') expect(faceAt.get(x.t), `at ${x.t} s`).toBe('step');
   });
@@ -340,7 +342,7 @@ describe('the dwell in the real game: the pacing tool\'s card player who claims 
   };
 
   it('with the dwell the row does not blink once; without it, the same seven minutes blink at least five times', () => {
-    const now = play(ADVICE.lineHold);
+    const now = play(HOLD);
     const before = play(0);
     expect(now.bad, now.bad.join('\n')).toEqual([]);
     expect(before.bad, before.bad.join('\n')).toEqual([]);
