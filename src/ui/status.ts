@@ -158,6 +158,12 @@ export interface WayOn {
   speed: boolean;
   /** A machine that takes no more because it is waiting for another input: that input. */
   waits: MatId | null;
+  /**
+   * It has room as it stands: a Lab studying under its rate, a machine short of this very material. Its Speed has just
+   * been raised, or it has only now been reached, and the node behind it is still called blocked for the few seconds
+   * the simulation takes to see its output drain. Absent otherwise.
+   */
+  room?: true;
 }
 
 /** A wire counts as full from this share of what its pipe carries (as the wire's own inspector says "At capacity"). */
@@ -184,17 +190,22 @@ function consumers(g: Game, id: number, port: number, mat: MatId, out: GNode[], 
   return out;
 }
 
+/** Is this Lab or machine taking all it can as it stands? A Lab that studies at its rate; a machine at work. */
+const flatOut = (g: Game, d: GNode): boolean => (d.type === 'lab' ? d.rate >= labRate(g, d) * LAB_FULL : d.status === 'working');
+
 /** Would a Speed level on this Lab or machine take more in? It can be bought (whatever the credits), and what holds it is its own pace. */
 function speedTakesMore(g: Game, d: GNode): boolean {
   if (!trackAvailable(g, d, 'speed') || d.lv.speed >= maxLevel(g, 'speed')) return false;
-  return d.type === 'lab' ? d.rate >= labRate(g, d) * LAB_FULL : d.status === 'working';
+  return flatOut(g, d);
 }
 
 /**
  * The way on from a blocked node, or null when there is none to name: its output has no wire (the box says to wire it),
  * a machine downstream is in trouble itself (the box jumps to that cause), or nothing downstream is a settled Lab or
  * machine with room on its wire (a Market or a Void takes everything: then a wire is the limit).
- * Of several, the one whose Speed is cheapest; with no Speed to offer, the first, to be shown.
+ * Of several, the one whose Speed is cheapest; with no Speed to offer, the first that takes no more, to be shown;
+ * where every one of them has room (the Speed the box offered has just been bought), the first, marked `room`: the
+ * box said "cannot take more" of a Lab in the second after its Speed was raised.
  */
 export function wayOn(g: Game, n: GNode, dx: Diagnosis = diagnose(g, n)): WayOn | null {
   if (dx.problem !== 'blocked' || dx.openPort || dx.culprit != null || !dx.mat) return null;
@@ -205,9 +216,10 @@ export function wayOn(g: Game, n: GNode, dx: Diagnosis = diagnose(g, n)): WayOn 
   let best: GNode | null = null;
   for (const d of found) if (speedTakesMore(g, d) && (!best || upgradeCost(d, 'speed') < upgradeCost(best, 'speed'))) best = d;
   if (best) return { node: best.id, speed: true, waits: null };
-  const d = found[0];
-  const waits = isMachine(d) && d.status === 'starved' && d.missing && d.missing !== dx.mat ? d.missing : null;
-  return { node: d.id, speed: false, waits };
+  const waitsFor = (d: GNode) => (isMachine(d) && d.status === 'starved' && d.missing && d.missing !== dx.mat ? d.missing : null);
+  const d = found.find((x) => flatOut(g, x) || waitsFor(x) != null) ?? found[0];
+  const waits = waitsFor(d);
+  return waits != null || flatOut(g, d) ? { node: d.id, speed: false, waits } : { node: d.id, speed: false, waits: null, room: true };
 }
 
 // ---------- "Upgrade all": what one press would buy ----------

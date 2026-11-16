@@ -3,7 +3,7 @@
 import { describe, expect, it } from 'vitest';
 import { clearHistory, connect, placeNode, upgrade, upgradeAll } from '../actions';
 import { PIPES } from '../content';
-import { maxLevel, upgradeCost } from '../economy';
+import { labRate, maxLevel, upgradeCost } from '../economy';
 import { GOALS } from '../goals';
 import { tick } from '../sim';
 import { Game, GNode, newGame } from '../state';
@@ -330,7 +330,7 @@ describe('a blocked node: the way on', () => {
     well.blockedOn = 'glint';
     well.grace = lab.grace = 0;
     lab.rate = 0.4;
-    expect(wayOn(g, well)).toEqual({ node: lab.id, speed: false, waits: null });
+    expect(wayOn(g, well)).toEqual({ node: lab.id, speed: false, waits: null, room: true });
     lab.rate = 1;
     expect(wayOn(g, well)?.speed).toBe(true);
     // (Only just built: not judged yet, so nothing is said about it.)
@@ -339,6 +339,45 @@ describe('a blocked node: the way on', () => {
     lab.grace = 0;
     wire.rate = PIPES[wire.tier].cap;
     expect(wayOn(g, well)).toBeNull();
+  });
+
+  it('in the seconds after the Speed it offered is bought, the Lab is said to have room, never that it cannot take more', () => {
+    const { g, well } = fastWell();
+    const lab = placeNode(g, 'lab', 500, 120)!;
+    connect(g, well.id, 0, lab.id);
+    run(g, 30);
+    expect(wayOn(g, well)).toEqual({ node: lab.id, speed: true, waits: null });
+    expect(upgrade(g, lab.id, 'speed')).toBe(true);
+    // The Well is still called blocked while its output drains; the Lab has not reached its new rate yet.
+    const said: string[] = [];
+    for (let i = 0; i < 40 && diagnose(g, well).problem === 'blocked'; i++) {
+      const on = wayOn(g, well)!;
+      expect(on.node).toBe(lab.id);
+      said.push(on.room ? 'room' : on.speed ? 'speed' : 'no more');
+      run(g, 0.25);
+    }
+    expect(said[0]).toBe('room');
+    expect(said).not.toContain('no more');
+    expect(diagnose(g, well).problem).toBeNull();
+  });
+
+  it('of two with no Speed left to buy, the one that takes no more is named before the one with room', () => {
+    const { g, well } = fastWell();
+    const router = placeNode(g, 'router', 400, 120)!;
+    const roomy = placeNode(g, 'lab', 700, 60)!;
+    const full = placeNode(g, 'lab', 700, 240)!;
+    connect(g, well.id, 0, router.id);
+    connect(g, router.id, 0, roomy.id);
+    connect(g, router.id, 0, full.id);
+    well.status = 'blocked';
+    well.blockedOn = 'glint';
+    well.grace = roomy.grace = full.grace = 0;
+    roomy.lv.speed = full.lv.speed = maxLevel(g, 'speed');
+    roomy.rate = 0.2;
+    full.rate = labRate(g, full);
+    expect(wayOn(g, well)).toEqual({ node: full.id, speed: false, waits: null });
+    full.rate = 0.2;
+    expect(wayOn(g, well)).toEqual({ node: roomy.id, speed: false, waits: null, room: true });
   });
 
   it('a machine that takes no more because it waits for another input: named with that input, to be shown', () => {

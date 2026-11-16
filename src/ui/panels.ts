@@ -765,9 +765,11 @@ function statusBlock(g: Game, n: GNode): string {
       const next = on ? nodeById(g, on.node) : null;
       if (on && next) {
         const name = NODE_DEFS[next.type].name;
+        // (With room: its Speed has just been raised, by the button below as likely as not, and this box is about to go.)
         body = on.waits ? `The ${name} it feeds is waiting for ${matName(on.waits)}.`
-          : !on.speed ? `The ${name} it feeds cannot take more.`
-            : next.type === 'lab' ? `The ${name} it feeds is full.` : `The ${name} it feeds is at full speed.`;
+          : on.room ? `The ${name} it feeds has room now.`
+            : !on.speed ? `The ${name} it feeds cannot take more.`
+              : next.type === 'lab' ? `The ${name} it feeds is full.` : `The ${name} it feeds is at full speed.`;
         if (on.speed) actions += buyBtn(`upgsrc:${next.id}`, upgradeCost(next, 'speed'), g.credits, `Upgrade ${name} · `, 'upg-next');
         actions += `<button class="ghostbtn" data-act="jump:${next.id}" data-testid="show-next" aria-label="Show the ${name}">Show</button>`;
       } else {
