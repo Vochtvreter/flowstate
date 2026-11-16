@@ -388,7 +388,7 @@ The tables below compare the build before the second fix round (d9b494b) with th
 
 The newcomer and the card-only player play the same game, to the second: the newcomer is offered no tip in fifteen runs (0–1 before).
 
-**A player who claims at once** (`--claimDelay=1,3`, card-only, seeds 0–14; no target): before, Lens 19:18–19:42, nothing to do 47–50% (559–585 s), up to 69–85 s at a stretch, 140–162 s on the Fabricator goal; now, Lens 16:15–16:54, 38–41% (374–415 s), up to 59–73 s at a stretch, 80–100 s on the Fabricator goal and 79–104 s on the Glyph goal, and 23 s on goal 8 (29 s before). A ready Claim counts as something to do, so this player has less to do between waits; the waits themselves are what came down.
+**A player who claims at once** (`--claimDelay=1,3`, card-only, seeds 0–14; no target): before, Lens 19:18–19:42, nothing to do 47–50% (559–585 s), up to 69–85 s at a stretch, 140–162 s on the Fabricator goal; now, Lens 16:15–16:52, 38–41% (374–415 s), up to 59 s at a stretch, 82–100 s on the Fabricator goal and 78–104 s on the Glyph goal, and 23 s on goal 8 (29 s before). (Before the Lab of a Well standing alone was given from the credits in hand, up to 73 s at a stretch, and goal 15 ended with a Well wired to nothing on 5 seeds.) A ready Claim counts as something to do, so this player has less to do between waits; the waits themselves are what came down. Claiming at 4–8 s: Lens 16:32–17:04, 34–37%, up to 58–71 s at a stretch, 67–90 s on the Fabricator goal. The D1 targets hold for the 8–16 s claimer the tool has always modelled, not for these two.
 
 | Fast players (30 runs, seeds 0–14) | Before (d9b494b) | Now | Target |
 |---|---|---|---|
