@@ -310,6 +310,213 @@ export function freeSpot(q: SpotQuery): Pt | null {
   return best;
 }
 
+// ---------- where a card built at a point the player chose stands ----------
+
+/** Air kept between a card built where the player chose and every other card and port, where there is room for it. */
+export const BUILD_AIR = 40;
+/** A spot with that air is taken only when none lies within this distance of a spot with the usual gap; and a spot whose new wire passes behind no card is worth going this much further for. */
+export const BUILD_REACH = 100;
+/** A card's ports stand out this far from its sides (style.css: 14 px dots centred a px past the edge): cards are kept that much further apart across. */
+export const PORT_OUT = 8;
+/** A card in view keeps this clear of what covers the stage: its ports at the sides, its pill and a gap above, a gap below. */
+const VIEW_SIDE = 10, VIEW_ABOVE = 22, VIEW_BELOW = 8, VIEW_PILL = 14, VIEW_FOOT = 4;
+
+/** A card as the placement rule sees it: its size, and the height to keep clear for it (see roomFor). */
+export interface Footprint { w: number; h: number; room: number }
+
+export interface SiteQuery {
+  /** The point the player chose (board units): where the middle of the card is wanted. */
+  at: Pt;
+  card: Footprint;
+  /** Other cards that may be built there instead (the build menu's other options): each has to fit on the same middle. */
+  alts?: Footprint[];
+  /** The other cards, each as tall as it may become, and the deposits with no Well on them. */
+  cards: Box[];
+  deposits: Box[];
+  board: { w: number; h: number };
+  grid: number;
+  /** The part of the board on the stage (board units), and what covers the stage there. With these, a spot that can be seen whole comes first. */
+  view?: Box | null;
+  covers?: Box[];
+  /** The wire the card arrives on: from this port to its input, or from its output to this port. */
+  wire?: { from?: Pt; to?: Pt };
+}
+
+/**
+ * The point nearest to `at` that is inside the plot, on the stage (`view`) and under none of `covers`: where a
+ * press outside the plot, or under something that lies over the board, is taken to have been meant. (With none of
+ * the plot on the stage: the nearest point of the plot.)
+ */
+export function clearPoint(at: Pt, board: { w: number; h: number }, view?: Box | null, covers: Box[] = []): Pt {
+  let area: Box = { x0: 0, y0: 0, x1: board.w, y1: board.h };
+  let over = covers;
+  if (view) {
+    const a = { x0: Math.max(0, view.x0), y0: Math.max(0, view.y0), x1: Math.min(board.w, view.x1), y1: Math.min(board.h, view.y1) };
+    if (a.x1 > a.x0 && a.y1 > a.y0) area = a;
+    else over = [];
+  }
+  const under = (x: number, y: number) => over.some((c) => x > c.x0 && x < c.x1 && y > c.y0 && y < c.y1);
+  const cx = Math.max(area.x0, Math.min(area.x1, at.x)), cy = Math.max(area.y0, Math.min(area.y1, at.y));
+  if (!under(cx, cy)) return { x: cx, y: cy };
+  // The nearest clear point keeps the point's own place on each axis, or lies on a side of a cover or of the area.
+  const xs = [cx, area.x0, area.x1], ys = [cy, area.y0, area.y1];
+  for (const c of over) {
+    for (const x of [c.x0, c.x1]) if (x >= area.x0 && x <= area.x1) xs.push(x);
+    for (const y of [c.y0, c.y1]) if (y >= area.y0 && y <= area.y1) ys.push(y);
+  }
+  let best: Pt | null = null;
+  let bestD = Infinity;
+  for (const y of ys) {
+    for (const x of xs) {
+      const d = Math.hypot(x - at.x, y - at.y);
+      if (d >= bestD || under(x, y)) continue;
+      bestD = d;
+      best = { x, y };
+    }
+  }
+  return best ?? { x: cx, y: cy };
+}
+
+/**
+ * Where a card built at a point the player chose stands (its top left corner, on the grid), or null when the
+ * plot has no room left.
+ *
+ * A spot is free when the card stands inside the plot there and keeps the usual gap (CARD_GAP, and the ports'
+ * reach across) from every other card and every free deposit, as does every card in `alts` on the same middle.
+ * Every free spot has a handicap, which depends on the board and the camera alone: BUILD_REACH when it has no air
+ * round it (BUILD_AIR from every other card), and BUILD_REACH again when the card could not be seen whole there
+ * (`view`: on the stage, under none of `covers`). The card goes to the free spot whose distance from the wanted
+ * one, plus its handicap, is least. Sideways counts a little less: cards are wider than tall. So:
+ *
+ *  - Centred on the point (on the grid) when the card has air there and can be seen; a step aside for air or to
+ *    come on to the stage, never a walk.
+ *  - When it cannot stand on the point, a spot whose new wire (drawn as the board draws it) would pass behind
+ *    another card counts as BUILD_REACH further off too: the card does not go to the far side of another card
+ *    from its source while the near side has room within that reach.
+ *  - A point outside the plot, or under something that covers the stage, is measured from the nearest point
+ *    inside and clear (`clearPoint`).
+ *  - A spot under one of `covers` is taken only when the plot has no other.
+ *  - A point the rule gave is accepted as it stands: asked again on the middle of its answer, the answer is the
+ *    same. (The handicaps do not depend on the point, and distances obey the triangle inequality.)
+ */
+export function buildSite(q: SiteQuery): Pt | null {
+  const { card, cards, deposits, board, grid } = q;
+  const alts = q.alts ?? [];
+  const covers = q.covers ?? [];
+  const snap = (v: number) => Math.round(v / grid) * grid;
+  const lo = Math.ceil(PLOT_MARGIN / grid) * grid;
+  const gx1 = Math.floor((board.w - card.w - PLOT_MARGIN) / grid) * grid, gy1 = Math.floor((board.h - card.room - PLOT_MARGIN) / grid) * grid;
+  if (gx1 < lo || gy1 < lo) return null;
+  const nx = (gx1 - lo) / grid + 1, ny = (gy1 - lo) / grid + 1;
+  const side = 2 * PORT_OUT;
+  const clearOf = (x: number, y: number, f: Footprint, gap: number) => {
+    for (const b of cards) if (x < b.x1 + gap + side && x + f.w + gap + side > b.x0 && y < b.y1 + gap && y + f.room + gap > b.y0) return false;
+    for (const b of deposits) if (x < b.x1 + CARD_GAP && x + f.w + CARD_GAP > b.x0 && y < b.y1 + CARD_GAP && y + f.room + CARD_GAP > b.y0) return false;
+    return true;
+  };
+  /** Where another card on the same middle would stand. */
+  const altAt = (x: number, y: number, f: Footprint): Pt => ({ x: snap(x + card.w / 2 - f.w / 2), y: snap(y + card.h / 2 - f.h / 2) });
+  const free = (x: number, y: number): boolean => {
+    if (!clearOf(x, y, card, CARD_GAP)) return false;
+    for (const f of alts) {
+      const p = altAt(x, y, f);
+      if (p.x < PLOT_MARGIN || p.y < PLOT_MARGIN || p.x + f.w > board.w - PLOT_MARGIN || p.y + f.room > board.h - PLOT_MARGIN || !clearOf(p.x, p.y, f, CARD_GAP)) return false;
+    }
+    return true;
+  };
+  /** Under none of the covers: the card, and every other that may be built on its middle. */
+  const uncovered = (x: number, y: number): boolean => {
+    if (!covers.length) return true;
+    let x0 = x, y0 = y, x1 = x + card.w, y1 = y + card.room;
+    for (const f of alts) {
+      const p = altAt(x, y, f);
+      x0 = Math.min(x0, p.x);
+      y0 = Math.min(y0, p.y);
+      x1 = Math.max(x1, p.x + f.w);
+      y1 = Math.max(y1, p.y + f.room);
+    }
+    for (const c of covers) if (x0 - VIEW_SIDE < c.x1 && x1 + VIEW_SIDE > c.x0 && y0 - VIEW_ABOVE < c.y1 && y1 + VIEW_BELOW > c.y0) return false;
+    return true;
+  };
+  /** The card can be seen whole there: on the stage, under nothing. */
+  const seen = (x: number, y: number): boolean => {
+    const v = q.view;
+    if (!v) return true;
+    return x - VIEW_SIDE >= v.x0 && x + card.w + VIEW_SIDE <= v.x1 && y - VIEW_PILL >= v.y0 && y + card.h + VIEW_FOOT <= v.y1 && uncovered(x, y);
+  };
+  /** The card's new wire, drawn to or from the middle of its side, would pass behind another card. */
+  const behind = (x: number, y: number): boolean => {
+    const w = q.wire;
+    if (!w || (!w.from && !w.to)) return false;
+    const a = w.from ?? { x: x + card.w, y: y + card.h / 2 }, b = w.from ? { x, y: y + card.h / 2 } : w.to!;
+    for (const p of samples(a, b, 24)) {
+      for (const c of cards) if (p.x > c.x0 + 2 && p.x < c.x1 - 2 && p.y > c.y0 + 2 && p.y < c.y1 - 2) return true;
+    }
+    return false;
+  };
+  const inX = (v: number) => Math.max(lo, Math.min(gx1, snap(v))), inY = (v: number) => Math.max(lo, Math.min(gy1, snap(v)));
+  const spotOf = (p: Pt): Pt => ({ x: inX(p.x - card.w / 2), y: inY(p.y - card.h / 2) });
+  // What a spot's handicap is, without the wire's share: worked out once a spot (the first time it is asked for). -1: not free.
+  const known = new Float32Array(nx * ny).fill(-2);
+  let clear = true;
+  const handicap = (x: number, y: number): number => {
+    const i = ((y - lo) / grid) * nx + (x - lo) / grid;
+    if (known[i] === -2) known[i] = !free(x, y) || (clear && !uncovered(x, y)) ? -1 : (clearOf(x, y, card, BUILD_AIR) ? 0 : BUILD_REACH) + (seen(x, y) ? 0 : BUILD_REACH);
+    return known[i];
+  };
+  /** The free spot whose distance from `from` plus its handicap is least; the nearer one of two that tie. */
+  const least = (from: Pt, wired: boolean): Pt | null => {
+    // Only spots nearer than the best so far can beat it: rings of grid lines round `from` are looked at, nearest first.
+    let best: Pt | null = null;
+    let bestCost = Infinity;
+    const most = Math.max(nx, ny);
+    for (let ring = 0; ring <= most; ring++) {
+      // (Every spot of this ring and beyond is at least this far off.)
+      if (ring * grid * 0.9 >= bestCost) break;
+      for (let j = -ring; j <= ring; j++) {
+        const y = from.y + j * grid;
+        if (y < lo || y > gy1) continue;
+        const stepI = Math.abs(j) === ring ? 1 : 2 * ring;
+        for (let i = -ring; i <= ring; i += stepI || 1) {
+          const x = from.x + i * grid;
+          if (x < lo || x > gx1) continue;
+          const d = Math.hypot(i * grid * 0.9, j * grid);
+          if (d > bestCost || (d === bestCost && best)) continue;
+          const h = handicap(x, y);
+          if (h < 0) continue;
+          const cost = d + h + (wired && behind(x, y) ? BUILD_REACH : 0);
+          if (cost < bestCost || (cost === bestCost && best && d < Math.hypot((best.x - from.x) * 0.9, best.y - from.y))) {
+            bestCost = cost;
+            best = { x, y };
+          }
+        }
+      }
+    }
+    return best;
+  };
+  const same = (a: Pt | null, b: Pt) => !!a && a.x === b.x && a.y === b.y;
+  const raw = spotOf(q.at);
+  const p = clearPoint(q.at, board, q.view, covers);
+  const inside = p.x === q.at.x && p.y === q.at.y;
+  // Clear of the covers first; with no such spot anywhere on the plot, under them.
+  for (clear of covers.length ? [true, false] : [false]) {
+    known.fill(-2);
+    // The card can stand on the point: it does.
+    if (same(least(raw, false), raw)) return raw;
+    // It has to move: now the wire counts too. (A point that is itself an answer of this rule stays one.)
+    const from = inside || same(least(raw, true), raw) ? raw : spotOf(p);
+    const best = least(from, true);
+    if (best) return best;
+  }
+  return null;
+}
+
+/** Where another card stands when it is built on the middle of a spot found for `card` (see `buildSite`). */
+export function siteFor(spot: Pt, card: Footprint, other: Footprint, grid: number): Pt {
+  const snap = (v: number) => Math.round(v / grid) * grid;
+  return { x: snap(spot.x + card.w / 2 - other.w / 2), y: snap(spot.y + card.h / 2 - other.h / 2) };
+}
+
 export interface Card { id: number; x: number; y: number; w: number; h: number; /** Height to keep clear for it (it may grow). */ room: number; /** A Well: it stays on its deposit. */ fixed: boolean }
 
 /** True when two cards share any ground at all (touching edges do not count). */

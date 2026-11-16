@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import {
-  Box, CARD_GAP, Card, PLOT_MARGIN, bestWindow, boxClear, cardsOverlap, dockSpot, fadeColor, fitBox, frameBox, freeSpot, heldRate, pinchView, separate,
-  spotFree, wholeGain,
+  BUILD_AIR, BUILD_REACH, Box, CARD_GAP, Card, Footprint, PLOT_MARGIN, PORT_OUT, SiteQuery, bestWindow, boxClear, buildSite, cardsOverlap, clearPoint,
+  dockSpot, fadeColor, fitBox, frameBox, freeSpot, heldRate, pinchView, samples, separate, siteFor, spotFree, wholeGain,
 } from './geom';
 
 const free = (k: number) => k;
@@ -220,6 +220,181 @@ describe('freeSpot: the placement rule', () => {
       expect(p.x).toBeGreaterThanOrEqual(PLOT_MARGIN);
       expect(p.y + 72).toBeLessThanOrEqual(BOARD.h - PLOT_MARGIN);
     }
+  });
+});
+
+describe('buildSite: where a card built at a point the player chose stands', () => {
+  const LAB: Footprint = { w: 172, h: 72, room: 72 }, REFINER: Footprint = { w: 172, h: 72, room: 92 }, ASSEMBLER: Footprint = { w: 172, h: 72, room: 112 }, VOID: Footprint = { w: 136, h: 60, room: 60 };
+  const site = (x: number, y: number, cards: Box[], more: Partial<SiteQuery> = {}) =>
+    buildSite({ at: { x, y }, card: LAB, cards, deposits: [], board: BOARD, grid: GRID, ...more });
+  /** The middle of a card standing on a spot. */
+  const mid = (p: { x: number; y: number }, f: Footprint = LAB) => ({ x: p.x + f.w / 2, y: p.y + f.h / 2 });
+  /** A card on spot `p` keeps `gap` from every other card (and the ports' reach across). */
+  const keeps = (p: { x: number; y: number }, f: Footprint, cards: Box[], gap: number) =>
+    cards.every((b) => !(p.x < b.x1 + gap + 2 * PORT_OUT && p.x + f.w + gap + 2 * PORT_OUT > b.x0 && p.y < b.y1 + gap && p.y + f.room + gap > b.y0));
+  const far = (p: { x: number; y: number }, q: { x: number; y: number }) => Math.hypot((p.x - q.x) * 0.9, p.y - q.y);
+  const randomBoard = (r: () => number, most = 25) => {
+    const cards: Box[] = [];
+    const count = 2 + Math.floor(r() * most);
+    for (let i = 0; i < count; i++) cards.push(card(20 + Math.round(r() * 52) * 20, 20 + Math.round(r() * 32) * 20, r() < 0.2 ? 136 : 172, [60, 72, 92, 112][Math.floor(r() * 4)]));
+    return cards;
+  };
+
+  it('centres the card on the point, on the grid, when it has air there', () => {
+    expect(site(486, 336, [])).toEqual({ x: 400, y: 300 });
+    expect(site(493, 329, [card(100, 100)])).toEqual({ x: 400, y: 300 });
+  });
+
+  it('steps aside for air when a spot with air is within reach, and stands by the point with the usual gap when none is', () => {
+    const other = card(400, 300);
+    // 28 px under the other card: the usual gap is kept there, the air is not; a row lower it is.
+    expect(site(486, 436, [other])).toEqual({ x: 400, y: 420 });
+    // Between a Well and the plot's left edge with a wall of cards round it, the only air is far off: the card stays by the point.
+    const wall = [card(240, 20, 172, 720)];
+    const p = site(120, 300, wall)!;
+    expect(far(p, { x: 34, y: 264 })).toBeLessThan(30);
+    expect(keeps(p, LAB, wall, CARD_GAP)).toBe(true);
+    expect(keeps(p, LAB, wall, BUILD_AIR)).toBe(false);
+  });
+
+  it('accepts a point it gave as it stands: asked again on the middle of its answer, the answer is the same', () => {
+    const r = rng(23);
+    let moved = 0, tight = 0;
+    for (let n = 0; n < 400; n++) {
+      const cards = randomBoard(r);
+      const f = [LAB, REFINER, ASSEMBLER, VOID][Math.floor(r() * 4)];
+      // A camera somewhere over the board, with something over its top and a corner, on half of the boards.
+      const vx = r() * 700, vy = r() * 300;
+      const view = r() < 0.5 ? { x0: vx, y0: vy, x1: vx + 400 + r() * 900, y1: vy + 350 + r() * 500 } : null;
+      const covers = view ? [{ x0: view.x0 + 100, y0: -1e6, x1: view.x0 + 420, y1: view.y0 + 130 }, { x0: view.x1 - 150, y0: view.y1 - 120, x1: 1e6, y1: 1e6 }] : [];
+      const wire = r() < 0.6 ? { from: { x: 100 + r() * 900, y: 60 + r() * 600 } } : r() < 0.5 ? { to: { x: 100 + r() * 900, y: 60 + r() * 600 } } : undefined;
+      const q = { card: f, cards, deposits: [card(880, 600)], board: BOARD, grid: GRID, view, covers, wire };
+      const at = { x: r() * 1400 - 80, y: r() * 900 - 70 };
+      const p = buildSite({ ...q, at });
+      if (!p) continue;
+      if (far(mid(p, f), at) > 15) moved++;
+      if (!keeps(p, f, cards, BUILD_AIR)) tight++;
+      expect(buildSite({ ...q, at: mid(p, f) })).toEqual(p);
+    }
+    // (The boards are crowded enough to matter: many answers are not the point itself, and some have no air.)
+    expect(moved).toBeGreaterThan(100);
+    expect(tight).toBeGreaterThan(10);
+  });
+
+  it('on random boards the card is always inside the plot, on the grid, and keeps the usual gap', () => {
+    const r = rng(5);
+    for (let n = 0; n < 300; n++) {
+      const cards = randomBoard(r);
+      const f = [LAB, REFINER, ASSEMBLER, VOID][Math.floor(r() * 4)];
+      const p = buildSite({ at: { x: r() * 1400 - 80, y: r() * 900 - 70 }, card: f, cards, deposits: [], board: BOARD, grid: GRID });
+      if (!p) continue;
+      expect(keeps(p, f, cards, CARD_GAP)).toBe(true);
+      expect(p.x % GRID).toBe(0);
+      expect(p.y % GRID).toBe(0);
+      expect(p.x).toBeGreaterThanOrEqual(PLOT_MARGIN);
+      expect(p.y).toBeGreaterThanOrEqual(PLOT_MARGIN);
+      expect(p.x + f.w).toBeLessThanOrEqual(BOARD.w - PLOT_MARGIN);
+      expect(p.y + f.room).toBeLessThanOrEqual(BOARD.h - PLOT_MARGIN);
+    }
+  });
+
+  it('is never further from the point than the rule it replaced (air if within reach of the nearest spot with the usual gap)', () => {
+    const r = rng(41);
+    const grow = (b: Box, d: number): Box => ({ x0: b.x0 - d - 2 * PORT_OUT, y0: b.y0 - d, x1: b.x1 + d + 2 * PORT_OUT, y1: b.y1 + d });
+    let differ = 0;
+    for (let n = 0; n < 300; n++) {
+      const cards = randomBoard(r);
+      const at = { x: 40 + r() * 1160, y: 40 + r() * 680 };
+      // (Both rules measure from the wanted spot on the grid.)
+      const want = { x: Math.round((at.x - 86) / GRID) * GRID, y: Math.round((at.y - 36) / GRID) * GRID };
+      const old = (gap: number) => freeSpot({ ...want, w: 172, h: 72, avoid: cards.map((b) => grow(b, gap - 8)), board: BOARD, grid: GRID, gap: 8 });
+      const a = old(BUILD_AIR), u = old(CARD_GAP);
+      const before = a && u && far(a, want) <= far(u, want) + BUILD_REACH ? a : u ?? a;
+      const now = site(at.x, at.y, cards);
+      if (!before || !now) {
+        expect(now).toEqual(before);
+        continue;
+      }
+      if (now.x !== before.x || now.y !== before.y) differ++;
+      expect(far(now, want)).toBeLessThanOrEqual(far(before, want) + 1e-6);
+    }
+    expect(differ).toBeLessThan(60);
+  });
+
+  it('takes a point outside the plot as the nearest point inside it', () => {
+    expect(clearPoint({ x: 500, y: 900 }, BOARD)).toEqual({ x: 500, y: 760 });
+    expect(clearPoint({ x: -40, y: -10 }, BOARD)).toEqual({ x: 0, y: 0 });
+    // Below the plot's edge, on open ground: the card stands at the edge under the point, not somewhere else.
+    expect(site(500, 900, [])).toEqual({ x: 420, y: 660 });
+    // With the edge taken under the point, the nearest room along it.
+    const p = site(500, 900, [card(400, 640), card(600, 640)])!;
+    expect(far(mid(p), { x: 500, y: 760 })).toBeLessThan(230);
+  });
+
+  it('takes a point under something that covers the stage as the nearest point clear of it', () => {
+    const view = { x0: 0, y0: 0, x1: 900, y1: 700 };
+    const strip = { x0: 200, y0: -1e6, x1: 700, y1: 150 };
+    expect(clearPoint({ x: 400, y: 100 }, BOARD, view, [strip])).toEqual({ x: 400, y: 150 });
+    expect(clearPoint({ x: 210, y: 20 }, BOARD, view, [strip])).toEqual({ x: 200, y: 20 });
+    // Off the stage: the nearest point on it.
+    expect(clearPoint({ x: 1000, y: 300 }, BOARD, view, [])).toEqual({ x: 900, y: 300 });
+    // The card is then built clear of the cover (with room for its pill), as near as that allows.
+    const p = site(400, 100, [], { view, covers: [strip] })!;
+    expect(p.y).toBeGreaterThanOrEqual(150 + 22);
+    expect(p.y).toBeLessThan(200);
+    expect(p.x).toBe(320);
+  });
+
+  it('does not build a card half off the stage while there is room beside it, and does when there is none', () => {
+    const view = { x0: 100, y0: 0, x1: 700, y1: 700 };
+    // 30 px from the stage's right side: the whole card is brought on to the stage.
+    const p = site(670, 300, [], { view, covers: [] })!;
+    expect(p.x + 172 + 10).toBeLessThanOrEqual(700);
+    expect(far(mid(p), { x: 670, y: 300 })).toBeLessThan(110);
+    // A wall of cards fills the stage's right half: the nearest room is off the stage, and that is where it goes.
+    const wall = [card(340, 20, 172, 720), card(528, 20, 172, 720)];
+    const q = site(660, 300, wall, { view, covers: [] })!;
+    expect(q.x).toBeGreaterThanOrEqual(700);
+  });
+
+  it('does not put the card on the far side of another card from its port when the near side has room within reach', () => {
+    // A Well's port at (272, 296); a Market stands to the right of where the player let go, the spot itself is tight.
+    const cards = [card(100, 260), card(360, 300)];
+    const from = { x: 272, y: 296 };
+    const p = site(446, 256, cards, { wire: { from } })!;
+    const end = { x: p.x, y: p.y + 36 };
+    const crossed = samples(from, end, 24).some((s) => cards.some((b) => s.x > b.x0 + 2 && s.x < b.x1 - 2 && s.y > b.y0 + 2 && s.y < b.y1 - 2));
+    expect(crossed).toBe(false);
+    expect(p.x).toBeLessThan(532);
+    // Without the wire the plain nearest spot is as good as any.
+    expect(site(446, 256, cards)).not.toBeNull();
+  });
+
+  it('leaves room on the same middle for every other card that may be built there, and puts each inside the outline', () => {
+    const r = rng(77);
+    for (let n = 0; n < 200; n++) {
+      const cards = randomBoard(r, 30);
+      const alts = [ASSEMBLER, VOID, REFINER];
+      const p = buildSite({ at: { x: 40 + r() * 1160, y: 40 + r() * 680 }, card: LAB, alts, cards, deposits: [], board: BOARD, grid: GRID });
+      if (!p) continue;
+      for (const f of alts) {
+        const q = siteFor(p, LAB, f, GRID);
+        expect(keeps(q, f, cards, CARD_GAP)).toBe(true);
+        expect(q.x % GRID).toBe(0);
+        expect(q.y % GRID).toBe(0);
+        expect(Math.abs(q.x + f.w / 2 - (p.x + 86))).toBeLessThanOrEqual(10);
+        expect(Math.abs(q.y + f.h / 2 - (p.y + 36))).toBeLessThanOrEqual(10);
+      }
+    }
+    expect(siteFor({ x: 400, y: 300 }, LAB, LAB, GRID)).toEqual({ x: 400, y: 300 });
+    expect(siteFor({ x: 400, y: 300 }, LAB, VOID, GRID)).toEqual({ x: 420, y: 300 });
+  });
+
+  it('answers null only when the plot has no room at all', () => {
+    expect(buildSite({ at: { x: 0, y: 0 }, card: LAB, cards: [], deposits: [], board: { w: 150, h: 60 }, grid: GRID })).toBeNull();
+    expect(site(600, 300, [card(0, 0, 1240, 760)])).toBeNull();
+    // Under a cover that hides the whole plot there is still room: the card goes under it.
+    expect(site(600, 300, [], { view: { x0: 0, y0: 0, x1: 1240, y1: 760 }, covers: [{ x0: -1e6, y0: -1e6, x1: 1e6, y1: 1e6 }] })).toEqual({ x: 520, y: 260 });
   });
 });
 
