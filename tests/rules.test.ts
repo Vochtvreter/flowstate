@@ -20,12 +20,14 @@ describe('numbers (2.6)', () => {
     expect(MATERIALS.shard.color).toBe('#B8F26B');
     expect(NODE_DEFS.assembler.base).toBe(600);
     // (It was 7,250¢ in an earlier build: the card player's longest wait, two minutes of nothing to do before the
-    // Lens. The fast players are the floor: their first Lens stays after 14:00.)
-    expect(NODE_DEFS.fabricator.base).toBe(4800);
+    // Lens. The fast players are the floor: their first Lens stays after 14:00. Then 4,800¢; 5,000¢ since the
+    // Fabricator card's lines have the player earn more while saving for it: the card player's first Lens stays
+    // after 17:30.)
+    expect(NODE_DEFS.fabricator.base).toBe(5000);
     // The second Assembler (Prism) is a purchase in its own right: 1,500¢, so that part of what the Fabricator
     // used to ask for is paid before the Fabricator goal begins. The other machines grow gently.
     expect([0, 1, 2].map((n) => nodeCostAt('assembler', n))).toEqual([600, 1500, 3750]);
-    expect([0, 1].map((n) => nodeCostAt('fabricator', n))).toEqual([4800, 5520]);
+    expect([0, 1].map((n) => nodeCostAt('fabricator', n))).toEqual([5000, 5750]);
     expect([0, 1, 2].map((n) => nodeCostAt('refiner', n))).toEqual([50, 57, 66]);
     // A Lab of its own for every Well is what the cards' lines build, five or six of them: Labs grow gently
     // (×1.1; ×1.3 made the sixth 371¢, kept back for the Assembler while Assembly was minutes away).
