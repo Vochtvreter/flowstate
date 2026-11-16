@@ -35,15 +35,16 @@
 // after `stale` seconds undone with the board untouched and every `stale` seconds after, 'gone' when the
 // line is done or leaves (or its step can no longer be done). `at` is the middle of the button.
 import { Advice, lineAdvice } from '../advice';
-import { RULES } from '../content';
+import { DATA_COLORS, RULES } from '../content';
+import { fmt } from '../economy';
 import { GoalView, Meanwhile, activeGoal, meanwhileOf } from '../goals';
 import { Game } from '../state';
 import { adviserAnswer, boardKey, builtRev } from './advice-client';
 import { Offered, carriedOut, clearMark, doable, offeredAt, showAdvice } from './advice-show';
 import { screenOpen } from './hud-screens';
-import { aboutSpan, aboutTime, calmMotion, capFirst, isTouch } from './hud-words';
+import { aboutSpan, aboutTime, calmMotion, capFirst, heldWords, isTouch, lineLabel } from './hud-words';
 import { esc, icon } from './icons';
-import { signal, ui } from './ui';
+import { signal, touch, ui } from './ui';
 
 export const TIP = {
   /** Game seconds of waiting, with the board left alone, before the tip row appears. */
@@ -416,6 +417,12 @@ interface Line {
   of: number;
   text: string;
   done: boolean;
+  /** The goal's own requirement (goal 22's wires): labelled "Next step", with no count. GoalView.meanwhile.required. */
+  required: boolean;
+  /** Its next step is being saved for: what, and about how long (game s). Said where Show me would be. GoalView.meanwhile.held. */
+  held: NonNullable<GoalView['meanwhile']>['held'] | null;
+  /** Real time before which its row is not drawn: the line it takes over from is still fading out (see swapLine). */
+  showAt: number;
   /** It came up in the middle of a goal (not together with the card): its row opens. Real time. */
   openedAt: number;
   /** Game time it was ticked before the player's eyes (0: it was done already when it came up), and until when it says what that bought. */
@@ -431,11 +438,17 @@ let line: Line | null = null;
 /** The goal the card was last drawn for: a line that comes up for the same goal has come up in the middle of it. */
 let cardGoal = -1;
 /**
- * The line's row on its way out, as for the tip. `swap`: another line is opening in its place at the same moment,
- * and the two move on the same curve, so that the card's height goes from the one to the other without a bump.
+ * The line's row on its way out, as for the tip, with the classes it had (it leaves as it was: ticked, saying what it
+ * bought). `swap`: another line takes its place: first it fades out where it is, keeping its height, until `faded`
+ * (real time); only then does the new line's row open, while this one, unseen by then, closes on the same curve, so
+ * that the card's height goes from the one to the other without a bump and two lines are never drawn at once.
  */
-let lineOut: { html: string; until: number; swap?: boolean } | null = null;
+let lineOut: { html: string; cls: string; until: number; swap?: boolean; faded?: number } | null = null;
 let lineInner = '';
+/** The classes the line's row was last drawn with (open, pop and the reminder pulse left out: they are moments). */
+let lineCls = '';
+/** Real milliseconds a line that gives way to the next one takes to fade out before that one opens in its place. */
+const SWAP_FADE = 160;
 /** Was the line's row on the card at the last refresh? */
 let lineWasOn = false;
 /** The line's next gesture (lineAdvice), looked at again when the board changes and once a second. */
@@ -499,12 +512,22 @@ function lineGone() {
 }
 
 function closeLine(swap = false) {
-  lineOut = lineInner && !calmMotion() ? { html: inert(lineInner), until: performance.now() + TIP.row, ...(swap ? { swap } : {}) } : null;
+  const now = performance.now();
+  if (!lineInner || calmMotion()) {
+    lineOut = null;
+    return;
+  }
+  lineOut = swap
+    ? { html: inert(lineInner), cls: lineCls, until: now + SWAP_FADE + TIP.row, swap, faded: now + SWAP_FADE }
+    : { html: inert(lineInner), cls: lineCls, until: now + TIP.row };
 }
 
 /** The card's view of the goal's line, as a Line: a row that opens (`openedAt`, real time) or one that came with the card (0). */
 function newLine(g: Game, mw: NonNullable<GoalView['meanwhile']>, openedAt: number): Line {
-  return { goal: g.goal.i, obj: meanwhileOf(g), step: mw.step ?? 1, of: mw.of ?? 1, text: mw.text, done: mw.done, openedAt, tickedAt: 0, until: 0, popAt: 0, nextAt: 0 };
+  return {
+    goal: g.goal.i, obj: meanwhileOf(g), step: mw.step ?? 1, of: mw.of ?? 1, text: mw.text, done: mw.done,
+    required: !!mw.required, held: mw.held ?? null, showAt: 0, openedAt, tickedAt: 0, until: 0, popAt: 0, nextAt: 0,
+  };
 }
 
 /** The line is ticked before the player's eyes: its box pops, and for a while it says what that bought. */
@@ -525,7 +548,11 @@ function swapLine(g: Game, mw: NonNullable<GoalView['meanwhile']>, now: number) 
   const old = line;
   if (lineWasOn) closeLine(true);
   lineGone();
-  line = newLine(g, mw, now);
+  // (The new row waits until the old one has faded out in its place: see lineOut.)
+  const at = lineOut?.faded ?? now;
+  line = newLine(g, mw, at);
+  line.showAt = at;
+  if (at > now) window.setTimeout(touch, at - now + 10);
   // (A line that was done by the same move as the one before it is shown done, and leaves a narrow card when that one would have.)
   if (line.done && old?.tickedAt) {
     line.tickedAt = old.tickedAt;
@@ -608,6 +635,8 @@ function tendLine(g: Game, v: GoalView | null, now: number, changed: boolean, sa
   } else {
     line.text = mw.text;
     line.obj = meanwhileOf(g);
+    line.required = !!mw.required;
+    line.held = mw.held ?? null;
     if (mw.done && !line.done) tick(line, g, now);
     else if (!mw.done && line.done) {
       // Undone again (the player took it back): the line is an open step once more.
@@ -634,7 +663,8 @@ function tendLine(g: Game, v: GoalView | null, now: number, changed: boolean, sa
   lineWasOn = on;
   // The Show me button, and the signals about it.
   const covered = ui.techOpen || screenOpen();
-  const up = on && !cur.done && !!step;
+  // (A step that is being saved for has no Show me: the row says what it is saving for instead.)
+  const up = on && !cur.done && !!step && !cur.held;
   if (up && !lineUp) {
     lineUp = true;
     lineSaid = false;
@@ -657,26 +687,46 @@ function lineBought(g: Game): string {
   return boughtText(gain.sum) || 'Done';
 }
 
+/**
+ * Where the line's held step's Show me would be: what it is saving for and about how long that takes ("Saving for this
+ * · 1,100¢ · about 40 s"), on two short lines. Nothing to press.
+ */
+function heldHtml(h: NonNullable<Line['held']>): string {
+  const tier = h.sym === '¢' ? null : ({ α: 'a', β: 'b', γ: 'g' } as const)[h.sym];
+  const amount = `${fmt(Math.ceil(h.cost))}${h.sym}`;
+  const w = heldWords(amount, h.eta);
+  const when = w.tail.slice(amount.length);
+  return `<span class="gc-held" data-testid="line-held" role="note" aria-label="${esc(w.all)}"><span class="gh-a" aria-hidden="true">${esc(w.head)}</span><span class="gh-b" aria-hidden="true"><b class="mono"${tier ? ` style="color:${DATA_COLORS[tier]}"` : ''}>${esc(amount)}</b>${esc(when)}</span></span>`;
+}
+
 /** The line's row, or '' when the card has none. `narrow`: the card has room for one row of guidance. */
 export function lineHtml(g: Game, narrow: boolean): string {
-  // (A row on its way out lies under the one that takes its place: the card is patched in place by position, and
-  // the row that stays keeps its element this way.)
-  const out = lineOut ? `<div class="gc-line gc-row out${lineOut.swap ? ' swap' : ''}" data-key="line-out" aria-hidden="true"><div class="gc-in">${lineOut.html}</div></div>` : '';
-  if (!line || !lineOn(g, narrow)) return out;
   const now = performance.now();
+  // (A row on its way out lies under the one that takes its place: the card is patched in place by position, and
+  // the row that stays keeps its element this way. One that gives way to the next line first fades out where it is,
+  // keeping its height, and the next line's row is not drawn until it has: see lineOut.)
+  const leaving = !!lineOut?.swap && now < (lineOut.faded ?? 0);
+  const out = lineOut ? `<div class="gc-line gc-row${lineOut.cls}${leaving ? ' leaving' : ` out${lineOut.swap ? ' swap' : ''}`}" data-key="line-out" aria-hidden="true"><div class="gc-in">${lineOut.html}</div></div>` : '';
+  if (!line || !lineOn(g, narrow) || now < line.showAt) return out;
   const bought = lineBought(g);
-  const title = step ? ` title="${esc(sentence(step))}"` : '';
-  // "While you wait · 2 of 3" where the goal has more than one line.
-  const label = `While you wait${line.of > 1 ? `<span class="gc-of" data-testid="line-count"> · ${line.step} of ${line.of}</span>` : ''}`;
-  // The tick, then the label over the sentence (or run in before it, where every line counts: hud.css), then the button.
+  const held = !line.done ? line.held : null;
+  const title = step && !held ? ` title="${esc(sentence(step))}"` : '';
+  // "While you wait · 2 of 3" where the goal has more than one line; "Next step" where it is the goal's own requirement.
+  const { label: lbl, count } = lineLabel(line.step, line.of, line.required);
+  const label = `${lbl}${count ? `<span class="gc-of" data-testid="line-count">${count}</span>` : ''}`;
+  // The tick, then the label over the sentence (or run in before it, where every line counts: hud.css), then the button,
+  // or what its step is being saved for where there is none yet.
   lineInner = `<span class="gc-tick" role="img" aria-label="${line.done ? 'Done' : 'Not done yet'}">${icon('check', 12)}</span>
     <div class="gc-linebody"><span class="gc-linehead"><span class="gc-lbl">${label}</span>${bought ? `<span class="gc-bought" data-testid="line-bought">${esc(bought)}</span>` : ''}</span>
     <span class="gc-linetxt">${esc(line.text)}</span></div>${
-    step && !line.done ? `<button class="gc-show" data-act="show-line" data-testid="line-show"${title}>Show me</button>` : line.tickedAt ? GONE : ''}`;
+    held ? heldHtml(held) : step && !line.done ? `<button class="gc-show" data-act="show-line" data-testid="line-show"${title}>Show me</button>` : line.tickedAt ? GONE : ''}`;
   // ("open" only while the row is opening: a row that is rebuilt later, when the card around it changes, does not open again.)
   const opening = line.openedAt && now - line.openedAt < TIP.row + 200;
-  const cls = `${opening ? ' open' : ''}${line.done ? ' done' : ''}${bought ? ' said' : ''}${line.done && now - line.popAt < 700 ? ' pop' : ''}${lineNag ? ` nag${lineNag % 2}` : ''}`;
-  return `<div class="gc-line gc-row${cls}" data-key="line" data-done="${line.done ? 1 : 0}" data-step="${line.step}" data-of="${line.of}" data-testid="goal-line"><div class="gc-in">${lineInner}</div></div>${out}`;
+  // (What the row keeps as it leaves: ticked, saying what it bought. Opening, the pop and a reminder are moments.)
+  const kept = `${line.done ? ' done' : ''}${bought ? ' said' : ''}${line.required ? ' req' : ''}`;
+  lineCls = kept;
+  const cls = `${opening ? ' open' : ''}${kept}${line.done && now - line.popAt < 700 ? ' pop' : ''}${lineNag ? ` nag${lineNag % 2}` : ''}`;
+  return `<div class="gc-line gc-row${cls}" data-key="line" data-done="${line.done ? 1 : 0}" data-step="${line.step}" data-of="${line.of}"${line.required ? ' data-required="1"' : ''}${held ? ' data-held="1"' : ''} data-testid="goal-line"><div class="gc-in">${lineInner}</div></div>${out}`;
 }
 
 /** Show me was pressed on the line: take the player to its next gesture, exactly as for a tip. */
@@ -700,7 +750,7 @@ export function showLine(g: Game, render: () => void) {
  * its place among the goal's lines (`place` of `of`) and, while it says what it bought, when the next line takes over.
  */
 export const lineShown = () => (line
-  ? { text: line.text, done: line.done, step, bought: lineBought(ui.g), up: lineUp, place: line.step, of: line.of, nextAt: line.nextAt || null }
+  ? { text: line.text, done: line.done, step, bought: lineBought(ui.g), up: lineUp, place: line.step, of: line.of, nextAt: line.nextAt || null, required: line.required, held: line.held }
   : null);
 
 // ---------- both rows ----------
@@ -722,6 +772,7 @@ export function resetTips() {
   adrift = 0;
   line = null;
   lineOut = null;
+  lineCls = '';
   lineWasOn = false;
   step = null;
   stepKey = '';

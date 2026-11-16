@@ -253,6 +253,9 @@ html[data-input='touch'] #tech .tt.own, html[data-input='touch'] #tech .qbox { m
 #tech .ttab .dot { flex: none; width: 8px; height: 8px; border-radius: 50%; background: var(--rdy); box-shadow: 0 0 8px rgba(94, 234, 212, 0.7); }
 
 #app.phone #tech .tree { padding: 10px 12px calc(16px + env(safe-area-inset-bottom)); touch-action: pan-y; -webkit-overflow-scrolling: touch; }
+/* While toasts are up the list ends higher, by the room hud-toasts.ts keeps for them (--toast-room): they lie in that gap,
+   never over a tile. The tiles do not move; only the list's foot does. */
+#app.phone #tech .tree { margin-bottom: var(--toast-room, 0px); }
 #app.phone #tech.sheet .tree { padding-bottom: 16px; }
 #app.phone #tech .tbranch { display: block; padding: 0; border: 0; }
 #app.phone #tech .bh h2 { display: none; }
@@ -302,8 +305,6 @@ html[data-input='touch'] #tech .tt.own, html[data-input='touch'] #tech .qbox { m
   #app.phone #tech .tree, #app.phone #tech.sheet .tree { padding-bottom: calc(12px + env(safe-area-inset-bottom)); }
   #app.phone #tech .tdetail { max-height: none; border-top: 0; border-left: 1px solid var(--line); border-radius: 0; box-shadow: none; animation: none; }
   #app.phone #tech .dhide { display: none; }
-  /* Toasts raised while the tree is open keep to the list's side, clear of the detail and its Research button. */
-  #app.phone.tech-open #toasts { align-self: flex-start; max-width: calc(58% - 16px); }
 }
 
 @media (prefers-reduced-motion: reduce) {

@@ -145,6 +145,12 @@ div.gc-rewards { justify-content: flex-start; margin-top: 2px; }
 /* The arc is stepped with the panels, never eased: see hud-flow.ts. */
 .fr-val { fill: none; stroke: #5ce1ff; stroke-width: 3; stroke-linecap: round; stroke-dasharray: 0 100; }
 .flowpct { margin-left: 3px; padding: 2px 6px; border-radius: 6px; font-size: 11.5px; font-weight: 600; color: #5ce1ff; background: rgba(92, 225, 255, 0.1); }
+/* Once the Flow meter is on, the whole credits chip answers a press as the ring does (hud-flow.ts): a 44 px target for a
+   finger whatever the layout (the chip is 40 px tall outside the phone layout: it reaches 2 px further each way). */
+/* (The reach lies under the chip's own content, so a press on the ring still lands on the ring button.) */
+.res.credits.flow-on { position: relative; isolation: isolate; cursor: pointer; }
+.res.credits.flow-on:hover { background: #172034; }
+html[data-input='touch'] .res.credits.flow-on::after { content: ''; position: absolute; z-index: -1; inset: -3px -1px; border-radius: 14px; }
 #app.flow-state .fr-val { stroke: #fff; }
 #app.flow-state .flowpct { color: #06222b; background: #5ce1ff; }
 .res.credits { padding-left: 10px; }
@@ -163,6 +169,27 @@ div.gc-rewards { justify-content: flex-start; margin-top: 2px; }
   .resrow { gap: 7px; }
   .techbtn .bw, .techbtn .kbd { display: none; }
 }
+
+/* ---------- inspector: a machine short of an input ----------
+   Not a problem (status.ts: starved means under 60% of its time at work): no warning box, no red. One amber line says
+   how short it is ("Receiving 0.80 of 1.00 Ember/s"), with the quickest fix under it when there is one (panels.ts). */
+.shortbox { border-radius: 12px; padding: 9px 12px; border: 1px solid #4a3d18; background: #1d1910; }
+.shortbox p { display: flex; align-items: center; gap: 8px; margin: 0; font-size: 12.5px; line-height: 17px; color: #fcd34d; }
+.shortbox p svg { flex: none; }
+.shortbox .mono { font-weight: 600; }
+.shortbox .st-actions { margin-top: 8px; }
+#insp .row .short { color: #fcd34d; }
+
+/* ---------- inspector: "Upgrade all" ----------
+   A quiet button beside the price (panels.ts), not a text link: 30 px for a mouse, 44 px for a finger. */
+.bulkbtn { flex: none; height: 30px; padding: 0 10px; border-radius: 8px; border: 1px solid #3a4a70; background: #141c2e; color: #9db8ff; font-size: 12px; font-weight: 600; white-space: nowrap; }
+/* Where the two buttons would leave the words beside them less than about 130 px (the 320 px inspector), the pair goes
+   under the words, at the right, rather than squeeze them into four lines. */
+.uprow.hasbulk { flex-wrap: wrap; row-gap: 8px; }
+.uprow.hasbulk > div { flex: 1 1 130px; }
+.upbtns { flex: none; display: flex; align-items: center; gap: 8px; margin-left: auto; }
+.bulkbtn:hover { background: #1a2338; }
+html[data-input='touch'] #insp .bulkbtn { height: 44px; padding: 0 12px; font-size: 13px; }
 
 /* ---------- Market inspector: demand gauges ---------- */
 .dg { display: flex; flex-direction: column; gap: 5px; padding: 2px 0 4px; }
@@ -366,6 +393,9 @@ html[data-input='touch'] #insp .link::after { content: ''; position: absolute; i
 #app.phone #toasts { position: absolute; top: var(--toast-top, 0px); left: var(--toast-x0, 8px); right: var(--toast-x1, 8px); bottom: auto; transform: none; margin: 0; max-width: none; align-items: center; }
 #app.phone .toast { max-width: 100%; }
 #toasts .toast.crowd { display: none; }
+/* Over the open tech tree, which covers the whole screen, the column is placed on the screen itself (hud-toasts.ts,
+   dockTree: in a room kept at the foot of the list of tiles), out of the stage that would clip it. */
+#app.phone.tech-open #toasts { position: fixed; }
 
 /* ---------- inspector under touch: what the rules above leave short of 44 px ----------
    The Router's mode buttons were 40 px tall, and the reach around its small steppers and filter chips came
@@ -386,10 +416,18 @@ html[data-input='touch'] #insp .step::after, html[data-input='touch'] #insp .fil
 html[data-input='touch'] #app:not(.phone) #hud #toasts { right: var(--toast-r, 228px); bottom: calc(16px + var(--toast-up, 0px)); }
 #app:not(.phone) .toast { text-align: left; }
 #toasts .toast:nth-last-child(n + 4) { display: none; }
-/* The one-off "Best played upright" line on a phone held sideways (hud-screens.ts): it can be dismissed. */
-.toast.upright { padding-right: 4px; }
-.toast.upright > svg { flex: none; color: #9db8ff; }
-.toast.upright .up-x { flex: none; pointer-events: auto; width: 44px; height: 44px; margin: -8px 0; padding: 0; border: 0; border-radius: 50%; background: transparent; color: #9db8ff; display: flex; align-items: center; justify-content: center; }
+/* The one-off "Best played upright" line on a phone held sideways (hud-screens.ts), once goal 1 is claimed: in the
+   middle of the top bar (hud-screens.ts sets the box: between the credits and the buttons on the right), never over
+   the board. Above the bar, under its open menu (#top.menu-open is 42). It fades in and out; it can be dismissed. */
+.upright-line { position: absolute; z-index: 35; display: flex; align-items: center; justify-content: center; pointer-events: none; transition: opacity 0.3s; }
+.upright-line.out { opacity: 0; }
+.up-pill { display: flex; align-items: center; gap: 8px; max-width: 100%; min-height: 36px; padding: 0 0 0 12px; border-radius: 12px; background: #17213a; border: 1px solid #34467a; box-shadow: 0 8px 24px rgba(0, 0, 0, 0.5); color: #dbe6ff; font-size: 12.5px; line-height: 16px; pointer-events: auto; animation: up-in 0.25s ease-out; }
+.up-pill > svg { flex: none; color: #9db8ff; }
+.up-pill > span { min-width: 0; }
+.up-x { flex: none; position: relative; width: 36px; height: 36px; padding: 0; border: 0; border-radius: 50%; background: transparent; color: #9db8ff; display: flex; align-items: center; justify-content: center; }
+/* (36 px to look at, 44 px to press.) */
+.up-x::after { content: ''; position: absolute; inset: -4px; }
+@keyframes up-in { from { opacity: 0; } }
 @media (max-width: 900px) {
   /* (No key hints at this width.) */
   #app:not(.phone) #hud #toasts { bottom: calc(16px + var(--toast-up, 0px)); }
@@ -495,13 +533,14 @@ html[data-input='touch'] .claim-ghost { animation-name: claim-sink-touch; }
 }
 
 /* The line's label run in before its sentence (a squeezed desktop stage, a phone held sideways): one line
-   of the card less. While the line says what it bought, those words lie where the sentence starts and the
-   sentence, which has been done, is out of sight: nothing in the row moves when the box is ticked. */
+   of the card less. While the line says what it bought, those words lie over the label and the sentence, which has
+   been done and is out of sight with its label: nothing in the row moves when the box is ticked. They wrap inside the
+   row, as the sentence did (on a tablet they ran 45 px out of the card on one line: final-wide F5). */
 #hud-strip.tight .gc-linehead { display: inline; height: auto; white-space: normal; }
 #hud-strip.tight .gc-linehead .gc-lbl { margin-right: 7px; }
 #hud-strip.tight .gc-linetxt { display: inline; }
-#hud-strip.tight .gc-bought { position: absolute; white-space: nowrap; font-size: 12px; }
-#hud-strip.tight .gc-line.said .gc-linetxt { visibility: hidden; }
+#hud-strip.tight .gc-bought { position: absolute; left: 0; top: 0; right: 0; white-space: normal; font-size: 12px; line-height: 17px; }
+#hud-strip.tight .gc-line.said .gc-linetxt, #hud-strip.tight .gc-line.said .gc-lbl { visibility: hidden; }
 #hud-strip.tight .gc-tick { margin-top: 1px; }
 
 /* The order as one row (a squeezed desktop stage, and the phone): what to deliver, how long that takes, what
@@ -610,7 +649,7 @@ html[data-input='mouse'] #hud-strip.tight .claim.sm { height: 32px; }
 /* The line: the tick, its label over the sentence (at the hint's size), and the button. */
 #app.phone .gc-line > .gc-in { margin-top: 1px; padding-top: 3px; }
 #app.phone .gc-linebody { line-height: 16px; }
-#app.phone .gc-linehead { height: 14px; line-height: 14px; }
+#app.phone .gc-linehead { height: 14px; min-height: 0; line-height: 14px; }
 #app.phone .gc-linehead .gc-lbl { font-size: 10px; }
 /* What the line bought takes the label's place while it is said (there is no room beside it), and may run on
    over where the button was: the row does not grow by a line when the box is ticked. */
@@ -654,6 +693,12 @@ html[data-input='mouse'] #hud-strip.tight .claim.sm { height: 32px; }
 #app.phone .alertchip::after { content: ''; position: absolute; inset: -5px 0; }
 #app.phone .al-go { height: 28px; }
 #app.phone .pz-ico { width: 24px; height: 24px; }
+/* A short phone held upright (740 px tall or less): while a sheet is open the alert waits out of sight, as it does on a
+   phone held sideways. The sheet is as tall as the strip leaves room for, and an alert that arrived while it was open
+   left its scroller 52 px at 360x740, a ringed button half in its faded foot. Paused is still said. */
+@media (orientation: portrait) and (max-height: 760px) {
+  #app.phone.insp-open #hud-alert:not([data-kind='paused']), #app.phone.building #hud-alert:not([data-kind='paused']) { display: none; }
+}
 
 /* A phone on its side has 276 px of stage. The card folds to one line (step, pips and reward over the
    title, progress beside it) with its hint behind a tap, as above; the line or the tip follows as one

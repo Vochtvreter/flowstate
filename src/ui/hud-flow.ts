@@ -15,17 +15,23 @@ import { isTouch } from './hud-words';
 import { onPress, toast, ui } from './ui';
 
 let app: HTMLElement;
+let chipEl: HTMLElement;
 let btn: HTMLElement;
 let ringEl: SVGElement;
 let arc: SVGElement;
 let pct: HTMLElement;
 
-/** Wrap the coin of the credits chip in the ring button and add the Flow percentage after the numbers. */
+/**
+ * Wrap the coin of the credits chip in the ring button and add the Flow percentage after the numbers. Once the Flow
+ * meter is on, the whole chip (coin and ring, the credits, the percentage) answers a press as the ring does: goal 16's
+ * card says "tap the Flow ring", and the ring alone is 26 px across (final-phone F6). The chip carries `flow-on` then.
+ */
 export function initFlowRing() {
   app = document.getElementById('app')!;
   const chip = document.querySelector<HTMLElement>('#top .res.credits');
   const coin = chip?.querySelector<HTMLElement>('.sym');
   if (!chip || !coin) return;
+  chipEl = chip;
   btn = el(`<button class="flowbtn" type="button" tabindex="-1" aria-label="Flow">
     <svg class="flowring" viewBox="0 0 36 36" width="36" height="36" aria-hidden="true" hidden><circle class="fr-trk" cx="18" cy="18" r="16"/><circle class="fr-val" cx="18" cy="18" r="16" pathLength="100" transform="rotate(-90 18 18)"/></svg></button>`);
   chip.insertBefore(btn, coin);
@@ -35,7 +41,8 @@ export function initFlowRing() {
   pct = el(`<span class="flowpct mono" hidden></span>`);
   chip.appendChild(pct);
   setAnchor('flow', ringEl);
-  onPress(btn, () => {
+  // (On the chip: a press on the ring button reaches it too, once; a key on the focused button arrives as its click.)
+  onPress(chip, () => {
     const g = ui.g;
     if (!g.flowOn) return;
     const worst = worstProducer(g);
@@ -70,10 +77,12 @@ export function updateFlowRing(g: Game) {
   setHidden(pct, !f.on);
   if (!f.on) setAttr(pct, 'title', null);
   setClass(btn, 'on', f.on);
+  setClass(chipEl, 'flow-on', f.on);
   setAttr(btn, 'data-testid', f.on ? 'flow-ring' : null);
   setAttr(btn, 'tabindex', f.on ? '0' : '-1');
   if (!f.on) {
     setAttr(btn, 'title', null);
+    setAttr(chipEl, 'title', null);
     return;
   }
   const v = Math.round(Math.max(0, Math.min(1, f.flow)) * 100);
@@ -91,4 +100,6 @@ export function updateFlowRing(g: Game) {
   setAttr(btn, 'title', label);
   setAttr(btn, 'aria-label', label);
   setAttr(pct, 'title', label);
+  // (The whole chip answers as the ring: it says what a press does wherever the pointer rests on it.)
+  setAttr(chipEl, 'title', label);
 }

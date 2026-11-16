@@ -646,18 +646,21 @@ function startBow() {
       wires.push({ pts, from: depth.get(wire.from)! * step, to: d * step, color: ends.mat ? MATERIALS[ends.mat].color : '#9DB8FF' });
     }
   }
-  // Bring the line into view if part of it is off screen. On a phone, Fit: its overview (every card an
-  // icon) is how a phone shows the whole factory, and the Lens moment uses it. Elsewhere, as little camera
-  // movement as it takes, among the cards (the board's frameNodes, the Wells first and the Lens last, so
-  // that the Lens is the one shown when they cannot all be): Fit drops a large factory into the overview
-  // there too, and turning every card into an icon at once was the longest frame of the whole moment.
+  // Bring the line into view if part of it is off screen, never zooming in (rev-consultant's answer (b)): a line
+  // that fits at the zoom the player has is slid into view at that zoom, as little as it takes (the board's
+  // frameNodes, the Wells first and the Lens last, so that the Lens is the one shown if they cannot all be). One that
+  // does not fit: on a phone, Fit, whose overview (every card an icon) is how a phone shows the whole factory;
+  // elsewhere frameNodes again, which pulls back among the cards: Fit drops a large factory into the overview there
+  // too, and turning every card into an icon at once was the longest frame of the whole moment.
   const r = boardRect();
-  const off = [...nodes, ...(lensBox ? [lensBox] : [])].some((b) => {
+  const all = [...nodes, ...(lensBox ? [lensBox] : [])];
+  const off = all.some((b) => {
     const p = toClient({ x: b.x + b.w / 2, y: b.y + b.h / 2 });
     return p.x < r.left + 20 || p.x > r.right - 20 || p.y < r.top + 20 || p.y > r.bottom - 20;
   });
-  if (off && env.phone) fitView();
-  else if (off) frameNodes([...depth.keys()].sort((a, b) => depth.get(a)! - depth.get(b)!));
+  const line = [...depth.keys()].sort((a, b) => depth.get(a)! - depth.get(b)!);
+  if (off && env.phone && !fitsNow(all)) fitView();
+  else if (off) frameNodes(line);
   const t0 = performance.now();
   const timers: number[] = [];
   bow = { t0, step, rows, wires, nodes, lens: lensBox, revealAt: (rows - 1) * step + 0.3, revealed: false, fadeFrom: Infinity, timers };
@@ -665,6 +668,27 @@ function startBow() {
   cueWhoosh();
   for (let i = 0; i < rows - 1; i++) timers.push(window.setTimeout(() => cueBowNote(i, rows), i * step * 1000));
   timers.push(window.setTimeout(revealLens, bow.revealAt * 1000));
+}
+
+/**
+ * Do these cards fit, all together, at the zoom the camera has, in the part of the board that nothing covers? Measured
+ * against the most room there is (only the strip and an open sheet left out, and a thin margin), so that a "no" here
+ * means Fit, which frames the whole factory in no more room than that, pulls the camera back and never brings it in.
+ */
+function fitsNow(cards: { x: number; y: number; w: number; h: number }[]): boolean {
+  if (!cards.length) return true;
+  const r = boardRect();
+  const c = env.cover();
+  const k = ui.view.k;
+  let x0 = Infinity, y0 = Infinity, x1 = -Infinity, y1 = -Infinity;
+  // (A card with its ports, which stand out of its sides, and its pill above it.)
+  for (const b of cards) {
+    x0 = Math.min(x0, b.x - 10);
+    y0 = Math.min(y0, b.y - 14);
+    x1 = Math.max(x1, b.x + b.w + 10);
+    y1 = Math.max(y1, b.y + b.h + 4);
+  }
+  return (x1 - x0) * k <= r.width - c.left - c.right - 12 && (y1 - y0) * k <= r.height - c.top - c.bottom - 12;
 }
 
 /** The light has reached the Lens (or the player pressed to skip ahead): flash its card and bring up the centre card. */

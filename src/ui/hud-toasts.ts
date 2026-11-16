@@ -201,22 +201,72 @@ export function initToastDock(host: HTMLElement) {
     set('--toast-up', up);
   };
   /**
+   * The room kept for toasts at the foot of the phone tree's list of tiles (px; 0: none). The tree reads it as
+   * --toast-room (tech.css): its list ends that much higher while toasts are up, so they lie in a gap of their own.
+   */
+  let treeRoom = 0;
+  const setTreeRoom = (px: number) => {
+    if (px === treeRoom) return;
+    treeRoom = px;
+    const tech = document.getElementById('tech');
+    if (!tech) return;
+    if (px) tech.style.setProperty('--toast-room', `${Math.round(px)}px`);
+    else tech.style.removeProperty('--toast-room');
+  };
+  /**
+   * On a phone with the tech tree open (it covers the whole screen): toasts lay over its tiles (wire-ui, what remains 3).
+   * They go in a room of their own at the foot of the list of tiles instead, which ends that much higher for as long as
+   * they are up: above the detail sheet, or the foot of the screen; on a phone held sideways, at the foot of the list's
+   * column, beside the detail. Never over a tile, the tabs, the detail or its Research button. The newest that fit in
+   * half the list's height show; older ones wait out of sight. (hud.css: the column is fixed to the screen here, since
+   * the tree reaches past the stage that holds the toasts.) False when the tree has no list to make room in.
+   */
+  const dockTree = (toasts: HTMLElement[]): boolean => {
+    const list = shownBox(document.querySelector('#tech .tree'));
+    if (!list) return false;
+    // (Where the list would end with no room kept for toasts.)
+    const bottom = list.bottom + treeRoom;
+    const x0 = list.left + 8, x1 = list.right - 8;
+    const key = `tree|${toasts.map((t) => toastIds.get(t) ?? (toastIds.set(t, ++toastSeq), toastSeq)).join(',')}|${Math.round(x0)},${Math.round(x1)},${Math.round(list.top)},${Math.round(bottom)}`;
+    if (key === phoneKey) return true;
+    phoneKey = key;
+    for (const t of toasts) setClassOn(t, 'crowd', false);
+    set('--toast-x0', x0);
+    set('--toast-x1', innerWidth - x1);
+    set('--toast-top', bottom);
+    const hs = toasts.map((t) => t.offsetHeight);
+    const stack = (n: number) => hs.slice(hs.length - n).reduce((a, h) => a + h, 0) + TOAST_GAP * (n - 1);
+    let n = toasts.length;
+    while (n > 1 && stack(n) > Math.max(60, (bottom - list.top) * 0.5)) n--;
+    const height = stack(n);
+    set('--toast-top', bottom - TOAST_GAP - height);
+    setTreeRoom(height + TOAST_GAP * 2);
+    toasts.forEach((t, i) => setClassOn(t, 'crowd', i < toasts.length - n));
+    return true;
+  };
+  /**
    * On a phone: under the strip, clear of what lies over the board there. The toasts' column (hud.css: absolute in
    * the stage, from --toast-top down, between --toast-x0 and --toast-x1) goes in the first place, from the strip down,
    * where it lies over none of it: at its natural place right under the strip, or just below something that stands in
    * the way, in the widest free stretch across (never narrower than TOAST_MIN_W). Where all of them do not fit, the
-   * oldest waits out of sight (`crowd`). Where not even the newest fits anywhere, it stands at its natural place.
+   * oldest waits out of sight (`crowd`). Where not even the newest fits anywhere, it stands at its natural place. With
+   * the tech tree open, in the room dockTree keeps at the foot of its list.
    */
   const dockPhone = () => {
     const toasts = (Array.from(host.children) as HTMLElement[]).filter((t) => !t.classList.contains('out'));
     const stage = document.getElementById('stage')?.getBoundingClientRect();
     if (!toasts.length || !stage) {
+      // (The last ones are fading out where they stand: their place, and the room kept for them, stay until they have gone.)
+      if (host.childElementCount && stage) return;
+      setTreeRoom(0);
       if (phoneKey) {
         phoneKey = '';
         for (const n of ['--toast-top', '--toast-x0', '--toast-x1']) set(n, null);
       }
       return;
     }
+    if (ui.techOpen && dockTree(toasts)) return;
+    setTreeRoom(0);
     const stripEl = document.getElementById('hud-strip');
     const strip = stripEl?.getBoundingClientRect();
     const { boxes, floor } = phoneObstacles();
@@ -296,11 +346,28 @@ export function initToastDock(host: HTMLElement) {
     const { n } = best;
     toasts.forEach((t, i) => setClassOn(t, 'crowd', i < toasts.length - n));
   };
-  const dock = () => (env.phone ? dockPhone() : dockWide());
+  const dock = () => {
+    if (env.phone) return dockPhone();
+    setTreeRoom(0);
+    dockWide();
+  };
   new MutationObserver(() => {
     while (host.childElementCount > maxToasts()) host.firstElementChild!.remove();
     dock();
   }).observe(host, { childList: true });
+  // The tech tree opening or closing moves the toasts between the board and the tree's room (on a phone the column is
+  // placed on the screen while the tree is open, on the stage otherwise): they are placed again at once, not a beat later.
+  const appEl = document.getElementById('app');
+  let treeWas = !!appEl?.classList.contains('tech-open');
+  if (appEl) {
+    new MutationObserver(() => {
+      const tree = appEl.classList.contains('tech-open');
+      if (tree === treeWas) return;
+      treeWas = tree;
+      phoneKey = '';
+      if (host.childElementCount || treeRoom) dock();
+    }).observe(appEl, { attributes: true, attributeFilter: ['class'] });
+  }
   // The camera may move while a toast is up, and so may what lies around them.
   onBeat(() => {
     if (host.childElementCount || up || right || phoneKey) dock();

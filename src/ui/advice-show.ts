@@ -6,12 +6,12 @@
 // the 'showme' signal tells whoever can point (the guiding hand) what to act out. Nothing is ever carried out
 // here: applyAdvice() in src/advice.ts is for bots.
 import { canFavour, freeDeposits, nodeById } from '../actions';
-import type { Advice } from '../advice';
+import { Advice, lineSpot } from '../advice';
 import { NodeType, TECHS } from '../content';
-import { expansionCost, has, nodeUnlocked } from '../economy';
-import { goalFocus } from '../goals';
-import { Game, GNode } from '../state';
-import { armedPort, boardRect, fitView, frameNodes as boardFrames, gestureActive, radialOpen, toClient, toWorld, zoomBy } from './board';
+import { expansionCost, has, matUnlocked, nodeUnlocked } from '../economy';
+import { activeGoal, goalDeposit, goalFocus } from '../goals';
+import { Deposit, Game, GNode } from '../state';
+import { armedPort, boardRect, fitView, frameBoxes, frameNodes as boardFrames, gestureActive, radialOpen, toClient, toWorld, zoomBy } from './board';
 import { celebrating } from './celebrate';
 import { Overlay, addOverlay } from './fx';
 import { Pt, nodeSize, outPorts } from './geom';
@@ -390,21 +390,32 @@ const SHEET_IN = 320;
 
 // ---------- the nodes the goal is about, brought into view ----------
 //
-// When a goal comes up, and after a sheet or the tech tree has closed, the nodes its hint or line is about
-// (goalFocus in src/goals.ts) are brought into view if any of them is off screen or covered: through the board's
-// frameNodes, which moves the camera as little as it can. Never while the player is in the middle of something
-// on the board (a drag, a pinch, an armed port, a node being placed, the build menu), never behind the start
-// screen or the summary, and not while a celebration card is up (a research's, a claim's): the look waits until it
-// has gone, so the board never glides under it, where a press made to put the card away would land on whatever the
-// glide had brought under the finger. Nothing happens when they are all in view already, or when the goal names no
-// node. A goal coming up brings its nodes in among the cards from the overview (it shows no ports); after a sheet or
-// the tree, an overview the player chose (zoomed out to by hand, or within by hand) is theirs: it counts as in view,
-// and only nodes off screen or covered are brought in, at the overview's zoom.
+// The nodes the goal's hint or line is about (goalFocus in src/goals.ts) are brought into view, if any of them is off
+// screen or covered, at these moments: when a goal comes up; when what it is saving for is saved (the card turns
+// "Saved": the hint is what to do now, and at goal 21 the Prism Assembler it names could be half a screen away); and
+// after the tech tree has closed. Through the board's frameNodes, which moves the camera as little as it can. Where
+// the goal names no node but a place (a Well on the Murk deposit: goalDeposit in src/goals.ts, or the line's deposit,
+// lineSpot in src/advice.ts), that deposit is brought into view instead, with the board's frameBoxes; and right after
+// a research that has opened up the deposit the goal names, that deposit is what is brought in.
+//
+// Closing a sheet (the inspector, the build sheet) leaves the camera where it is: the player opened it on something,
+// and that is where they are looking (final-phone F5: the camera glided away from the Ember Well the alert had shown).
+// The one exception is a look that came due while the sheet was up: it was put off, and runs once the sheet has gone.
+//
+// Never while the player is in the middle of something on the board (a drag, a pinch, an armed port, a node being
+// placed, the build menu): that look is dropped. Never behind the start screen or the summary, and not while a
+// celebration card is up (a research's, a claim's): the look waits until it has gone, so the board never glides under
+// it, where a press made to put the card away would land on whatever the glide had brought under the finger. Nothing
+// happens when they are all in view already, or when the goal names neither a node nor a place. A goal's own look
+// brings its nodes in among the cards from the overview (it shows no ports); after the tree, an overview the player
+// chose (zoomed out to by hand, or within by hand) is theirs: it counts as in view, and only nodes off screen or
+// covered are brought in, at the overview's zoom.
 
 /**
- * Real milliseconds after a goal comes up, or after a sheet or the tree has gone, before the nodes are looked for:
- * a few frames, for the new card to take its height (a sheet counts as gone the moment it starts to slide away).
- * Short on purpose: the camera's glide is over before a player has the next press ready, and is never under it.
+ * Real milliseconds after a goal comes up (or turns "Saved", or a deposit is researched), or after a sheet or the tree
+ * has gone, before the nodes are looked for: a few frames, for the new card to take its height (a sheet counts as gone
+ * the moment it starts to slide away). Short on purpose: the camera's glide is over before a player has the next press
+ * ready, and is never under it.
  */
 const AFTER_GOAL = 120;
 const AFTER_SHEET = 60;
@@ -415,8 +426,19 @@ let sheetSeen = false;
 let treeSeen = false;
 /** Real time at which to look (0: nothing to do). */
 let focusDue = 0;
-/** What the look is for: a goal that came up (the overview is no view of its ports), or a sheet or the tree that closed. */
-let focusFor: 'goal' | 'sheet' = 'goal';
+/**
+ * What the look is for: a goal that came up (the overview is no view of its ports); a goal that turned "Saved" (the
+ * same, except that where the hint's own step is a Well on a deposit, that deposit comes first); a research that opened
+ * up the deposit the goal names ('deposit': that deposit, before the goal's nodes); or the tree that closed.
+ */
+let focusFor: 'goal' | 'saved' | 'deposit' | 'tree' = 'goal';
+/** A look came due while a sheet was up: it waits for the sheet to go, and runs then. */
+let focusHeld = false;
+/** The goal the card said "Saving" for at the last frame (-1: none), and the goal whose "Saved" has had its look. */
+let savingGoal = -1;
+let savedLooked = -1;
+/** The raw materials whose deposits on the board can be built on, as last seen (a research adds one). */
+let depositMats = '';
 /** When the player last changed the zoom by hand: the wheel, a pinch, the zoom or Fit buttons, a key (ms). */
 let zoomedAt = -1e9;
 /**
@@ -457,7 +479,7 @@ function listenForZoom() {
 /** How long after the player's zooming the board may still be getting there (a Fit glides for 0.6 s). */
 const ZOOM_SETTLES = 1200;
 /** For scripts: what the last look found and did. */
-let focusLast: { at: number; goal: number; ids: number[]; inView: boolean; framed: boolean; why?: string } | null = null;
+let focusLast: { at: number; goal: number; ids: number[]; deposit?: number; inView: boolean; framed: boolean; why?: string; overview?: boolean } | null = null;
 
 /**
  * A sheet the player works in lies over the board: on a phone, the inspector or the build menu. (Elsewhere the build
@@ -495,6 +517,74 @@ export function focusInView(ids: number[], overview = false): boolean {
   return true;
 }
 
+/** How a look ranks against another one already waiting: the stronger kind is kept. */
+const LOOK_RANK = { tree: 0, goal: 1, saved: 1, deposit: 2 } as const;
+
+/**
+ * Look `after` ms from now, for `kind`. A look already waiting (due, or held behind a sheet or the tree) keeps the
+ * stronger kind and the later time.
+ */
+function lookSoon(now: number, kind: typeof focusFor, after: number) {
+  const waiting = focusDue > 0 || focusHeld;
+  if (!waiting || LOOK_RANK[kind] >= LOOK_RANK[focusFor]) focusFor = kind;
+  focusDue = Math.max(focusDue, now + after);
+  focusHeld = false;
+}
+
+/**
+ * Is the goal on the card saving credits for its next step, not yet in hand? Its own count (GoalProgress). (Only
+ * credits: what they are saved for is built on the board. Data is spent in the tree, and saving it says nothing about
+ * where to look.)
+ */
+function savingNow(g: Game): boolean {
+  if (g.goal.ready) return false;
+  const p = activeGoal(g)?.progress?.(g);
+  return !!p && p[2] === '¢' && p[0] + 1e-6 < p[1];
+}
+
+/** The raw materials of the deposits on the board that can be built on (their research is done), as one string. */
+function openDepositMats(g: Game): string {
+  const out: string[] = [];
+  for (const d of g.deposits) if (!out.includes(d.mat) && matUnlocked(g, d.mat)) out.push(d.mat);
+  return out.sort().join(',');
+}
+
+/**
+ * The free deposit the goal names for a Well, if any: the hint's own (goalDeposit: "Place a Well on the Murk deposit"),
+ * else the one the card's line wants next (lineSpot). With `hintOnly`, the hint's or none.
+ */
+function namedDeposit(g: Game, hintOnly = false): Deposit | null {
+  let id = goalDeposit(g);
+  if (id == null && !hintOnly) {
+    try {
+      const spot = lineSpot(g);
+      id = spot && 'deposit' in spot ? spot.deposit : null;
+    } catch (err) {
+      console.error('line spot:', err);
+    }
+  }
+  return id == null ? null : g.deposits.find((d) => d.id === id) ?? null;
+}
+
+/** A deposit as the board frames it (its card, 172 by 72, with a margin; as Show me and the opening view frame it). */
+const depositBox = (d: Deposit) => ({ x0: d.x - 12, y0: d.y - 12, x1: d.x + 184, y1: d.y + 84 });
+
+/** Is this deposit on screen, in the part of the board nothing covers? (Not in the overview, unless `overview` will do.) */
+function depositInView(d: Deposit, overview: boolean): boolean {
+  const boardEl = document.getElementById('board');
+  const e = boardEl?.querySelector(`.deposit[data-dep="${d.id}"]`);
+  if (!boardEl || !e || (!overview && boardEl.classList.contains('ov'))) return false;
+  const b = boardEl.getBoundingClientRect(), r = e.getBoundingClientRect(), c = env.cover();
+  if (r.left < b.left + c.left || r.right > b.right - c.right || r.top < b.top + c.top || r.bottom > b.bottom - c.bottom - c.row) return false;
+  const s = env.phone ? null : env.strip();
+  return !(s && r.left < b.left + s.x1 && r.right > b.left + s.x0 && r.top < b.top + s.bottom);
+}
+
+/** Real time the goal's count was last looked at for "Saved" (it is looked at four times a second, not every frame). */
+let savingAt = 0;
+let techsSeen = -1;
+let depositsSeen = -1;
+
 /** Call once a frame. */
 export function tendFocus(g: Game) {
   const now = performance.now();
@@ -506,6 +596,9 @@ export function tendFocus(g: Game) {
     focusGame = g;
     focusGoal = -1;
     focusDue = 0;
+    focusHeld = false;
+    savingGoal = savedLooked = -1;
+    techsSeen = depositsSeen = -1;
   }
   // Behind the start screen, the summary or the time-away card nothing is looked at; the goal on the card when
   // the player gets to it counts as coming up then.
@@ -517,35 +610,82 @@ export function tendFocus(g: Game) {
   const tree = ui.techOpen;
   if (g.goal.i !== focusGoal) {
     focusGoal = g.goal.i;
-    focusDue = now + AFTER_GOAL;
-    focusFor = 'goal';
+    focusDue = 0;
+    focusHeld = false;
+    lookSoon(now, 'goal', AFTER_GOAL);
+    savingGoal = -1;
   }
-  if ((sheetSeen && !sheet) || (treeSeen && !tree)) {
-    // (A goal's own look, still to come, stays a goal's.)
-    if (!focusDue) focusFor = 'sheet';
-    focusDue = Math.max(focusDue, now + AFTER_SHEET);
+  // The credits for the goal's next step have been saved: the hint is what to do now, and what it names is brought into
+  // view (once a goal).
+  if (now - savingAt >= 250) {
+    savingAt = now;
+    const saving = savingNow(g);
+    if (saving) savingGoal = g.goal.i;
+    else if (savingGoal === g.goal.i && savedLooked !== g.goal.i && !g.goal.ready) {
+      savedLooked = g.goal.i;
+      savingGoal = -1;
+      lookSoon(now, 'saved', AFTER_GOAL);
+    }
   }
+  // A research has opened up a kind of deposit: the deposit the goal names (if it names one) is brought into view.
+  // (An expansion brings new deposits of its own, and its own camera move: that is not a research.)
+  if (g.techs.length !== techsSeen || g.deposits.length !== depositsSeen) {
+    const mats = openDepositMats(g);
+    const researched = techsSeen >= 0 && g.techs.length !== techsSeen && g.deposits.length === depositsSeen;
+    // (Only when the research opened up the very deposit the goal names: one it does not name, say Breeze researched
+    // early at goal 16, is no reason to move the camera, and a 'deposit' look would outrank the tree's own, which leaves
+    // an overview the player chose alone.)
+    const fresh = researched ? mats.split(',').filter((m) => m && !depositMats.split(',').includes(m)) : [];
+    const named = fresh.length ? namedDeposit(g) : null;
+    if (named && fresh.includes(named.mat)) lookSoon(now, 'deposit', AFTER_GOAL);
+    techsSeen = g.techs.length;
+    depositsSeen = g.deposits.length;
+    depositMats = mats;
+  }
+  // The tree has closed: a look at the goal (the research card, if any, goes first). A sheet that closes leaves the
+  // camera alone, unless a look came due while it was up (or while the tree was): that one runs now.
+  if (treeSeen && !tree) lookSoon(now, 'tree', AFTER_SHEET);
+  else if (sheetSeen && !sheet && focusHeld && !tree) lookSoon(now, focusFor, AFTER_SHEET);
   sheetSeen = sheet;
   treeSeen = tree;
   if (!focusDue || now < focusDue) return;
   // (Still due: looked at once the card has gone.)
   if (celebrating()) return;
+  // Held, with what it is for: looked at once the sheet or the tree has gone.
+  if (sheet || tree) {
+    focusDue = 0;
+    focusHeld = true;
+    focusLast = { at: g.time, goal: g.goal.i, ids: [], inView: false, framed: false, why: `${sheet ? 'a sheet is up' : 'the tree is open'} (held)` };
+    return;
+  }
   focusDue = 0;
-  const ids = goalFocus(g);
-  const busy = sheet ? 'a sheet is up' : radialOpen() ? 'the build menu is up' : tree ? 'the tree is open' : gestureActive() ? 'a gesture'
-    : armedPort() ? 'a port is armed' : ui.placing ? 'placing' : '';
-  if (busy || !ids.length) {
+  const busy = radialOpen() ? 'the build menu is up' : gestureActive() ? 'a gesture' : armedPort() ? 'a port is armed' : ui.placing ? 'placing' : '';
+  // What to bring in: the goal's nodes; where it names no node, the deposit it names. Straight after a research that
+  // opened up that deposit, the deposit first; and when the credits are saved for a Well the hint puts on a deposit,
+  // that deposit first (the line's nodes, which the card points at while it waits, are not what the credits are for).
+  const first = focusFor === 'deposit' ? namedDeposit(g) : focusFor === 'saved' ? namedDeposit(g, true) : null;
+  const ids = first ? [] : goalFocus(g);
+  const place = first ?? (ids.length ? null : namedDeposit(g));
+  if (busy || (!ids.length && !place)) {
     focusLast = { at: g.time, goal: g.goal.i, ids, inView: false, framed: false, why: busy || 'no nodes' };
     return;
   }
-  // After a sheet or the tree, an overview the player chose is theirs: it counts as a view of the nodes.
-  const theirs = focusFor === 'sheet' && ov && ownOverview;
+  // After the tree (or a research that opened up the deposit the goal names, done there or from the queue), an overview
+  // the player chose is theirs: it counts as a view of the nodes, and what is off screen is slid in at its zoom.
+  const theirs = (focusFor === 'tree' || focusFor === 'deposit') && ov && ownOverview;
+  if (place) {
+    const inView = depositInView(place, theirs);
+    // (The board's frameBoxes moves the camera as little as it can, from the overview into among the cards.)
+    if (!inView) frameBoxes([depositBox(place)], !theirs);
+    focusLast = { at: g.time, goal: g.goal.i, ids: [], deposit: place.id, inView, framed: !inView, why: focusFor, ...(theirs ? { overview: true } : {}) };
+    return;
+  }
   const inView = focusInView(ids, theirs);
   // (The board's frameNodes keeps the camera still when they are in view; it is not even asked then. From the player's
   // overview it brings them in at the same zoom; otherwise in among the cards, where the ports are.)
   if (!inView) boardFrames([...ids].reverse(), !theirs);
-  focusLast = { at: g.time, goal: g.goal.i, ids, inView, framed: !inView, ...(theirs ? { why: 'overview' } : {}) };
+  focusLast = { at: g.time, goal: g.goal.i, ids, inView, framed: !inView, why: focusFor, ...(theirs ? { overview: true } : {}) };
 }
 
-/** For scripts: the last look at the goal's nodes. */
+/** For scripts: the last look at the goal's nodes (or at the deposit it names). */
 export const focusSeen = () => focusLast;

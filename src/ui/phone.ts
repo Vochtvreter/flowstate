@@ -161,8 +161,10 @@ function measure() {
   // Everything else (the strip growing a line, a sheet's contents, the stage) bumps sizeRev. Reading layout
   // forces the browser to lay the page out there and then, so it is done only when something may have moved,
   // never on every refresh while a sheet slides in.
+  // (A goal that is ready seats its Claim in the thumb row; the capstone during the ending has none: hud.ts.)
+  const claimUp = !!g?.goal.ready && !!goalEl?.querySelector('[data-testid="claim"]');
   const key = env.phone
-    ? `p|${sizeRev}|${isOpen(insp) ? 1 : 0}${isOpen(build) ? 1 : 0}${carrying() ? 1 : 0}${g?.goal.ready ? 1 : 0}${summaryEl && !summaryEl.hidden ? 1 : 0}`
+    ? `p|${sizeRev}|${isOpen(insp) ? 1 : 0}${isOpen(build) ? 1 : 0}${carrying() ? 1 : 0}${claimUp ? 1 : 0}${summaryEl && !summaryEl.hidden ? 1 : 0}`
     : `d|${sizeRev}`;
   if (key === measuredKey) return;
   measuredKey = key;
@@ -200,7 +202,7 @@ function measure() {
   const sum = summaryCover();
   sumNow = sum;
   // (Under the summary the thumb row is out of reach and out of sight: nothing is kept clear of it.)
-  const row = sum.bottom ? 12 : (g?.goal.ready ? CLAIM_ROW : THUMB_ROW) + 16;
+  const row = sum.bottom ? 12 : (claimUp ? CLAIM_ROW : THUMB_ROW) + 16;
   coverNow = { top: bottom, right: Math.max(sheetNow.shift, sum.right), bottom: Math.max(sheetNow.lift, sum.bottom), left: 0, row };
 }
 
@@ -461,6 +463,8 @@ let hintGoal = -1;
 let hintOpen = false;
 /** The card folds its hint behind a tap (`#app.fold`): see below. */
 let fold = false;
+/** A sheet the player works in (the inspector, the build sheet) was open at the last sync. */
+let sheetSeenOpen = false;
 let coverSeen = '';
 /** How much the summary covered when last looked at: a change means the factory is framed again. */
 let summarySeen = '0|0';
@@ -491,6 +495,11 @@ function sync() {
     hintH = 0;
     setHintOpen(true);
   }
+  // A sheet that opens folds it away too, as the tap on the board that opens one does: a sheet opened from the alert's
+  // Show or the Flow ring was left a sliver on a short phone while the hint stood open above it.
+  const sheetOpen = env.phone && (isOpen(insp) || isOpen(build));
+  if (sheetOpen && !sheetSeenOpen) foldHint();
+  sheetSeenOpen = sheetOpen;
   measure();
   const c = coverNow;
   // The card folds its hint behind a tap where the strip would otherwise take too much of the board:
