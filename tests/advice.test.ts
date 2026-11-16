@@ -1335,6 +1335,7 @@ describe('the words: every sentence of the repertoire fits the card', () => {
     // Refiner from a Well's port, and a Void from any port of any machine.
     lineTune: [Producers, ['Refiner', 'Assembler', 'Fabricator'], [upgradePrice]],
     lineTuneLabs: [[TECHS.R2.name], [costText(TECHS.R2)]],
+    lineRefineAll: [],
     lineRefine: [wells.flatMap(both).map((n) => `${n}'s port`), [buildPrice], mats, values],
     lineVoid: [ports, mats],
   };

@@ -29,7 +29,7 @@ import { graph, isMachine, isPass } from './graph';
 import { startOrders } from './orders';
 import { Game, GNode, GoalReward, Wire, isLookahead, nodeNoun } from './state';
 import { clearHistory } from './actions';
-import { flowLineWords, lineFocus, lineHeld, lineOpen, lineSpot, tuneLineWords, waitKind } from './advice';
+import { flowLineWords, lineFocus, lineHeld, lineSpot, tuneLineWords, tuneState, waitKind } from './advice';
 
 /** [current, target, unit]. Unit '¢' means "saving up credits"; 'α' / 'β' / 'γ' mean saving up Data. */
 export type GoalProgress = [current: number, target: number, unit: string];
@@ -97,9 +97,9 @@ export interface Meanwhile {
    */
   required?: boolean;
   /**
-   * The line is only worth saying while its steps pay (the Fabricator card's two: lineOpen in src/advice.ts): once
-   * it does not apply it does not come back. So the card's count ("1 of 2") leaves it out unless it applies now or
-   * has been shown; a line without this is counted from the start, because it may still come.
+   * The line is only worth saying while its steps pay (the Fabricator card's tune-up: tuneState in src/advice.ts):
+   * once it does not apply it does not come back. So the card's count ("1 of 2") leaves it out unless it applies now
+   * or has been shown; a line without this is counted from the start, because it may still come.
    */
   closes?: boolean;
 }
@@ -498,45 +498,45 @@ const EXPAND_LABS: Meanwhile = {
 };
 
 /**
- * What the Fabricator card's tune-up line can put right, looking at the board only: a counted Well or machine that
- * makes more than everything it is wired to can take, so that it stands blocked part of the time and does not flow
- * (the press of Upgrade all on the Wells that the card before asks for leaves several like that).
- *  - It feeds only Labs, they cannot study all of it, and Lab Speed is not researched (`research`): with it Labs
- *    study twice as fast.
- *  - It feeds only machines, and they run flat out (`speed`): a level of Speed on the one whose next level is the
- *    cheapest. `extra` is how much more of the material that level lets it take a second, and `flows` whether the
- *    producer then flows.
- * The research first, then the producer of which the least is taken (by what the machines can take at their
- * levels, not by its utilisation of the moment, which wavers: two Wells equally outrun would take turns on the
- * card); the older one of two alike. null when nothing is outrun in a way this can put right. (A port that also
- * sells, or feeds a Lab with room, is never outrun: what the machines leave goes there. So this never asks for a
- * raw Well to be wired to the Market, which the Flow goal's own line may.)
+ * What the Fabricator card's tune-up can put right, looking at the board only: a counted Well or machine that makes
+ * more than everything it is wired to can take, so that it stands blocked part of the time and does not flow (the
+ * press of Upgrade all on the Wells that the card before asks for leaves several like that).
+ *  - `labs`: it feeds only Labs, they cannot study all of it, and Lab Speed is not researched: with it Labs study
+ *    twice as fast.
+ *  - `level`: it feeds only machines, and they run flat out: a level of Speed on the one whose next level is the
+ *    cheapest (`speed`). `extra` is how much more of the material that level lets it take a second, and `flows`
+ *    whether the producer then flows.
+ * Of several outrun alike, the one of which the least is taken (by what the machines can take at their levels, not
+ * by its utilisation of the moment, which wavers: two Wells equally outrun would take turns on the card), and the
+ * older of two. null where nothing is outrun in that way. (A port that also sells, or feeds a Lab with room, is
+ * never outrun: what the machines leave goes there. So this never asks for a raw Well to be wired to the Market,
+ * which the Flow goal's own line may.)
  */
-export type TuneFix = { n: GNode; mat: MatId } & ({ research: string } | { speed: GNode; extra: number; flows: boolean });
+export interface TuneLabs { n: GNode; mat: MatId; research: string }
+export interface TuneLevel { n: GNode; mat: MatId; speed: GNode; extra: number; flows: boolean }
 
 /**
- * tuneFix and refineNext look at every node, and the Fabricator card asks for them several times at each look
- * (is the line done, does it apply, what is its step): what they found is kept for the moment it was worked out
- * at, the game's time and the board as it stood. Beside the game, not in it.
+ * outrun and refineNext look at every node, and the Fabricator card asks for them several times at each look (is
+ * the line done, does it apply, what is its step): what they found is kept for the moment it was worked out at,
+ * the game's time and the board as it stood. Beside the game, not in it.
  */
-const boardReads = new WeakMap<Game, { time: number; rev: number; techs: number; tune?: TuneFix | null; refine?: RefineStep | null }>();
+const boardReads = new WeakMap<Game, { time: number; rev: number; techs: number; tune?: { labs: TuneLabs | null; level: TuneLevel | null }; refine?: RefineStep | null }>();
 function readsAt(g: Game) {
   let m = boardReads.get(g);
   if (!m || m.time !== g.time || m.rev !== g.rev || m.techs !== g.techs.length) boardReads.set(g, (m = { time: g.time, rev: g.rev, techs: g.techs.length }));
   return m;
 }
 
-export function tuneFix(g: Game): TuneFix | null {
+export function outrun(g: Game): { labs: TuneLabs | null; level: TuneLevel | null } {
   const m = readsAt(g);
-  if (m.tune === undefined) m.tune = findTune(g);
-  return m.tune;
+  return (m.tune ??= findOutrun(g));
 }
 
-function findTune(g: Game): TuneFix | null {
+function findOutrun(g: Game): { labs: TuneLabs | null; level: TuneLevel | null } {
   const c = graph(g);
   const F = RULES.flow.flowing;
-  let labs: TuneFix | null = null;
-  let level: TuneFix | null = null;
+  let labs: TuneLabs | null = null;
+  let level: TuneLevel | null = null;
   let share = Infinity;
   for (const n of g.nodes) {
     if (!countsForFlow(g, n)) continue;
@@ -569,7 +569,7 @@ function findTune(g: Game): TuneFix | null {
       share = taken / gives;
     }
   }
-  return labs ?? level;
+  return { labs, level };
 }
 
 /** Does this Well send what it gives to Labs and nowhere else? */
@@ -578,7 +578,7 @@ const feedsLabsOnly = (g: Game, n: GNode) => {
   return n.type === 'well' && !!n.material && ws.length > 0 && ws.every((w) => typeOf(g, w.to) === 'lab');
 };
 
-/** Refiners built on a Well that a Lab studies too: what the Fabricator card's second line has the player build. */
+/** Refiners built on a Well that a Lab studies too: what the Fabricator card's tune-up has the player build. */
 export function turnedRefiners(g: Game): GNode[] {
   const c = graph(g);
   return g.nodes.filter((n) => n.type === 'refiner' && !!recipeOf(n) && (c.ins.get(n.id) ?? []).some((w) => {
@@ -639,37 +639,29 @@ function findRefine(g: Game): RefineStep | null {
 const savingForFabricator = (g: Game) => count(g, 'fabricator') === 0 && g.credits < nodeCost(g, 'fabricator');
 
 /**
- * "The Murk Well outruns its Refiner: buy Speed on the Refiner (32¢)." The card before had every Well upgraded at
- * once; a Well that feeds one machine and nothing else now makes more than that machine takes, stands blocked a
- * fifth of the time, and Flow (which every sale is paid by) is down. Each step puts one of them right (tuneFix),
- * and is only on the card while what it brings in pays its price back before the Fabricator can be bought
- * (lineOpen in src/advice.ts): a step that would make the Fabricator later is not said, and the line leaves.
- * Done when nothing is outrun any more, or when the player has tuned something and no step is worth its price.
+ * The tune-up before the Fabricator: one line whose words are its next step's own. The wait for the Fabricator's
+ * price is the longest of the demo, and the board has two kinds of slack by then.
+ *  - "The Murk Well outruns its Refiner: buy Speed on the Refiner (32¢)." The card before had every Well upgraded
+ *    at once: a Well that feeds one machine and nothing else now makes more than that machine takes, stands blocked
+ *    a fifth of the time, and Flow (which every sale is paid by) is down. A level of Speed on the machine puts it
+ *    right (outrun); where it is Labs that a Well outruns, and Lab Speed is not researched, that research does.
+ *  - "You have enough α: build a Refiner from a Well that only feeds a Lab, and sell its goods." Fabrication is the
+ *    last research of the demo and its α is in hand: a Well that a Lab studies earns nothing toward the Fabricator.
+ *    A Refiner built from its port takes what it needs first (machines are fed before Labs), the Lab keeps the
+ *    rest, and the Spark, Ink or Shard is sold: nothing raw, and nothing over its demand (refineNext). Its product
+ *    is wired to the Market, and an Ink Refiner's Silt gets a Void.
+ * A step that costs credits is only on the card while what it brings in pays its price back before the Fabricator
+ * can be bought (tuneState in src/advice.ts): one that would make the Fabricator later is not said. When no step
+ * is left that pays, the line is ticked if the player has done some of it, and leaves the card if not; it does not
+ * come back. Its own words below are for the line once ticked.
  */
-const FLOW_TUNE: Meanwhile = {
-  id: 'flow-tune',
+const TUNE_UP: Meanwhile = {
+  id: 'tune-up',
   closes: true,
-  // (Its words once done. While there is a step, the card reads the words for the board: say.)
-  text: hint('Your line is tuned: every sale pays more until the Fabricator is yours.'),
+  text: hint('Your line is tuned: nothing else pays for itself before the Fabricator.'),
   say: (g) => tuneLineWords(g),
-  done: (g) => !tuneFix(g) || (g.nodes.some((n) => isMachine(n) && n.lv.speed > 0) && !lineOpen(g, 'flow-tune')),
-  when: (g) => savingForFabricator(g) && (FLOW_TUNE.done(g) || lineOpen(g, 'flow-tune')),
-};
-
-/**
- * "You have enough α: build a Refiner from a Well that only feeds a Lab, and sell its goods." Fabrication is
- * the last research of the demo, and its α is in hand: a Well that a Lab studies earns nothing toward the
- * Fabricator. A Refiner built from its port takes what it needs first (machines are fed before Labs), the Lab
- * keeps the rest, and the Spark, Ink or Shard is sold: nothing raw, and nothing over its demand (refineNext).
- * Like the tune-up, each Refiner is only asked for while it pays its price back before the Fabricator can be
- * bought. Done when no such Well is left, or when one has been turned and no other is worth its price.
- */
-const REFINE_WELLS: Meanwhile = {
-  id: 'refine-wells',
-  closes: true,
-  text: hint('You have enough α: build a Refiner from a Well that only feeds a Lab, and sell its goods.'),
-  done: (g) => !refineNext(g) || (turnedRefiners(g).length > 0 && !lineOpen(g, 'refine-wells')),
-  when: (g) => savingForFabricator(g) && dataFor(g, 'P7', 'a') && (REFINE_WELLS.done(g) || lineOpen(g, 'refine-wells')),
+  done: (g) => tuneState(g) === 'done',
+  when: (g) => savingForFabricator(g) && tuneState(g) !== 'none',
 };
 
 /** Seconds the active goal has been the active one (0 until the first tick has seen it). */
@@ -1053,11 +1045,10 @@ export const GOALS: Goal[] = [
     // (Its second line wired each Well with a Lab of its own to the Market too: four wires across the whole board at
     // minute 17, and a minute later the game said that what they sold went at a quarter of the price, as every
     // card player first sold over demand there. The Fabricator's price came down instead: docs/CONTENT.md.)
-    // Then the wait for the Fabricator's price, the longest of the demo, with the board's research done: the
-    // Wells that outrun their machines are put right (a level of Speed each), and the Wells that only feed Labs
-    // get a Refiner whose goods are sold. Both only while a step pays for itself before the Fabricator can be
-    // bought; neither sells anything raw or over its demand.
-    meanwhile: [CUT_GLYPH, FLOW_TUNE, REFINE_WELLS],
+    // Then the tune-up, for the wait itself: the Wells that outrun their machines are put right (a level of Speed
+    // each), and the Wells that only feed Labs get a Refiner whose goods are sold. Each step only while it pays for
+    // itself before the Fabricator can be bought; nothing is sold raw or over its demand.
+    meanwhile: [CUT_GLYPH, TUNE_UP],
     reward: { b: 40 },
   },
   {
@@ -1246,22 +1237,26 @@ export function meanwhileAt(g: Game): { line: Meanwhile; step: number; of: numbe
   let seen = linesSeen.get(g);
   if (!seen || seen.goal !== g.goal.i || g.time < seen.at) linesSeen.set(g, (seen = { goal: g.goal.i, at: g.time, ids: new Set() }));
   seen.at = g.time;
-  const shown: { line: Meanwhile; on: boolean; done: boolean }[] = [];
-  for (const line of all) {
-    const done = line.done(g);
-    if (done && had?.includes(line.id)) continue;
-    const on = !line.when || line.when(g);
-    if (on) seen.ids.add(line.id);
-    if (on || !line.closes || seen.ids.has(line.id)) shown.push({ line, on, done });
-  }
+  // One pass, asking each line no more than is needed: whether it is done only up to the line the card shows (and
+  // of a line that was done when the goal came up), whether it applies only up to there and of a line that closes.
+  let found: { line: Meanwhile; step: number; of: number } | null = null;
   let last: { line: Meanwhile; step: number; of: number } | null = null;
-  for (let i = 0; i < shown.length; i++) {
-    if (!shown[i].on) continue;
-    const at = { line: shown[i].line, step: i + 1, of: shown.length };
-    if (!shown[i].done) return at;
-    last = at;
+  let count = 0;
+  for (const line of all) {
+    if (had?.includes(line.id) && line.done(g)) continue;
+    const ask = !found || !!line.closes;
+    const on = ask ? !line.when || line.when(g) : false;
+    if (on) seen.ids.add(line.id);
+    if (!on && line.closes && !seen.ids.has(line.id)) continue;
+    count++;
+    if (found || !on) continue;
+    const at = { line, step: count, of: 0 };
+    if (line.done(g)) last = at;
+    else found = at;
   }
-  return last;
+  const at = found ?? last;
+  if (at) at.of = count;
+  return at;
 }
 
 /** The line meanwhileAt(g) gives, done or not; null when there is none. lineAdvice(g) gives its next step. */

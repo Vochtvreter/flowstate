@@ -32,7 +32,7 @@ const ORDER: Record<string, string[]> = {
   'hold-flow': ['flow-fix'],
   'make-mist': ['expand-labs', 'speed-pairs', 'deep-analysis'],
   'make-prism': ['cut-glyph'],
-  'build-fabricator': ['cut-glyph', 'flow-tune', 'refine-wells'],
+  'build-fabricator': ['cut-glyph', 'tune-up'],
   'make-lens': ['prism-fab', 'glyph-fab'],
 };
 const TEXT: Record<string, { mouse: string; touch: string }> = {
@@ -51,9 +51,8 @@ const TEXT: Record<string, { mouse: string; touch: string }> = {
   'speed-pairs': { mouse: 'Buy Speed on each Well with a Lab of its own, and on that Lab when it is full.', touch: '' },
   'deep-analysis': { mouse: 'Research Lab Speed, then Deep Analysis: every item studied gives half as much Data again.', touch: '' },
   'cut-glyph': { mouse: 'You have the β you need: cut the wire from the Glyph Assembler to the Lab.', touch: '' },
-  // (Its words once done. While there is a step, the card reads the step's own sentence: Meanwhile.say.)
-  'flow-tune': { mouse: 'Your line is tuned: every sale pays more until the Fabricator is yours.', touch: '' },
-  'refine-wells': { mouse: 'You have enough α: build a Refiner from a Well that only feeds a Lab, and sell its goods.', touch: '' },
+  // (Its words once ticked. While a step is on offer, the card reads the words for that step: Meanwhile.say.)
+  'tune-up': { mouse: 'Your line is tuned: nothing else pays for itself before the Fabricator.', touch: '' },
   'prism-fab': { mouse: 'Wire the Prism Assembler\'s port to the Fabricator: a Lens takes one Prism.', touch: '' },
   'glyph-fab': { mouse: 'Wire the Glyph Assembler\'s port to the Fabricator: a Lens takes two Glyph.', touch: '' },
 };
@@ -62,17 +61,17 @@ for (const t of Object.values(TEXT)) if (!t.touch) t.touch = t.mouse;
 const FREE = 'Give each free deposit a Well and a Lab of its own.';
 const lineOf = (id: string): Meanwhile => GOALS.flatMap((x) => x.meanwhile ?? []).find((l) => l.id === id)!;
 /**
- * The Fabricator card's two lines, whose steps are only on the card while they pay for themselves before the
- * Fabricator can be bought (Meanwhile.closes): they may leave the card with work left, and a copy of a board (which
- * does not remember what was on offer a moment ago) may not have them where the game it was copied from did.
+ * The Fabricator card's tune-up, whose steps are only on the card while they pay for themselves before the
+ * Fabricator can be bought (Meanwhile.closes): it may leave the card with work left, and a copy of a board (which
+ * does not remember what was on offer a moment ago) may not have it where the game it was copied from did.
  */
-const EARNING = ['flow-tune', 'refine-wells'];
+const EARNING = ['tune-up'];
 
 /** The most steps each line can take on the scripted boards (the board, then a Well and a Lab for each deposit; a pair is two presses). */
 const MOST: Record<string, number> = {
   'ink-lab': 1, 'glint-lab': 1, 'well-labs': 4, 'expand-labs': 5, 'flow-fix': 3, 'speed-pairs': 10, 'deep-analysis': 2, 'cut-glyph': 1, 'prism-fab': 1, 'glyph-fab': 1,
   // A level of Speed or two on each outrun Refiner; a Refiner, its wire to the Market and (for Ink) a Void, on each of four Wells.
-  'flow-tune': 6, 'refine-wells': 9,
+  'tune-up': 15,
 };
 
 describe('"while you wait": the lines', () => {
@@ -351,7 +350,7 @@ describe('"while you wait": each line is true, and nothing undoes it', () => {
       expect(new Set(got).size).toBe(got.length);
       // A line on two goals comes up on one or the other (done on the first, it is done on the second).
       const shared = (x: string) => x.endsWith('/expand-labs') || x.endsWith('/cut-glyph');
-      // (The Fabricator card's two come up where their steps pay: checked on the pacing tool's players, further down.)
+      // (The Fabricator card's tune-up comes up where its steps pay: checked on the pacing tool's players, further down.)
       const earning = (x: string) => EARNING.some((id) => x.endsWith(`/${id}`));
       for (const x of all) if (!shared(x) && !earning(x)) expect(got, x).toContain(x);
       expect(got.some((x) => x.endsWith('/expand-labs')), 'the second expansion').toBe(true);
@@ -386,9 +385,9 @@ describe('"while you wait": each line is true, and nothing undoes it', () => {
         for (const x of gains) expect(x, from).toBeGreaterThanOrEqual(0);
         continue;
       }
-      // The Fabricator card's two promise less: each step only that the Fabricator is not later for it. Held to
-      // that here (a few seconds either way are the orders' lumps); what they are worth is measured on the pacing
-      // tool's players below.
+      // The Fabricator card's tune-up promises less: of each step only that the Fabricator is not later for it.
+      // Held to that here (a few seconds either way are the orders' lumps); what it is worth is measured on the
+      // pacing tool's players below.
       if (EARNING.includes(line)) {
         expect((gains[0] + gains[1]) / 2, `${goal}/${line}: ${from}`).toBeGreaterThanOrEqual(0);
         continue;
@@ -527,7 +526,7 @@ function followSteps(g: Game, line: string, from: string): Advice[] {
   for (;;) {
     if (g.goal.ready) break; // (the goal came first: the card shows Claim)
     const now = meanwhileOf(g);
-    // (One of the Fabricator card's two may leave with work left, once its next step no longer pays.)
+    // (The Fabricator card's tune-up may leave with work left, once no step of it pays.)
     if (!now && EARNING.includes(line)) break;
     expect(now, `${from}: a line stays on the card while it is followed`).not.toBeNull();
     if (now!.id !== line || now!.done(g)) break;
@@ -575,7 +574,7 @@ describe('lineAdvice: the next step of the card\'s line, for its "Show me"', () 
   const boards: Snap[] = [
     ...cards.snaps, ...tips.flatMap((t) => t.snaps),
     ...SEEDS.flatMap((seed) => [...pacingBoards('cardonly', seed), ...pacingBoards('newcomer10', seed)]),
-    // (A copy of a board on which one of the Fabricator card's lines was on its last seconds may not have it.)
+    // (A copy of a board on which the Fabricator card's tune-up was on its last seconds may not have it.)
   ].filter((b) => !EARNING.includes(b.line) || meanwhileOf(b.g)?.id === b.line);
 
   it('the boards are the card players\' own: every line but those of goal 22, from the tests\' player and from the pacing tool\'s', () => {
@@ -607,8 +606,11 @@ describe('lineAdvice: the next step of the card\'s line, for its "Show me"', () 
     for (const seq of report['well-labs'] ?? []) expect(seq).toMatch(/^(Place a Well on the free (Glint|Murk) deposit \(N¢\), then build a Lab from its port\.|Build a Lab from the new (Glint|Murk) Well's port)/);
     for (const seq of report['flow-fix'] ?? []) expect(seq).toMatch(/needs more \w+: buy Speed on (the|an?|its) \w+ (Well|Refiner)/);
     for (const seq of report['cut-glyph']) expect(seq).toMatch(/^Cut the wire from the Glyph Assembler to (the|a) Lab: sold, each Glyph is N¢\.$/);
-    for (const seq of report['flow-tune']) expect(seq).toMatch(/^(The|An?) \w+ Well outruns its Refiner: buy Speed on the Refiner \(N¢\)\./);
-    for (const seq of report['refine-wells']) expect(seq).toMatch(/^Build a Refiner from (the|an?) \w+ Well's port \(N¢\): its \w+ sells for N¢ each\.  →  Wire (the|an?) \w+ Refiner's (\w+ )?port to the Market: its \w+ is not sold \(N¢ each\)\./);
+    // The tune-up: a level of Speed where a Well outruns its Refiner, then a Refiner on a Well that only feeds a Lab and its wire to the Market.
+    for (const seq of report['tune-up']) {
+      expect(seq).toMatch(/(^|  →  )((The|An?) \w+ Well outruns its Refiner: buy Speed on the Refiner \(N¢\)\.|Build a Refiner from (the|an?) \w+ Well's port \(N¢\): its \w+ sells for N¢ each\.)/);
+      expect(seq).not.toMatch(/Build a Refiner from [^→]*$/); // never left with its product unsold: the wire to the Market follows
+    }
   });
 
   it('through whole runs it never gives a step without a line or for a line that is done, and every step it gives can be done on the spot', () => {
