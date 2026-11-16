@@ -673,11 +673,11 @@ export function fitView(smooth = false) {
 
 /**
  * The view a game opens on (a save loaded, a new game, the layout changed under it). The view the layout
- * had before, when the board is coming back to it. Otherwise the whole factory, when it can be read at
- * once. When it is too big for that: what the player is in the middle of (a port armed for a wire, when a
- * phone is turned) or what the goal is about (goalFocus), at a readable zoom; with nothing named, the
- * middle of the factory at a readable zoom on a phone, and elsewhere the floor of the detailed tier when
- * every card is whole and uncovered there, else all of it in the overview, so that no card opens cut in
+ * had before, when the board is coming back to it; on a phone that was turned, the zoom and the middle it had.
+ * Otherwise the whole factory, when it can be read at once. When it is too big for that: what the player is in
+ * the middle of (a wire a finger is still drawing) or what the goal is about (goalFocus), at a readable zoom; with
+ * nothing named, the middle of the factory at a readable zoom on a phone, and elsewhere the floor of the detailed
+ * tier when every card is whole and uncovered there, else all of it in the overview, so that no card opens cut in
  * half at the stage's edges.
  */
 function openView() {
@@ -691,9 +691,18 @@ function openView() {
   }
   openPending = false;
   const back = switchedTo ? layoutViews.get(switchedTo) : undefined;
-  switchedTo = null;
+  const turned = turnedFrom;
+  switchedTo = turnedFrom = null;
   if (back) {
     standOn(back);
+    return;
+  }
+  // A phone turned keeps the zoom it had and the middle of its view; the selected node, or the armed port, is then
+  // brought back into view if the turn put it out of sight (the least move, at that zoom when it fits).
+  if (turned) {
+    standOn({ ...turned, k: clampK(turned.k) });
+    const keep = tapWire ? tapWire.from : ui.sel?.kind === 'node' ? ui.sel.id : null;
+    if (keep != null) frameNodes([keep]);
     return;
   }
   const floor = zoomFloor();
@@ -1040,12 +1049,17 @@ export function refreshBoard() {
   openingUntil = performance.now() + 800;
   fitBack = fitAt = null;
   // Between the phone layout and the wide one, the view each had is kept, so that going back (a window
-  // dragged narrow and wide again) finds the board where it was. A phone turned on its side is framed afresh.
+  // dragged narrow and wide again) finds the board where it was. A phone turned on its side keeps its zoom and
+  // the middle of its view (see `openView`).
   const kind = layoutKind();
   if (kindSeen && kind !== kindSeen) {
     layoutViews.set(kindSeen, resizeAnchorNow());
     switchedTo = kind;
-  } else switchedTo = null;
+    turnedFrom = null;
+  } else {
+    switchedTo = null;
+    turnedFrom = kind === 'phone' ? resizeAnchorNow() : null;
+  }
   kindSeen = kind;
   // The build menu changes shape (a fan or a sheet): it closes, and its port is armed again so that one
   // tap opens it in the new shape. An armed port and a wire being dragged carry on as they were.
@@ -1070,6 +1084,8 @@ const layoutKind = (): LayoutKind => (env.phone ? 'phone' : 'wide');
 let kindSeen: LayoutKind | null = null;
 /** The layout the board has just switched to (until the opening view has been chosen for it). */
 let switchedTo: LayoutKind | null = null;
+/** A phone has just been turned: the view it had before (the middle of the stage and the zoom), to stand on again. */
+let turnedFrom: Anchor | null = null;
 /** A view to come back to: the world point in the middle of the stage, and the zoom. */
 interface Anchor { wx: number; wy: number; k: number }
 const layoutViews = new Map<LayoutKind, Anchor>();
@@ -1229,6 +1245,12 @@ const ex = {
   settling: false,
   /** What the last measurement was taken for (see `expandKey`), and when. */
   key: '', measuredAt: 0,
+  /**
+   * Off a phone the stage itself has changed size (the inspector opened or closed beside it, the window was
+   * resized): docked, the button takes its place afresh rather than staying where it was, so that it comes back
+   * once the inspector has gone.
+   */
+  reseat: false,
 };
 
 /** The goal that first asks for the expansion: before it the button is not shown (it would compete with the first steps). */
@@ -1448,7 +1470,7 @@ function placeExpand(byCamera = false) {
     // the phone shell reports, the sheet and the floating buttons above it each take their new place a frame or
     // more apart (the alert chip coming in under the card moved it three times in 60 ms).
     const at = ex.target;
-    const kept = (!byCamera || !!glide) && at && ex.docked && ex.mini === mini && !env.calm ? { x: at.x - ex.w / 2, y: at.y - ex.h / 2 } : null;
+    const kept = !ex.reseat && (!byCamera || !!glide) && at && ex.docked && ex.mini === mini && !env.calm ? { x: at.x - ex.w / 2, y: at.y - ex.h / 2 } : null;
     const sig = `${Math.round(area.x0)},${Math.round(area.y0)},${Math.round(area.x1)},${Math.round(area.y1)}|${ex.blocks.map((b) => `${Math.round(b.x0)},${Math.round(b.y0)},${Math.round(b.x1)},${Math.round(b.y1)}`).join(' ')}`;
     if (sig !== ex.around) {
       ex.around = sig;
@@ -1486,6 +1508,7 @@ function placeExpand(byCamera = false) {
   ex.mini = mini;
   ex.call = call;
   ex.target = target;
+  ex.reseat = false;
   drawExpand();
 }
 
@@ -1717,6 +1740,7 @@ export function initBoard(root: HTMLElement) {
     new ResizeObserver(() => {
       invalidateLayout();
       ex.stale = true;
+      if (!env.phone) ex.reseat = true;
       stageResized();
       touch();
     }).observe(boardEl);
