@@ -2949,8 +2949,10 @@ function freeSpot(x: number, y: number, w: number, h: number, skip?: number, roo
   return nearestSpot({ x, y, w, h: room, avoid: nodeBoxes(skip, true).concat(depositBoxes()), board: ui.g.board, grid: GRID });
 }
 
-/** Air kept between a card built where the player chose and every other card and port (and free deposit). */
+/** Air kept between a card built where the player chose and every other card and port. */
 const BUILD_CLEAR = 40;
+/** How much further from the chosen point than the nearest spot with the usual gap a spot with that air may be. */
+const AIR_REACH = 100;
 /** ...and between it and the edge of the stage, or whatever covers the stage. */
 const EDGE_CLEAR = 8;
 /** A card's ports stand out this far from its sides (style.css: 14 px dots centred a px past the edge). */
@@ -2958,28 +2960,36 @@ const PORT_OUT = 8;
 
 /**
  * Where a w×h card built at a point the player chose stands (its top left corner): centred on the point, on the
- * grid, when that keeps BUILD_CLEAR from every other card and port, and from every free deposit; otherwise the
- * nearest spot that does. Never under what covers the stage (the strip, a sheet, the floating buttons, the corner
+ * grid, when that keeps BUILD_CLEAR from every other card and port, and the usual gap (CARD_GAP) from every free
+ * deposit; otherwise the nearest spot that does. Never under what covers the stage (the strip, a sheet, the floating buttons, the corner
  * controls); a spot off the stage is taken when it is the nearest, and the camera then brings the card in (see
- * `built`). With no room for that much air anywhere, the nearest spot with the usual gap (CARD_GAP). Null when the
- * plot is full. `room`: the height to keep clear for it (roomFor).
+ * `built`). With no room for that much air within reach (AIR_REACH further than the nearest spot with the usual
+ * gap, CARD_GAP), that nearest spot. Null when the plot is full. `room`: the height to keep clear for it (roomFor).
  */
 function buildSpot(at: Pt, w: number, h: number, room = h): Pt | null {
   const g = ui.g;
   // Everything is kept EDGE_CLEAR away; cards and deposits are grown to make up the rest of their own gap. (Ports
   // stand out at the sides of the others and of this card: the cards are kept that much further apart across.)
   const grow = (b: Box, d: number, dx = 0): Box => ({ x0: b.x0 - d - dx, y0: b.y0 - d, x1: b.x1 + d + dx, y1: b.y1 + d });
+  // (A free deposit is only kept clear by the usual gap: it is a place, not a machine with ports and wires, and with
+  // the wider air round every one of them a card tapped near a deposit landed far from the finger.)
   const solid = (gap: number) => nodeBoxes(undefined, true).map((b) => grow(b, gap - EDGE_CLEAR, 2 * PORT_OUT))
-    .concat(depositBoxes().map((b) => grow(b, gap - EDGE_CLEAR)));
+    .concat(depositBoxes().map((b) => grow(b, CARD_GAP - EDGE_CLEAR)));
   // What covers the stage, in board units. (A card's pill stands 14 px above it: a card under the strip is kept that much lower.)
   const v = viewAhead();
   const covered = coverBoxes().map((b) => ({ x0: (b.x0 - v.x) / v.k, y0: (b.y0 - v.y) / v.k, x1: (b.x1 - v.x) / v.k, y1: (b.y1 - v.y) / v.k + 14 }));
   const q = { x: at.x - w / 2, y: at.y - h / 2, w, h: room, board: g.board, grid: GRID, gap: EDGE_CLEAR };
   const airy = solid(BUILD_CLEAR), usual = solid(CARD_GAP);
-  return nearestSpot({ ...q, avoid: airy.concat(covered) })
-    ?? nearestSpot({ ...q, avoid: airy })
-    ?? nearestSpot({ ...q, avoid: usual.concat(covered) })
-    ?? nearestSpot({ ...q, avoid: usual });
+  // (Sideways counts a little less, as in nearestSpot: cards are wider than tall.)
+  const far = (p: Pt | null) => (p ? Math.hypot((p.x - q.x) * 0.9, p.y - q.y) : Infinity);
+  // Air is worth a step aside, not a walk: the airy spot is taken when it lies within AIR_REACH of the nearest spot
+  // with the usual gap, and otherwise the card stands by the point with the usual gap (between a Well and the plot's
+  // edge, say, where the only airy spot is a screen away).
+  const pick = (extra: Box[]): Pt | null => {
+    const a = nearestSpot({ ...q, avoid: airy.concat(extra) }), u = nearestSpot({ ...q, avoid: usual.concat(extra) });
+    return a && far(a) <= far(u) + AIR_REACH ? a : u ?? a;
+  };
+  return pick(covered) ?? pick([]);
 }
 
 const NO_ROOM = 'No room left on the board. <b>Expand it</b>, or clear a space.';
