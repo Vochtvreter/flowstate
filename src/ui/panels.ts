@@ -25,10 +25,10 @@ import { Panel, cachedRect, el, invalidateLayout, makePanel, setAnchor, setAttr,
 import { nodeSize } from './geom';
 import { marketSection } from './hud-market';
 import { logoMark } from './hud-screens';
-import { isTouch, withKey } from './hud-words';
+import { PressWord, isTouch, withKey } from './hud-words';
 import { esc, icon, matGlyph, nodeIcon } from './icons';
 import { env } from './phone-env';
-import { diagnose, matName, starvedShort, victoryQuiet } from './status';
+import { bulkPlan, diagnose, matName, starvedShort, victoryQuiet } from './status';
 import { metData, pricedInMet, readyCount, setCardWait, teasedSlot } from './tech';
 import { delegate, select, signal, toast, touch, ui } from './ui';
 
@@ -129,12 +129,12 @@ export function initPanels(refs: {
   delegate(inspEl, (a, args, pressed) => {
     // A control that a tip pointed at ("Show me") loses its ring the moment it is pressed.
     pressedMark(pressed.dataset.testid);
-    inspectorAction(a, args, hooks.openTech);
+    inspectorAction(a, args, hooks.openTech, pressed);
     renderPanels(true);
   });
 }
 
-function inspectorAction(a: string, args: string[], openTech: (id?: string) => void) {
+function inspectorAction(a: string, args: string[], openTech: (id?: string) => void, pressed: HTMLElement) {
   const g = ui.g;
   const sel = ui.sel;
   if (a === 'close') return select(null);
@@ -151,6 +151,16 @@ function inspectorAction(a: string, args: string[], openTech: (id?: string) => v
     if (a === 'upg') {
       if (!upgrade(g, n.id, args[0] as Track)) toast('Not enough credits', 'bad');
     } else if (a === 'upgall') {
+      // One press buys what the button said, or nothing. The button is drawn on the panels' beat, and credits come in
+      // between: where they have brought another node within reach since, the press would spend more than was
+      // written on it. It is drawn afresh instead (the refresh that follows every press here), and says so.
+      const plan = bulkPlan(g, n.type, args[0] as Track);
+      const said = Number(pressed.dataset.count);
+      if (plan.count > 0 && pressed.dataset.count != null && plan.count !== said) {
+        const names = `${NODE_DEFS[n.type].name}${plan.count > 1 ? 's' : ''}`;
+        toast(`${plan.count} ${names} in reach now, for <b>${fmt(plan.cost)}¢</b>. ${PressWord()} again.`, 'info');
+        return;
+      }
       const c = upgradeAll(g, n.type, args[0] as Track);
       toast(c ? `Upgraded ${c} ${NODE_DEFS[n.type].name}${c > 1 ? 's' : ''}` : 'Not enough credits', c ? 'good' : 'bad');
     } else if (a === 'del') {
@@ -719,6 +729,28 @@ function flowSection(g: Game, n: GNode): string {
     <div class="bar"><span style="width:${pct(n.util)}%;background:#7AA2FF"></span></div></div>`;
 }
 
+/**
+ * "Upgrade all · 819¢": the bulk button says what one press would spend, before the press (bulkPlan in status.ts counts
+ * it as upgradeAll does it). It looks as the single-level button beside it does: gold when the press would buy
+ * something, filling up while it would buy nothing. Where the credits reach only some of the nodes, it says how many
+ * ("Upgrade 6 of 9 · 512¢"): that is what the press would do. (A button with an edge, 44 px tall for a finger: goal 20
+ * asks for it.)
+ */
+function bulkBtn(g: Game, n: GNode, t: Track): string {
+  const def = NODE_DEFS[n.type];
+  const plan = bulkPlan(g, n.type, t);
+  const some = plan.count > 0;
+  const part = some && plan.count < plan.of;
+  const price = some ? plan.cost : plan.total;
+  const words = part ? `Upgrade ${plan.count} of ${plan.of}` : 'Upgrade all';
+  const about = part
+    ? `Upgrade ${plan.count} of ${plan.of} ${def.name}s by one level, lowest level first, for ${fmt(price)}¢`
+    : `Upgrade every ${def.name} by one level for ${fmt(price)}¢${some ? '' : ': not enough credits yet'}`;
+  const id = `upgall-${t}`;
+  return `<button class="buy bulk${some ? ' ok' : ''}${marked(id)}" data-act="upgall:${t}" data-testid="${id}" data-count="${plan.count}" data-of="${plan.of}" data-cost="${price}" title="${about}" aria-label="${about}">${
+    some ? '' : `<span class="fill" style="width:${pct(g.credits / Math.max(1, price))}%"></span>`}<span class="lab">${words} · <span class="mono">${fmt(price)}¢</span></span></button>`;
+}
+
 function upgradeSection(g: Game, n: GNode): string {
   const def = NODE_DEFS[n.type];
   if (!def.tracks.length) return '';
@@ -734,9 +766,7 @@ function upgradeSection(g: Game, n: GNode): string {
     const max = maxLevel(g, t);
     if (lv >= max) return `<div class="uprow"><div><b>${TRACK_INFO[t].name} <span class="mono muted">Lv ${lv}</span></b><small>Maxed${t === 'speed' && TECHS.U2 && !has(g, 'U2') ? ` · ${esc(TECHS.U2.name)} raises the cap` : ''}</small></div></div>`;
     const cost = upgradeCost(n, t);
-    const all = `upgall-${t}`;
-    // (A button with an edge, 44 px tall for a finger: as a text link it was 66 by 15 px on a tablet, and goal 20 asks for it.)
-    const bulk = has(g, 'S1') ? `<button class="bulkbtn${marked(all)}" data-act="upgall:${t}" data-testid="${all}" title="Upgrade every ${def.name} by one level" aria-label="Upgrade every ${def.name} by one level">Upgrade all</button>` : '';
+    const bulk = has(g, 'S1') ? bulkBtn(g, n, t) : '';
     const buy = buyBtn(`upg:${t}`, cost, g.credits, '', `upg-${t}`);
     // (With "Upgrade all" the two buttons are kept together: where the row is narrow they go under the words as a pair.)
     return `<div class="uprow${bulk ? ' hasbulk' : ''}"><div><b>${TRACK_INFO[t].name} <span class="mono muted">Lv ${lv} → ${lv + 1}</span></b><small>${TRACK_INFO[t].desc(n)}</small></div>${bulk ? `<span class="upbtns">${bulk}${buy}</span>` : buy}</div>`;

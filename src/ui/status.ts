@@ -1,8 +1,9 @@
 // What is wrong with a node, and where the cause lies: the inspector's status box, the board's pill and the
-// HUD's alert chip all read diagnose().
-import { MATERIALS, MatId, NODE_DEFS } from '../content';
+// HUD's alert chip all read diagnose(). And, worked out here because it only reads the game, what one press of
+// "Upgrade all" would buy (bulkPlan).
+import { MATERIALS, MatId, NODE_DEFS, NodeType, Track } from '../content';
 import { materialsAt } from '../actions';
-import { recipeOf } from '../economy';
+import { maxLevel, recipeOf, trackAvailable, upgradeCost } from '../economy';
 import { activeGoal, goalAge, goalFocus } from '../goals';
 import { graph, isMachine, isPass } from '../sim';
 import { Game, GNode } from '../state';
@@ -142,6 +143,39 @@ export function diagnose(g: Game, n: GNode): Diagnosis {
 }
 
 export const matName = (m: MatId | null) => (m ? MATERIALS[m].name : 'input');
+
+// ---------- "Upgrade all": what one press would buy ----------
+
+export interface BulkPlan {
+  /** How many nodes one press would raise right now, and how many of the type have a level left on the track. */
+  count: number;
+  of: number;
+  /** What that press would spend, and what raising all `of` would cost. */
+  cost: number;
+  total: number;
+}
+
+/**
+ * What one press of "Upgrade all" would do at this moment, as upgradeAll (src/actions.ts) does it: every node of the
+ * type, lowest level first, each raised one level while the credits last. The button says this price before the
+ * press: unpriced, one press took a player from 936 credits to 117.
+ */
+export function bulkPlan(g: Game, type: NodeType, track: Track): BulkPlan {
+  const nodes = g.nodes.filter((n) => n.type === type).sort((a, b) => a.lv[track] - b.lv[track]);
+  const plan: BulkPlan = { count: 0, of: 0, cost: 0, total: 0 };
+  let credits = g.credits;
+  for (const n of nodes) {
+    if (!trackAvailable(g, n, track) || n.lv[track] >= maxLevel(g, track)) continue;
+    const cost = upgradeCost(n, track);
+    plan.of++;
+    plan.total += cost;
+    if (cost > credits + 1e-6) continue;
+    credits -= cost;
+    plan.count++;
+    plan.cost += cost;
+  }
+  return plan;
+}
 
 // ---------- the alert chip: which node it names ----------
 

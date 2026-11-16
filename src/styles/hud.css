@@ -181,15 +181,17 @@ html[data-input='touch'] .res.credits.flow-on::after { content: ''; position: ab
 #insp .row .short { color: #fcd34d; }
 
 /* ---------- inspector: "Upgrade all" ----------
-   A quiet button beside the price (panels.ts), not a text link: 30 px for a mouse, 44 px for a finger. */
-.bulkbtn { flex: none; height: 30px; padding: 0 10px; border-radius: 8px; border: 1px solid #3a4a70; background: #141c2e; color: #9db8ff; font-size: 12px; font-weight: 600; white-space: nowrap; }
-/* Where the two buttons would leave the words beside them less than about 130 px (the 320 px inspector), the pair goes
-   under the words, at the right, rather than squeeze them into four lines. */
+   A buy button like the single-level one beside it (panels.ts: bulkBtn), with what one press costs written on it:
+   gold when the press would buy something, filling up while it would not. Its words are set in the interface's
+   face and only the price in the mono one; it is as wide as they are. */
+.buy.bulk { flex: none; min-width: 0; font-family: inherit; }
+.buy.bulk .mono { font-family: var(--mono); }
+/* Where the two buttons would leave the words beside them less than about 130 px (the 320 px inspector, a phone's
+   sheet), the pair goes under the words, at the right, rather than squeeze them into four lines. */
 .uprow.hasbulk { flex-wrap: wrap; row-gap: 8px; }
 .uprow.hasbulk > div { flex: 1 1 130px; }
-.upbtns { flex: none; display: flex; align-items: center; gap: 8px; margin-left: auto; }
-.bulkbtn:hover { background: #1a2338; }
-html[data-input='touch'] #insp .bulkbtn { height: 44px; padding: 0 12px; font-size: 13px; }
+/* (Should the two ever be wider than the row together, a total of six figures, the single button goes under the other.) */
+.upbtns { flex: 0 1 auto; display: flex; flex-wrap: wrap; justify-content: flex-end; align-items: center; gap: 8px; margin-left: auto; max-width: 100%; }
 
 /* ---------- Market inspector: demand gauges ---------- */
 .dg { display: flex; flex-direction: column; gap: 5px; padding: 2px 0 4px; }

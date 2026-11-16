@@ -1,11 +1,12 @@
 // Which node the HUD's alert names, and what the board says at the ending (status.ts). These run without a
 // browser: they only read the game.
 import { describe, expect, it } from 'vitest';
-import { clearHistory, connect, placeNode } from '../actions';
+import { clearHistory, connect, placeNode, upgrade, upgradeAll } from '../actions';
+import { maxLevel } from '../economy';
 import { GOALS } from '../goals';
 import { tick } from '../sim';
 import { Game, GNode, newGame } from '../state';
-import { ALERT_QUIET, alertPick, diagnose, starvedShort } from './status';
+import { ALERT_QUIET, alertPick, bulkPlan, diagnose, starvedShort } from './status';
 
 const run = (g: Game, seconds: number) => {
   for (let i = 0; i < seconds * 20; i++) tick(g, 0.05);
@@ -228,5 +229,50 @@ describe('the ending: the board is the victory picture', () => {
     expect(alertPick(g, glyph.id, (n) => (diagnose(g, n).problem ? 'trouble' : null), [])).toBeNull();
     // (Free play, or a game that has not ended: diagnosed as ever.)
     expect(diagnose({ ...g, ended: false }, glyph).problem).toBe('starved');
+  });
+});
+
+describe('"Upgrade all": what one press would buy', () => {
+  /** Four Wells at levels 0, 0, 1 and 2 (their next levels cost 50, 50, 80 and 128). */
+  function wells(credits: number): Game {
+    clearHistory();
+    const g = newGame();
+    g.credits = 1e6;
+    g.techs = ['P1', 'R1', 'P2', 'P3', 'S1'];
+    for (const depositId of [2, 3, 4]) placeNode(g, 'well', 0, 0, { depositId });
+    const all = g.nodes.filter((n) => n.type === 'well');
+    expect(all).toHaveLength(4);
+    upgrade(g, all[2].id, 'speed');
+    upgrade(g, all[3].id, 'speed');
+    upgrade(g, all[3].id, 'speed');
+    g.credits = credits;
+    return g;
+  }
+
+  it('says what the press spends and how many it raises, whatever the credits', () => {
+    for (const credits of [0, 49, 50, 99, 100, 179, 180, 307, 308, 5000]) {
+      const g = wells(credits);
+      const plan = bulkPlan(g, 'well', 'speed');
+      expect(plan.of).toBe(4);
+      expect(plan.total).toBe(50 + 50 + 80 + 128);
+      const raised = upgradeAll(g, 'well', 'speed');
+      expect(raised, `with ${credits} credits`).toBe(plan.count);
+      expect(credits - g.credits, `with ${credits} credits`).toBeCloseTo(plan.cost, 6);
+    }
+  });
+
+  it('all of them when the credits reach, lowest level first when they do not, none below the cheapest', () => {
+    expect(bulkPlan(wells(308), 'well', 'speed')).toEqual({ count: 4, of: 4, cost: 308, total: 308 });
+    expect(bulkPlan(wells(200), 'well', 'speed')).toEqual({ count: 3, of: 4, cost: 180, total: 308 });
+    expect(bulkPlan(wells(49), 'well', 'speed')).toEqual({ count: 0, of: 4, cost: 0, total: 308 });
+  });
+
+  it('a node with no level left on the track is not counted, nor paid for', () => {
+    const g = wells(5000);
+    const top = g.nodes.filter((n) => n.type === 'well')[3];
+    top.lv.speed = maxLevel(g, 'speed');
+    expect(bulkPlan(g, 'well', 'speed')).toEqual({ count: 3, of: 3, cost: 180, total: 180 });
+    // (Efficiency is not a Well's track at all.)
+    expect(bulkPlan(g, 'well', 'eff')).toEqual({ count: 0, of: 0, cost: 0, total: 0 });
   });
 });
