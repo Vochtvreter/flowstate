@@ -1179,22 +1179,19 @@ export function tidy(input: TidyInput): Map<number, Pt> {
   }
   // What the next Tidy would do with this layout is done now, until it changes nothing: so a board that has
   // been tidied is left alone by the next Tidy. (It would mend it; and, that changing nothing, take the careful way.)
-  for (let pass = 0; pass < 6 && best !== base; pass++) {
-    const before = best.positions();
-    const next = fine(before);
-    const limit = SHARE_AS_IT_STANDS * TOTAL;
-    const same = () => next.positions().every((p, i) => p.x === before[i].x && p.y === before[i].y);
-    repair(next, cols, limit);
-    improve(next, anyGain, cols, limit, true);
-    if (same()) {
-      next.work = 0;
-      improve(next, noLoss, cols, limit, false);
-      if (same()) break;
+  if (best !== base) {
+    const before = best.positions(), was = bestGrade;
+    const share = SHARE_AS_IT_STANDS * TOTAL;
+    for (let pass = 0; pass < 6; pass++) {
+      const moves = best.moves;
+      const limit = best.work + share;
+      repair(best, cols, limit);
+      improve(best, anyGain, cols, limit, true);
+      if (best.moves === moves) improve(best, noLoss, cols, best.work + share, false);
+      if (best.moves === moves) break;
     }
-    const s = gradeOf(next);
-    if (!passes(s) || s.under > bestGrade.under || s.score >= bestGrade.score) break;
-    best = next;
-    bestGrade = s;
+    const s = gradeOf(best);
+    if (!passes(s) || s.under > was.under || s.score > was.score) best = fine(before);
   }
   const out = new Map<number, Pt>();
   const end = best.positions();
