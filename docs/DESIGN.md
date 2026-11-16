@@ -323,7 +323,7 @@ Several goals have a wait in them: Data to save for a research, credits for a ma
   ```
 - **Undo** keeps a snapshot of the board's structure and the credits spent for each step, up to 200.
 - **Tests:** `npm test` runs 535 tests, among them the pacing targets on four order sequences. `npm run pacing` plays six scripted players and checks each run against the pacing targets.
-- **Size and speed:** the shipped JavaScript and CSS are about 224 kB gzipped. Frame rates are in [PITCH_PLAN.md](./PITCH_PLAN.md#outcome).
+- **Size and speed:** the shipped JavaScript and CSS are about 247 kB gzipped. Frame rates are in [PITCH_PLAN.md](./PITCH_PLAN.md#outcome).
 - **Outside requests:** the page loads its typefaces from Google Fonts and shows system fonts until they arrive. Nothing else leaves the page.
 - **Publishing:** `.github/workflows/deploy.yml` runs the tests and the build on every push to `main` and deploys the result to GitHub Pages.
 

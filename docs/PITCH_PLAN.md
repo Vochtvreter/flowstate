@@ -20,10 +20,10 @@ The plan was carried out. What the build is, system by system, is in [DESIGN.md]
 | Dead stretches (fast bot) | none over 60 s before minute 10, none over 120 s before the capstone | 38–44 s; 38–56 s | met |
 | Where credits come from | at least 65% from sales and orders by the capstone | 80–82% (fast bots), 75–76% (card followers) | met |
 | Phone | every goal completable by touch at 360×740; primary targets ≥ 44px | a scripted touch player reached the first Lens at 390×844. At 360×740, goals 1–14 were played from a new game; of the later goals only parts were tried, from prepared saves. On the screens measured, every button is 44 px or has a 44 px press area. | **shown in part** |
-| Frame rate | ≥ 50 fps at 45 nodes under 4× CPU throttle | at rest 57–58 fps at 1440×900 and 60 at 390×844. While panning at 1440×900: 54 fps at 100% zoom, 50 at 70% (single runs 41–55); on the phone 60 frames are drawn but the camera moves in only about 50 of them | met at rest; **at the line** while panning the desktop board at 70% |
+| Frame rate | ≥ 50 fps at 45 nodes under 4× CPU throttle | at rest 57–58 fps at 1440×900 and 60 at 390×844. While panning at 1440×900: 54 fps at 100% zoom, 45 at 70% (single runs 41–55 over the measurements made; the build before the last round of fixes gave 47 in the same runs); on the phone 60 frames are drawn but the camera moves in only about 50 of them | met at rest; **under the line** while panning the desktop board at 70% |
 | Quality | no page errors; `tsc` clean; tests pass | `tsc` clean; 535 tests pass; no page error in the scripted sessions | met |
 
-At normal CPU speed the same board holds 60 fps at rest and 58–60 while panning, on both sizes. The shipped JavaScript and CSS are about 224 kB gzipped. Over 15 minutes at rest the heap went from 4.9 to 5.2 MB, nearly all of it in the first two and a half minutes, and the page's element count stayed flat.
+At normal CPU speed the same board holds 60 fps at rest and 58–60 while panning, on both sizes. The shipped JavaScript and CSS are about 247 kB gzipped. Over 15 minutes at rest the heap went from 4.9 to 5.2 MB, nearly all of it in the first two and a half minutes, and the page's element count stayed flat.
 
 **The player the plan did not have.** The plan tuned for a fast bot and a slow one. The build is tuned for a third: a scripted newcomer who does only what the goal card says, one action every 6 seconds, and claims 8–16 seconds after Claim lights. Its targets were set during the work, and it meets them on all fifteen seeds, some by little:
 
