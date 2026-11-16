@@ -1029,7 +1029,7 @@ export const GOALS: Goal[] = [
       'Tap a Well and tap Upgrade all beside Speed: every Well gets one level more.',
     ),
     done: bulkSince,
-    ...buying((g) => (isFinite(cheapestWellSpeed(g)) ? price(cheapestWellSpeed(g), 'Upgrade all') : null)),
+    ...buying((g) => (isFinite(cheapestWellSpeed(g)) ? price(cheapestWellSpeed(g), 'the upgrade') : null)),
     reward: { credits: 1200, b: 60 },
   },
   {
