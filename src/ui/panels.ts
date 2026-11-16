@@ -146,6 +146,7 @@ function inspectorAction(a: string, args: string[], openTech: (id?: string) => v
   if (a === 'jump') return jumpTo(Number(args[0]));
   if (a === 'upgsrc') {
     if (!upgrade(g, Number(args[0]), 'speed')) toast('Not enough credits', 'bad');
+    else wayPress = { node: Number(args[0]), at: g.time };
     return;
   }
   if (!sel) return;
@@ -714,8 +715,18 @@ function intake(g: Game, n: GNode, m: MatId | null): { got: number; need: number
 }
 
 /** "Upgrade source · 50¢": Speed on what supplies the input that runs short, when it is working and can take one. */
+/**
+ * The node whose Speed a status box's button raised last, and when (game seconds). The node it eases is still called
+ * starved or blocked for a few seconds while the flow settles; in that time the box offers no second level of the same
+ * Speed, which would be spent for nothing (it showed "Upgrade Lab · 128¢" under the thumb half a second after the
+ * press that had already cured the block).
+ */
+let wayPress: { node: number; at: number } | null = null;
+const WAY_SETTLE = 5;
+const justRaised = (g: Game, id: number): boolean => !!wayPress && wayPress.node === id && g.time - wayPress.at >= 0 && g.time - wayPress.at < WAY_SETTLE;
+
 function upgradeSourceBtn(g: Game, src: GNode | null | undefined): string {
-  if (!src || !trackAvailable(g, src, 'speed') || src.lv.speed >= maxLevel(g, 'speed') || src.status !== 'working') return '';
+  if (!src || !trackAvailable(g, src, 'speed') || src.lv.speed >= maxLevel(g, 'speed') || src.status !== 'working' || justRaised(g, src.id)) return '';
   return buyBtn(`upgsrc:${src.id}`, upgradeCost(src, 'speed'), g.credits, 'Upgrade source · ', 'upg-source');
 }
 
@@ -765,9 +776,12 @@ function statusBlock(g: Game, n: GNode): string {
       const next = on ? nodeById(g, on.node) : null;
       if (on && next) {
         const name = NODE_DEFS[next.type].name;
-        // (With room: its Speed has just been raised, by the button below as likely as not, and this box is about to go.)
+        // (With room: its Speed has just been raised, by the button below as likely as not, and this box is about to go.
+        // Raised by that button seconds ago, it is not offered again while the flow settles.)
+        const room = on.room || (on.speed && justRaised(g, next.id));
+        if (room) on.speed = false;
         body = on.waits ? `The ${name} it feeds is waiting for ${matName(on.waits)}.`
-          : on.room ? `The ${name} it feeds has room now.`
+          : room ? `The ${name} it feeds has room now.`
             : !on.speed ? `The ${name} it feeds cannot take more.`
               : next.type === 'lab' ? `The ${name} it feeds is full.` : `The ${name} it feeds is at full speed.`;
         if (on.speed) actions += buyBtn(`upgsrc:${next.id}`, upgradeCost(next, 'speed'), g.credits, `Upgrade ${name} · `, 'upg-next');
