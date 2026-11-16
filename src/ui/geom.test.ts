@@ -357,6 +357,17 @@ describe('buildSite: where a card built at a point the player chose stands', () 
     expect(q.x).toBeGreaterThanOrEqual(700);
   });
 
+  it('steps out of a part of the stage where the card could not be seen once built, when that is within reach; the point itself stands', () => {
+    const view = { x0: 0, y0: 0, x1: 1000, y1: 700 };
+    const hidden = [{ x0: 680, y0: -1e6, x1: 1e6, y1: 1e6 }];
+    // 40 px into the part a panel will cover: the card is built just left of it.
+    const p = site(720, 300, [], { view, covers: [], hidden })!;
+    expect(p.x + 172 + 10).toBeLessThanOrEqual(680);
+    expect(far(mid(p), { x: 720, y: 300 })).toBeLessThanOrEqual(BUILD_REACH + 40);
+    // Deep in it, no spot in sight is within reach: the card stands on the point (and the camera will bring it out).
+    expect(site(900, 300, [], { view, covers: [], hidden })).toEqual({ x: 820, y: 260 });
+  });
+
   it('does not put the card on the far side of another card from its port when the near side has room within reach', () => {
     // A Well's port at (272, 296); a Market stands to the right of where the player let go, the spot itself is tight.
     const cards = [card(100, 260), card(360, 300)];

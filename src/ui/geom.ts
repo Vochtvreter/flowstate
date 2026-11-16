@@ -340,6 +340,8 @@ export interface SiteQuery {
   /** The part of the board on the stage (board units), and what covers the stage there. With these, a spot that can be seen whole comes first. */
   view?: Box | null;
   covers?: Box[];
+  /** Parts of the stage where a card could not be seen once it is built (a panel that building it opens): a spot there counts as out of sight, though a point there is a point the player chose. */
+  hidden?: Box[];
   /** The wire the card arrives on: from this port to its input, or from its output to this port. */
   wire?: { from?: Pt; to?: Pt };
 }
@@ -433,7 +435,9 @@ export function buildSite(q: SiteQuery): Pt | null {
   const seen = (x: number, y: number): boolean => {
     const v = q.view;
     if (!v) return true;
-    return x - VIEW_SIDE >= v.x0 && x + card.w + VIEW_SIDE <= v.x1 && y - VIEW_PILL >= v.y0 && y + card.h + VIEW_FOOT <= v.y1 && uncovered(x, y);
+    if (x - VIEW_SIDE < v.x0 || x + card.w + VIEW_SIDE > v.x1 || y - VIEW_PILL < v.y0 || y + card.h + VIEW_FOOT > v.y1 || !uncovered(x, y)) return false;
+    for (const c of q.hidden ?? []) if (x - VIEW_SIDE < c.x1 && x + card.w + VIEW_SIDE > c.x0 && y - VIEW_PILL < c.y1 && y + card.h + VIEW_FOOT > c.y0) return false;
+    return true;
   };
   const inside = (p: Pt, c: Box) => p.x > c.x0 + 2 && p.x < c.x1 - 2 && p.y > c.y0 + 2 && p.y < c.y1 - 2;
   /** The card's new wire, to or from the middle of its side: 2 when the spot is on the far side of another card from its port, 1 when the wire would pass behind a card, else 0. */

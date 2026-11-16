@@ -3107,27 +3107,29 @@ function footprint(type: NodeType, recipe?: string | null): Footprint {
 }
 
 /** What the placement rule knows of the camera: the part of the board on the stage, and what covers the stage there (board units). */
-interface Sight { view: Box | null; covers: Box[] }
+interface Sight { view: Box | null; covers: Box[]; hidden?: Box[] }
 
 /** The width the inspector takes from the stage's right side when it opens beside the board (style.css, `#insp`). */
 const INSPECT_W = 320;
 
 /**
  * The stage, and what lies over it, as the board stands under the camera now (or where the camera is going). Where
- * a card that is built gets selected (see `built`), the inspector then opens over the stage's right side: that part
- * does not count as stage, so that a card is not built where the panel it opens will cover it.
+ * a card that is built gets selected (see `built`), the inspector then opens over the stage's right side, and the
+ * corner controls move in with it: a card there could not be seen once it is built (`hidden`), though a point there
+ * is as good a point to choose as any.
  */
 function sightNow(): Sight {
   const r = rectOf();
   if (r.width < 2 || r.height < 2) return { view: null, covers: [] };
   const v = viewAhead();
   const toBoard = (b: Box): Box => ({ x0: (b.x0 - v.x) / v.k, y0: (b.y0 - v.y) / v.k, x1: (b.x1 - v.x) / v.k, y1: (b.y1 - v.y) / v.k });
-  const panel = selectsBuilt() && !document.getElementById('insp')?.classList.contains('open') ? INSPECT_W : 0;
-  const covers = coverBoxes(FAB_CLEAR, false);
-  // (The corner controls move in with the stage's right side.)
-  const c = panel ? env.corner() : null;
-  if (c) covers.push({ x0: c.x0 - panel, y0: c.y0, x1: 1e6, y1: 1e6 });
-  return { view: toBoard({ x0: 0, y0: 0, x1: Math.max(r.width / 2, r.width - panel), y1: r.height }), covers: covers.map(toBoard) };
+  const hidden: Box[] = [];
+  if (selectsBuilt() && !document.getElementById('insp')?.classList.contains('open') && r.width > 2 * INSPECT_W) {
+    hidden.push({ x0: r.width - INSPECT_W, y0: -1e6, x1: 1e6, y1: 1e6 });
+    const c = env.corner();
+    if (c) hidden.push({ x0: c.x0 - INSPECT_W, y0: c.y0, x1: 1e6, y1: 1e6 });
+  }
+  return { view: toBoard({ x0: 0, y0: 0, x1: r.width, y1: r.height }), covers: coverBoxes(FAB_CLEAR, false).map(toBoard), hidden: hidden.map(toBoard) };
 }
 
 /**
@@ -3142,7 +3144,7 @@ function buildSpot(at: Pt, card: Footprint, opts: { wire?: { from?: Pt; to?: Pt 
   const sight = opts.sight ?? sightNow();
   return buildSite({
     at, card, wire: opts.wire, cards: nodeBoxes(undefined, true), deposits: depositBoxes(), board: ui.g.board, grid: GRID,
-    view: sight.view, covers: sight.covers,
+    view: sight.view, covers: sight.covers, hidden: sight.hidden,
   });
 }
 
