@@ -3898,7 +3898,8 @@ function wireUnderWay(d: WireDrag) {
   // What cannot take the wire is dimmed. A finger hides what is under it, so for touch the possible
   // ends are lit up as well, as they are for wiring by tap.
   markTargets(d.from, d.port, !d.touch);
-  if (d.touch && env.phone && ui.sel) select(null);
+  // A wire dragged out is a port armed as much as one tapped: on a narrow stage the inspector closes (see `makeRoom`).
+  makeRoom();
 }
 
 // ----- two fingers -----
@@ -4173,7 +4174,7 @@ function steer(cx: number, cy: number, hovering = false) {
       if (!d.armed && Math.hypot(cx - d.sx, cy - d.sy) > d.slop) {
         d.armed = true;
         if (tapWire) disarm();
-        if (env.phone && ui.sel) select(null);
+        makeRoom();
       }
       const can = (n: GNode) => !isSink(n) && n.id !== d.to && !noUse(g, n.id, portFor(n, d.mat), d.to);
       const sn = !d.armed ? null : d.slop >= TOUCH_SLOP ? snapTarget(p, can) : snapExact(p, can, 'out');
