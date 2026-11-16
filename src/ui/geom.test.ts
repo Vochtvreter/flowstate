@@ -195,6 +195,32 @@ describe('freeSpot: the placement rule', () => {
     const avoid = [card(400, 300), card(600, 300), card(400, 400)];
     expect(spot(410, 310, avoid, { x: 1, y: 0.2 })).toEqual(spot(410, 310, avoid, { x: 1, y: 0.2 }));
   });
+
+  it('keeps a wider gap when asked (a card built where the player chose keeps 40 px of air)', () => {
+    const other = card(400, 300);
+    // 28 px under the other card: free with the usual 16 px, taken with 40.
+    expect(freeSpot({ x: 400, y: 400, w: 172, h: 72, avoid: [other], board: BOARD, grid: GRID })).toEqual({ x: 400, y: 400 });
+    const p = freeSpot({ x: 400, y: 400, w: 172, h: 72, avoid: [other], board: BOARD, grid: GRID, gap: 40 })!;
+    expect(spotFree(p.x, p.y, 172, 72, [other], 40)).toBe(true);
+    // The nearest such spot: straight down to the first grid line 40 px clear.
+    expect(p).toEqual({ x: 400, y: 420 });
+  });
+
+  it('with a wide gap, on random boards, the result is always that clear, on the grid and in the plot', () => {
+    const r = rng(11);
+    for (let n = 0; n < 200; n++) {
+      const avoid: Box[] = [];
+      const count = 3 + Math.floor(r() * 18);
+      for (let i = 0; i < count; i++) avoid.push(card(Math.round(r() * 1100), Math.round(r() * 680)));
+      const p = freeSpot({ x: r() * 1200, y: r() * 700, w: 172, h: 72, avoid, board: BOARD, grid: GRID, gap: 40 });
+      if (!p) continue;
+      expect(spotFree(p.x, p.y, 172, 72, avoid, 40)).toBe(true);
+      expect(p.x % GRID).toBe(0);
+      expect(p.y % GRID).toBe(0);
+      expect(p.x).toBeGreaterThanOrEqual(PLOT_MARGIN);
+      expect(p.y + 72).toBeLessThanOrEqual(BOARD.h - PLOT_MARGIN);
+    }
+  });
 });
 
 describe('separate: cards that rest on one another are pulled apart', () => {
