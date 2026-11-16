@@ -30,7 +30,7 @@ import { esc, icon, matGlyph, nodeIcon } from './icons';
 import { env } from './phone-env';
 import { bulkPlan, diagnose, matName, starvedShort, victoryQuiet, wayOn } from './status';
 import { metData, pricedInMet, readyCount, setCardWait, teasedSlot } from './tech';
-import { delegate, select, signal, toast, touch, ui } from './ui';
+import { delegate, onPress, select, signal, toast, touch, ui } from './ui';
 
 let topEl: HTMLElement;
 let hotEl: HTMLElement;
@@ -114,10 +114,14 @@ export function initPanels(refs: {
     touch();
   });
   delegate(hotEl, (a, args) => {
+    // (Not in the moment after the bar was moved by a page: see hotPage.)
+    if (performance.now() - pagedAt < PAGE_DEAF) return;
     if (a === 'place') startPlacing(args[0] as never);
     else if (a === 'locked') hooks.openTech(args[0]);
     renderPanels(true);
   });
+  pageButton(document.getElementById('hot-more'), 1);
+  pageButton(document.getElementById('hot-less'), -1);
 
   delegate(zoomEl, (a) => {
     if (a === 'in') zoomBy(1.25);
@@ -603,8 +607,8 @@ function renderHot(force: boolean) {
 /**
  * On a phone the build bar scrolls sideways once it holds more than fits (Market, Lab and Void went off its
  * right edge unseen). It says so: `more-r` while there is more to the right, `more-l` to the left
- * (phone.css fades that edge and puts a chevron on it). Looked at when its slots change, when it scrolls and when
- * the window does.
+ * (phone.css fades that edge and shows the chevron button that moves the bar that way: pageButton). Looked at when
+ * its slots change, when it scrolls and when the window does.
  */
 function hotMore() {
   const phone = env.phone;
@@ -621,6 +625,76 @@ const hotMoreSoon = () => {
     hotMore();
   });
 };
+
+/** The width of a chevron button over the bar's edge, and the gap between two slots (phone.css). */
+const PAGE_BTN = 46;
+const PAGE_GAP = 6;
+/** When the bar was last moved by a page (ms), and for how long after that it takes no press on a slot. */
+let pagedAt = -1e9;
+const PAGE_DEAF = 600;
+
+/**
+ * Move the phone's build bar on (1) or back (-1) by a page: the first slot that the chevron lay over comes to stand
+ * clear, just inside the chevron at the other edge. With reduced motion the bar jumps there. For PAGE_DEAF ms after,
+ * the slots take no press: a chevron that has done its work goes away, and a second tap aimed at it would land on
+ * the slot that stands where it was (the Void, which is free).
+ */
+function hotPage(dir: 1 | -1) {
+  const view = hotEl.getBoundingClientRect();
+  const at = hotEl.scrollLeft;
+  const max = hotEl.scrollWidth - hotEl.clientWidth;
+  // Each slot's edges along the bar's content.
+  const slots = Array.from(hotEl.querySelectorAll<HTMLElement>('.hb')).filter((e) => e.offsetWidth > 0).map((e) => {
+    const r = e.getBoundingClientRect();
+    return { x0: r.left - view.left + at, x1: r.right - view.left + at };
+  });
+  let to: number;
+  if (dir > 0) {
+    const edge = at + view.width - PAGE_BTN;
+    const next = slots.find((s) => s.x1 > edge + 1);
+    to = next ? next.x0 - PAGE_BTN - PAGE_GAP : max;
+  } else {
+    const edge = at + PAGE_BTN;
+    const prev = slots.reverse().find((s) => s.x0 < edge - 1);
+    to = prev ? prev.x1 + PAGE_GAP + PAGE_BTN - view.width : 0;
+  }
+  // (Always some way in the direction asked, never past either end, and not to within a chevron's width of an end:
+  // the bar would rest a few pixels short of it.)
+  to = dir > 0 ? Math.max(to, at + PAGE_BTN) : Math.min(to, at - PAGE_BTN);
+  to = to < PAGE_BTN ? 0 : to > max - PAGE_BTN ? max : to;
+  pagedAt = performance.now();
+  hotEl.scrollTo({ left: to, behavior: env.calm ? 'auto' : 'smooth' });
+}
+
+/**
+ * A chevron over the build bar's edge: a press moves the bar by a page. A finger that comes down on it and slides
+ * moves the bar with it instead, as it does anywhere else on the bar (the chevron lies over the bar, so the browser's
+ * own scrolling does not start there).
+ */
+function pageButton(btn: HTMLElement | null, dir: 1 | -1) {
+  if (!btn) return;
+  let down: { id: number; x: number; left: number } | null = null;
+  let slid = false;
+  btn.addEventListener('pointerdown', (e) => {
+    slid = false;
+    down = e.pointerType === 'mouse' ? null : { id: e.pointerId, x: e.clientX, left: hotEl.scrollLeft };
+  });
+  btn.addEventListener('pointermove', (e) => {
+    if (!down || e.pointerId !== down.id) return;
+    const dx = e.clientX - down.x;
+    if (!slid && Math.abs(dx) < 8) return;
+    slid = true;
+    hotEl.scrollLeft = down.left - dx;
+  });
+  const up = (e: PointerEvent) => {
+    if (down && e.pointerId === down.id) down = null;
+  };
+  btn.addEventListener('pointerup', up);
+  btn.addEventListener('pointercancel', up);
+  onPress(btn, () => {
+    if (!slid) hotPage(dir);
+  });
+}
 
 /** Hotbar node types in key order (unlocked only). */
 export function hotbarTypes(g: Game) {
