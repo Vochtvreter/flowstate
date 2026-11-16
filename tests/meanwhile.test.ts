@@ -2,12 +2,12 @@
 // in, when they show, that each is true on the board a card-following player has, that nothing later undoes
 // them, and that lineAdvice (the step the card's "Show me" acts out) follows each one to the end.
 import { describe, expect, it } from 'vitest';
-import { claimGoal, clearHistory, connect, cutWire, expandBoard, favour, freeDeposits, placeNode } from '../src/actions';
-import { Advice, advice, adviceTrials, applyAdvice, lineAdvice } from '../src/advice';
-import { RULES, TECHS } from '../src/content';
-import { nodeCost } from '../src/economy';
-import { GOALS, MAIN_GOALS, Meanwhile, activeGoal, goalById, goalFocus, goalView, meanwhileAt, meanwhileOf } from '../src/goals';
-import { Game, cloneGame, nodeNoun, serialize } from '../src/state';
+import { claimGoal, claimOrder, clearHistory, connect, cutWire, expandBoard, favour, freeDeposits, placeNode, upgrade } from '../src/actions';
+import { ADVICE, Advice, advice, adviceTrials, applyAdvice, lineAdvice, tuneState } from '../src/advice';
+import { NODE_DEFS, RULES, TECHS } from '../src/content';
+import { demandRate, nodeCost } from '../src/economy';
+import { GOALS, MAIN_GOALS, Meanwhile, activeGoal, goalById, goalFocus, goalView, meanwhileAt, meanwhileOf, outrun, refineNext } from '../src/goals';
+import { Game, cloneGame, deserialize, nodeNoun, serialize } from '../src/state';
 import { Bot, CFG, POLICIES } from '../tools/pacing';
 import { followMeanwhile, playByTheCard } from './cardPlayer';
 import { fresh, market, realWaitEnds, rich, run, well } from './helpers';
@@ -467,10 +467,10 @@ describe('"while you wait": worth it to the pacing tool\'s card-only player', ()
     return s;
   };
 
-  it('the card-only player who leaves one line out spends at least 15 s longer on the goals it stands on, on every seed', () => {
+  it('the card-only player who leaves one line out spends at least 15 s longer on the goals it stands on, on every seed (the tune-up: never less)', () => {
     // Not the lines of "Make your first Lens": this player wires what the hint names anyway (the lines are for a
     // person who did not, and are checked on such boards below).
-    const lines = ['ink-lab', 'glint-lab', 'well-labs', 'expand-labs', 'flow-fix', 'speed-pairs', 'deep-analysis', 'cut-glyph'];
+    const lines = ['ink-lab', 'glint-lab', 'well-labs', 'expand-labs', 'flow-fix', 'speed-pairs', 'deep-analysis', 'cut-glyph', 'tune-up'];
     const report: string[] = [];
     const gains: [string, number][] = [];
     for (const seed of SEEDS) {
@@ -487,7 +487,12 @@ describe('"while you wait": worth it to the pacing tool\'s card-only player', ()
     console.info(`the card-only player of the pacing tool, each line left out in turn:\n  ${report.join('\n  ')}`);
     // "glint-lab" is the exception: 13–25 s. Ember Deposits came down to 195α, so goal 11's wait is shorter, and
     // what the Glint Well's Lab of its own brings after it (1 α a second, through goals 12 to 15) is not counted.
-    for (const [what, gain] of gains) expect(gain, what).toBeGreaterThanOrEqual(what.endsWith('glint-lab') ? 10 : 15);
+    // The Fabricator card's tune-up is the other: it is there to put work into that wait, and promises of each step
+    // only that the Fabricator is not later for it: 5–17 s on these seeds (0–17 s on seeds 0 to 14), never a loss.
+    const least = (what: string) => (what.endsWith('glint-lab') ? 10 : what.endsWith('tune-up') ? 0 : 15);
+    for (const [what, gain] of gains) expect(gain, what).toBeGreaterThanOrEqual(least(what));
+    const tune = gains.filter(([what]) => what.endsWith('tune-up')).map(([, gain]) => gain);
+    expect(tune.reduce((a, b) => a + b, 0) / tune.length, 'the tune-up, on average').toBeGreaterThanOrEqual(5);
   }, 600_000);
 });
 
@@ -944,6 +949,392 @@ describe('"Make your first Lens": a line for each input the Fabricator lacks', (
     expect(g.time - t0).toBeLessThanOrEqual(32);
     clearHistory();
   });
+});
+
+// ---------------------------------------------------------------------------------------------------
+// "Build a Fabricator": the tune-up, the one line whose steps are only said while they pay.
+// ---------------------------------------------------------------------------------------------------
+
+describe('"Build a Fabricator": the tune-up before the Fabricator', () => {
+  const PRICE = () => NODE_DEFS.fabricator.base;
+  const REFINE = 'You have enough α: build a Refiner from a Well that only feeds a Lab, and sell its goods.';
+
+  /**
+   * A board made by hand, on "Build a Fabricator" with Fabrication still to research: a Glint Well that feeds a
+   * Shard Refiner and sells the rest; a Murk Well with a level of Speed (1.25 a second) that feeds an Ink Refiner
+   * and nothing else (it takes 1); an Ember Well and a second Glint Well that each feed a Lab and nothing else.
+   * Run for half a minute so that everything counts for Flow, then 2,000¢ in hand, Fabrication's β and no α.
+   */
+  const board = (credits = 2000, alpha = 0) => {
+    const g = rich();
+    g.techs = ['P1', 'R1', 'P2', 'P3', 'L1', 'P4', 'R2', 'R3', 'P5', 'S1'];
+    const m = market(g);
+    const glint = well(g);
+    const shard = placeNode(g, 'refiner', 400, 100, { recipe: 'shard' })!;
+    connect(g, glint.id, 0, shard.id);
+    connect(g, glint.id, 0, m.id);
+    connect(g, shard.id, 0, m.id);
+    const murk = placeNode(g, 'well', 0, 0, { depositId: 3 })!;
+    upgrade(g, murk.id, 'speed');
+    const ink = placeNode(g, 'refiner', 400, 400, { recipe: 'ink' })!;
+    connect(g, murk.id, 0, ink.id);
+    connect(g, ink.id, 0, m.id);
+    connect(g, ink.id, 1, placeNode(g, 'void', 700, 520)!.id);
+    const ember = placeNode(g, 'well', 0, 0, { depositId: 4 })!;
+    upgrade(g, ember.id, 'speed');
+    const emberLab = placeNode(g, 'lab', 400, 560)!;
+    connect(g, ember.id, 0, emberLab.id);
+    const glint2 = placeNode(g, 'well', 0, 0, { depositId: 2 })!;
+    const glintLab = placeNode(g, 'lab', 400, 260)!;
+    connect(g, glint2.id, 0, glintLab.id);
+    run(g, 30);
+    g.credits = credits;
+    g.data = { a: alpha, b: TECHS.P7.cost.b!, g: 0 };
+    at(g, 'build-fabricator');
+    clearHistory();
+    return { g, m, murk, ink, ember, emberLab, glint2, glintLab };
+  };
+
+  it('a line that is done when its goal comes up is not shown, ticked, and is not counted', () => {
+    const { g, m, ink } = board();
+    // No Glyph is studied on this board: "cut the wire from the Glyph Assembler to the Lab" is done already.
+    expect(lineOf('cut-glyph').done(g)).toBe(true);
+    expect(g.goalAt!.had).toEqual(['cut-glyph']);
+    // The card shows the tune-up, as the only line: no "2 of 2".
+    const v = goalView(g)!.meanwhile!;
+    expect(v).toEqual({ text: 'The Murk Well outruns its Refiner: buy Speed on the Refiner (32¢).', done: false });
+    expect(meanwhileAt(g)).toMatchObject({ step: 1, of: 1 });
+    // The game notes it by itself when the goal comes up (a save from before this was kept: on its first tick).
+    delete g.goalAt!.had;
+    run(g, 0.05);
+    expect(g.goalAt!.had).toEqual(['cut-glyph']);
+    expect(deserialize(serialize(g))!.goalAt!.had).toEqual(['cut-glyph']);
+    // Where the Glyph is still studied, that line is first of two, and the tune-up second.
+    const glyph = placeNode(g, 'assembler', 700, 300, { recipe: 'glyph' })!;
+    connect(g, glyph.id, 0, m.id);
+    const wire = connect(g, glyph.id, 0, g.nodes.find((n) => n.type === 'lab')!.id)!;
+    g.credits = 2000;
+    run(g, 0.05); // (undone: it is a line like any other again)
+    expect(g.goalAt!.had).toEqual([]);
+    expect(goalView(g)!.meanwhile).toEqual({ text: TEXT['cut-glyph'].mouse, done: false, step: 1, of: 2 });
+    expect(cutWire(g, wire.id)).toBe(true);
+    expect(goalView(g)!.meanwhile).toMatchObject({ done: false, step: 2, of: 2 });
+    expect(lineAdvice(g)).toMatchObject({ upgrade: 'speed', node: ink.id });
+    // The same on the other cards: "Make your first Mist" with the second expansion done reads "1 of 2" (see above),
+    // and "Make your first Lens" with the Prism wired shows the Glyph line alone (see below).
+    clearHistory();
+  });
+
+  it('a Well that outruns the one machine it feeds: a level of Speed on that machine, given past the reserve while it pays', () => {
+    const { g, murk, ink } = board();
+    expect(meanwhileOf(g)!.id).toBe('tune-up');
+    const a = lineAdvice(g)!;
+    checkStep(a, 'the tune-up');
+    expect(a).toMatchObject({ kind: 'credits', upgrade: 'speed', node: ink.id, culprit: murk.id, cost: 32 });
+    expect(a.text.mouse).toBe('The Murk Well outruns its Refiner: buy Speed on the Refiner (32¢).');
+    // The card reads the step's own sentence, the same for a finger, and has nothing to save for: the Fabricator's
+    // whole price is still to come (the reserve would hold any step that costs credits), and the step is given.
+    expect(goalView(g, true)!.meanwhile).toEqual({ text: a.text.mouse, done: false });
+    expect(g.credits).toBeLessThan(PRICE());
+    expect(goalFocus(g)).toEqual([murk.id, ink.id]);
+    expect(applyAdvice(g, a)).toBe(true);
+    expect(ink.lv.speed).toBe(1);
+    // The Refiner now takes 1.18 of the Well's 1.25: nothing is outrun. What is left of the line (the Wells that
+    // only feed Labs) waits for Fabrication's α: until that is in hand the card leaves the line out, unticked.
+    expect(outrun(g)).toEqual({ labs: null, level: null });
+    expect(goalView(g)!.meanwhile).toBeUndefined();
+    expect(lineAdvice(g)).toBeNull();
+    clearHistory();
+  });
+
+  it('then a Refiner from each Well that only feeds a Lab, its product wired to the Market: the dearest first, and ticked when none is left', () => {
+    const { g, m, ember, glint2 } = board();
+    g.data.a = TECHS.P7.cost.a!;
+    expect(applyAdvice(g, lineAdvice(g)!)).toBe(true); // the level of Speed
+    // Through the building and the wiring the card says why, and what: one sentence for the two gestures.
+    expect(goalView(g)!.meanwhile).toEqual({ text: REFINE, done: false });
+    let a = lineAdvice(g)!;
+    checkStep(a, 'the tune-up');
+    expect(a).toMatchObject({ kind: 'credits', build: 'refiner', node: ember.id, port: 0, recipe: 'spark', cost: nodeCost(g, 'refiner') });
+    expect(a.text.mouse).toBe(`Build a Refiner from the Ember Well's port (${nodeCost(g, 'refiner')}¢): its Spark sells for 6¢ each.`);
+    expect(applyAdvice(g, a)).toBe(true);
+    const spark = g.nodes.find((n) => n.recipe === 'spark')!;
+    expect(g.wires.some((w) => w.from === ember.id && w.to === spark.id)).toBe(true);
+    // Its product first: a Refiner is never left with nowhere to send what it makes.
+    a = lineAdvice(g)!;
+    checkStep(a, 'the tune-up');
+    expect(a).toMatchObject({ wire: { from: spark.id, to: m.id, port: 0 }, cost: 0 });
+    expect(a.text.mouse).toBe('Wire the Spark Refiner\'s port to the Market: its Spark is not sold (6¢ each).');
+    expect(goalView(g)!.meanwhile).toEqual({ text: REFINE, done: false });
+    expect(applyAdvice(g, a)).toBe(true);
+    // Then the next Well, the same two gestures.
+    a = lineAdvice(g)!;
+    expect(a).toMatchObject({ build: 'refiner', node: glint2.id, port: 0, recipe: 'shard' });
+    expect(a.text.mouse).toMatch(/^Build a Refiner from a Glint Well's port \(\d+¢\): its Shard sells for 3¢ each\.$/);
+    expect(applyAdvice(g, a)).toBe(true);
+    a = lineAdvice(g)!;
+    expect(a.text.mouse).toBe('Wire a Shard Refiner\'s port to the Market: its Shard is not sold (3¢ each).');
+    expect(applyAdvice(g, a)).toBe(true);
+    // No Well is left that only feeds a Lab: done, ticked, in the line's own words.
+    expect(goalView(g)!.meanwhile).toEqual({ text: TEXT['tune-up'].mouse, done: true });
+    expect(lineAdvice(g)).toBeNull();
+    // The Labs are still wired, and get what the Refiners leave (machines are fed first).
+    expect(g.wires.filter((w) => g.nodes.find((n) => n.id === w.to)!.type === 'lab').length).toBe(2);
+    // Nothing raw was wired to the Market for it, and nothing it sells is over its demand.
+    run(g, 40);
+    for (const mat of ['spark', 'shard', 'ink'] as const) expect(g.soldRate[mat] ?? 0, mat).toBeLessThanOrEqual(demandRate(g, mat));
+    expect(g.seenSurplus).toBe(false);
+    clearHistory();
+  });
+
+  it('an Ink Refiner built for it gets its Ink sold and a Void for its Silt; a Well whose product the Markets would not buy is left alone', () => {
+    const { g, m, ember, glint2, emberLab } = board();
+    g.data.a = TECHS.P7.cost.a!;
+    expect(applyAdvice(g, lineAdvice(g)!)).toBe(true); // the level of Speed
+    // Spark already sells at its demand: no Refiner is asked for on the Ember Well. The Glint Well comes instead.
+    g.soldRate.spark = demandRate(g, 'spark');
+    expect(refineNext(g)).toMatchObject({ well: glint2, out: 'shard' });
+    delete g.soldRate.spark;
+    // A second Murk Well that only feeds a Lab (the board's first expansion brings the deposit).
+    expect(expandBoard(g)).toBe(true);
+    const dep = g.deposits.find((d) => d.mat === 'murk' && !g.nodes.some((n) => n.depositId === d.id))!;
+    const murk2 = placeNode(g, 'well', dep.x, dep.y, { depositId: dep.id })!;
+    connect(g, murk2.id, 0, emberLab.id);
+    g.credits = 2000;
+    // Ember first (Spark is the dearest), then Murk (Ink), then Glint (Shard).
+    const order: string[] = [];
+    for (let i = 0; i < 12 && !lineOf('tune-up').done(g); i++) {
+      const a = lineAdvice(g)!;
+      checkStep(a, 'the tune-up');
+      order.push(a.text.mouse.replace(/\d+¢/g, 'N¢'));
+      expect(applyAdvice(g, a)).toBe(true);
+    }
+    expect(order).toEqual([
+      'Build a Refiner from the Ember Well\'s port (N¢): its Spark sells for N¢ each.',
+      'Wire the Spark Refiner\'s port to the Market: its Spark is not sold (N¢ each).',
+      'Build a Refiner from a Murk Well\'s port (N¢): its Ink sells for N¢ each.',
+      'Wire an Ink Refiner\'s Ink port to the Market: its Ink is not sold (N¢ each).',
+      'Build a Void from an Ink Refiner\'s Silt port: it stops when its Silt piles up.',
+      'Build a Refiner from a Glint Well\'s port (N¢): its Shard sells for N¢ each.',
+      'Wire a Shard Refiner\'s port to the Market: its Shard is not sold (N¢ each).',
+    ]);
+    // While the Void is the step, the card reads that sentence; the Void is free.
+    expect(g.nodes.filter((n) => n.type === 'void').length).toBe(2);
+    // A Well too slow to keep a Refiner flowing is not asked for one (an Ember Well at no level gives 0.8 of the 1 it takes).
+    ember.lv.speed = 0;
+    const h = board();
+    h.ember.lv.speed = 0;
+    h.g.rev++;
+    expect(refineNext(h.g)).toMatchObject({ well: h.glint2 });
+    clearHistory();
+    void m;
+  });
+
+  it('where Wells outrun their Labs and Lab Speed is not researched, that research is the step, from the α Fabrication does not need', () => {
+    const { g, glint2 } = board();
+    g.techs = g.techs.filter((t) => t !== 'R2' && t !== 'R3');
+    upgrade(g, glint2.id, 'speed');
+    upgrade(g, glint2.id, 'speed'); // 1.56 a second into a Lab that studies 1
+    g.credits = 2000;
+    run(g, 5);
+    expect(outrun(g).labs).toMatchObject({ n: glint2, research: 'R2' });
+    // Fabrication's 720α come first: without 50α over them the research is not asked for (the level of Speed is).
+    g.data.a = TECHS.P7.cost.a! + TECHS.R2.cost.a! - 1;
+    expect(lineAdvice(g)).toMatchObject({ upgrade: 'speed' });
+    g.data.a += 1;
+    const a = lineAdvice(g)!;
+    checkStep(a, 'the tune-up');
+    expect(a).toMatchObject({ research: 'R2', cost: 0, culprit: glint2.id });
+    expect(a.text.mouse).toBe('Your Wells outrun their Labs: research Lab Speed (50α) and they flow again.');
+    expect(goalView(g)!.meanwhile).toEqual({ text: a.text.mouse, done: false });
+    expect(applyAdvice(g, a)).toBe(true);
+    expect(g.techs).toContain('R2');
+    expect(outrun(g).labs).toBeNull();
+    clearHistory();
+  });
+
+  it('a step is only said while it pays for itself before the Fabricator can be bought; then the line leaves, and does not come back', () => {
+    // The price nearly in hand: nothing can pay for itself in the seconds left. No line, no step, nothing "saved for".
+    const near = board(PRICE() - 20, TECHS.P7.cost.a!);
+    expect(goalView(near.g)!.meanwhile).toBeUndefined();
+    expect(lineAdvice(near.g)).toBeNull();
+    expect(tuneState(near.g)).toBe('none');
+    // The price in hand: the same (and the card asks for the Fabricator).
+    near.g.credits = PRICE();
+    expect(goalView(near.g)!.meanwhile).toBeUndefined();
+
+    // On offer, and then the credits come in (an order's pay, say): the step stays through ADVICE.lineHold seconds,
+    // then the line leaves the card, unticked: nothing of it was done.
+    const { g } = board();
+    g.data.a = TECHS.P7.cost.a!;
+    expect(lineAdvice(g)).toMatchObject({ upgrade: 'speed' });
+    g.credits = PRICE() - 20;
+    expect(lineAdvice(g), 'the dwell').toMatchObject({ upgrade: 'speed' });
+    for (let t = 0; t < ADVICE.lineHold + 2; t++) {
+      run(g, 1);
+      g.credits = PRICE() - 20;
+      goalView(g);
+    }
+    expect(goalView(g)!.meanwhile).toBeUndefined();
+    expect(lineAdvice(g)).toBeNull();
+    expect(tuneState(g)).toBe('none');
+    // That kind of step does not come back when the seconds left grow again (credits spent elsewhere): it is shut
+    // for this goal. (The other kind, a Refiner on a Lab's Well, was never on offer here, and still may be.)
+    g.credits = 2000;
+    run(g, 1);
+    expect(lineAdvice(g)).toMatchObject({ build: 'refiner' });
+    expect(outrun(g).level).not.toBeNull();
+    // (It is remembered beside the game, not in it: a copy, or the save loaded again, looks afresh.)
+    expect(lineAdvice(cloneGame(g)!)).toMatchObject({ upgrade: 'speed' });
+
+    // With a step of it done, the same moment ticks the line instead: "nothing else pays for itself".
+    const k = board().g;
+    k.data.a = TECHS.P7.cost.a!;
+    expect(applyAdvice(k, lineAdvice(k)!)).toBe(true); // the level of Speed
+    expect(lineAdvice(k)).toMatchObject({ build: 'refiner' });
+    k.credits = PRICE() - 20;
+    for (let t = 0; t < ADVICE.lineHold + 2; t++) {
+      run(k, 1);
+      k.credits = PRICE() - 20;
+      goalView(k);
+    }
+    expect(goalView(k)!.meanwhile).toEqual({ text: TEXT['tune-up'].mouse, done: true });
+    expect(lineAdvice(k)).toBeNull();
+    k.credits = 2000;
+    run(k, 1);
+    expect(goalView(k)!.meanwhile).toEqual({ text: TEXT['tune-up'].mouse, done: true });
+    clearHistory();
+  });
+
+  it('the payback, in numbers: what a step brings in, times three quarters of the seconds left less its lead, against its price', () => {
+    const { g } = board();
+    g.data.a = TECHS.P7.cost.a!;
+    expect(ADVICE.payShare).toBe(0.75);
+    expect(ADVICE.payLead).toEqual({ speed: 4, build: 14 });
+    expect(applyAdvice(g, lineAdvice(g)!)).toBe(true);
+    // A Refiner on the Ember Well: 0.5 Spark a second at 6¢ is 3¢ a second (no Flow bonus on this board), for 66¢.
+    const cost = nodeCost(g, 'refiner');
+    expect(cost).toBe(66);
+    const rate = g.creditRate;
+    expect(rate).toBeGreaterThan(1);
+    // It pays when 3 × (0.75 × left − 14) ≥ 66: with 48 s or more left at the income of the moment.
+    const leftNeeded = (cost / 3 + 14) / 0.75;
+    for (const [left, given] of [[leftNeeded + 4, true], [leftNeeded - 4, false]] as const) {
+      const h = cloneGame(g)!;
+      h.credits = PRICE() - left * h.creditRate;
+      expect(!!lineAdvice(h), `${left.toFixed(0)} s left`).toBe(given);
+    }
+    clearHistory();
+  });
+});
+
+describe('"Build a Fabricator": the tune-up in whole runs of the pacing tool\'s card-only player', () => {
+  const FAB = GOALS.findIndex((x) => x.id === 'build-fabricator');
+  /** The real game from this board until the Fabricator's price is in hand: nobody plays, orders are claimed `lag` s after they fill. `first`: a step to do at once, and then the free gestures that finish it, six seconds apart. */
+  const priceIn = (from: Game, lag: number, first: Advice | null) => {
+    const g = cloneGame(from)!;
+    const need = nodeCost(g, 'fabricator');
+    let next = 0;
+    if (first) {
+      expect(applyAdvice(g, first), first.text.mouse).toBe(true);
+      next = 6;
+    }
+    let ready: number | null = null;
+    let t = 0;
+    while (t < 600 && g.credits < need) {
+      run(g, 0.05);
+      t += 0.05;
+      g.events.length = 0;
+      if (g.order?.ready) {
+        ready ??= t;
+        if (t - ready >= lag) {
+          claimOrder(g);
+          ready = null;
+        }
+      } else ready = null;
+      if (first && t >= next) {
+        const a = tuneState(g) === 'open' ? lineAdvice(g) : null;
+        if (a && !a.cost && !a.research && !a.upgrade && applyAdvice(g, a)) next = t + 6;
+      }
+    }
+    return t;
+  };
+
+  it('claiming late or at once: every paid step is honest, the card never blinks, nothing is shown already ticked, and nothing sells over demand', () => {
+    const report: string[] = [];
+    for (const delay of [[8, 16], [1, 3]] as [number, number][]) {
+      for (const seed of [0, 1, 2, 3]) {
+        const who = `claiming ${delay.join('–')} s late, seed ${seed}`;
+        const bot = new Bot({ ...POLICIES.cardonly, claimDelay: delay }, seed, 45);
+        const gains: number[] = [];
+        let steps = 0;
+        let lastStep = '';
+        const step = bot.lineStep.bind(bot);
+        bot.lineStep = () => {
+          const want = step();
+          const g = bot.g;
+          if (!want || g.goal.i !== FAB || g.time < bot.freeAt || want.cost > g.credits || meanwhileOf(g)?.id !== 'tune-up') return want;
+          const key = `${g.time.toFixed(2)}|${want.label}`;
+          if (key === lastStep) return want;
+          lastStep = key;
+          steps++;
+          const a = lineAdvice(g)!;
+          // A step that costs credits is a decision: the Fabricator's price must not be later for it, in the real game.
+          if (a.cost) gains.push(priceIn(g, delay[0] + 4, null) - priceIn(g, delay[0] + 4, a));
+          return want;
+        };
+        // The card, looked at on every tick of every goal, as the page looks at it.
+        const undone = new Set<string>();
+        const bad: string[] = [];
+        let shown: { key: string; rev: number } | null = null;
+        let gone: { key: string; rev: number; at: number } | null = null;
+        let blinks = 0;
+        const note = bot.noteNothing.bind(bot);
+        bot.noteNothing = () => {
+          note();
+          const g = bot.g;
+          const v = goalView(g)?.meanwhile;
+          const line = meanwhileOf(g);
+          if (!v || !line) {
+            if (shown && shown.key !== '-') gone = { ...shown, at: g.time };
+            shown = { key: '-', rev: g.rev };
+            return;
+          }
+          const id = `${g.goal.i}/${line.id}`;
+          const a = lineAdvice(g);
+          if (!v.done) undone.add(id);
+          // Ticked: only a line the card has shown undone on this goal. Undone: a Show me, or what it is saving for.
+          else if (!undone.has(id)) bad.push(`${id} shown already ticked at ${Math.round(g.time)} s`);
+          if (!v.done && !a && !v.held) bad.push(`${id} up with no step and no reason at ${Math.round(g.time)} s`);
+          if (g.goal.i !== FAB) return;
+          const key = `${v.text}|${v.done ? 'done' : 'step'}`;
+          if (shown && shown.key !== key && shown.rev === g.rev && gone && gone.key === key && gone.rev === g.rev && g.time - gone.at < 30) blinks++;
+          if (shown && shown.key !== key) gone = { ...shown, at: g.time };
+          shown = { key, rev: g.rev };
+        };
+        bot.run();
+        expect(bot.g.ended, who).toBe(true);
+        expect(bad, `${who}: ${bad.slice(0, 3).join('; ')}`).toEqual([]);
+        expect(blinks, `${who}: a step given, taken back and given again on an untouched board`).toBe(0);
+        // The line was followed: two levels of Speed, a Refiner or two with their wires.
+        expect(steps, `${who}: steps of the tune-up`).toBeGreaterThanOrEqual(4);
+        expect(gains.length, who).toBeGreaterThanOrEqual(3);
+        for (const x of gains) expect(x, `${who}: seconds a paid step brought the Fabricator's price nearer`).toBeGreaterThanOrEqual(-0.5);
+        // Nothing over its demand before the Lens (the tool's own check for this player, here for the eager one too).
+        expect(bot.surplusAt == null || bot.surplusAt.t >= (bot.madeAt.lens ?? Infinity), `${who}: first sale over demand`).toBe(true);
+        const nothing = bot.nothing.perGoal[FAB] ?? 0;
+        const stretch = bot.nothing.stretches.filter((x) => x.goal === FAB).reduce((m, x) => Math.max(m, x.to - x.from), 0);
+        report.push(`${who}: ${steps} steps, paid ones ${gains.map((x) => x.toFixed(1)).join(', ')} s sooner; nothing to do on the goal ${Math.round(nothing)} s, ${Math.round(stretch)} s at a stretch`);
+        // The player who claims at once: at most a minute of nothing to do on this goal, no stretch over 45 s.
+        if (delay[0] === 1) {
+          expect(nothing, `${who}: nothing to do on "Build a Fabricator"`).toBeLessThanOrEqual(60);
+          expect(stretch, `${who}: longest stretch of it`).toBeLessThanOrEqual(45);
+        }
+        clearHistory();
+      }
+    }
+    console.info(`the tune-up, on the pacing tool's card-only player:\n  ${report.join('\n  ')}`);
+  }, 600_000);
 });
 
 // ---------------------------------------------------------------------------------------------------

@@ -228,8 +228,8 @@ export const ADVICE = {
    * too long: the income is the game's 3-second average, averaged again here over `payOver` seconds of looks (it
    * ripples by a quarter with every burst of sales), orders pay in lumps it does not show, and it is rising while
    * the line's own steps take hold. So only `payShare` of those seconds is counted on. (With all of them counted on,
-   * 2 of 64 steps given to the pacing tool's card-only player who claims at once made the Fabricator later, by up to
-   * 1.5 s; at three quarters none of 119 does, claiming at once or 8 to 16 s late, seeds 0 to 14.)
+   * 7 of 134 steps given to the pacing tool's card-only player, claiming at once or 8 to 16 s late on seeds 0 to 14,
+   * made the Fabricator later, by up to 1.6 s: a third Refiner, on a Glint Well. At three quarters none of 119 does.)
    */
   payOver: 20,
   payShare: 0.75,
