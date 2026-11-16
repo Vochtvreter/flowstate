@@ -1022,9 +1022,11 @@ function gradeOf(L: Layout): Grade {
  * board of fifty spends it all, and settles for what it has by then.
  */
 const TOTAL = 3400000, ROUGH = 0.4;
-const SHARE_AS_IT_STANDS = 0.1, SHARE_PLAIN = 0.2, SHARE_MEND = 0.15, SHARE_UNSTICK = 0.3;
+const SHARE_AS_IT_STANDS = 0.1, SHARE_PLAIN = 0.2, SHARE_MEND = 0.15, SHARE_UNSTICK = 0.3, SHARE_LAST = 0.15;
 /** Trials each card gets when a layout is shaken: all of it (a fresh layout: this many at most, and at least so many for it to be worth doing), or just the cards round a wire that is stuck behind one (and three times as many again when that was not enough). */
-const SHAKE_PER_CARD = 1500, SHAKE_AT_LEAST = 250, GENTLE_PER_CARD = 1000, GENTLE_ROUNDS = 2;
+const SHAKE_PER_CARD = 1500, SHAKE_AT_LEAST = 250, GENTLE_PER_CARD = 400, GENTLE_ROUNDS = 2;
+/** When all that still leaves this few wires behind cards, the best layout is shaken loose again, this many times at most. */
+const LAST_FEW = 2, LAST_TRIES = 3;
 /** A fresh layout is shaken this many times, each time with other numbers deciding: where one run ends up is a matter of luck, and the better of two short ones beats one long one. */
 const SHAKES = 2;
 /** A layout that moves every card (plain columns, a fresh one) has to beat the board as it stands, mended, by this share of its score. */
@@ -1075,11 +1077,11 @@ export function tidy(input: TidyInput): Map<number, Pt> {
     return s;
   };
   let spent = 0;
-  /** What is left of a share of the comparing, for a layout that has already done `L.work` of it. */
-  const upTo = (L: Layout, share: number) => L.work + Math.max(0, Math.min(share * TOTAL, TOTAL - spent));
+  /** What is left of a share of the comparing, for a layout that has already done `L.work` of it. (`extra`: a share over and above the total.) */
+  const upTo = (L: Layout, share: number, extra = false) => L.work + Math.max(0, extra ? share * TOTAL : Math.min(share * TOTAL, TOTAL - spent));
   /** Bring wires out from behind cards, then improve, within a share of the comparing. */
-  const mend = (L: Layout, share: number) => {
-    const from = L.work, limit = upTo(L, share);
+  const mend = (L: Layout, share: number, extra = false) => {
+    const from = L.work, limit = upTo(L, share, extra);
     repair(L, cols, limit);
     improve(L, anyGain, cols, limit, true);
     spent += L.work - from;
@@ -1095,21 +1097,23 @@ export function tidy(input: TidyInput): Map<number, Pt> {
     return [...hurt].sort((x, y) => x - y);
   };
   /** Where a few cards are stuck with a wire behind one, shake just those, gently, and mend again; and once more, longer. */
-  const unstick = (L: Layout, share: number, seed: number): Layout => {
+  const unstick = (L: Layout, share: number, seed: number, extra = false, wide = false): Layout => {
     const perTrial = wires.length ? (2 * wires.length * (wires.length + nodes.length)) / Math.max(1, loose.length) + wires.length : 1;
-    const until = spent + share * TOTAL;
+    const until = extra ? spent + share * TOTAL : Math.min(spent + share * TOTAL, TOTAL);
     for (let round = 0; round < GENTLE_ROUNDS; round++) {
-      const among = stuck(L);
+      let among = stuck(L);
       if (!among.length) break;
+      // (`wide`: every card, and warmer. For the wire that a gentle shake of the cards round it has not brought out.)
+      if (wide) among = loose;
       // (Two thirds of what is left of the share for the shake, the rest to mend after it.)
-      const room = Math.max(0, Math.min(until, TOTAL) - spent);
+      const room = Math.max(0, until - spent);
       const trials = Math.floor(Math.min(GENTLE_PER_CARD * (1 + 2 * round) * among.length, (room * 0.67) / ROUGH / perTrial));
       if (trials < 8) break;
       const rough = new Layout(inp, nodes, wf, wt, L.positions(), COARSE, COARSE_STEP);
-      const shaken = anneal(rough, among, trials, seed + round, WARM);
+      const shaken = anneal(rough, among, trials, seed + round, wide ? HOT : WARM);
       spent += rough.work * ROUGH;
       L = fine(shaken.at);
-      mend(L, Math.max(0, Math.min(until, TOTAL) - spent) / TOTAL);
+      mend(L, Math.max(0, until - spent) / TOTAL, extra);
     }
     return L;
   };
@@ -1143,7 +1147,13 @@ export function tidy(input: TidyInput): Map<number, Pt> {
     let plain = fine(soft.positions());
     mend(plain, SHARE_MEND);
     plain = unstick(plain, SHARE_UNSTICK, 1);
-    const gp = offer(plain, true);
+    let gp = offer(plain, true);
+    // One or two wires still behind cards: the whole of it is shaken, warmer, from where it stands.
+    if (gp.under > 0 && gp.under <= LAST_FEW) {
+      const wider = unstick(fine(plain.positions()), SHARE_LAST, 21, false, true);
+      const gw = offer(wider, true);
+      if (gw.under < gp.under) gp = gw;
+    }
 
     // 3. Where that still leaves a wire behind a card: a fresh layout shaken into shape, a few times; each mended.
     if ((gp.under > 0 || gp.charge >= UNDER) && core.length) {
@@ -1170,6 +1180,10 @@ export function tidy(input: TidyInput): Map<number, Pt> {
       }
     }
   }
+  // One or two wires still behind cards, on a board that could be clean: the best layout so far is shaken loose
+  // again, with other numbers deciding, up to three times. (This is the one place where more comparing is done
+  // than the total allows: it is rare, and a wire across a card is what Tidy is pressed to be rid of.)
+  for (let k = 0; k < LAST_TRIES && best !== base && bestGrade.under > 0 && bestGrade.under <= LAST_FEW; k++) offer(unstick(fine(best.positions()), SHARE_LAST, 31 + 10 * k, true, true), true);
   if (best === base) {
     // Nothing passed: the careful way, which cannot lose.
     const c = fine(start);
