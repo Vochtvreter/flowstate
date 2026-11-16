@@ -593,9 +593,9 @@ const plotTag = { text: '', big: false, w: 0, left: 16, on: true };
 
 /**
  * Keep the plot's label ("Board · 3 plots") whole: it stands at the left end of the plot's top side, and when
- * something that covers the stage (the goal card) would cut it there it moves along that side to the nearest place
- * that is clear; with none, it is left out until there is one. Never half of it. (Not looked for in the overview,
- * which does not show it.)
+ * something that covers the stage (the goal card), or the stage's own edge, would cut it there it moves along that
+ * side to the nearest place that is clear; with none, it is left out until there is one. Never half of it. (Not
+ * looked for in the overview, which does not show it.)
  */
 function placePlotLabel() {
   const g = ui.g;
@@ -621,6 +621,9 @@ function placePlotLabel() {
     if (c) covers.push({ x0: c.x0, y0: c.y0, x1: 1e6, y1: 1e6 });
     if (hintsBox && g.goal.i < HINTS_UNTIL) covers.push(hintsBox);
   }
+  // Past the stage's edges it cannot be read either: with the plot's corner off the side of the stage (as the camera
+  // stands in the Lens ending) it read "ard · 3 plots" there.
+  covers.push({ x0: -1e6, y0: -1e6, x1: 0, y1: 1e6 }, { x0: r.width, y0: -1e6, x1: 1e6, y1: 1e6 }, { x0: -1e6, y0: -1e6, x1: 1e6, y1: 0 });
   const v = ui.view;
   const y0 = (big ? -11 : -9) * v.k + v.y, y1 = y0 + (big ? 22 : 17) * v.k;
   const w = plotTag.w;
