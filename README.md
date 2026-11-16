@@ -2,7 +2,7 @@
 
 An incremental node-graph game for the browser. You wire up a *theoretical supply line*: Wells on deposits feed Refiners, Assemblers and a Fabricator, Markets sell what arrives for credits, and Labs turn it into Data. Credits buy machines and upgrades; Data buys a tech tree. A goal card leads a new player through 22 goals to the first Lens, which ends the demo; free play goes on after it.
 
-This is the pitch build: one guided session of about 20 minutes, for a mouse and keyboard or for a finger on a phone.
+This is the pitch build: one guided session, for a mouse and keyboard or for a finger on a phone. Scripted players who follow the goal card take about 20 minutes over it; no person has been timed.
 
 ## Play
 
@@ -52,7 +52,7 @@ Tidy appears once six cards stand on the board; the Tech tree once the Lab is un
 - **Editing:** everything in the Controls table, full refunds, 200 steps of undo, Tidy (lays the board out again) and an overview zoom in which a large factory still fits the screen and can still be wired.
 - **Phone layout:** build bar and thumb-reach Claim, Fit and Undo at the bottom, bottom sheets for the inspector, the build menu and the tech tree's detail, 44 px touch targets, wiring by tap.
 - **Feel:** synthesised sound with a mute control, light haptics where the device has them, celebrations for seven big moments, a guiding hand for the first wire and build. Reduced motion is honoured.
-- **Saves:** in the browser, every 10 seconds and when the tab is hidden. After the first Lens the line earns at half rate while the game is closed (2 hours at most, 8 with a tech). Saves of the earlier public version load.
+- **Saves:** in the browser, every 10 seconds and when the tab is hidden. After the first Lens the line earns at half rate while the game is closed (2 hours at most, 8 with a tech). Saves of the earlier public version load; a machine carried over from one refunds no more than was paid for it there.
 
 ## Not built
 

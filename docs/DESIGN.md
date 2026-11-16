@@ -31,7 +31,7 @@ Every design decision should serve one of these. If it serves none, cut it.
 
 - **Seconds:** watch items move, see `+credits` pop at the Market, spot a red node, fix it.
 - **Minutes:** save up for the next node, upgrade or research; claim a goal or an order; rebalance a chain after an upgrade shifted the ratios.
-- **The session:** about twenty minutes from the first wire to the first Lens, which ends the demo. Free play goes on through four more goals, to the Paradox. Nothing is built for the hours beyond that (section 12).
+- **The session:** about twenty minutes from the first wire to the first Lens, which ends the demo. That is the time of scripted players who follow the goal cards (§6.5); no person has been timed. Free play goes on through four more goals, to the Paradox. Nothing is built for the hours beyond that (section 12).
 
 ---
 
@@ -215,7 +215,7 @@ This is the most important section. The editor *is* the game. Sizes, layouts and
 | Branch | Drag from the *middle of a wire* → a new wire from that wire's source port. | — (a drag on a wire pans) |
 | Cut | Hold `Shift` and drag across wires. Or select a wire and press `Del`. | Tap the wire, then "Cut wire". |
 | Move | Drag a node. It settles on a 20 px grid, clear of other cards. | Drag, after 10 px. |
-| Delete | `Del` or `Backspace`, or Delete in the inspector. Always full refund. The last Well cannot be deleted. | Delete in the inspector. |
+| Delete | `Del` or `Backspace`, or Delete in the inspector. Always full refund, except for a node from a save of the earlier public version, which refunds no more than was paid for it. The last Well cannot be deleted. | Delete in the inspector. |
 | Undo / redo | `Ctrl+Z` / `Ctrl+Shift+Z` or `Ctrl+Y`. Restores credits. Up to 200 steps, back to the last goal claimed. | Undo button; Redo in the gear menu. |
 | Duplicate | `Ctrl+D`: another node of the same type and recipe to place, at the normal price. | Duplicate in the inspector. |
 | Inspect | Click a node or wire → inspector with recipe, in/out rates, utilization, upgrades, and what is wrong with a one-press fix ("Receiving 0.80 of 1.00 Ember/s", with an "Upgrade source · 50¢" button). Hovering shows the rates on its wires. | Tap → the inspector as a bottom sheet. |
