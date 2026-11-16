@@ -271,7 +271,7 @@ New materials or machines, timed contracts, blueprints, multi-select, prestige, 
 
 Found during the work and left for after the pitch. Each is stated as a player would meet it.
 
-1. A player who presses Claim the moment it lights has nothing to do for about a third of the run, most of all on "Assemble your first Glyph" (80 to 105 seconds). On "Build a Fabricator" 42 to 52 seconds are left (76 to 82 when played in the page), at the end of the wait, once the card's tune-up is done.
+1. A player who presses Claim the moment it lights has nothing to do for about a third of the run, most of all on "Assemble your first Glyph" (80 to 105 seconds). On "Build a Fabricator" 42 to 52 seconds are left (76 to 82 when played in the page), at the end of the wait, once the card's tune-up is done. Played in real time, "Make your first Spark" also has about a minute in which the card offers nothing once both its lines are done (61 seconds on a phone, 69 with a mouse): the earliest lull, at minute 2½ to 3½.
 2. When "Assemble your first Glyph" comes up, the card says "about 6 min" or "about 7 min" for a wait that takes about three once the player follows its line.
 3. A "while you wait" step that has just come up can read "Saving for this · about 3 min" and be offered a few seconds later.
 4. A step stays on the card for up to 10 seconds after the player has spent credits elsewhere. Taken then, it puts off the card's own purchase.
