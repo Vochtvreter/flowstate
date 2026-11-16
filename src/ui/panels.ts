@@ -162,7 +162,7 @@ function inspectorAction(a: string, args: string[], openTech: (id?: string) => v
       const said = Number(pressed.dataset.count);
       if (plan.count > 0 && pressed.dataset.count != null && plan.count !== said) {
         const names = `${NODE_DEFS[n.type].name}${plan.count > 1 ? 's' : ''}`;
-        toast(`${plan.count} ${names} in reach now, for <b>${fmt(plan.cost)}¢</b>. ${PressWord()} again.`, 'info');
+        toast(`${PressWord()} again: ${plan.count} ${names} in reach now, for <b>${fmt(plan.cost)}¢</b>`, 'info');
         return;
       }
       const c = upgradeAll(g, n.type, args[0] as Track);
