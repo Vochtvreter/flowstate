@@ -993,16 +993,29 @@ function framePlan(boxes: Box[], readable: boolean, opts: { least?: number; hint
       let bestCost = Infinity;
       for (const area of areas) {
         if (area.x1 - area.x0 < 80 || area.y1 - area.y0 < 60) continue;
-        const v = frameBox(cur, b, area, least);
-        const sx0 = b.x0 * v.k + v.x, sy0 = b.y0 * v.k + v.y, sx1 = b.x1 * v.k + v.x, sy1 = b.y1 * v.k + v.y;
-        // All of it has to be inside the area (a box too big for the area at the floor is not), under nothing.
-        if (sx0 < area.x0 - 0.5 || sy0 < area.y0 - 0.5 || sx1 > area.x1 + 0.5 || sy1 > area.y1 + 0.5) continue;
-        if (blocks.some((o) => sx0 < o.x1 && sx1 > o.x0 && sy0 < o.y1 && sy1 > o.y0)) continue;
-        // The least change wins: keeping the zoom matters most, then how far the board slides.
-        const cost = (cur.k - v.k) * 4000 + Math.abs(v.x - cur.x) + Math.abs(v.y - cur.y);
-        if (cost < bestCost) {
-          bestCost = cost;
-          best = v;
+        const v0 = frameBox(cur, b, area, least);
+        // The least move into the area; when that lies under a block (a floating button in the corner of a short
+        // stage), the box is slid on past the block, to its left or right, above or below it, as long as it stays
+        // in the area.
+        const cands: View[] = [v0];
+        const s0 = onStage(b, v0);
+        for (const o of blocks) {
+          if (!(s0.x0 < o.x1 && s0.x1 > o.x0 && s0.y0 < o.y1 && s0.y1 > o.y0)) continue;
+          for (const [dx, dy] of [[o.x0 - s0.x1, 0], [o.x1 - s0.x0, 0], [0, o.y0 - s0.y1], [0, o.y1 - s0.y0]]) {
+            if (Number.isFinite(dx) && Number.isFinite(dy)) cands.push({ x: v0.x + dx, y: v0.y + dy, k: v0.k });
+          }
+        }
+        for (const v of cands) {
+          const sx0 = b.x0 * v.k + v.x, sy0 = b.y0 * v.k + v.y, sx1 = b.x1 * v.k + v.x, sy1 = b.y1 * v.k + v.y;
+          // All of it has to be inside the area (a box too big for the area at the floor is not), under nothing.
+          if (sx0 < area.x0 - 0.5 || sy0 < area.y0 - 0.5 || sx1 > area.x1 + 0.5 || sy1 > area.y1 + 0.5) continue;
+          if (blocks.some((o) => sx0 < o.x1 && sx1 > o.x0 && sy0 < o.y1 && sy1 > o.y0)) continue;
+          // The least change wins: keeping the zoom matters most, then how far the board slides.
+          const cost = (cur.k - v.k) * 4000 + Math.abs(v.x - cur.x) + Math.abs(v.y - cur.y);
+          if (cost < bestCost) {
+            bestCost = cost;
+            best = v;
+          }
         }
       }
       if (best) return best;
@@ -1746,7 +1759,8 @@ export function initBoard(root: HTMLElement) {
     }).observe(boardEl);
   }
   applyView();
-  // For scripts: `flowstate.board.inClear(id)`, `.buildSpot(x, y, type)`, `.covers()`, `.place()` (main.ts builds window.flowstate after the modules have started).
+  // For scripts: `flowstate.board.inClear(id)`, `.buildSpot(x, y, type)`, `.covers()`, `.place()`, `.frameBoxes(boxes, readable)`
+  // (main.ts builds window.flowstate after the modules have started).
   const attach = () => {
     const hook = (window as unknown as { flowstate?: Record<string, unknown> }).flowstate;
     if (!hook) return false;
@@ -1759,6 +1773,7 @@ export function initBoard(root: HTMLElement) {
       },
       covers: () => coverBoxes(),
       place: () => goalPlace(ui.g),
+      frameBoxes: (boxes: Box[], readable = false) => frameBoxes(boxes, readable),
     };
     return true;
   };
