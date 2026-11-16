@@ -1778,9 +1778,9 @@ interface Result {
   surplusAt: Bot['surplusAt'];
   /**
    * "Nothing to do" up to the first Lens (Bot.nothing): seconds in all, their share of the time to the Lens, the
-   * longest stretch and the goal it fell in, and the seconds on each goal (by index).
+   * longest stretch and the goal it fell in, the seconds on each goal (by index), and the longest stretch on each.
    */
-  nothing: { total: number; share: number; longest: number; longestGoal: string; perGoal: Record<number, number> };
+  nothing: { total: number; share: number; longest: number; longestGoal: string; perGoal: Record<number, number>; stretchOn: Record<number, number> };
 }
 
 function measure(bot: Bot): Result {
@@ -1829,9 +1829,11 @@ function measure(bot: Bot): Result {
     surplusAt: bot.surplusAt,
     nothing: (() => {
       const long = bot.nothing.stretches.reduce((m, x) => (x.to - x.from > m.to - m.from ? x : m), { from: 0, to: 0, goal: 0 });
+      const stretchOn: Record<number, number> = {};
+      for (const x of bot.nothing.stretches) stretchOn[x.goal] = Math.max(stretchOn[x.goal] ?? 0, x.to - x.from);
       return {
         total: bot.nothing.total, share: bot.nothing.total / Math.max(1, lens ?? end), longest: long.to - long.from,
-        longestGoal: GOALS[long.goal]?.title ?? '—', perGoal: { ...bot.nothing.perGoal },
+        longestGoal: GOALS[long.goal]?.title ?? '—', perGoal: { ...bot.nothing.perGoal }, stretchOn,
       };
     })(),
     policy: bot.P, seed: bot.seed, minutes: bot.minutes,
@@ -2173,10 +2175,10 @@ function summary(results: Result[]): string {
     P();
   }
   P('== NOTHING TO DO, up to the first Lens: free hands, goal not ready, no order to claim, no step of the card\'s line that can be done now ==');
-  P(`policy      seed    Lens  nothing   share  longest stretch                        seconds on each goal with nothing to do (goal: s, 10 s or more)`);
+  P(`policy      seed    Lens  nothing   share  longest stretch                        seconds on each goal with nothing to do, and the longest stretch of them there (goal: s (stretch), 10 s or more)`);
   for (const r of results) {
     const x = r.nothing;
-    const per = Object.entries(x.perGoal).filter(([, s]) => s >= 10).map(([i, s]) => `${Number(i) + 1}: ${Math.round(s)}`).join(' · ');
+    const per = Object.entries(x.perGoal).filter(([, s]) => s >= 10).map(([i, s]) => `${Number(i) + 1}: ${Math.round(s)} (${Math.round(x.stretchOn[Number(i)] ?? 0)})`).join(' · ');
     P([
       padR(r.policy.name, 11), pad(r.seed, 4), ' ', pad(mmss(r.lens), 6), pad(Math.round(x.total) + 's', 8), pad(Math.round(x.share * 100) + '%', 7), ' ',
       padR(`${Math.round(x.longest)}s ${x.longestGoal}`.slice(0, 38), 38), ' ', per,

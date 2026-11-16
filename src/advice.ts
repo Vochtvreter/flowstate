@@ -48,12 +48,12 @@ import {
 } from './actions';
 import { DATA_NAMES, DATA_WORTH, DATA_YIELD, DataTier, MATERIALS, MAT_IDS, MatId, NODE_DEFS, NodeType, RECIPES, RULES, TECHS, Track } from './content';
 import {
-  costText, dataYield, demandInfo, demandShown, expansionCost, has, labRate, maxLevel, nodeCost, recipeOf, research, techAffordable,
-  techAvailable, trackAvailable, upgradeCost, wellRate,
+  costText, dataYield, demandInfo, demandShown, expansionCost, flowMult, has, labRate, maxLevel, nodeCost, recipeOf, research, techAffordable,
+  techAvailable, trackAvailable, upgradeCost, valueOf, wellRate,
 } from './economy';
 import { countsForFlow, isFlowing } from './flow';
 import { Forecast, forecast, lookahead } from './forecast';
-import { activeGoal, depositsFrom, flowFix, goalAge, lensMaker, meanwhileAt, meanwhileOf, ownPairs, rawGlintWell } from './goals';
+import { Meanwhile, TuneFix, activeGoal, depositsFrom, flowFix, goalAge, lensMaker, meanwhileAt, meanwhileOf, ownPairs, rawGlintWell, refineNext, tuneFix } from './goals';
 import { graph, isMachine, isPass } from './graph';
 import { claimOrder, orderReachesMarket, ordersWorth } from './orders';
 import { tick } from './sim';
@@ -215,6 +215,24 @@ export const ADVICE = {
    * touched. Longer than the ripple's period; 0: no dwell, the step follows the reserve from moment to moment.
    */
   lineHold: 10,
+  /**
+   * A step of a card's line that earns credits (a level of Speed on a machine its Well outruns, a Refiner on a Well
+   * that only feeds a Lab: the Fabricator card's lines) is given past the reserve, from the credits in hand, while
+   * what it earns before the card's own purchase can be made covers its price (paysBack): then the purchase comes
+   * sooner for it, not later. `payLead`: seconds before such a step starts to earn: a level of Speed, and a machine
+   * that is built and then wired on.
+   */
+  payLead: { speed: 4, build: 14 },
+  /**
+   * The seconds left to the card's purchase are reckoned from the credits still short and the income, and come out
+   * too long: the income is the game's 3-second average, averaged again here over `payOver` seconds of looks (it
+   * ripples by a quarter with every burst of sales), orders pay in lumps it does not show, and it is rising while
+   * the line's own steps take hold. So only `payShare` of those seconds is counted on. (With all of them counted on,
+   * 2 of 64 steps given to the pacing tool's card-only player who claims at once made the Fabricator later, by up to
+   * 1.5 s; at three quarters none of 119 does, claiming at once or 8 to 16 s late, seeds 0 to 14.)
+   */
+  payOver: 20,
+  payShare: 0.75,
 };
 
 // =====================================================================================
@@ -568,6 +586,14 @@ export const SAY = {
   // --- "Hold 95% Flow": the line itself, naming the node its step acts on (flowLineWords below; its other fix, a
   // wire to the Market, reads as flowSell and flowNowhere do) ---
   lineFlowSpeed: (Who: string, mat: string, node: string) => `${Who} needs more ${mat}: buy Speed on ${node}.`,
+  // --- "Build a Fabricator", the tune-up: a Well that makes more than the machine it feeds can take (`kind` is
+  // that machine's kind, "Refiner"), or more than its Labs can study while Lab Speed is not researched ---
+  lineTune: (Who: string, kind: string, cost: number) => `${Who} outruns its ${kind}: buy Speed on the ${kind} (${cents(cost)}).`,
+  lineTuneLabs: (name: string, cost: string) => `Your Wells outrun their Labs: research ${name} (${cost}) and they flow again.`,
+  // --- "Build a Fabricator", its last line: a Refiner on a Well that only feeds a Lab, its product sold (the wire
+  // to the Market reads as sellUnsold does), and a Void for a by-product ---
+  lineRefine: (port: string, cost: number, out: string, value: number) => `Build a Refiner from ${port} (${cents(cost)}): its ${out} sells for ${value}¢ each.`,
+  lineVoid: (port: string, mat: string) => `Build a Void from ${port}: it stops when its ${mat} piles up.`,
 };
 
 /**
@@ -607,6 +633,24 @@ function supplierName(g: Game, s: GNode, n: GNode): string {
     if (from && nodeNoun(from) === noun) feeding++;
   }
   return feeding === 1 ? `its ${noun}` : plain;
+}
+
+/** The sentence for a fix of the Fabricator card's tune-up line (tuneFix in src/goals.ts): the step's own, price and all. */
+function tuneWords(g: Game, f: TuneFix): string {
+  if ('research' in f) return SAY.lineTuneLabs(TECHS[f.research].name, costText(TECHS[f.research]));
+  return SAY.lineTune(cap(the(g, f.n)), NODE_DEFS[f.speed.type].name, upgradeCost(f.speed, 'speed'));
+}
+
+/**
+ * The tune-up line of "Build a Fabricator" ("flow-tune"), in words that name what its next step acts on: "The Murk
+ * Well outruns its Refiner: buy Speed on the Refiner (32¢)." The same sentence for mouse and touch. null when
+ * nothing is outrun (goalView then shows the line's own words, which are for the line once done).
+ */
+export function tuneLineWords(g: Game): { mouse: string; touch: string } | null {
+  const f = tuneFix(g);
+  if (!f) return null;
+  const text = tuneWords(g, f);
+  return { mouse: text, touch: text };
 }
 
 // =====================================================================================
@@ -1601,19 +1645,28 @@ function lineStep(g: Game, any = false): Cand | null {
   const next = lineNext(g);
   if (!next) return null;
   if (any) return next.c;
-  if (next.c.act.t === 'research' && !techAffordable(g, TECHS[next.c.act.tech])) return null;
-  return lineGiven(g, next) ? next.c : null;
+  return stepGiven(g, next) ? next.c : null;
 }
 
-/** The line's next gesture as lineNext gives it: the candidate, the credits that must be free for it, the line it is of. */
-type LineNext = { c: Cand; need: number; line: string; pair?: boolean };
+/** Can this gesture of a line be done right now: its Data in hand (a research), its credits free to spend (lineGiven)? */
+function stepGiven(g: Game, next: LineNext): boolean {
+  if (next.c.act.t === 'research' && !techAffordable(g, TECHS[next.c.act.tech])) return false;
+  return lineGiven(g, next);
+}
+
+/**
+ * The line's next gesture as lineNext gives it: the candidate, the credits that must be free for it, the line it is
+ * of. `earns`: the step brings credits in (`gain` a second, from `lead` seconds after it is done), and is given past
+ * the reserve while that pays its price back before the card's own purchase can be made (paysBack).
+ */
+type LineNext = { c: Cand; need: number; line: string; pair?: boolean; earns?: { gain: number; lead: number } };
 
 /**
  * The step of a card's line that the free funds were last seen to cover, per game: which step (the goal, the line,
  * its action and its price) and the game time of that look. Kept here and not in the Game: nothing of it is saved,
  * a copy of the game starts without it, and the simulation does not know of it.
  */
-const lineCover = new WeakMap<Game, { step: string; at: number }>();
+const lineCover = new WeakMap<Game, Map<string, { step: string; at: number }>>();
 
 /**
  * Is the line's next step given right now (a "Show me" on the card), as far as its credits go? A step that costs
@@ -1637,17 +1690,22 @@ const lineCover = new WeakMap<Game, { step: string; at: number }>();
 function lineGiven(g: Game, next: LineNext): boolean {
   if (next.need <= 1e-9) return true;
   const step = `${g.goal.i}|${next.line}|${JSON.stringify(next.c.act)}|${next.need}`;
-  const seen = lineCover.get(g);
+  // (Kept by line: the Fabricator card asks about two lines at every look, and neither may forget the other's step.)
+  let lines = lineCover.get(g);
+  const seen = lines?.get(next.line);
   if (next.need <= lineFunds(g, next) + 1e-6) {
     if (seen) {
       seen.step = step;
       seen.at = g.time;
-    } else lineCover.set(g, { step, at: g.time });
+    } else {
+      if (!lines) lineCover.set(g, (lines = new Map()));
+      lines.set(next.line, { step, at: g.time });
+    }
     return true;
   }
   if (!seen) return false;
   if (seen.step === step && g.time >= seen.at && g.time - seen.at < ADVICE.lineHold && g.credits >= next.need - 1e-6) return true;
-  lineCover.delete(g);
+  lines!.delete(next.line);
   return false;
 }
 
@@ -1658,7 +1716,115 @@ function lineGiven(g: Game, next: LineNext): boolean {
  * nearer and more of the card's purchase is kept back); held then, the Lab waited for the card's purchase and the
  * goal could end with the Well blocked.
  */
-const lineFunds = (g: Game, next?: { pair?: boolean }) => (next?.pair ? Math.max(0, g.credits) : Math.max(0, g.credits - cardReserve(g)));
+const lineFunds = (g: Game, next?: { pair?: boolean; need?: number; earns?: { gain: number; lead: number } }) =>
+  (next?.pair || (next?.earns && paysBack(g, next.need ?? 0, next.earns)) ? Math.max(0, g.credits) : Math.max(0, g.credits - cardReserve(g)));
+
+/**
+ * Does a step that earns credits pay its price back before the card's own next purchase can be made? Then that
+ * purchase comes sooner with the step than without it, and the step may spend what the reserve keeps back (the
+ * Fabricator card's lines: after Fabrication is researched the reserve is the Fabricator's whole price, and holds
+ * every step that costs anything). The seconds left are the reserve's own: the credits still short at the game's
+ * smoothed income, or the wait for the research's Data if that is longer (cardPurchase). With the step done `lead`
+ * seconds from now and earning `gain` a second from then, the purchase is sooner exactly when gain × (left − lead)
+ * is more than the price; of `left` only ADVICE.payShare is counted on. Never once the purchase can be paid for.
+ */
+function paysBack(g: Game, cost: number, earns: { gain: number; lead: number }): boolean {
+  if (!ADVICE.lineReserve) return true;
+  if (!ADVICE.reserveEarned) return false;
+  const p = cardPurchase(g);
+  if (!p) return true;
+  const short = p.then - g.credits;
+  if (short <= 1e-6) return false;
+  const rate = steadyIncome(g);
+  const left = Math.max(p.wait, rate > 1e-9 ? short / rate : Infinity);
+  return earns.gain * (ADVICE.payShare * left - earns.lead) >= cost;
+}
+
+/** For each game: its income from sales as the payback reckons it (steadyIncome), and when it was last looked at. */
+const steadyRates = new WeakMap<Game, { at: number; rate: number }>();
+
+/**
+ * Credits a second from sales, steadier than Game.creditRate: that average of three seconds, averaged again over
+ * ADVICE.payOver game seconds of looks (whoever looks: the card looks at the Fabricator's lines a few times a
+ * second). The first look takes the game's own rate as it is. Kept beside the game: nothing is saved.
+ */
+function steadyIncome(g: Game): number {
+  const now = Math.max(0, g.creditRate);
+  const s = steadyRates.get(g);
+  if (!s || g.time < s.at) {
+    steadyRates.set(g, { at: g.time, rate: now });
+    return now;
+  }
+  const dt = g.time - s.at;
+  if (dt > 0) {
+    s.rate += (now - s.rate) * (1 - Math.exp(-dt / ADVICE.payOver));
+    s.at = g.time;
+  }
+  return s.rate;
+}
+
+/**
+ * Credits a second that a level of Speed on the machine a producer outruns brings in (tuneFix `speed`): the more it
+ * then makes, at the price of its product, for the share of that port's leftovers that goes to a Market (what the
+ * machines on the port do not take is shared evenly among its Markets, Labs and junctions); and, when the producer
+ * flows again with it, what one more producer flowing adds to every sale.
+ */
+function tuneGain(g: Game, f: Extract<TuneFix, { speed: GNode }>): number {
+  const r = recipeOf(f.speed);
+  const takes = r?.inputs.find((i) => i[0] === f.mat)?.[1] ?? 0;
+  if (!r || !takes) return 0;
+  const [out, qty] = r.outputs[0];
+  const sinks = outs(g, f.speed, 0).filter((w) => !machineAt(g, w.to));
+  const sold = sinks.length ? sinks.filter((w) => node(g, w.to)?.type === 'market').length / sinks.length : 0;
+  let counted = 0;
+  for (const n of g.nodes) if (countsForFlow(g, n)) counted++;
+  const flows = f.flows && g.flowOn && counted > 0 ? (RULES.flow.bonus / counted) * (Math.max(0, g.creditRate) / flowMult(g)) : 0;
+  return (f.extra / takes) * qty * valueOf(g, out) * sold * flowMult(g) + flows;
+}
+
+/** Is this tech's Data in hand over and above what the research the card is saving for still needs of it? */
+function spareData(g: Game, t: { cost: Partial<Record<DataTier, number>> }): boolean {
+  const goal = savingFor(g);
+  const want = goal ? TECHS[goal].cost : {};
+  return TIERS.every((k) => !(t.cost[k] ?? 0) || g.data[k] >= (t.cost[k] ?? 0) + (want[k] ?? 0));
+}
+
+/**
+ * For each game: the earning lines of the active goal (lineOpen) that have had a step on offer, and whether their
+ * steps have stopped paying since. Once they have, the line is shut for the rest of the goal: the seconds left to
+ * the purchase only run down, and a step that came back for a moment on a ripple of the income would be a line
+ * that ticks, unticks and ticks again. Kept beside the game, like lineCover: nothing is saved.
+ */
+const lineLatch = new WeakMap<Game, Map<string, { shut: boolean; at: number }>>();
+
+/**
+ * Is a step of this line of the active goal on offer right now: there is something left for it to do, and that
+ * gesture can be done (stepGiven: for a step that earns, it still pays its price back in time, or did within the
+ * last ADVICE.lineHold seconds)? For the lines whose steps are only worth saying while they pay ("flow-tune",
+ * "refine-wells" on "Build a Fabricator": Meanwhile.when and done in src/goals.ts ask here). A line that had a
+ * step on offer and then, with work still left, has none, stays shut until the goal changes.
+ */
+export function lineOpen(g: Game, id: string): boolean {
+  const line = activeGoal(g)?.meanwhile?.find((l) => l.id === id);
+  if (!line || g.goal.ready) return false;
+  // (Every look keeps the steady income up to date, whether or not a step that needs it is next.)
+  steadyIncome(g);
+  const key = `${g.goal.i}|${id}`;
+  let lines = lineLatch.get(g);
+  let was = lines?.get(key);
+  if (was && g.time < was.at) {
+    lines!.delete(key);
+    was = undefined;
+  }
+  if (was?.shut) return false;
+  const next = lineNextOf(g, line);
+  const on = !!next && stepGiven(g, next);
+  if (on) {
+    if (!lines) lineLatch.set(g, (lines = new Map()));
+    lines.set(key, { shut: false, at: g.time });
+  } else if (next && was) was.shut = true;
+  return on;
+}
 
 /**
  * The line's next gesture whether or not it can be paid for (`c`), and the credits that must be free to spend for
@@ -1680,10 +1846,15 @@ const lineFunds = (g: Game, next?: { pair?: boolean }) => (next?.pair ? Math.max
 function lineNext(g: Game): LineNext | null {
   const at = meanwhileAt(g);
   if (!at || at.line.done(g)) return null;
-  const line = at.line.id;
+  return lineNextOf(g, at.line);
+}
+
+/** The next gesture of one line of the active goal, whether or not it is the line on the card (see lineNext). */
+function lineNextOf(g: Game, of: Meanwhile): LineNext | null {
+  const line = of.id;
   const paid = (c: Cand, need = c.cost): LineNext => ({ c, need, line });
   const free = (c: Cand | null): LineNext | null => (c ? { c, need: 0, line } : null);
-  switch (at.line.id) {
+  switch (line) {
     case 'ink-lab': {
       const p = ports(g).find((x) => x.mat === 'ink' && isMachine(x.n));
       const room = (lab: GNode) => Math.max(0, labRate(g, lab) - lab.rate);
@@ -1700,7 +1871,7 @@ function lineNext(g: Game): LineNext | null {
     }
     case 'well-labs': case 'expand-labs': {
       // Which deposits the line is about: any (goal 15's first line), or those of the second expansion on.
-      const from = at.line.id === 'well-labs' ? null : 1;
+      const from = line === 'well-labs' ? null : 1;
       const later = from == null ? null : depositsFrom(g, from);
       const mine = (deposit: number | null | undefined) => deposit != null && (!later || later.has(deposit));
       if (!has(g, NODE_DEFS.lab.tech)) return null;
@@ -1763,12 +1934,50 @@ function lineNext(g: Game): LineNext | null {
       return free({ act: { t: 'research', tech: id }, cost: 0, hope: 0, brings: 'data', text: id === 'R2' ? SAY.lineLabSpeed(t.name, costText(t)) : SAY.lineDeep(t.name, costText(t)) });
     }
     case 'cut-glyph': {
-      const id = at.line.cuts?.(g)[0];
+      const id = of.cuts?.(g)[0];
       const c = id == null ? null : cutCand(g, id);
       return free(c && { ...c, brings: 'credits' });
     }
+    case 'flow-tune': {
+      const f = tuneFix(g);
+      if (!f) return null;
+      if ('research' in f) {
+        // Lab Speed, from the α the card's own research does not need. It costs no credits: given once that α is in hand.
+        const t = TECHS[f.research];
+        if (!t || !techAvailable(g, t) || !spareData(g, t)) return null;
+        return free({ act: { t: 'research', tech: f.research }, cost: 0, hope: 0, culprit: f.n.id, brings: 'credits', text: tuneWords(g, f) });
+      }
+      const cost = upgradeCost(f.speed, 'speed');
+      return {
+        ...paid({ act: { t: 'upgrade', node: f.speed.id, track: 'speed', all: false }, cost, hope: 0, show: f.speed.id, culprit: f.n.id, brings: 'credits', text: tuneWords(g, f) }),
+        earns: { gain: tuneGain(g, f), lead: ADVICE.payLead.speed },
+      };
+    }
+    case 'refine-wells': {
+      const r = refineNext(g);
+      if (!r) return null;
+      if ('sell' in r) {
+        const p: Port = { n: r.sell, port: r.port, mat: r.mat };
+        return free({ ...wireCand(p, r.market, 0, SAY.sellUnsold(portName(g, p), the(g, r.market), MATERIALS[r.mat].name, MATERIALS[r.mat].value)), brings: 'credits' });
+      }
+      if ('dump' in r) {
+        const p: Port = { n: r.dump, port: r.port, mat: r.mat };
+        const cost = nodeCost(g, 'void');
+        return paid({ act: { t: 'build', type: 'void', from: r.dump.id, port: r.port }, cost, hope: 0, show: r.dump.id, brings: 'credits', text: SAY.lineVoid(portName(g, p), MATERIALS[r.mat].name) });
+      }
+      const cost = nodeCost(g, 'refiner');
+      const p: Port = { n: r.well, port: 0, mat: r.well.material! };
+      return {
+        ...paid({
+          act: { t: 'build', type: 'refiner', from: r.well.id, port: 0, recipe: r.recipe.id }, cost, hope: 0, show: r.well.id, brings: 'credits',
+          text: SAY.lineRefine(portName(g, p), cost, MATERIALS[r.out].name, MATERIALS[r.out].value),
+        }),
+        // What the Refiner's product sells for, Flow's bonus on it included; nothing is lost for it (a Lab studied the raw material).
+        earns: { gain: r.gives * valueOf(g, r.out) * flowMult(g), lead: ADVICE.payLead.build },
+      };
+    }
     case 'prism-fab': case 'glyph-fab': {
-      const mat: MatId = at.line.id === 'prism-fab' ? 'prism' : 'glyph';
+      const mat: MatId = line === 'prism-fab' ? 'prism' : 'glyph';
       const fab = lensMaker(g);
       // The maker with the most to spare, so that a second Glyph Assembler that sells everything is the one wired.
       const p = fab && ports(g).filter((x) => x.mat === mat && x.n !== fab && !wired(g, x, fab)).sort((a, b) => spare(g, b) - spare(g, a))[0];
