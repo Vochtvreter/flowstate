@@ -210,7 +210,7 @@ This is the most important section. The editor *is* the game. Sizes, layouts and
 | Action | Mouse and keys | Touch |
 |---|---|---|
 | Connect | Drag from a port and let go over a node's card, or within 12 px of its port. An input port can be dragged backwards to a source. | Tap a port, then tap the target. Dragging works too, and snaps on from 40 px. |
-| **Build-from-wire** | Drag from a port into empty space and release → **build menu** of machines and other nodes that can take that material (or make it, from an input port). The pick is placed, wired and set to its recipe. Options keep a fixed order with numbers; the one the goal card asks for is highlighted and Enter builds it. | Tap a port, tap an empty spot → the same options in a bottom sheet, the suggested one first. |
+| **Build-from-wire** | Drag from a port into empty space and release → **build menu** of machines and other nodes that can take that material (or make it, from an input port). Where the card will stand is shown as an outline while the menu is open; the pick is placed there, wired and set to its recipe. Options keep a fixed order with numbers; the one the goal card asks for is highlighted and Enter builds it. | Tap a port, tap an empty spot → the same options in a bottom sheet, the suggested one first. |
 | Place | Pick in the build bar or press its number, then click the board. Shift-click places several. A Well goes on a free deposit; clicking the deposit takes one up. | Tap in the build bar, tap the board. |
 | Splice | Drop an unwired node onto a wire → it's inserted inline. A Market, Lab or Void becomes a branch instead. | The same. |
 | Branch | Drag from the *middle of a wire* → a new wire from that wire's source port. | — (a drag on a wire pans) |
@@ -229,7 +229,7 @@ This is the most important section. The editor *is* the game. Sizes, layouts and
 
 - **Auto-recipe:** a machine built from a port, or wired into, takes the unlocked recipe that best fits what is wired in.
 - **Machines first:** a fan-out feeds machines before Markets, Labs and Voids (§4.3).
-- **Placement:** a machine built from the menu stands at the point the player chose, moved only as far as it takes to keep clear of other cards, ports, deposits and whatever covers the board.
+- **Placement:** a machine built from the menu stands in the outline the menu shows while it is open. That is centred on the point the player chose (or the nearest point inside the plot and clear) when it has room there. Otherwise it is the nearest free spot, preferring, within about 100 px, one with air round it, one the player can see whole, one on the near side of other cards from its port, and one whose new wire passes behind no card.
 - **Tidy** (`T`, from six nodes): lays the whole board out again so that no wire runs behind a card it does not end at, and wires are short and cross little. Wells stay on their deposits, the cards glide to their places, and one undo puts everything back.
 - *Not built:* a ratio hint while placing ("needs 2.0/s Glint · 1.4/s spare upstream").
 
