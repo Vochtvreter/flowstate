@@ -632,7 +632,12 @@ export function tendFocus(g: Game) {
   if (g.techs.length !== techsSeen || g.deposits.length !== depositsSeen) {
     const mats = openDepositMats(g);
     const researched = techsSeen >= 0 && g.techs.length !== techsSeen && g.deposits.length === depositsSeen;
-    if (researched && mats.split(',').some((m) => m && !depositMats.split(',').includes(m))) lookSoon(now, 'deposit', AFTER_GOAL);
+    // (Only when the research opened up the very deposit the goal names: one it does not name, say Breeze researched
+    // early at goal 16, is no reason to move the camera, and a 'deposit' look would outrank the tree's own, which leaves
+    // an overview the player chose alone.)
+    const fresh = researched ? mats.split(',').filter((m) => m && !depositMats.split(',').includes(m)) : [];
+    const named = fresh.length ? namedDeposit(g) : null;
+    if (named && fresh.includes(named.mat)) lookSoon(now, 'deposit', AFTER_GOAL);
     techsSeen = g.techs.length;
     depositsSeen = g.deposits.length;
     depositMats = mats;
@@ -665,8 +670,9 @@ export function tendFocus(g: Game) {
     focusLast = { at: g.time, goal: g.goal.i, ids, inView: false, framed: false, why: busy || 'no nodes' };
     return;
   }
-  // After the tree, an overview the player chose is theirs: it counts as a view of the nodes.
-  const theirs = focusFor === 'tree' && ov && ownOverview;
+  // After the tree (or a research that opened up the deposit the goal names, done there or from the queue), an overview
+  // the player chose is theirs: it counts as a view of the nodes, and what is off screen is slid in at its zoom.
+  const theirs = (focusFor === 'tree' || focusFor === 'deposit') && ov && ownOverview;
   if (place) {
     const inView = depositInView(place, theirs);
     // (The board's frameBoxes moves the camera as little as it can, from the overview into among the cards.)
