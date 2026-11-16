@@ -1,9 +1,10 @@
 // What is wrong with a node, and where the cause lies: the inspector's status box, the board's pill and the
-// HUD's alert chip all read diagnose(). And, worked out here because it only reads the game, what one press of
-// "Upgrade all" would buy (bulkPlan).
+// HUD's alert chip all read diagnose(). And what the inspector offers to do about it, worked out here because it
+// only reads the game: the way on from a blocked node (wayOn), and what one press of "Upgrade all" would buy
+// (bulkPlan).
 import { MATERIALS, MatId, NODE_DEFS, NodeType, Track } from '../content';
 import { materialsAt } from '../actions';
-import { maxLevel, recipeOf, trackAvailable, upgradeCost } from '../economy';
+import { labRate, maxLevel, pipeCap, recipeOf, trackAvailable, upgradeCost } from '../economy';
 import { activeGoal, goalAge, goalFocus } from '../goals';
 import { graph, isMachine, isPass } from '../sim';
 import { Game, GNode } from '../state';
@@ -143,6 +144,70 @@ export function diagnose(g: Game, n: GNode): Diagnosis {
 }
 
 export const matName = (m: MatId | null) => (m ? MATERIALS[m].name : 'input');
+
+// ---------- a blocked node: the way on ----------
+// A starved machine's box offers Speed on its source in one press. A blocked node whose output is wired had nothing
+// to offer unless a machine further down was in trouble itself: a Well feeding a Lab that studies as fast as it can
+// said "whatever is downstream cannot keep up", and the player went looking for the Lab. wayOn names what is full
+// downstream and whether Speed on it would take more. It decides nothing about what blocked means: diagnose does.
+
+export interface WayOn {
+  /** The Lab or machine downstream that takes no more of what the blocked node sends. */
+  node: number;
+  /** Speed on it would take more: it is at work flat out, and has a level left to buy. */
+  speed: boolean;
+  /** A machine that takes no more because it is waiting for another input: that input. */
+  waits: MatId | null;
+}
+
+/** A wire counts as full from this share of what its pipe carries (as the wire's own inspector says "At capacity"). */
+const WIRE_FULL = 0.97;
+/** A Lab counts as full from this share of the rate it studies at. */
+const LAB_FULL = 0.9;
+
+/** The Labs and machines that `mat` reaches from this port, through Routers, Mergers and Silos, by wires that still have room. */
+function consumers(g: Game, id: number, port: number, mat: MatId, out: GNode[], seen: Set<number>, depth = 0): GNode[] {
+  if (depth > 6 || seen.has(id)) return out;
+  seen.add(id);
+  const c = graph(g);
+  const src = c.byId.get(id);
+  for (const w of c.outs.get(id)?.[port] ?? []) {
+    // A wire that carries all its pipe can is the limit itself: what stands beyond it may have room to spare.
+    if (w.rate >= pipeCap(w.tier) * WIRE_FULL) continue;
+    // (A Router's filtered wire carries one material only.)
+    if (src?.type === 'router' && src.mode === 'filter' && w.filter && w.filter !== mat) continue;
+    const d = c.byId.get(w.to);
+    if (!d) continue;
+    if (isPass(d)) consumers(g, d.id, 0, mat, out, seen, depth + 1);
+    else if (d.type === 'lab' || (isMachine(d) && !!recipeOf(d)?.inputs.some((i) => i[0] === mat))) out.push(d);
+  }
+  return out;
+}
+
+/** Would a Speed level on this Lab or machine take more in? It can be bought (whatever the credits), and what holds it is its own pace. */
+function speedTakesMore(g: Game, d: GNode): boolean {
+  if (!trackAvailable(g, d, 'speed') || d.lv.speed >= maxLevel(g, 'speed')) return false;
+  return d.type === 'lab' ? d.rate >= labRate(g, d) * LAB_FULL : d.status === 'working';
+}
+
+/**
+ * The way on from a blocked node, or null when there is none to name: its output has no wire (the box says to wire it),
+ * a machine downstream is in trouble itself (the box jumps to that cause), or nothing downstream is a Lab or a machine
+ * with room on its wire (a Market or a Void takes everything: then a wire is the limit).
+ * Of several, the one whose Speed is cheapest; with no Speed to offer, the first, to be shown.
+ */
+export function wayOn(g: Game, n: GNode, dx: Diagnosis = diagnose(g, n)): WayOn | null {
+  if (dx.problem !== 'blocked' || dx.openPort || dx.culprit != null || !dx.mat) return null;
+  const port = n.type === 'well' ? 0 : Math.max(0, recipeOf(n)?.outputs.findIndex((o) => o[0] === dx.mat) ?? 0);
+  const found = consumers(g, n.id, port, dx.mat, [], new Set());
+  if (!found.length) return null;
+  let best: GNode | null = null;
+  for (const d of found) if (speedTakesMore(g, d) && (!best || upgradeCost(d, 'speed') < upgradeCost(best, 'speed'))) best = d;
+  if (best) return { node: best.id, speed: true, waits: null };
+  const d = found[0];
+  const waits = isMachine(d) && d.status === 'starved' && d.missing && d.missing !== dx.mat ? d.missing : null;
+  return { node: d.id, speed: false, waits };
+}
 
 // ---------- "Upgrade all": what one press would buy ----------
 

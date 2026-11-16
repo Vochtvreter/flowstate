@@ -2,11 +2,12 @@
 // browser: they only read the game.
 import { describe, expect, it } from 'vitest';
 import { clearHistory, connect, placeNode, upgrade, upgradeAll } from '../actions';
-import { maxLevel } from '../economy';
+import { PIPES } from '../content';
+import { maxLevel, upgradeCost } from '../economy';
 import { GOALS } from '../goals';
 import { tick } from '../sim';
 import { Game, GNode, newGame } from '../state';
-import { ALERT_QUIET, alertPick, bulkPlan, diagnose, starvedShort } from './status';
+import { ALERT_QUIET, alertPick, bulkPlan, diagnose, starvedShort, wayOn } from './status';
 
 const run = (g: Game, seconds: number) => {
   for (let i = 0; i < seconds * 20; i++) tick(g, 0.05);
@@ -229,6 +230,126 @@ describe('the ending: the board is the victory picture', () => {
     expect(alertPick(g, glyph.id, (n) => (diagnose(g, n).problem ? 'trouble' : null), [])).toBeNull();
     // (Free play, or a game that has not ended: diagnosed as ever.)
     expect(diagnose({ ...g, ended: false }, glyph).problem).toBe('starved');
+  });
+});
+
+describe('a blocked node: the way on', () => {
+  /** The opening Glint Well one Speed level up (1.25 a second), with everything researched that these boards need. */
+  function fastWell(): { g: Game; well: GNode } {
+    clearHistory();
+    const g = newGame();
+    g.credits = 1e6;
+    g.techs = ['P1', 'R1', 'P2', 'P3', 'P4', 'L1'];
+    const well = g.nodes.find((n) => n.type === 'well')!;
+    upgrade(g, well.id, 'speed');
+    return { g, well };
+  }
+
+  it('a Well that feeds a Lab studying as fast as it can: Speed on that Lab, and it works', () => {
+    const { g, well } = fastWell();
+    const lab = placeNode(g, 'lab', 500, 120)!;
+    connect(g, well.id, 0, lab.id);
+    run(g, 30);
+    const dx = diagnose(g, well);
+    expect(dx.problem).toBe('blocked');
+    expect(dx.openPort).toBe(false);
+    expect(dx.culprit).toBeNull();
+    expect(wayOn(g, well, dx)).toEqual({ node: lab.id, speed: true, waits: null });
+    // The press the box offers: the Lab takes all the Well gives, and nothing is blocked any more.
+    expect(upgrade(g, lab.id, 'speed')).toBe(true);
+    run(g, 30);
+    expect(diagnose(g, well).problem).toBeNull();
+    expect(wayOn(g, well)).toBeNull();
+  });
+
+  it('a Well that feeds a Refiner at full speed: Speed on that Refiner', () => {
+    const { g, well } = fastWell();
+    const ref = placeNode(g, 'refiner', 500, 120, { recipe: 'shard' })!;
+    const market = g.nodes.find((n) => n.type === 'market')!;
+    connect(g, well.id, 0, ref.id);
+    connect(g, ref.id, 0, market.id);
+    run(g, 30);
+    expect(ref.status).toBe('working');
+    expect(diagnose(g, well).problem).toBe('blocked');
+    expect(wayOn(g, well)).toEqual({ node: ref.id, speed: true, waits: null });
+  });
+
+  it('a machine downstream that is in trouble itself stays the cause to jump to: nothing else is offered', () => {
+    const { g, well } = fastWell();
+    // (A Refiner with nowhere to send its Shard fills up and stops.)
+    const ref = placeNode(g, 'refiner', 500, 120, { recipe: 'shard' })!;
+    connect(g, well.id, 0, ref.id);
+    run(g, 40);
+    const dx = diagnose(g, well);
+    expect(dx.problem).toBe('blocked');
+    expect(dx.culprit).toBe(ref.id);
+    expect(wayOn(g, well, dx)).toBeNull();
+  });
+
+  it('nothing to name: an output with no wire, and a node that is not blocked', () => {
+    const { g, well } = fastWell();
+    run(g, 10);
+    expect(diagnose(g, well).openPort).toBe(true);
+    expect(wayOn(g, well)).toBeNull();
+    const lab = placeNode(g, 'lab', 500, 120)!;
+    connect(g, well.id, 0, lab.id);
+    well.status = 'working';
+    expect(wayOn(g, well)).toBeNull();
+  });
+
+  it('through a Router, and of two that are full the one whose Speed is cheaper', () => {
+    const { g, well } = fastWell();
+    const router = placeNode(g, 'router', 400, 120)!;
+    const lab = placeNode(g, 'lab', 700, 60)!;
+    const ref = placeNode(g, 'refiner', 700, 240, { recipe: 'shard' })!;
+    connect(g, well.id, 0, router.id);
+    connect(g, router.id, 0, lab.id);
+    connect(g, router.id, 0, ref.id);
+    // (States set by hand, as elsewhere in this file: both take all they can, and the Well backs up.)
+    well.status = 'blocked';
+    well.blockedOn = 'glint';
+    lab.rate = 1;
+    ref.status = 'working';
+    well.grace = lab.grace = ref.grace = 0;
+    expect(upgradeCost(ref, 'speed')).toBeLessThan(upgradeCost(lab, 'speed'));
+    expect(wayOn(g, well)).toEqual({ node: ref.id, speed: true, waits: null });
+    // The Refiner is waiting for nothing, but it has no level left to buy: the Lab's Speed is the one on offer.
+    ref.lv.speed = maxLevel(g, 'speed');
+    expect(wayOn(g, well)).toEqual({ node: lab.id, speed: true, waits: null });
+    // Neither has: the first of them is named, to be shown.
+    lab.lv.speed = maxLevel(g, 'speed');
+    expect(wayOn(g, well)).toMatchObject({ speed: false, waits: null });
+    expect([lab.id, ref.id]).toContain(wayOn(g, well)!.node);
+  });
+
+  it('a Lab with room to spare is not offered Speed, and a wire at capacity hides what stands beyond it', () => {
+    const { g, well } = fastWell();
+    const lab = placeNode(g, 'lab', 500, 120)!;
+    const wire = connect(g, well.id, 0, lab.id)!;
+    well.status = 'blocked';
+    well.blockedOn = 'glint';
+    well.grace = 0;
+    lab.rate = 0.4;
+    expect(wayOn(g, well)).toEqual({ node: lab.id, speed: false, waits: null });
+    lab.rate = 1;
+    expect(wayOn(g, well)?.speed).toBe(true);
+    wire.rate = PIPES[wire.tier].cap;
+    expect(wayOn(g, well)).toBeNull();
+  });
+
+  it('a machine that takes no more because it waits for another input: named with that input, to be shown', () => {
+    const { g } = fastWell();
+    const ink = placeNode(g, 'refiner', 400, 400, { recipe: 'ink' })!;
+    const asm = placeNode(g, 'assembler', 700, 400, { recipe: 'glyph' })!;
+    connect(g, ink.id, 0, asm.id);
+    ink.status = 'blocked';
+    ink.blockedOn = 'ink';
+    asm.status = 'starved';
+    asm.missing = 'spark';
+    ink.grace = asm.grace = 0;
+    const dx = diagnose(g, ink);
+    expect(dx).toMatchObject({ problem: 'blocked', mat: 'ink', culprit: null, openPort: false });
+    expect(wayOn(g, ink, dx)).toEqual({ node: asm.id, speed: false, waits: 'spark' });
   });
 });
 

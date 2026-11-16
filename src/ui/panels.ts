@@ -28,7 +28,7 @@ import { logoMark } from './hud-screens';
 import { PressWord, isTouch, withKey } from './hud-words';
 import { esc, icon, matGlyph, nodeIcon } from './icons';
 import { env } from './phone-env';
-import { bulkPlan, diagnose, matName, starvedShort, victoryQuiet } from './status';
+import { bulkPlan, diagnose, matName, starvedShort, victoryQuiet, wayOn } from './status';
 import { metData, pricedInMet, readyCount, setCardWait, teasedSlot } from './tech';
 import { delegate, select, signal, toast, touch, ui } from './ui';
 
@@ -685,8 +685,21 @@ function statusBlock(g: Game, n: GNode): string {
     title = `Blocked: ${matName(dx.mat)} output is full`;
     if (dx.openPort) body = `${matName(dx.mat)} has nowhere to go. ${isTouch() ? 'Tap its port, then tap an empty spot' : 'Drag from its port into empty space'} to send it somewhere.`;
     else {
-      body = 'Whatever is downstream cannot keep up.';
-      if (dx.culprit != null) actions += `<button class="ghostbtn" data-act="jump:${dx.culprit}">Jump to the cause</button>`;
+      // What is full downstream, named, with the way on in one press where there is one: Speed on the Lab or machine
+      // that takes no more (the same button a starved machine has for its source), and Show to go there.
+      const on = wayOn(g, n, dx);
+      const next = on ? nodeById(g, on.node) : null;
+      if (on && next) {
+        const name = NODE_DEFS[next.type].name;
+        body = on.waits ? `The ${name} it feeds is waiting for ${matName(on.waits)}.`
+          : !on.speed ? `The ${name} it feeds cannot take more.`
+            : next.type === 'lab' ? `The ${name} it feeds is full.` : `The ${name} it feeds is at full speed.`;
+        if (on.speed) actions += buyBtn(`upgsrc:${next.id}`, upgradeCost(next, 'speed'), g.credits, `Upgrade ${name} · `, 'upg-next');
+        actions += `<button class="ghostbtn" data-act="jump:${next.id}" data-testid="show-next" aria-label="Show the ${name}">Show</button>`;
+      } else {
+        body = 'Whatever is downstream cannot keep up.';
+        if (dx.culprit != null) actions += `<button class="ghostbtn" data-act="jump:${dx.culprit}">Jump to the cause</button>`;
+      }
     }
     if (dx.victim) cls = 'blocked';
   }
@@ -936,8 +949,9 @@ let inspOpenedFor = '';
 /**
  * Scroll the inspector, just opened, so what the player most likely came for is in view: the control "Show me" has
  * ringed, the "Upgrade all" the goal on the card asks for (goal 20, whether it can be afforded yet or not), the warning
- * of a node with a problem (opened from the alert's Show, or by a tap: it says what is wrong and how to fix it, and the
- * first upgrade below it was the wrong fix), on a Router the rows of its wires with their Favour buttons,
+ * of a node with a problem (opened from the alert's Show, the Flow ring, or by a tap: it says what is wrong and how to
+ * fix it, and the first upgrade below it was the wrong fix; where it is taller than the scroller, its buttons come
+ * before its title), on a Router the rows of its wires with their Favour buttons,
  * on anything else the first upgrade they can afford. Below the fold of a phone's sheet those were missed, or showed a
  * sliver over Duplicate and Delete. Nothing moves when it is in view already, nor
  * once a finger is on the panel.
@@ -980,7 +994,12 @@ function revealInInspector(opened: string, again = false) {
   const foot = isTouch() ? SHEET_FADE : 0;
   if (top >= 0 && bottom <= room - foot) return;
   // The whole of it where it fits, its top where it does not; 12 px clear of the edge.
-  const shift = bottom - top + 24 + foot <= room ? bottom - room + 12 + foot : top - 12;
+  let shift = bottom - top + 24 + foot <= room ? bottom - room + 12 + foot : top - 12;
+  // A warning too tall for the scroller (a short phone, with a tall strip above the sheet) has its fix at its foot:
+  // the buttons stand clear of the scroller's foot, under as much of the warning's words as there is room for. Its top
+  // alone showed what is wrong and a sliver of the button that puts it right.
+  const fix = want === warn ? warn[0].querySelector<HTMLElement>('.st-actions') : null;
+  if (fix) shift = Math.max(shift, span([fix]).bottom - (room - foot - 2));
   box.scrollTop = Math.max(0, Math.min(box.scrollHeight - room, box.scrollTop + shift));
   revealedAt = box.scrollTop;
 }
