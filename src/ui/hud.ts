@@ -290,7 +290,15 @@ function waitHtml(w: WaitLine, paused: boolean): string {
   // (Paused, nothing comes in: the time left would be a promise the board is not keeping.)
   const left = paused ? 'paused' : isFinite(w.eta) ? aboutTime(w.eta) : tier ? `nothing is bringing in ${w.unit} yet` : 'nothing is being sold yet';
   const cls = paused ? ' paused' : isFinite(w.eta) ? '' : ' never';
-  return `${bar(w.need > 0 ? w.have / w.need : 0, color)}<span class="gc-num">Saving <b class="mono"${tier ? ` style="color:${color}"` : ''}>${fmt(Math.floor(w.have))} / ${fmt(w.need)}${w.unit}</b></span><span class="gc-eta${cls}" data-testid="goal-eta">${left}</span>`;
+  const count = `<b class="mono"${tier ? ` style="color:${color}"` : ''}>${fmt(Math.floor(w.have))} / ${fmt(w.need)}${w.unit}</b>`;
+  const eta = `<span class="gc-eta${cls}" data-testid="goal-eta">${left}</span>`;
+  // What the count is for, where the adviser names it: "Saving for the Assembler · 38 / 600¢ · about 2 min" (the bar
+  // turned to "Saving 38 / 600¢" in the middle of goal 15, with nothing to say what the 600 was). The words stand
+  // apart from the count, so that a narrow card can set them on a line of their own (hud.css).
+  if (w.name) {
+    return `${bar(w.need > 0 ? w.have / w.need : 0, color)}<span class="gc-for" data-testid="goal-for">Saving<span class="gc-what"> for ${esc(w.name)}</span></span><span class="gc-num">${count}</span>${eta}`;
+  }
+  return `${bar(w.need > 0 ? w.have / w.need : 0, color)}<span class="gc-num">Saving ${count}</span>${eta}`;
 }
 
 /**
@@ -486,7 +494,7 @@ function renderGoal(g: Game, force: boolean) {
     const flowView = !!v.flow;
     const lensInputs = !!inputs?.length && !!v.progress && v.progress[0] < v.progress[1] && inputs.some((x) => !x.fed);
     const body = flowView ? flowHtml(v.flow!, v.progress) : lensInputs ? inputsHtml(inputs!) : wait ? waitHtml(wait, g.paused) : v.progress ? progressHtml(v.progress) : '';
-    prog = body ? `<div class="gc-prog${flowView ? ' flow' : ''}${body.includes('gc-eta') ? ' eta' : ''}">${body}</div>` : '';
+    prog = body ? `<div class="gc-prog${flowView ? ' flow' : ''}${body.includes('gc-eta') ? ' eta' : ''}${body.includes('gc-for') ? ' named' : ''}">${body}</div>` : '';
     rows = lineHtml(g, narrow) + tipHtml(g);
     // A wait (what the goal asks for next has to be saved up for, or Flow has to be held): what there is to do
     // meanwhile is the line or the tip, and on a phone the hint folds behind a tap once the player has pressed the
