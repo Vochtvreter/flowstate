@@ -24,6 +24,8 @@
  *                --lineReserve=0       what-if: a line's step does not keep back the credits for the card's own
  *                                      next purchase (ADVICE.lineReserve); --lineReserve=full keeps back all of its
  *                                      price from the start, the rule before ADVICE.reserveEarned
+ *                --lineHold=<seconds>  what-if: how long a line's step that has been given stays given while the
+ *                                      reserve ripples (ADVICE.lineHold); 0 is no dwell, the rule before it
  *                --claimDelay=<lo>,<hi> what-if: the card players claim this many seconds after Claim lights (8,16
  *                                      otherwise); 1,3 is a person who presses it at once
  *                --lineDelay=<seconds> what-if: they get to a line only once it has been on the card that long
@@ -80,6 +82,11 @@
  * now (lineAdvice is null). A tip on offer does not count as something to do: the card is what has to carry
  * the wait. A line the player leaves alone (--skipLine) still counts as something to do, so compare that
  * measure only between runs that read the same lines.
+ *
+ * The card is looked at on every tick (noteNothing), hands free or not, as the page looks at it every time it
+ * draws the card: a step of a line that has been given stays given while the reserve ripples (ADVICE.lineHold),
+ * counted from the looks that saw it covered, so a player whose card was only read between gestures would be
+ * shown less than the page shows.
  *
  *   slow        the old floor (one action per 8–10 s, wires and builds Routers unprompted, ignores amber,
  *               never upgrades a Lab). Not in the default table any more; --policy=slow still runs it.
@@ -1697,7 +1704,9 @@ export class Bot {
   noteNothing() {
     const g = this.g;
     const before = !g.ended;
-    const none = before && this.idleSince != null && !this.dawdling && !g.goal.ready && !g.order?.ready && !lineAdvice(g);
+    // (Looked at on every tick, as the page does when it draws the card: see "Nothing to do" at the top.)
+    const step = before ? lineAdvice(g) : null;
+    const none = before && this.idleSince != null && !this.dawdling && !g.goal.ready && !g.order?.ready && !step;
     if (!none) {
       this.endNothing();
       return;
@@ -2232,7 +2241,8 @@ function main() {
       // rule before the second fix round); anything else: only what cannot be earned back before it can be made.
       ADVICE.lineReserve = v !== '0';
       ADVICE.reserveEarned = v !== 'full';
-    } else if (k === 'claimDelay' && v) {
+    } else if (k === 'lineHold' && v) ADVICE.lineHold = Number(v);
+    else if (k === 'claimDelay' && v) {
       // A card player who claims sooner (or later): --claimDelay=1,3 is a person who presses Claim the moment it lights.
       const [lo, hi] = v.split(',').map(Number);
       for (const pol of Object.values(POLICIES)) if (pol.card) pol.claimDelay = [lo, hi ?? lo];
@@ -2273,7 +2283,7 @@ function main() {
   const what = [
     profileName !== 'current' ? `profile "${profileName}": ${profile.describe}` : '', ...overrides.map((o) => `--set=${o}`),
     CFG.bulk ? '' : '--noBulk', CFG.tips ? '' : '--noTips', CFG.meanwhile ? '' : '--noMeanwhile',
-    ...process.argv.slice(2).filter((a) => /^--(skipLine|lineDelay|tipDelay|tipEvery|hands|minShare|lineReserve|claimDelay)=/.test(a)),
+    ...process.argv.slice(2).filter((a) => /^--(skipLine|lineDelay|tipDelay|tipEvery|hands|minShare|lineReserve|lineHold|claimDelay)=/.test(a)),
   ].filter(Boolean).join('  ');
   const play = (p: Policy, s: number) => {
     const bot = new Bot(p, s, minutes ?? (p.card ? CFG.minutesCard : p.fast ? CFG.minutesFast : CFG.minutesSlow));
