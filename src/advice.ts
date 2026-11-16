@@ -1622,7 +1622,10 @@ const lineCover = new WeakMap<Game, { step: string; at: number }>();
  * game seconds on end: the reserve ripples with the smoothed rates it is worked out from, and a step must not
  * come and go with it. Whenever the free funds cover it again the count starts over. Credits that are not in hand
  * at all (spent on something else) withdraw it at once, and it is then not given again until the free funds cover
- * it. So the line can take from the card's own purchase no more than the ripple moves the reserve by.
+ * it. So on a board the player leaves alone the line can take from the card's own purchase no more than the ripple
+ * moves the reserve by. (Not so right after a purchase elsewhere that leaves the step's price in hand: the step
+ * stays for those seconds too, and taken then it sets the card's purchase back by what was spent. The card players
+ * of the pacing tool never do that; its fast players do, and leave the step alone.)
  *
  * The dwell belongs to one step of one game: another step (another action, or the same at another price), another
  * line or goal, or a game whose clock has gone back, starts with none. It is counted in game time from the looks
