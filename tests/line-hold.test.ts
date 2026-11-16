@@ -9,10 +9,10 @@
 // Each case is run again with the dwell off (ADVICE.lineHold = 0, the rule as it was), where the same check fails.
 import { describe, expect, it } from 'vitest';
 import { applyAdvice, ADVICE, lineAdvice, lineHeld } from '../src/advice';
-import { connect, expandBoard, freeDeposits, placeNode } from '../src/actions';
+import { connect, expandBoard, freeDeposits, placeNode, upgrade } from '../src/actions';
 import { TECHS } from '../src/content';
 import { nodeCost } from '../src/economy';
-import { GOALS, goalView, meanwhileOf } from '../src/goals';
+import { GOALS, goalView, meanwhileOf, ownPairs } from '../src/goals';
 import { Game, cloneGame, deserialize, serialize } from '../src/state';
 import { Bot, POLICIES } from '../tools/pacing';
 import { market, rich, well } from './helpers';
@@ -200,7 +200,7 @@ describe('the step of a card\'s line does not blink with the reserve (ADVICE.lin
     expect(applyAdvice(g, lineAdvice(g)!)).toBe(true);
   });
 
-  dwellCase('the dwell belongs to one step: not the next step, the same step at another price, another goal, a game whose clock went back, or a copy', () => {
+  dwellCase('the dwell belongs to one step: not the next step, the same step at another price, another step at the same price, another goal, a game whose clock went back, or a copy', () => {
     /** The board with its step on offer by the dwell alone: covered two seconds ago, 55¢ short now, the price in hand. */
     const kept = () => {
       const b = board();
@@ -241,6 +241,42 @@ describe('the step of a card\'s line does not blink with the reserve (ADVICE.lin
     expect(face(g)).toBe('held');
     g.creditRate = HIGH;
     expect(lineAdvice(g)).toMatchObject({ build: 'well', deposit: was.deposit });
+
+    // Another step at the very same price. On "Make your first Mist" the line that buys Speed on each Well with a Lab
+    // of its own goes from pair to pair, and a level costs the same on every Well. The first pair's Well is on offer
+    // and kept; its level is bought, and its Lab's too, by hand, before the card is looked at again: what the line
+    // asks for now is the next pair's Well, for the price the kept step had. It is another step: held at once.
+    const m = board().g;
+    m.techs.push('P4');
+    at(m, 'make-mist');
+    m.credits = 1e6;
+    for (let i = 0; i < 12 && meanwhileOf(m)?.id === 'expand-labs'; i++) expect(applyAdvice(m, lineAdvice(m)!)).toBe(true);
+    expect(meanwhileOf(m)!.id).toBe('speed-pairs');
+    for (const k of ['a', 'b', 'g'] as const) {
+      m.data[k] = Math.max(0, (TECHS.P5.cost[k] ?? 0) - WAIT);
+      m.dataRate[k] = 1;
+    }
+    const level = lineAdvice(m)!;
+    expect(level).toMatchObject({ upgrade: 'speed' });
+    const pair = ownPairs(m).find((x) => x.wells.some((w) => w.id === level.node))!;
+    expect(pair).toBeTruthy();
+    const price = level.cost!;
+    m.creditRate = 1e3; // nothing of the card's purchase is kept back...
+    m.credits = price + SPARE;
+    expect(face(m)).toBe('step');
+    m.time += 2;
+    m.creditRate = 0; // ...and now all of it is
+    expect(face(m)).toBe('step'); // kept
+    m.credits = 1e6;
+    expect(applyAdvice(m, lineAdvice(m)!)).toBe(true);
+    expect(upgrade(m, pair.lab.id, 'speed')).toBe(true);
+    m.credits = price + SPARE;
+    const next = lineAdvice(Object.assign(cloneGame(m)!, { credits: 1e6 }))!;
+    expect(next).toMatchObject({ upgrade: 'speed', cost: price });
+    expect(next.node).not.toBe(level.node);
+    expect(face(m)).toBe('held');
+    m.creditRate = 1e3;
+    expect(lineAdvice(m)).toMatchObject({ upgrade: 'speed', node: next.node });
 
     // Another goal with the same line and the same step ("Make your first Mist" picks the expansion up where the
     // Glyph card left it): nothing is carried over. (With no credits coming in, all of its purchase is kept back.)
