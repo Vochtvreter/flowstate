@@ -8,11 +8,11 @@ The interface as built. Numbers are the ones in the code (`src/ui/`, `src/style.
 
 1. **The board is the hero.** Bars and corner controls hug the edges. Over the board stand only the goal card with its chips at the top, the Expand button when it docks and, in passing, the build menu, the "Tap where…" line, toasts, celebration cards and the guiding hand. The camera keeps what matters out from under them.
 2. **Quiet when healthy, loud when broken.** A working node shows a green ring. Only the *root cause* of a problem gets a pill and a word; a node that merely suffers from trouble elsewhere turns its ring amber. Wells never get a pill.
-3. **Every problem comes with its fix.** The inspector's status box offers the action ("Upgrade source · 50¢", "Jump to source"); the alert chip has **Show**.
+3. **Every problem comes with its fix.** The inspector's status box offers the action (starved: "Upgrade source · 50¢", "Jump to source"; blocked: "Upgrade Lab · 50¢", "Show"; for a few seconds after its own button has raised that Speed it offers no second level, and says the Lab "has room now" until the node is no longer called blocked); the alert chip has **Show**.
 4. **Colour is not the only signal** where there is room for another: materials are a colour and a shape, Data a colour and a letter, a problem a colour and a word. (The overview tier is the exception: see section 4.)
 5. **Progress toward every price.** Buy buttons and build-bar slots fill as the credits come in.
 6. **Words follow the pointer.** A finger is told to "tap" and never shown a key (`html[data-input]`, set from the last pointer used).
-7. **Nothing pressable arrives under a press already on its way.** The build menu takes no press for its first 250 ms, the summary for 600 ms, the Expand button for 700 ms after an expansion, and a second Claim within 500 ms is ignored.
+7. **Nothing pressable arrives under a press already on its way.** The build menu takes no press for its first 250 ms, the summary for 600 ms, the Expand button for 700 ms after an expansion, the build bar's slots for 600 ms after a chevron has moved it, and a second Claim within 500 ms is ignored.
 
 ---
 
@@ -23,7 +23,7 @@ The phone layout is on when the window is under 700 px wide, or is wider than ta
 | | Desktop (1440×900) | Phone upright (390×844) | Phone sideways (844×390) |
 |---|---|---|---|
 | Top bar | 56 px: logo, credits, Data chips, Undo, Redo, Pause, Tech tree, sound, gear | 52 px: logo mark, credits, Data as one block, Tech, gear | 46 px, the same |
-| Build bar | 76 px rail down the left, key numbers in the corners | 72 px bar along the bottom, 60 px slots, scrolls sideways | 68 px, the same |
+| Build bar | 76 px rail down the left, key numbers in the corners | 72 px bar along the bottom, 60 px slots, scrolls sideways; a round chevron button (46 px wide, as tall as the bar) stands on an edge with more beyond it and moves the bar by a page | 68 px, the same |
 | Goal card, order, alert | Card over the top of the board, order beside it, alert under it | One strip across the top of the board | Card at the top left, its hint folded away at the first press on the board; order and alert as pills beside it |
 | Inspector | 320 px panel at the right; the board gets narrower | Bottom sheet | Sheet at the right, at most 340 px |
 | Build menu | Fan round the pointer | Bottom sheet | Sheet at the right |
@@ -61,7 +61,7 @@ From the top: a row of pips (one for each of the 22 goals, larger for the six bi
 
 | Row | What it shows |
 |---|---|
-| Progress | A bar and a count ("Saving 364 / 1,325α · about 7 min"; "Saved"; "nothing is being sold yet"). The Flow goal shows "Flow 90% · 9 of 10 running" with a mark at the share to hold; the Lens goal shows which inputs are wired ("Prism ✓ · Glyph ✗"). |
+| Progress | A bar and a count. While something is being saved for it says what for ("Saving for Assembly · 364 / 1,325α · about 7 min"); a phone held upright, and a desktop card on a stage under 520 px, set those words on a line of their own over the bar, and a phone held sideways leaves the name out. Then "Saved"; "nothing is being sold yet" where nothing comes in. The Flow goal shows "Flow 90% · 9 of 10 running" with a mark at the share to hold; the Lens goal shows which inputs are wired ("Prism ✓ · Glyph ✗"). |
 | While you wait | A step from the goal itself: a tick box, "While you wait · 1 of 2", one sentence and **Show me**. It reads "Next step" when the step is the goal's own requirement (goal 22). When the step costs credits the card is keeping for its own purchase, **Show me** gives way to "Saving for this · 1,100¢ · about 40 s". A step that has been offered is not taken back for a passing dip in income: it stays until it has been out of reach for 10 s, or the player no longer has the credits for it (`ADVICE.lineHold` in `src/advice.ts`). Done, the box is ticked and the row says what the step bought. A line that was done before its goal came up is not shown at all. On goal 21 the line is the tune-up before the Fabricator: its sentence is its next step's own, a step is only on the card while it pays for itself before the Fabricator can be bought (it is never "Saving for this"), and when none is left the row is ticked if the player did some of it and closes if not ([CONTENT.md](./CONTENT.md), "While you wait"). |
 | Tip | The adviser's one suggestion (`src/advice.ts`, run in a Worker). It appears after 6 s of waiting with the board left alone, never repeats the line's own step, and has its own **Show me**. A narrow card (phone, squeezed desktop) shows one of the two rows at a time, the line first. |
 
@@ -180,14 +180,14 @@ It never moves while a button or finger is down on the board, a port is armed, a
 
 ## 7. The inspector (`panels.ts`)
 
-Opens when a card or a wire is selected: a 320 px panel beside the board on a desktop, a bottom sheet on a phone (swipe it down by its handle or header, or press ✕). On opening it scrolls to what the player most likely came for: the button **Show me** ringed, the warning, a Router's wire rows, or the first upgrade they can afford.
+Opens when a card or a wire is selected: a 320 px panel beside the board on a desktop, a bottom sheet on a phone (swipe it down by its handle or header, or press ✕). On opening it scrolls to what the player most likely came for: the button **Show me** ringed, the warning, a Router's wire rows, or the first upgrade they can afford; a warning taller than a short phone's sheet is scrolled so that its buttons stand clear of the sheet's foot.
 
 | Section | Contents |
 |---|---|
 | Header | Icon, name, one line on what the node does, ✕ |
 | Status | Only for a problem: a box with what is wrong and its fix (see section 4), or the amber line for a machine that is merely short |
 | Body, by type | *Machine:* the recipe as chips, with **Change** when it has a choice; Flow bars for each input (received / needed) and output; utilisation. *Well:* extraction rate. *Router:* mode (Even, Ratio, Priority, Filter; a locked mode leads to its tech), one row per wire with its share and its control, and **Favour** to send one wire the bigger share. *Market:* what sells here and what it earns; after the first sale over demand, a demand gauge per material. *Lab:* what it studies and what each item gives. *Silo:* what it holds |
-| Upgrades | One row per track: level, effect, and a buy button that fills as credits come in. With the Bulk Upgrade tech each row also has **Upgrade all**, which raises every node of that type by one level |
+| Upgrades | One row per track: level, effect, and a buy button that fills as credits come in. With the Bulk Upgrade tech each row also has a second buy button with the price of one press on it ("Upgrade all · 819¢"): it raises every node of that type by one level, lowest level first. Where the credits reach only some it says how many ("Upgrade 6 of 9 · 512¢"); a press that would buy more than the button said buys nothing and asks for a second press |
 | Footer | **Duplicate** (not for a Well) and **Delete · +refund** |
 
 A wire's inspector shows what it carries against its capacity, "At capacity" when it is the bottleneck, the next pipe tier with its price, **Upgrade every full wire**, and **Cut wire · +refund**.

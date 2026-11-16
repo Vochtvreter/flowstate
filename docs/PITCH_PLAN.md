@@ -193,7 +193,7 @@ Unlocked by goal 11. **One** order at a time, shown beside the goal: "Deliver N 
 
 **Built**, with these differences ([UI.md](./UI.md) has the detail).
 
-- The goal card also carries a strip of 22 pips, the "while you wait" line with a **Show me** button, the adviser's tip, and, for a wait, a line such as "Saving 64 / 195α · about 3 min".
+- The goal card also carries a strip of 22 pips, the "while you wait" line with a **Show me** button, the adviser's tip, and, for a wait, a line such as "Saving for Ember Deposits · 64 / 195α · about 3 min".
 - The Flow ring's label is the Flow percentage; the bonus is in its tooltip.
 - The tech tree also leaves out any tech priced in a kind of Data the player has not had yet.
 - Zoom does go below a readable size. The readable view stops at 70% (74% on a phone); below that the cards become small tiles, an overview in which wiring still works. It goes out only as far as the factory needs, and never past 15%.
