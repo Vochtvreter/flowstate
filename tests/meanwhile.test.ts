@@ -678,6 +678,18 @@ describe('lineAdvice: the next step of the card\'s line, for its "Show me"', () 
     h.credits += 1;
     expect(lineAdvice(h)).toMatchObject({ build: 'well' });
     expect(goalView(h)!.meanwhile!.held).toBeUndefined();
+    // Once that Well stands, its Lab is given from the credits in hand even where the reserve has grown since (the
+    // pair brings α in faster, so the research is nearer and more of the Assembler is kept back): held, the Lab
+    // waited for the Assembler and the goal could end with the Well blocked (seen with a player who claims at once).
+    const k = cloneGame(h)!;
+    expect(applyAdvice(k, lineAdvice(k)!)).toBe(true);
+    const alone = k.nodes.find((n) => n.type === 'well' && !k.wires.some((x) => x.from === n.id))!;
+    k.credits = nodeCost(k, 'lab'); // all of it would be kept back for the Assembler
+    expect(lineAdvice(k)).toMatchObject({ build: 'lab', node: alone.id, port: 0 });
+    expect(goalView(k)!.meanwhile!.held).toBeUndefined();
+    k.credits = nodeCost(k, 'lab') - 1; // short of the Lab itself: saved for, the Lab's price alone
+    expect(lineAdvice(k)).toBeNull();
+    expect(goalView(k)!.meanwhile!.held).toEqual({ cost: nodeCost(k, 'lab'), sym: '¢', eta: expect.any(Number) });
 
     // "Make your first Mist", second line: Speed on a Well with a Lab of its own, then on its Lab.
     h.credits = 1e9;

@@ -1592,11 +1592,17 @@ function lineStep(g: Game, any = false): Cand | null {
   if (any) return next.c;
   if (next.c.act.t === 'research' && !techAffordable(g, TECHS[next.c.act.tech])) return null;
   if (next.need <= 1e-9) return next.c;
-  return next.need <= lineFunds(g) + 1e-6 ? next.c : null;
+  return next.need <= lineFunds(g, next) + 1e-6 ? next.c : null;
 }
 
-/** Credits a line's step may spend right now: what is in hand less what the card keeps back (cardReserve). */
-const lineFunds = (g: Game) => Math.max(0, g.credits - cardReserve(g));
+/**
+ * Credits a line's step may spend right now: what is in hand less what the card keeps back (cardReserve). The Lab
+ * of a Well that stands alone (`pair`) is not held back by the reserve: the Well was only offered with its Lab's price
+ * free as well, and the reserve can grow a moment later (the pair just built brings α in faster, so the research is
+ * nearer and more of the card's purchase is kept back); held then, the Lab waited for the card's purchase and the
+ * goal could end with the Well blocked.
+ */
+const lineFunds = (g: Game, next?: { pair?: boolean }) => (next?.pair ? Math.max(0, g.credits) : Math.max(0, g.credits - cardReserve(g)));
 
 /**
  * The line's next gesture whether or not it can be paid for (`c`), and the credits that must be free to spend for
@@ -1615,7 +1621,7 @@ const lineFunds = (g: Game) => Math.max(0, g.credits - cardReserve(g));
  *  - cut-glyph (goals 19 and 21): the first wire that still takes Glyph to a Lab is cut.
  *  - prism-fab, glyph-fab (goal 22): the maker's port wired to the Fabricator.
  */
-function lineNext(g: Game): { c: Cand; need: number } | null {
+function lineNext(g: Game): { c: Cand; need: number; pair?: boolean } | null {
   const at = meanwhileAt(g);
   if (!at || at.line.done(g)) return null;
   const paid = (c: Cand, need = c.cost) => ({ c, need });
@@ -1644,7 +1650,8 @@ function lineNext(g: Game): { c: Cand; need: number } | null {
       const bare = g.nodes.find((n) => n.type === 'well' && !!n.material && mine(n.depositId) && !outs(g, n).length);
       if (bare) {
         const cost = nodeCost(g, 'lab');
-        return paid({ act: { t: 'build', type: 'lab', from: bare.id, port: 0 }, cost, hope: 0, show: bare.id, brings: 'data', text: SAY.lineLab(MATERIALS[bare.material!].name, cost) });
+        // The second half of a pair: from the credits in hand, whatever the reserve has grown to since (lineFunds).
+        return { ...paid({ act: { t: 'build', type: 'lab', from: bare.id, port: 0 }, cost, hope: 0, show: bare.id, brings: 'data', text: SAY.lineLab(MATERIALS[bare.material!].name, cost) }), pair: true };
       }
       const d = freeDeposits(g).find((x) => mine(x.id));
       if (d) {
@@ -1786,8 +1793,8 @@ export function lineHeld(g: Game): { cost: number; sym: '¢' | 'α' | 'β' | 'γ
     }
     return worst;
   }
-  if (next.need <= 1e-9 || next.need <= lineFunds(g) + 1e-6) return null;
-  const p = ADVICE.lineReserve ? cardPurchase(g) : null;
+  if (next.need <= 1e-9 || next.need <= lineFunds(g, next) + 1e-6) return null;
+  const p = ADVICE.lineReserve && !next.pair ? cardPurchase(g) : null;
   const rate = Math.max(0, g.creditRate);
   const need = next.need;
   // Can the step be covered before the card's purchase is (the reserve shrinking as the purchase draws near
