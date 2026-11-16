@@ -29,7 +29,7 @@ import {
 } from './fx';
 import {
   Box, Card, Footprint, Port, Pt, View, ZOOM, bestWindow, bezierAt, boxClear, boxUnion, buildSite, centreView, clearPoint, dockSpot, fadeColor, fitBox,
-  fitZoom, frameBox, freeSpot as nearestSpot, heldRate, inPorts, matColor, nodeSize, outPorts, pathD, pinchView, roomFor, segmentsCross, separate,
+  fitZoom, fitsAt, frameBox, freeSpot as nearestSpot, heldRate, inPorts, matColor, nodeSize, outPorts, pathD, pinchView, roomFor, segmentsCross, separate,
   siteFor, wholeGain, wireEnds,
 } from './geom';
 import { isStarted, screenOpen } from './hud-screens';
@@ -236,8 +236,12 @@ interface RadialState {
    * card, that card, and the board (its revision) and the camera it was found on.
    */
   site?: Pt | null; card?: Footprint; rev?: number; sight?: Sight;
+  /** Where each other option's card would stand, as far as asked for (see `optSite`). */
+  sites?: Map<number, Box | null>;
   /** The option whose card the outline shows: the suggested one, until the pointer rests on another. */
   shown?: number;
+  /** An option that was pressed and whose card would not stand in the suggested one's outline: its own outline is on show, and the next press on it builds. */
+  asked?: number;
   /** A move the camera made for the menu itself when it opened: where it stood before, and where the move left it. */
   moved?: { from: View; to: View } | null;
 }
@@ -586,7 +590,6 @@ function cardBox(n: GNode): Box {
 
 /** The plot's label as last placed: its width on the board once measured (for which words), where it stands along the plot's top side, whether it shows. */
 const plotTag = { text: '', big: false, w: 0, left: 16, on: true };
-let plotCovers: { at: number; boxes: Box[] } | null = null;
 
 /**
  * Keep the plot's label ("Board · 3 plots") whole: it stands at the left end of the plot's top side, and when
@@ -594,7 +597,7 @@ let plotCovers: { at: number; boxes: Box[] } | null = null;
  * that is clear; with none, it is left out until there is one. Never half of it. (Not looked for in the overview,
  * which does not show it.)
  */
-function placePlotLabel(fresh = false) {
+function placePlotLabel() {
   const g = ui.g;
   if (!g || over || !plotLabel) return;
   const text = plotLabel.textContent ?? '';
@@ -604,14 +607,26 @@ function placePlotLabel(fresh = false) {
     plotTag.w = plotLabel.offsetWidth;
   }
   if (!plotTag.w) return;
-  const now = performance.now();
-  if (fresh || !plotCovers || now - plotCovers.at > 400) plotCovers = { at: now, boxes: coverBoxes() };
+  // What covers the stage, from what the shell has already measured (this runs with every camera move: no layout is read).
+  const covers: Box[] = [];
+  const r = rectOf();
+  if (env.phone) {
+    const c = env.cover();
+    if (c.top) covers.push({ x0: -1e6, y0: -1e6, x1: 1e6, y1: c.top });
+    if (c.bottom) covers.push({ x0: -1e6, y0: r.height - c.bottom, x1: 1e6, y1: 1e6 });
+    if (c.right) covers.push({ x0: r.width - c.right, y0: -1e6, x1: 1e6, y1: 1e6 });
+  } else {
+    const st = env.strip(), c = env.corner();
+    if (st) covers.push({ x0: st.x0, y0: -1e6, x1: st.x1, y1: st.bottom });
+    if (c) covers.push({ x0: c.x0, y0: c.y0, x1: 1e6, y1: 1e6 });
+    if (hintsBox && g.goal.i < HINTS_UNTIL) covers.push(hintsBox);
+  }
   const v = ui.view;
   const y0 = (big ? -11 : -9) * v.k + v.y, y1 = y0 + (big ? 22 : 17) * v.k;
   const w = plotTag.w;
   const cut = (left: number) => {
     const x0 = left * v.k + v.x, x1 = (left + w) * v.k + v.x;
-    return plotCovers!.boxes.some((c) => x0 < c.x1 + 6 && x1 > c.x0 - 6 && y0 < c.y1 + 2 && y1 > c.y0);
+    return covers.some((c) => x0 < c.x1 + 6 && x1 > c.x0 - 6 && y0 < c.y1 + 2 && y1 > c.y0);
   };
   let left = 16;
   let on = true;
@@ -619,7 +634,7 @@ function placePlotLabel(fresh = false) {
     // Just right of what covers it, or just left: whichever is nearer and clear, inside the plot's own side.
     on = false;
     let best = Infinity;
-    for (const c of plotCovers.boxes) {
+    for (const c of covers) {
       for (const x of [(c.x1 + 10 - v.x) / v.k, (c.x0 - 10 - v.x) / v.k - w]) {
         if (x < 16 || x + w > g.board.w - 16 || Math.abs(x - 16) >= best || cut(x)) continue;
         best = Math.abs(x - 16);
@@ -1845,8 +1860,10 @@ export function initBoard(root: HTMLElement) {
   for (const m of [radialEl, buildEl]) m.addEventListener('pointerdown', noteMenuPress, true);
   // The outline is the suggested option's card; with the pointer (or the focus) on another option it is that one's.
   const showOpt = (e: Event) => {
+    // (A finger does not rest on an option before it presses it: for a finger the first press shows, see `pickRadial`.)
+    if ((e.type === 'pointerover' || e.type === 'pointerout') && (e as PointerEvent).pointerType !== 'mouse') return;
     const slot = (e.target as Element | null)?.closest?.<HTMLElement>('.slot');
-    const i = slot && e.type !== 'pointerout' && e.type !== 'focusout' ? Number(slot.dataset.i) : undefined;
+    const i = slot && e.type !== 'pointerout' && e.type !== 'focusout' ? Number(slot.dataset.i) : radial?.asked;
     if (radial && radial.shown !== i) {
       radial.shown = i;
       drawSite();
@@ -1889,6 +1906,9 @@ export function initBoard(root: HTMLElement) {
       },
       // The build menu's outline while it is open: the spot found for the suggested card, the card on show, the camera.
       site: () => siteState(),
+      // Where the menu's suggested card would stand for a point, by the whole rule and with one part of it left out
+      // (the wire's share, the other options' room, the camera): to see which part moved a card.
+      explain: (x: number, y: number, from: number, port: number) => explainSite({ x, y }, from, port),
       // The outline the menu would show if it were opened from this port at each of these points (see `buildPreview`).
       preview: (from: number, port: number, pts: Pt[], blind = false) => buildPreview(from, port, pts, blind),
       covers: () => coverBoxes(),
@@ -2884,7 +2904,7 @@ export function updateSlow(part?: 'nodes' | 'wires') {
   }
   placeExpand();
   if (ui.placing) updateGhost();
-  placePlotLabel(true);
+  placePlotLabel();
   syncFitControl();
   if (radial) {
     refreshBuildSheet();
@@ -3103,14 +3123,13 @@ function sightNow(): Sight {
  * rule is `buildSite` in geom.ts, where it is tested: centred on the point when the card has room there; otherwise
  * the nearest spot that has, measured from the point (or, for a point outside the plot or under something that
  * covers the stage, from the nearest point inside and clear); in view and uncovered when any such spot is; and a
- * point the rule gave is accepted as it stands. `alts`: other cards that may be built there instead (the build
- * menu's other options). `wire`: the port the card will be wired from, or to. `sight`: the camera the spot is found
- * for (as it is now, unless given).
+ * point the rule gave is accepted as it stands. `wire`: the port the card will be wired from, or to. `sight`: the
+ * camera the spot is found for (as it is now, unless given).
  */
-function buildSpot(at: Pt, card: Footprint, opts: { alts?: Footprint[]; wire?: { from?: Pt; to?: Pt }; sight?: Sight } = {}): Pt | null {
+function buildSpot(at: Pt, card: Footprint, opts: { wire?: { from?: Pt; to?: Pt }; sight?: Sight } = {}): Pt | null {
   const sight = opts.sight ?? sightNow();
   return buildSite({
-    at, card, alts: opts.alts, wire: opts.wire, cards: nodeBoxes(undefined, true), deposits: depositBoxes(), board: ui.g.board, grid: GRID,
+    at, card, wire: opts.wire, cards: nodeBoxes(undefined, true), deposits: depositBoxes(), board: ui.g.board, grid: GRID,
     view: sight.view, covers: sight.covers,
   });
 }
@@ -4773,8 +4792,15 @@ function openBuildSheet(state: RadialState) {
   // The board slides, as little as it can, so that the outline shows above the sheet (beside it, on a phone held
   // sideways). The move is the sheet's own: it is taken back when the sheet goes (see `unmove`).
   const card = state.card!, site = state.site!;
-  const before = { ...viewAhead() };
-  const to = sheetLift({ x0: site.x - 16, y0: site.y - 22, x1: site.x + card.w + 16, y1: site.y + card.room + 12 });
+  liftFor(state, { x0: site.x, y0: site.y, x1: site.x + card.w, y1: site.y + card.room });
+}
+
+/** Under the phone's sheet: slide the board, if need be, so that this outline shows above it (see `sheetLift`). */
+function liftFor(state: RadialState, box: Box) {
+  if (!buildEl.classList.contains('open')) return;
+  const before = state.moved?.from ?? { ...viewAhead() };
+  // (Across, the card with its ports: a spot the rule counts as in view is then never moved sideways for.)
+  const to = sheetLift({ x0: box.x0 - 10, y0: box.y0 - 22, x1: box.x1 + 10, y1: box.y1 + 12 });
   if (to) {
     moveView(to.x, to.y, to.k, true);
     state.moved = { from: before, to };
@@ -4803,27 +4829,23 @@ function sheetLift(box: Box): View | null {
 
 /**
  * Find where the card the menu builds will stand, for the camera as it was when the menu opened: the spot of the
- * suggested option's card (`buildSpot`), with room on the same middle for every other option on offer, so that
- * whatever is picked is built in the outline the menu shows.
+ * suggested option's card (`buildSpot`). It is found once; the pick builds there (see `pickRadial`).
  */
 function findSite(r: RadialState) {
-  const open = r.opts.filter((o) => !o.locked);
   const best = r.opts[r.best ?? 0];
-  const lead = best && !best.locked ? best : open[0];
+  const lead = best && !best.locked ? best : r.opts.find((o) => !o.locked);
   r.rev = ui.g.rev;
   r.site = null;
+  r.sites = new Map();
+  r.asked = undefined;
   if (!lead) return;
-  const card = footprint(lead.type, lead.recipe);
-  const alts: Footprint[] = [];
-  for (const o of open) {
-    const f = footprint(o.type, o.recipe);
-    const same = (x: Footprint) => x.w === f.w && x.h === f.h && x.room === f.room;
-    if (!same(card) && !alts.some(same)) alts.push(f);
-  }
   r.sight ??= sightNow();
-  r.card = card;
-  r.site = buildSpot(r.at, card, { alts, wire: r.dir === 'consume' ? { from: r.a } : { to: r.a }, sight: r.sight });
+  r.card = footprint(lead.type, lead.recipe);
+  r.site = buildSpot(r.at, r.card, { wire: menuWire(r), sight: r.sight });
 }
+
+/** The wire a card built from this menu arrives on: from the port, or (built back from an input port) to it. */
+const menuWire = (r: RadialState) => (r.dir === 'consume' ? { from: r.a } : { to: r.a });
 
 /**
  * The outline the build menu would show if it were opened from this output port at each of these points (board
@@ -4849,12 +4871,53 @@ export function buildPreview(from: number, port: number, pts: Pt[], blind = fals
   });
 }
 
-/** Where this option's card stands: on the middle of the spot found for the menu. */
+/** For scripts: see the hook `board.explain`. */
+function explainSite(at: Pt, from: number, port: number) {
+  const g = ui.g;
+  const n = nodeById(g, from);
+  const a = n && outPorts(g, n)[port];
+  if (!a) return null;
+  const mats = materialsAt(g, from, port);
+  const r: RadialState = { at, dir: 'consume', from, port, to: 0, mat: mats[0] ?? null, a, opts: consumeOptions(g, mats) };
+  suggest(g, r);
+  findSite(r);
+  const card = r.card;
+  if (!card) return null;
+  const sight = r.sight!;
+  return {
+    type: r.opts[r.best ?? 0]?.type, rule: r.site,
+    noWire: buildSpot(at, card, { sight }),
+    noSight: buildSpot(at, card, { wire: { from: a }, sight: { view: null, covers: sight.covers } }),
+    bare: buildSpot(at, card, { sight: { view: null, covers: sight.covers } }),
+    clear: clearPoint(at, g.board, sight.view, sight.covers),
+  };
+}
+
+/**
+ * Where this option's card stands. The suggested option's: on the spot found for the menu. Any other: on the same
+ * middle, when that card has room there too (most are the same size or smaller); a card that has not (a taller one in
+ * a tight spot) gets a spot of its own by the same rule, as near that middle as it can stand.
+ */
 function optSite(r: RadialState, o: RadialOpt): Box | null {
-  if (!r.site || !r.card) return null;
+  if (!r.site || !r.card || o.locked) return null;
+  const i = r.opts.indexOf(o);
+  let box = r.sites?.get(i);
+  if (box !== undefined) return box;
+  const f = footprint(o.type, o.recipe);
   const { w, h } = sizeFor(o.type, o.recipe);
-  const p = siteFor(r.site, r.card, { w, h, room: h }, GRID);
-  return { x0: p.x, y0: p.y, x1: p.x + w, y1: p.y + h };
+  let p: Pt | null = siteFor(r.site, r.card, f, GRID);
+  if (!(f.w === r.card.w && f.h === r.card.h && f.room === r.card.room) && !fitsAt(p, f, { cards: nodeBoxes(undefined, true), deposits: depositBoxes(), board: ui.g.board })) {
+    p = buildSpot({ x: r.site.x + r.card.w / 2, y: r.site.y + r.card.h / 2 }, f, { wire: menuWire(r), sight: r.sight });
+  }
+  box = p ? { x0: p.x, y0: p.y, x1: p.x + w, y1: p.y + h } : null;
+  r.sites?.set(i, box);
+  return box;
+}
+
+/** This option's card would stand in the outline the menu shows for the suggested one: on the same middle (to the grid). */
+function inOutline(r: RadialState, o: RadialOpt): boolean {
+  const lead = r.opts[r.best ?? 0], a = lead ? optSite(r, lead) : null, b = optSite(r, o);
+  return !!a && !!b && Math.abs((a.x0 + a.x1) / 2 - (b.x0 + b.x1) / 2) <= 10 && Math.abs((a.y0 + a.y1) / 2 - (b.y0 + b.y1) / 2) <= 10;
 }
 
 /**
@@ -5139,6 +5202,16 @@ export function pickRadial(i: number) {
   // has changed under the open menu (an undo by key) is the spot found again, for the same camera.
   if (r.rev !== g.rev) findSite(r);
   const box = optSite(r, o);
+  // An option whose card has no room in that outline (a taller card, in a tight spot) has a spot of its own beside
+  // it. Nothing is built where it was not shown: unless its outline is on show already (the pointer rests on it), the
+  // first press shows it, with the wire, and the next builds.
+  if (box && !inOutline(r, o) && r.shown !== i && r.asked !== i) {
+    r.asked = r.shown = i;
+    drawSite();
+    liftFor(r, box);
+    toast(`No room for the ${NODE_DEFS[o.type].name} there: it would stand here. Pick it again to build.`, 'info');
+    return;
+  }
   shutRadial();
   if (!box) {
     unmove(r);

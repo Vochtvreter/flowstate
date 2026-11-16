@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import {
-  BUILD_AIR, BUILD_REACH, Box, CARD_GAP, Card, Footprint, PLOT_MARGIN, PORT_OUT, SiteQuery, bestWindow, boxClear, buildSite, cardsOverlap, clearPoint,
-  dockSpot, fadeColor, fitBox, frameBox, freeSpot, heldRate, pinchView, samples, separate, siteFor, spotFree, wholeGain,
+  BUILD_AIR, BUILD_REACH, Box, CARD_GAP, Card, Footprint, PLOT_MARGIN, PORT_OUT, SiteQuery, WIRE_REACH, bestWindow, boxClear, buildSite, cardsOverlap,
+  clearPoint, dockSpot, fadeColor, fitBox, fitsAt, frameBox, freeSpot, heldRate, pinchView, samples, separate, siteFor, spotFree, wholeGain,
 } from './geom';
 
 const free = (k: number) => k;
@@ -370,24 +370,31 @@ describe('buildSite: where a card built at a point the player chose stands', () 
     expect(site(446, 256, cards)).not.toBeNull();
   });
 
-  it('leaves room on the same middle for every other card that may be built there, and puts each inside the outline', () => {
-    const r = rng(77);
-    for (let n = 0; n < 200; n++) {
-      const cards = randomBoard(r, 30);
-      const alts = [ASSEMBLER, VOID, REFINER];
-      const p = buildSite({ at: { x: 40 + r() * 1160, y: 40 + r() * 680 }, card: LAB, alts, cards, deposits: [], board: BOARD, grid: GRID });
-      if (!p) continue;
-      for (const f of alts) {
-        const q = siteFor(p, LAB, f, GRID);
-        expect(keeps(q, f, cards, CARD_GAP)).toBe(true);
-        expect(q.x % GRID).toBe(0);
-        expect(q.y % GRID).toBe(0);
-        expect(Math.abs(q.x + f.w / 2 - (p.x + 86))).toBeLessThanOrEqual(10);
-        expect(Math.abs(q.y + f.h / 2 - (p.y + 36))).toBeLessThanOrEqual(10);
-      }
-    }
+  it('puts another card of the menu on the same middle, and says whether it has room there', () => {
     expect(siteFor({ x: 400, y: 300 }, LAB, LAB, GRID)).toEqual({ x: 400, y: 300 });
     expect(siteFor({ x: 400, y: 300 }, LAB, VOID, GRID)).toEqual({ x: 420, y: 300 });
+    expect(siteFor({ x: 400, y: 300 }, LAB, ASSEMBLER, GRID)).toEqual({ x: 400, y: 300 });
+    const q = { cards: [card(400, 400)], deposits: [], board: BOARD };
+    // 28 px above another card: a Lab keeps the usual gap; an Assembler, which may grow to 112 px, does not.
+    expect(fitsAt({ x: 400, y: 300 }, LAB, q)).toBe(true);
+    expect(fitsAt({ x: 400, y: 300 }, ASSEMBLER, q)).toBe(false);
+    expect(fitsAt({ x: 420, y: 300 }, VOID, q)).toBe(true);
+    // Outside the plot's margin there is no room.
+    expect(fitsAt({ x: 0, y: 300 }, LAB, q)).toBe(false);
+    expect(fitsAt({ x: 400, y: 700 }, LAB, q)).toBe(false);
+  });
+
+  it('counts a clear wire for a little and the near side of a card for a reach, and only when the card has to move', () => {
+    const from = { x: 272, y: 156 };
+    // The card can stand on the point: it does, though its wire will pass behind the Market.
+    const market = card(360, 300);
+    expect(site(626, 476, [card(100, 120), market], { wire: { from } })).toEqual({ x: 540, y: 440 });
+    // It cannot (8 px under the Market): of the spots about as near, the one on the near side of the Market, with its wire clear.
+    const p = site(626, 416, [card(100, 120), market], { wire: { from } })!;
+    const end = { x: p.x, y: p.y + 36 };
+    expect(samples(from, end, 24).some((s) => s.x > 362 && s.x < 530 && s.y > 302 && s.y < 370)).toBe(false);
+    expect(far(p, { x: 540, y: 380 })).toBeLessThanOrEqual(BUILD_REACH + 60);
+    expect(WIRE_REACH).toBeLessThan(BUILD_REACH);
   });
 
   it('answers null only when the plot has no room at all', () => {
