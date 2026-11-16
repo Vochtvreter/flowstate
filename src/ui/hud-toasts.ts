@@ -355,6 +355,19 @@ export function initToastDock(host: HTMLElement) {
     while (host.childElementCount > maxToasts()) host.firstElementChild!.remove();
     dock();
   }).observe(host, { childList: true });
+  // The tech tree opening or closing moves the toasts between the board and the tree's room (on a phone the column is
+  // placed on the screen while the tree is open, on the stage otherwise): they are placed again at once, not a beat later.
+  const appEl = document.getElementById('app');
+  let treeWas = !!appEl?.classList.contains('tech-open');
+  if (appEl) {
+    new MutationObserver(() => {
+      const tree = appEl.classList.contains('tech-open');
+      if (tree === treeWas) return;
+      treeWas = tree;
+      phoneKey = '';
+      if (host.childElementCount || treeRoom) dock();
+    }).observe(appEl, { attributes: true, attributeFilter: ['class'] });
+  }
   // The camera may move while a toast is up, and so may what lies around them.
   onBeat(() => {
     if (host.childElementCount || up || right || phoneKey) dock();
