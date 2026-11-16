@@ -224,7 +224,7 @@ const marked = new Set<number>();
 let markedFor: { from: number; port: number; quiet: boolean } | null = null;
 
 interface RadialOpt { type: NodeType; recipe?: string; label: string; sub: string; cost: number; locked?: string; glyph: string }
-/** `best`: the option the card asks for, highlighted and preselected (-1: none; see `suggest`). */
+/** `best`: the option highlighted and preselected: the one the card asks for, or the first when it asks for none (see `suggest`). */
 interface RadialState { at: Pt; opts: RadialOpt[]; dir: 'consume' | 'produce'; from: number; port: number; to: number; mat: MatId | null; a: Pt; best?: number }
 let radial: RadialState | null = null;
 
