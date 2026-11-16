@@ -322,17 +322,21 @@ describe('a blocked node: the way on', () => {
     expect([lab.id, ref.id]).toContain(wayOn(g, well)!.node);
   });
 
-  it('a Lab with room to spare is not offered Speed, and a wire at capacity hides what stands beyond it', () => {
+  it('a Lab with room to spare is not offered Speed; one just built is not judged; a wire at capacity hides what stands beyond it', () => {
     const { g, well } = fastWell();
     const lab = placeNode(g, 'lab', 500, 120)!;
     const wire = connect(g, well.id, 0, lab.id)!;
     well.status = 'blocked';
     well.blockedOn = 'glint';
-    well.grace = 0;
+    well.grace = lab.grace = 0;
     lab.rate = 0.4;
     expect(wayOn(g, well)).toEqual({ node: lab.id, speed: false, waits: null });
     lab.rate = 1;
     expect(wayOn(g, well)?.speed).toBe(true);
+    // (Only just built: not judged yet, so nothing is said about it.)
+    lab.grace = 3;
+    expect(wayOn(g, well)).toBeNull();
+    lab.grace = 0;
     wire.rate = PIPES[wire.tier].cap;
     expect(wayOn(g, well)).toBeNull();
   });

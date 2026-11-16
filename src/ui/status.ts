@@ -192,14 +192,15 @@ function speedTakesMore(g: Game, d: GNode): boolean {
 
 /**
  * The way on from a blocked node, or null when there is none to name: its output has no wire (the box says to wire it),
- * a machine downstream is in trouble itself (the box jumps to that cause), or nothing downstream is a Lab or a machine
- * with room on its wire (a Market or a Void takes everything: then a wire is the limit).
+ * a machine downstream is in trouble itself (the box jumps to that cause), or nothing downstream is a settled Lab or
+ * machine with room on its wire (a Market or a Void takes everything: then a wire is the limit).
  * Of several, the one whose Speed is cheapest; with no Speed to offer, the first, to be shown.
  */
 export function wayOn(g: Game, n: GNode, dx: Diagnosis = diagnose(g, n)): WayOn | null {
   if (dx.problem !== 'blocked' || dx.openPort || dx.culprit != null || !dx.mat) return null;
   const port = n.type === 'well' ? 0 : Math.max(0, recipeOf(n)?.outputs.findIndex((o) => o[0] === dx.mat) ?? 0);
-  const found = consumers(g, n.id, port, dx.mat, [], new Set());
+  // (A Lab or machine the player has only just built or changed is not judged yet, here as on the board: its grace.)
+  const found = consumers(g, n.id, port, dx.mat, [], new Set()).filter((d) => !(d.grace > 0));
   if (!found.length) return null;
   let best: GNode | null = null;
   for (const d of found) if (speedTakesMore(g, d) && (!best || upgradeCost(d, 'speed') < upgradeCost(best, 'speed'))) best = d;
