@@ -98,7 +98,7 @@ describe('orders (2.5)', () => {
     g.stats.ordersFilled = 1;
     const o = makeOrder(g);
     expect(o.mat).toBe('glint');
-    expect(o.need).toBeGreaterThanOrEqual(45);
+    expect(o.need).toBeGreaterThanOrEqual(RULES.orders.minSeconds); // a Glint a second, for at least that long
     // Nothing is produced at all (the Well is backed up): still a valid order.
     cutWire(g, g.wires[0].id);
     run(g, 30);
@@ -262,12 +262,16 @@ describe('orders (2.5)', () => {
     g.ordersOn = true;
     g.stats.ordersFilled = 1;
     expect(neededTier(g)).toBe('a');
-    // Three refined materials on sale at 0.5/s each: an order is 45–90 s of one of them (67.5 s on average),
+    // Three refined materials on sale at 0.5/s each: an order is 25–50 s of one of them (37.5 s on average),
     // claimed 10 s after it fills, and pays 3 α an item.
+    const mean = (RULES.orders.minSeconds + RULES.orders.maxSeconds) / 2;
+    expect(mean).toBe(37.5);
     const all = ordersWorth(g, { shard: 0.5, ink: 0.5, spark: 0.5 }, 10);
-    const pay = orderReward(g, 'ink', 0.5 * 67.5);
-    expect(all.a).toBeCloseTo(pay.a / (67.5 + 10), 2);
-    expect(all.a).toBeGreaterThan(1.2); // studying all of one of them would bring 1.5 α a second
+    const pay = orderReward(g, 'ink', 0.5 * mean);
+    expect(all.a).toBeCloseTo(pay.a / (mean + 10), 2);
+    // Studying all of one of them would bring 1.5 α a second; the ten seconds an order waits for its Claim are a
+    // fifth of its time now that orders are about half the size they were (45–90 s, when this was over 1.2).
+    expect(all.a).toBeGreaterThan(1.1);
     expect(all.credits).toBeGreaterThan(0.5);
     expect(all.b + all.g).toBe(0);
     // Half as much sold (the other half wired into Labs, say): orders half the size, in the same time.
@@ -294,9 +298,10 @@ describe('orders (2.5)', () => {
     const again = makeOrder(g, g.order!.mat);
     expect(sized(again)).toBeLessThan(40);
     g.stats.ordersFilled = 1;
-    let longer = 0;
-    for (let i = 0; i < 40; i++) if (sized(makeOrder(g)) > 44) longer++;
-    expect(longer).toBeGreaterThan(30); // 45 to 90 s from then on (a few are held up by the minimum of 8)
+    // 25 to 50 s from then on (a few are held up by the minimum of 8): no longer held to the first order's window.
+    const sizes = Array.from({ length: 40 }, () => sized(makeOrder(g))).filter((x) => isFinite(x)); // (some ask for what reaches no Market)
+    expect(sizes.filter((x) => x < 31 || x > 38).length).toBeGreaterThan(15);
+    expect(Math.min(...sizes)).toBeGreaterThanOrEqual(RULES.orders.minSeconds - 2);
   });
 
   it('prefers what is selling, and says so when the ordered material reaches no Market', () => {

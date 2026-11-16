@@ -75,7 +75,8 @@ describe('the adviser through its worker code', () => {
 
   test('followed second by second, it keeps and changes its verdicts exactly as on the live game', () => {
     // A long Data wait, a credits wait and the Flow goal, each from the moment the newcomer starts waiting.
-    const starts = ['make-glyph', 'build-fabricator', 'hold-flow', 'make-mist'].map((id) => real.find((g) => waitKind(g) && idOf(g) === id)!);
+    // (The Flow goal of the player who follows the lines is short: the waits of the one who reads none stand in.)
+    const starts = ['make-glyph', 'build-fabricator', 'hold-flow', 'make-mist'].map((id) => [...real, ...loose].find((g) => waitKind(g) && idOf(g) === id)!);
     let id = 1000;
     let kept = 0, fresh = 0;
     for (const start of starts) {
@@ -160,15 +161,16 @@ describe('what the adviser remembers, through its worker code', () => {
   });
 
   test('a tip is said once on an untouched board; an adviser handed a new game each time would say it again and again', () => {
-    // The newcomer who follows tips and no lines, a minute into the wait for Assembly: "buy Speed on the Lab"
-    // and "build a second Lab" are about equally good here, and used to take turns on the card.
+    // The newcomer who follows tips and no lines, a minute and a half into the wait for Breeze Deposits (order seed
+    // 3): two tips come and go there, and without the adviser's memory they come back again and again. (It was a
+    // minute into the wait for Assembly, on seed 1, until the second fix round's prices and Labs.)
     let n = 0;
     let board: Game | null = null;
     playByTheCard({
-      tips: true, seed: 1, meanwhile: false,
+      tips: true, seed: 3, meanwhile: false,
       onIdle: (g) => {
-        if (board || !waitKind(g) || activeGoal(g)!.id !== 'make-glyph') return;
-        if (++n === 60) { board = cloneGame(g)!; board.rev = g.rev; }
+        if (board || !waitKind(g) || activeGoal(g)!.id !== 'make-mist') return;
+        if (++n === 90) { board = cloneGame(g)!; board.rev = g.rev; }
       },
     });
     expect(board).not.toBeNull();

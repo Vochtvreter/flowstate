@@ -26,7 +26,7 @@ import { graph, isMachine, isPass } from './graph';
 import { startOrders } from './orders';
 import { Game, GNode, GoalReward, Wire, isLookahead, nodeNoun } from './state';
 import { clearHistory } from './actions';
-import { flowLineWords, lineFocus, waitKind } from './advice';
+import { flowLineWords, lineFocus, lineHeld, lineSpot, waitKind } from './advice';
 
 /** [current, target, unit]. Unit '¢' means "saving up credits"; 'α' / 'β' / 'γ' mean saving up Data. */
 export type GoalProgress = [current: number, target: number, unit: string];
@@ -88,6 +88,11 @@ export interface Meanwhile {
    * ever said when a card says the same.
    */
   cuts?(g: Game): number[];
+  /**
+   * The line is the goal's own requirement, not something to do while waiting: the goal cannot complete without
+   * it (goal 22's wires into the Fabricator). goalView passes it on, and the card says "Next step", with no count.
+   */
+  required?: boolean;
 }
 
 // ---------- helpers for predicates ----------
@@ -416,16 +421,6 @@ const cheapestWellSpeed = (g: Game) => {
 
 const hint = (mouse: string, touch: string = mouse) => ({ mouse, touch });
 
-/** Wells that feed a Lab studying what Wells give it and nothing else: the Wells of "a Well and a Lab of its own". */
-export function pairedWells(g: Game): GNode[] {
-  const c = graph(g);
-  const out = new Set<number>();
-  for (const lab of g.nodes) {
-    const fed = lab.type === 'lab' ? c.ins.get(lab.id) ?? [] : [];
-    if (fed.length > 0 && fed.every((w) => c.byId.get(w.from)?.type === 'well')) for (const w of fed) out.add(w.from);
-  }
-  return g.nodes.filter((n) => out.has(n.id));
-}
 /**
  * The pairs of "a Well and a Lab of its own" in the strict sense: a Lab fed by Wells alone, whose Wells send
  * nothing anywhere else. For each: its Wells, its Lab, what the pair studies a second now and at no Speed at
@@ -448,14 +443,6 @@ export function ownPairs(g: Game): { lab: GNode; wells: GNode[]; rate: number; b
   }
   return out;
 }
-/** Of those, the ones not wired to a Market. */
-const wellsToSell = (g: Game) => pairedWells(g).filter((n) => !(graph(g).outs.get(n.id)?.[0] ?? []).some((w) => graph(g).byId.get(w.to)?.type === 'market')).length;
-
-/**
- * "Expand the board again and give both new deposits a Well and a Lab of its own": the second expansion, on
- * "Assemble your first Glyph" once the first one's deposits have theirs, and on "Make your first Mist" for
- * whatever of it is still to do (the credits for the Assembler come first: see lineAdvice).
- */
 /**
  * "You have the β you need: cut the wire from the Glyph Assembler to the Lab." Goal 17 had the player study
  * Glyph. Fabrication's β is in hand once that and the rewards of goals 19 and 20 are counted, and from then on
@@ -480,9 +467,22 @@ const GLINT_LAB: Meanwhile = {
   when: (g) => has(g, 'R1') && (g.nodes.some((n) => n.type === 'well' && n.material === 'glint' && reachesLab(g, n.id, 0)) || !!rawGlintWell(g)),
 };
 
+/**
+ * "Expand the board again and give both new deposits a Well and a Lab of its own": the second expansion, on
+ * "Assemble your first Glyph" once the first one's deposits have theirs, and on "Make your first Mist" for
+ * whatever of it is still to do (the credits for the Assembler come first: see lineAdvice). It says "Expand"
+ * only while the expansion is its next step: once the board has grown, or wherever a deposit is waiting (a
+ * Glyph card that ended between the expansion and its pairs), it reads "Give each free deposit a Well and a Lab of
+ * its own." (It used to say "Expand the board again" on the Mist card, where its Show me then pointed at a Lab
+ * and a free deposit, and the line was ticked with no expansion made.)
+ */
 const EXPAND_LABS: Meanwhile = {
   id: 'expand-labs',
   text: hint('Expand the board again and give both new deposits a Well and a Lab of its own.'),
+  say: (g) => {
+    const spot = lineSpot(g);
+    return spot && 'expand' in spot ? null : hint('Give each free deposit a Well and a Lab of its own.');
+  },
   // Two such pairs on the second expansion's deposits, or five in all.
   done: (g) => wellLabs(g, depositsFrom(g, 1)) >= 2 || wellLabs(g) >= 5,
   when: (g) => has(g, 'R1'),
@@ -816,6 +816,16 @@ export const GOALS: Goal[] = [
         done: (g) => { const p = ownPairs(g); return p.length > 0 && p.every((x) => x.sped); },
         when: (g) => ownPairs(g).length >= 2,
       },
+      // Then Lab Speed and Deep Analysis: every Lab gives half as much again, for the rest of this wait and every
+      // one after it. The β it costs comes from the Glyph the card before had the player study; the Speed line comes
+      // first so that it is in hand by then. (A fast player buys Deep Analysis too, but after Breeze Deposits: this
+      // line is what the card-following player has instead of that player's upgrades. Second fix round, D1.)
+      {
+        id: 'deep-analysis',
+        text: hint('Research Lab Speed, then Deep Analysis: every item studied gives half as much Data again.'),
+        done: (g) => has(g, 'R3'),
+        when: (g) => has(g, 'R1'),
+      },
     ],
     reward: { a: 50 },
   },
@@ -855,17 +865,10 @@ export const GOALS: Goal[] = [
     // takes a wire back, and it is a card that says so: the adviser never reverses a card (src/advice.ts).
     // It applies while the β is covered and the Fabricator's price is not: a player who already has the
     // credits (one who never spent any on upgrades) gains nothing by it, and is not asked.
-    meanwhile: [
-      CUT_GLYPH,
-      {
-        // Once Fabrication is researched no Data is needed before the Lens, and the Wells with Labs of their own
-        // sell nothing: wired to the Market as well, half of what each gives is sold. Their Labs keep the rest.
-        id: 'sell-raw',
-        text: hint('Fabrication is researched: wire each Well with a Lab of its own to the Market too.'),
-        done: (g) => wellsToSell(g) === 0 && pairedWells(g).length > 0,
-        when: (g) => has(g, 'P7') && count(g, 'fabricator') === 0 && pairedWells(g).length > 0 && (wellsToSell(g) === 0 || g.credits < nodeCost(g, 'fabricator')),
-      },
-    ],
+    // (Its second line wired each Well with a Lab of its own to the Market too: four wires across the whole board at
+    // minute 17, and a minute later the game said that what they sold went at a quarter of the price, as every
+    // card player first sold over demand there. The Fabricator's price came down instead: docs/CONTENT.md.)
+    meanwhile: [CUT_GLYPH],
     reward: { b: 40 },
   },
   {
@@ -881,18 +884,21 @@ export const GOALS: Goal[] = [
     },
     // A Fabricator built from the Prism Assembler's port, as the card before says, has its Prism and no Glyph:
     // the step left is a wire, and the card names it (one built anywhere else needs the Prism wired too).
+    // They are the goal itself, not something to do while waiting (`required`): the card says "Next step".
     meanwhile: [
       {
         id: 'prism-fab',
         text: hint('Wire the Prism Assembler\'s port to the Fabricator: a Lens takes one Prism.'),
         done: (g) => lensFed(g, 'prism'),
         when: (g) => !!lensMaker(g),
+        required: true,
       },
       {
         id: 'glyph-fab',
         text: hint('Wire the Glyph Assembler\'s port to the Fabricator: a Lens takes two Glyph.'),
         done: (g) => lensFed(g, 'glyph'),
         when: (g) => !!lensMaker(g),
+        required: true,
       },
     ],
     reward: { unlock: 'end' },
@@ -991,7 +997,7 @@ export function goalView(g: Game, touch = false): GoalView | null {
   const inputs = goal.id === 'make-lens' && !g.goal.ready ? lensFeeds(g) : null;
   return {
     ...(goal.id === 'hold-flow' ? { flow: flowGoalView(g) } : {}),
-    ...(at ? { meanwhile: { text: lineText(g, at.line, touch), done: at.line.done(g), ...(at.of > 1 ? { step: at.step, of: at.of } : {}) } } : {}),
+    ...(at ? { meanwhile: lineView(g, at, touch) } : {}),
     ...(inputs ? { inputs } : {}),
     goal,
     number: free ? g.goal.i - MAIN_GOALS + 1 : g.goal.i + 1,
@@ -1002,6 +1008,18 @@ export function goalView(g: Game, touch = false): GoalView | null {
     progress: g.goal.ready ? null : goal.progress?.(g) ?? null,
     reward: goal.reward,
     big: !!goal.big,
+  };
+}
+
+/** The card's view of the line meanwhileAt(g) gives (GoalView.meanwhile). */
+function lineView(g: Game, at: { line: Meanwhile; step: number; of: number }, touch: boolean): NonNullable<GoalView['meanwhile']> {
+  const done = at.line.done(g);
+  const held = done ? null : lineHeld(g);
+  return {
+    text: lineText(g, at.line, touch), done,
+    ...(at.of > 1 ? { step: at.step, of: at.of } : {}),
+    ...(at.line.required ? { required: true } : {}),
+    ...(held ? { held } : {}),
   };
 }
 

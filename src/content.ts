@@ -93,12 +93,12 @@ export const NODE_DEFS: Record<NodeType, NodeDef> = {
   well: { type: 'well', name: 'Well', base: 10, growth: 1.15, tracks: ['speed'], verb: 'extract', blurb: 'Extracts a raw material. Must sit on a deposit.' },
   refiner: { type: 'refiner', name: 'Refiner', base: 50, growth: 1.15, tech: 'P1', tracks: ['speed', 'eff', 'buffer'], verb: 'refine', blurb: 'One input in, something better out.' },
   assembler: { type: 'assembler', name: 'Assembler', base: 600, growth: 2.5, tech: 'P4', tracks: ['speed', 'eff', 'buffer'], verb: 'assemble', blurb: 'Combines two inputs.' },
-  fabricator: { type: 'fabricator', name: 'Fabricator', base: 7250, growth: 1.15, tech: 'P7', tracks: ['speed', 'eff', 'buffer'], verb: 'fabricate', blurb: 'Combines up to three inputs.' },
+  fabricator: { type: 'fabricator', name: 'Fabricator', base: 4800, growth: 1.15, tech: 'P7', tracks: ['speed', 'eff', 'buffer'], verb: 'fabricate', blurb: 'Combines up to three inputs.' },
   router: { type: 'router', name: 'Router', base: 25, growth: 1.1, tech: 'L1', tracks: [], verb: 'split', blurb: 'Splits a stream by ratio, priority or filter.' },
   merger: { type: 'merger', name: 'Merger', base: 25, growth: 1.1, tech: 'L2', tracks: [], verb: 'merge', blurb: 'A junction: many wires in, one stream out.' },
   silo: { type: 'silo', name: 'Silo', base: 200, growth: 1.2, tech: 'L5', tracks: ['buffer'], verb: 'store', blurb: 'A big buffer that smooths bursts.' },
   market: { type: 'market', name: 'Market', base: 150, growth: 1.5, firstFree: true, tracks: [], verb: 'sell', blurb: 'Sells anything for credits. Takes any number of wires.' },
-  lab: { type: 'lab', name: 'Lab', base: 100, growth: 1.3, tech: 'R1', tracks: ['speed'], verb: 'study', blurb: 'Turns items into Data for the tech tree.' },
+  lab: { type: 'lab', name: 'Lab', base: 100, growth: 1.1, tech: 'R1', tracks: ['speed'], verb: 'study', blurb: 'Turns items into Data for the tech tree.' },
   void: { type: 'void', name: 'Void', base: 0, growth: 1, tech: 'P2', tracks: [], verb: 'destroy', blurb: 'Destroys whatever arrives. Free.' },
 };
 
@@ -165,11 +165,16 @@ const T = (
  * Tech prices as tuned with the pacing bot (`npm run pacing`, docs/CONTENT.md). The reasoning, so that the
  * next change keeps it:
  *  - The Processing spine the goal chain asks for (P2 → P3 → P4 → P5 → P7) is priced for the newcomer who
- *    does what the goal card says, its "while you wait" lines included (Goal.meanwhile in src/goals.ts): each
- *    of its waits is three to three and a half minutes for that player, never four, and together they put
- *    the first Lens at about twenty minutes, with the adviser's tips or without them. (The lines roughly
- *    triple that player's α. A player who reads only the hints and ignores the lines still needs most of an
- *    hour: the spine is not priced for that.)
+ *    does what the goal card says, its "while you wait" lines included (Goal.meanwhile in src/goals.ts), so that
+ *    the card keeps that player busy: nothing to do for at most 30% of the time to the first Lens, never for
+ *    more than a minute at a stretch, never more than 75 s on one goal, and the first Lens at 17:30–21:00
+ *    (decision D1 of the second fix round, "idle over length"; `npm run pacing`, policy cardonly). The fast
+ *    players are the floor (no first Lens before 14:00), so the spine could not simply come down. What came
+ *    down is what the card's player pays for and the fast players hardly do: the Labs of the lines (×1.1 a Lab,
+ *    it was ×1.3) and the Fabricator; and "Make your first Mist" has a line for Lab Speed and Deep Analysis
+ *    (the fast players buy Deep Analysis after Breeze Deposits, never before it). Assembly is 1,325α, Breeze
+ *    Deposits 1,875α. (A player who reads only the hints and ignores the lines still needs most of an hour:
+ *    the spine is not priced for that.)
  *  - Fabrication's α is the one spine price that is lower than the rest of the curve would suggest: by then
  *    the two Assemblers take the Shard, Ink and Spark the Labs were studying, and a newcomer's α income falls
  *    by a third. At 720 α the card's last wait is for the Fabricator's credits, not for the research, for the
@@ -179,7 +184,9 @@ const T = (
  *    Fabricator's price in hand before the research on every seed, and the line was worth nothing to them.
  *    The fast players wait for the Fabricator's credits whatever this costs, so it does not move their Lens.
  *  - Ember Deposits is the cheap one because a fast player has nothing else to do while it is saved for:
- *    past about 220 α their hands are idle for more than a minute.
+ *    past about 220 α their hands are idle for more than a minute. At 195α the card player's wait for it is
+ *    under a minute (51–56 s); Murk Deposits at 40α keeps a player who claims at once within 30 s on goal 8.
+ *  - Paradox's α (2,800) keeps the fast players' first Paradox after 24:00, now that their Lens comes sooner.
  *  - Side techs are impulse buys: cheap next to the spine tech they compete with, so every kind of player
  *    picks them up along the way. α for what is useful before the first Glyph (Lab Speed, Merger, Pipes
  *    Mk II: 150 α together), β after it. Wider Demand is β for that reason: nothing sells over demand before
@@ -199,12 +206,12 @@ const T = (
 export const TECHS: Record<string, Tech> = Object.fromEntries([
   // Processing
   T('P1', 'Refining', 'processing', 0, 0, {}, [], 'Your first machine. Turn raw Glint into Shard, which sells for more.', ['Refiner', 'Recipe: 2 Glint → Shard'], { auto: 'Reward for the goal “Wire it to the Market too”' }),
-  T('P2', 'Murk Deposits', 'processing', 1, 0, { a: 45 }, ['R1'], 'Extract Murk and refine it into Ink. It leaves Silt behind, so you also get the Void to dump it.', ['Murk Wells', 'Recipe: 2 Murk → Ink + Silt', 'Void node']),
-  T('P3', 'Ember Deposits', 'processing', 2, 0, { a: 215 }, ['P2'], 'Extract Ember and refine it into Spark.', ['Ember Wells', 'Recipe: 2 Ember → Spark']),
-  T('P4', 'Assembly', 'processing', 3, 0, { a: 1250 }, ['P3'], 'Machines with two inputs. Ink and Spark make Glyph, your first Tier 2 item and the source of β Data.', ['Assembler', 'Recipe: Ink + Spark → Glyph']),
-  T('P5', 'Breeze Deposits', 'processing', 4, 0, { a: 1850 }, ['P4'], 'Extract Breeze, refine it into Mist, and combine Mist with Shard into Prism.', ['Breeze Wells', 'Recipe: 2 Breeze → Mist', 'Recipe: 2 Shard + Mist → Prism']),
+  T('P2', 'Murk Deposits', 'processing', 1, 0, { a: 40 }, ['R1'], 'Extract Murk and refine it into Ink. It leaves Silt behind, so you also get the Void to dump it.', ['Murk Wells', 'Recipe: 2 Murk → Ink + Silt', 'Void node']),
+  T('P3', 'Ember Deposits', 'processing', 2, 0, { a: 195 }, ['P2'], 'Extract Ember and refine it into Spark.', ['Ember Wells', 'Recipe: 2 Ember → Spark']),
+  T('P4', 'Assembly', 'processing', 3, 0, { a: 1325 }, ['P3'], 'Machines with two inputs. Ink and Spark make Glyph, your first Tier 2 item and the source of β Data.', ['Assembler', 'Recipe: Ink + Spark → Glyph']),
+  T('P5', 'Breeze Deposits', 'processing', 4, 0, { a: 1875 }, ['P4'], 'Extract Breeze, refine it into Mist, and combine Mist with Shard into Prism.', ['Breeze Wells', 'Recipe: 2 Breeze → Mist', 'Recipe: 2 Shard + Mist → Prism']),
   T('P7', 'Fabrication', 'processing', 5, 0, { a: 720, b: 100 }, ['P5'], 'Three-input machines. Prism and Glyph become Lens, the first Tier 3 item and the source of γ Data.', ['Fabricator', 'Recipe: Prism + 2 Glyph → Lens']),
-  T('P9', 'Paradox', 'processing', 6, 0, { a: 2500, b: 250, g: 450 }, ['P8'], 'The capstone. Lens, Dynamo and raw Breeze fold into a Paradox.', ['Recipe: Lens + Dynamo + 4 Breeze → Paradox']),
+  T('P9', 'Paradox', 'processing', 6, 0, { a: 2800, b: 250, g: 450 }, ['P8'], 'The capstone. Lens, Dynamo and raw Breeze fold into a Paradox.', ['Recipe: Lens + Dynamo + 4 Breeze → Paradox']),
   // (Behind Assembly, not just Refining: it is priced in β, and Assembly is what brings the first β. Researchable
   // from the first visit to the tree, it sat there for ten minutes with "no β yet".)
   T('U1', 'Efficiency Tuning', 'processing', 1, 1, { b: 40 }, ['P1', 'P4'], 'A new upgrade track for machines: some crafts consume no inputs.', ['Efficiency upgrades on machines']),
@@ -390,10 +397,15 @@ export const RULES = {
   orders: {
     /** Starting seed for order generation; the running seed is saved with the game. */
     seed: 0x5eed1e55,
-    /** An order asks for between this many... */
-    minSeconds: 45,
+    /**
+     * An order asks for between this many... (It was 45 to 90 s. At about half the size, an order comes and is
+     * claimed almost twice as often for the same pay a second: a Claim to press every minute or so through the long waits of
+     * the middle game, which the card-following player otherwise spent with nothing to do; and a stretch of
+     * nothing to do is broken by one more often.)
+     */
+    minSeconds: 25,
     /** ...and this many seconds of what currently reaches Markets of that material... */
-    maxSeconds: 90,
+    maxSeconds: 50,
     /** ...but never fewer items than this. */
     minNeed: 8,
     /**

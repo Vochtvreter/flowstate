@@ -194,7 +194,7 @@ describe('waitInfo: what the card is waiting for', () => {
     expect(waitInfo(g)).toEqual({ unit: '¢', have: 0, need: 12, eta: Infinity, name: 'the Well' });
     at(g, 'research-murk');
     g.techs = ['P1', 'R1'];
-    expect(waitInfo(g)).toEqual({ unit: 'α', have: 0, need: 45, eta: Infinity, name: 'Murk Deposits' });
+    expect(waitInfo(g)).toEqual({ unit: 'α', have: 0, need: TECHS.P2.cost.a, eta: Infinity, name: 'Murk Deposits' });
   });
 
   it('for a tech with two prices, and for a research followed by a machine, names whatever takes longest', () => {
@@ -521,7 +521,7 @@ describe('advice: the repertoire, one board at a time', () => {
   });
 
   it('"cut this wire" is only ever said when the goal card says it too, and then the card\'s own step says it', () => {
-    // "Build a Fabricator", researched: 7,100¢ to save, the β long covered, and half the Glyph going into the Lab.
+    // "Build a Fabricator", researched: its price to save, the β long covered, and half the Glyph going into the Lab.
     const g = glyphGame();
     g.techs.push('P5', 'P7');
     g.data = { a: 5000, b: 5000, g: 0 };
@@ -533,7 +533,8 @@ describe('advice: the repertoire, one board at a time', () => {
     const lab = g.nodes.find((n) => n.type === 'lab')!;
     const wire = g.wires.find((w) => w.from === glyph.id && w.to === lab.id)!;
     // The card says it: its "while you wait" line.
-    expect(goalView(g)!.meanwhile).toEqual({ text: 'You have the β you need: cut the wire from the Glyph Assembler to the Lab.', done: false, step: 1, of: 2 });
+    // (The card's only line now: the one that wired the raw Wells to the Market as well is gone.)
+    expect(goalView(g)!.meanwhile).toEqual({ text: 'You have the β you need: cut the wire from the Glyph Assembler to the Lab.', done: false });
     expect(meanwhileOf(g)!.cuts!(g)).toEqual([wire.id]);
     // The line's step says which wire, in the words of the button ("Cut wire"), for the card's "Show me".
     const a = lineAdvice(g)!;
@@ -1257,7 +1258,7 @@ describe('the words: every sentence of the repertoire fits the card', () => {
   // Speed level 25 on a Fabricator, and a hundredth Lab: nothing in the game costs more than these.
   const upgradePrice = upgradeCostAt('fabricator', 'speed', 24);
   const bulkPrice = 10 * upgradePrice;
-  const buildPrice = nodeCostAt('lab', 40);
+  const buildPrice = nodeCostAt('lab', 99);
   const techs = Object.values(TECHS).map((t) => [t.name, costText(t)] as const);
 
   function* combos(lists: readonly (readonly unknown[])[], i = 0, acc: unknown[] = []): Generator<unknown[]> {
@@ -1310,7 +1311,8 @@ describe('the words: every sentence of the repertoire fits the card', () => {
     wellFeed: [Machines, raws, [buildPrice]],
     flowSell: [Producers, mats, own, markets],
     flowNowhere: [Producers, mats, own, markets],
-    flowSpeed: { tuples: shortOf },
+    // (As the card's Flow line names it, a tip names the supplier "its Ember Well" where several stand and one feeds it.)
+    flowSpeed: { tuples: shortOf.flatMap(([Who, mat, maker, price]) => [[Who, mat, maker, price], [Who, mat, maker.replace(/^(the|an?) /, 'its '), price]] as const) },
     flowWire: [Machines, mats, ports],
     flowNone: [Machines, mats, ports],
     flowFavour: [Machines, mats],
@@ -1324,7 +1326,9 @@ describe('the words: every sentence of the repertoire fits the card', () => {
     lineFeed: [ports, [...both('Fabricator'), ...both('Lens Fabricator')], ['one', 'two'], mats],
     linePairWell: [wells.flatMap(both), [upgradePrice]],
     linePairLab: [raws, [upgradePrice]],
-    lineSell: [wells.flatMap(both).map((n) => `${n}'s port`), markets, raws],
+    // "Make your first Mist", third line: Lab Speed, then Deep Analysis (their real names and prices).
+    lineLabSpeed: [[TECHS.R2.name], [costText(TECHS.R2)]],
+    lineDeep: [[TECHS.R3.name], [costText(TECHS.R3)]],
     // The Flow goal's line: who needs what, and the maker to buy Speed on, as for flowSpeed (and "its Ember Well").
     lineFlowSpeed: { tuples: shortOf.flatMap(([Who, mat, maker]) => [[Who, mat, maker], [Who, mat, maker.replace(/^(the|an?) /, 'its ')]] as const) },
   };
