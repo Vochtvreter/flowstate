@@ -634,6 +634,8 @@ function tendLine(g: Game, v: GoalView | null, now: number, changed: boolean, sa
     if (!line.done || g.time >= line.nextAt) swapLine(g, mw, now);
   } else {
     line.text = mw.text;
+    // (The count as well: a line that comes up in the middle of the wait makes "While you wait" read "1 of 2".)
+    line.of = mw.of ?? 1;
     line.obj = meanwhileOf(g);
     line.required = !!mw.required;
     line.held = mw.held ?? null;
