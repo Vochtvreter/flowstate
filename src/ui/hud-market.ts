@@ -1,5 +1,5 @@
 // The Market inspector: what sells here, and (once demand has ever mattered) one demand gauge per
-// material. Owned by the HUD track.
+// material. Part of the HUD.
 //
 // A gauge is a single bar. Its fill is what is being sold per second; a tick marks how much the
 // buyers take at full price. Whatever is past the tick sells cheap and is drawn striped. Under it,

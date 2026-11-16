@@ -20,7 +20,7 @@ describe('the ending: from the first Lens to free play', () => {
     return { g, screens, ui };
   }
 
-  it('Keep playing with no Claim before it: the capstone is claimed and free play shows at once (final-consultant F1)', async () => {
+  it('Keep playing with no Claim before it: the capstone is claimed and free play shows at once', async () => {
     const { g, screens } = await lensMade();
     expect(GOALS[g.goal.i].reward.unlock).toBe('end');
     // From the Lens on, the card shows the ending (no Claim: Keep playing claims), and the board is quiet.

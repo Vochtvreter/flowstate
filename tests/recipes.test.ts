@@ -1,5 +1,5 @@
-// What recipe a machine takes from what is wired into it, once later research exists (the rules review's F5),
-// and Paradox's price in β (F6). Free play, mostly: the recipes that compete need γ.
+// What recipe a machine takes from what is wired into it, once later research exists, and Paradox's price in β.
+// Free play, mostly: the recipes that compete need γ.
 import { describe, expect, it } from 'vitest';
 import { connect, pickRecipe, placeNode } from '../src/actions';
 import { TECHS } from '../src/content';
@@ -64,8 +64,8 @@ describe('a machine takes the recipe that fits what it is fed', () => {
 
 describe('Paradox', () => {
   it('costs 250β: free play\'s last research is not a 37-minute save of the Data it has least of', () => {
-    // (Its α went from 2,500 to 2,800 with the second fix round: the fast players' first Lens came sooner, and their
-    // first Paradox stays after 24:00.)
+    // (Its α went from 2,500 to 2,800 when the fast players' first Lens came sooner: their first Paradox stays
+    // after 24:00.)
     expect(TECHS.P9.cost).toEqual({ a: 2800, b: 250, g: 450 });
   });
 });

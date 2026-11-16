@@ -25,7 +25,8 @@ describe('pacing: every target holds on order seeds 0 to 3', () => {
           // The Flow goal's line names the fix (Speed on the Ember Well): done long before the valve (90 s).
           expect(flowGoal, `seed ${seed}: seconds on the Flow goal`).not.toBeNull();
           expect(flowGoal!, `seed ${seed}: seconds on the Flow goal`).toBeLessThanOrEqual(45);
-          // Decision D1 of the second fix round, "idle over length" (also among the checks below).
+          // The pacing rule: where a later first Lens would cost waits with nothing to do in them, the waits are
+          // kept short. Its limits for this player (also among the checks below).
           expect(nothing.longest, `seed ${seed}: longest stretch with nothing to do`).toBeLessThanOrEqual(60);
           expect(nothing.share, `seed ${seed}: share of nothing to do`).toBeLessThanOrEqual(0.3);
           for (const [i, s] of Object.entries(nothing.perGoal)) expect(s, `seed ${seed}: nothing to do on goal ${Number(i) + 1}`).toBeLessThanOrEqual(75);
@@ -42,8 +43,9 @@ describe('pacing: every target holds on order seeds 0 to 3', () => {
     });
   }
 
-  it('the targets are the ones in the brief', () => {
-    // Fast: the first Lens no sooner than 14:00 (decision D1 of the second fix round; it was 14:30).
+  it('the targets are the ones in docs/CONTENT.md', () => {
+    // Fast: the first Lens no sooner than 14:00 (it was 14:30; it came down so that the card players' waits could
+    // be kept short, under the pacing rule).
     expect(TARGETS.fast).toMatchObject({
       firstMachineBy: 45, labBy: 90, firstResearchBy: 150, earlyIdleMax: 10, glyph: [360, 480], lens: [840, 1080], fabricatorMax: 300,
       deadBefore10: 60, deadBeforeLens: 120, contentUntil: 1440, paradoxBy: 1800,
@@ -52,7 +54,7 @@ describe('pacing: every target holds on order seeds 0 to 3', () => {
     // no goal over 240 s. At 10 s an action: Lens by 24:00, no goal over 300 s.
     expect(TARGETS.newcomer).toEqual({ lens: [1050, 1260], goalMax: 240, fabricatorMax: 240 });
     expect(TARGETS.newcomer10).toEqual({ lensBy: 1440, goalMax: 300 });
-    // Never following a tip (decision D1, "idle over length"): Lens between 17:30 and 21:00, no goal over 360 s,
+    // Never following a tip (the player the pacing rule is set for): Lens between 17:30 and 21:00, no goal over 360 s,
     // never a minute with nothing to do, no goal with more than 75 s of it in all, and nothing to do for at most 30%
     // of the time to the Lens. Nothing is sold over its demand before the Lens either (a check of its own).
     expect(TARGETS.cardonly).toEqual({ lens: [1050, 1260], goalMax: 360, nothingStretch: 60, nothingShare: 0.3, nothingGoal: 75 });

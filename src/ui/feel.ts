@@ -1,5 +1,5 @@
 // Feel: sound, haptics, celebrations and the guiding hand.
-// Owned by the feel track. Nothing here is called by the board or the panels: it listens to the
+// Nothing here is called by the board or the panels: it listens to the
 // hooks in ui.ts (simulation events, interface signals, the frame and the beat) and answers with
 // sound (audio.ts), particles (fx.ts), the big celebrations (celebrate.ts) and the hand (hand.ts).
 import { DATA_COLORS, DATA_NAMES, DataTier, MatId, NODE_DEFS, NodeType, TECHS } from '../content';
@@ -789,7 +789,7 @@ export function initFeel() {
   onSignal('sale', onSale);
   onSignal('connect', onConnect);
   onSignal('place', onPlace);
-  // (The hotbar button's own pulse is the phone track's; this is the bell that goes with it.)
+  // (The hotbar button's own pulse is in phone.css; this is the bell that goes with it.)
   onSignal('afford', () => cueAfford());
   // The goal card's tip: a soft cue when one appears (audio.ts lets one through every 20 s), the hand
   // at its Show me button when it has gone stale, and the hand acting it out when Show me is pressed.

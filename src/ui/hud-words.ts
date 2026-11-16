@@ -1,4 +1,4 @@
-// Wording that depends on how the player is playing. Owned by the HUD track.
+// Wording that depends on how the player is playing. Part of the HUD.
 //
 // The phone module records the kind of the last pointer on <html data-input="touch|mouse">.
 // Everything the HUD and the panels say reads it here: a finger "taps", and is never told about a key.

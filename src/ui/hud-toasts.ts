@@ -1,4 +1,4 @@
-// Simulation events to toasts, and where toasts sit. Owned by the HUD track.
+// Simulation events to toasts, and where toasts sit. Part of the HUD.
 //
 // A toast is for what nothing else on screen says at that moment. So there is none for:
 //  - a goal turning ready or being claimed (the goal card; the celebration);
@@ -214,7 +214,7 @@ export function initToastDock(host: HTMLElement) {
     else tech.style.removeProperty('--toast-room');
   };
   /**
-   * On a phone with the tech tree open (it covers the whole screen): toasts lay over its tiles (wire-ui, what remains 3).
+   * On a phone with the tech tree open (it covers the whole screen): toasts lay over its tiles.
    * They go in a room of their own at the foot of the list of tiles instead, which ends that much higher for as long as
    * they are up: above the detail sheet, or the foot of the screen; on a phone held sideways, at the foot of the list's
    * column, beside the detail. Never over a tile, the tabs, the detail or its Research button. The newest that fit in

@@ -248,7 +248,7 @@ g.wire.dim:hover .base { stroke-opacity: 0.6; }
    (For touch, and for a port armed by a tap, phone.css also lights up what can.) */
 #board.marking .node.cant { opacity: 0.4; }
 
-/* The overview: the camera is out past the floor of the detailed tier (#board.ov; data-ov is 1, 2, 3
+/* The overview: the camera is out past the floor of the detailed tier (#board.ov; data-ov is 1 to 5
    as it pulls back further). Every card is its icon and status ring on a plain tile, wires are thin
    lines of one width, and nothing has to be read. Icons and wires are sized in board units, so each
    step draws them larger: an icon is never under 24 px on screen. */

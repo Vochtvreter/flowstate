@@ -257,7 +257,7 @@ export interface OrderView {
 
 /**
  * What the orders still to come are worth per second on this board, on average: for the adviser's look-ahead
- * copies (src/advice.ts), in which no new order is rolled. An order asks for 45 to 90 s of what is sold of one
+ * copies (src/advice.ts), in which no new order is rolled. An order asks for 25 to 50 s of what is sold of one
  * of the first three candidates and pays by the item, so a board that sells half as much of a material gets
  * orders for it half the size: a change that takes goods away from the Markets costs that much.
  * `sold` is items per second reaching Markets, `lag` the seconds between an order filling and its claim.

@@ -282,7 +282,7 @@ export const TARGETS = {
     /** An action available at least this often in the first two minutes. */
     earlyIdleMax: 10,
     glyph: [360, 480] as [number, number],
-    /** 14:00–18:00 (the first Lens for the card players came down to 17:30–21:00: decision D1 of the second fix round). */
+    /** 14:00–18:00 (the first Lens for the card players came down to 17:30–21:00: the pacing rule, at `cardonly` below). */
     lens: [840, 1080] as [number, number],
     /** No more than this long on "Build a Fabricator". */
     fabricatorMax: 300,
@@ -308,9 +308,10 @@ export const TARGETS = {
     goalMax: 300,
   },
   /**
-   * The newcomer who never follows a tip: the cards and their "while you wait" lines alone. Decision D1 of the
-   * second fix round, "idle over length": the first Lens between 17:30 and 21:00, with something to do in it: no
-   * stretch of nothing to do (Bot.nothing) over a minute, no goal with more than 75 s of nothing to do in all,
+   * The newcomer who never follows a tip: the cards and their "while you wait" lines alone. The pacing rule is
+   * set for this player: where a later first Lens would cost waits with nothing to do in them, the waits are
+   * kept short. So the first Lens between 17:30 and 21:00, with something to do in it: no stretch of nothing to
+   * do (Bot.nothing) over a minute, no goal with more than 75 s of nothing to do in all,
    * nothing to do for no more than 30% of the time to the first Lens, and nothing sold over its demand before it
    * (the first surplus is a moment of free play).
    */
@@ -1902,8 +1903,9 @@ function checks(r: Result): Check[] {
     add('dearest goal-path tech, in Data income', `${isFinite(r.wall.seconds) ? Math.round(r.wall.seconds) + 's' : 'never'} (${r.wall.id})`, `≤ about ${T.dataWall}s`, r.wall.seconds <= T.dataWall * 1.1);
   }
   add('credits from sales and orders at the Lens', r.earnedShare == null ? '—' : `${Math.round(r.earnedShare * 100)}%`, `≥ ${Math.round(TARGETS.earnedShare * 100)}%`, r.earnedShare != null && r.earnedShare >= TARGETS.earnedShare);
-  // The card players sell nothing over its demand before the first Lens (decision D1): the first surplus, Market
-  // Lens and the Commerce branch belong to free play. (The fast players may: their own upgrades get them there.)
+  // The card players sell nothing over its demand before the first Lens (one of the pacing targets): the first
+  // surplus, Market Lens and the Commerce branch belong to free play. (The fast players may: their own upgrades get
+  // them there.)
   if (r.policy.card) {
     const early = r.surplusAt != null && (r.lens == null || r.surplusAt.t < r.lens);
     add('first sale over demand', r.surplusAt ? mmss(r.surplusAt.t) : 'never', 'after the first Lens', !early);
@@ -2238,7 +2240,7 @@ function main() {
     else if (k === 'minShare' && v) ADVICE.minShare = Number(v);
     else if (k === 'lineReserve' && v) {
       // 0: no reserve at all; full: the whole price of the card's next purchase is kept back from the start (the
-      // rule before the second fix round); anything else: only what cannot be earned back before it can be made.
+      // rule of an earlier build); anything else: only what cannot be earned back before it can be made.
       ADVICE.lineReserve = v !== '0';
       ADVICE.reserveEarned = v !== 'full';
     } else if (k === 'lineHold' && v) ADVICE.lineHold = Number(v);

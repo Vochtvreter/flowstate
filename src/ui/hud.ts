@@ -1,6 +1,6 @@
 // The HUD: goal card and Claim, order chip, bottleneck chip, Flow ring, and the toasts that follow
 // the simulation. The start screen and the end-of-demo summary are in hud-screens.ts.
-// Owned by the HUD track. Subscribes through the hooks in ui.ts and panels.ts.
+// Subscribes through the hooks in ui.ts and panels.ts.
 //
 // What other modules can rely on:
 //  - Anchors (dom.ts): 'goal' is the Claim button while there is one, otherwise the card (for half
@@ -281,7 +281,7 @@ function progressHtml(p: GoalProgress): string {
 /**
  * The progress line during a wait, as the adviser sees the wait: what is really being saved for (which can
  * be the credits for a machine while the goal's own count is still the Data for its research) and how long
- * that takes at the current income: "Saving 320 / 1,140α · about 2 min". When nothing is coming in it
+ * that takes at the current income: "Saving 320 / 1,325α · about 2 min". When nothing is coming in it
  * says so, instead of a time that would never come.
  */
 function waitHtml(w: WaitLine, paused: boolean): string {

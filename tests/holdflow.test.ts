@@ -1,9 +1,9 @@
 // "Hold 95% Flow" when the player has built ahead: a second Glyph Assembler, which the credits in hand pay for
-// when the goal comes up, leaves two producers short that no single change puts right. The rules review's F1
-// (its rev-holdflow test): the chain stopped there for good. The valve's second step (all but two, at 180 s)
-// lets it through, and the card's own line names what it can fix on the way. Left alone, the board is three
-// short: the third step (all but three, at 300 s) passes it. So it does a save from the public version played
-// on by the tips alone (the rules verifier's v10), which stopped there for good with two steps.
+// when the goal comes up, leaves two producers short that no single change puts right: the chain used to stop
+// there for good. The valve's second step (all but two, at 180 s) lets it through, and the card's own line names
+// what it can fix on the way. Left alone, the board is three short: the third step (all but three, at 300 s)
+// passes it. So it does a save from the public version played on by the tips alone, which stopped there for
+// good with two steps.
 import { describe, expect, it } from 'vitest';
 import { claimGoal, claimOrder, clearHistory, connect, expandBoard, favour, placeNode } from '../src/actions';
 import { advice, adviceTrials, applyAdvice, lineAdvice } from '../src/advice';
@@ -68,11 +68,11 @@ describe('Hold 95% Flow with a second Glyph Assembler built ahead', () => {
     expect(slack2 || g.time - t0 < RULES.flow.valveAfter2).toBe(true);
   }, 120_000);
 
-  it('the player who reads no line and follows the tips (the review\'s own script): the adviser names the fix the line names, then the valve\'s second step', () => {
+  it('the player who reads no line and follows the tips: the adviser names the fix the line names, then the valve\'s second step', () => {
     const { g } = builtAhead();
     const t0 = g.time;
     const tips: string[] = [];
-    // As tests/rev-holdflow did: a look at the tips every 16 s, nothing else.
+    // A look at the tips every 16 s, nothing else.
     for (let k = 0; k < 450 && !g.goal.ready; k++) {
       for (let i = 0; i < 40; i++) tick(g, 0.05);
       if (g.order?.ready) claimOrder(g);
@@ -110,7 +110,7 @@ describe('Hold 95% Flow with a second Glyph Assembler built ahead', () => {
     expect(goalView(g)!.flow).toMatchObject({ valve: true, slack: 3 });
   }, 120_000);
 
-  it('the line names the node its step acts on, which is not the producer the Flow ring jumps to (the rules review\'s board)', () => {
+  it('the line names the node its step acts on, which is not the producer the Flow ring jumps to', () => {
     const { g } = builtAhead();
     // A moment for the second Assembler to count and for the rates to settle.
     for (let i = 0; i < 20 * 30; i++) tick(g, 0.05);
@@ -144,7 +144,7 @@ describe('Hold 95% Flow with a second Glyph Assembler built ahead', () => {
     clearHistory();
     const g = deserialize(PUBLIC_BOARD)!;
     const by = (f: (n: GNode) => boolean) => g.nodes.find(f);
-    // Up to "Hold 95% Flow" as the rules verifier's v10 played it: the cards, a Router that favours the Lab, the expansion.
+    // Played up to "Hold 95% Flow": the cards, a Router that favours the Lab, the expansion.
     for (let k = 0; k < 2000 && activeGoal(g)!.id !== 'hold-flow'; k++) {
       for (let i = 0; i < 40; i++) tick(g, 0.05);
       if (g.order?.ready) claimOrder(g);
