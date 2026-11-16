@@ -25,12 +25,12 @@ import { Panel, cachedRect, el, invalidateLayout, makePanel, setAnchor, setAttr,
 import { nodeSize } from './geom';
 import { marketSection } from './hud-market';
 import { logoMark } from './hud-screens';
-import { isTouch, withKey } from './hud-words';
+import { PressWord, isTouch, withKey } from './hud-words';
 import { esc, icon, matGlyph, nodeIcon } from './icons';
 import { env } from './phone-env';
-import { diagnose, matName, starvedShort, victoryQuiet } from './status';
+import { bulkPlan, diagnose, matName, starvedShort, victoryQuiet, wayOn } from './status';
 import { metData, pricedInMet, readyCount, setCardWait, teasedSlot } from './tech';
-import { delegate, select, signal, toast, touch, ui } from './ui';
+import { delegate, onPress, select, signal, toast, touch, ui } from './ui';
 
 let topEl: HTMLElement;
 let hotEl: HTMLElement;
@@ -114,10 +114,14 @@ export function initPanels(refs: {
     touch();
   });
   delegate(hotEl, (a, args) => {
+    // (Not in the moment after the bar was moved by a page: see hotPage.)
+    if (performance.now() - pagedAt < PAGE_DEAF) return;
     if (a === 'place') startPlacing(args[0] as never);
     else if (a === 'locked') hooks.openTech(args[0]);
     renderPanels(true);
   });
+  pageButton(document.getElementById('hot-more'), 1);
+  pageButton(document.getElementById('hot-less'), -1);
 
   delegate(zoomEl, (a) => {
     if (a === 'in') zoomBy(1.25);
@@ -129,12 +133,12 @@ export function initPanels(refs: {
   delegate(inspEl, (a, args, pressed) => {
     // A control that a tip pointed at ("Show me") loses its ring the moment it is pressed.
     pressedMark(pressed.dataset.testid);
-    inspectorAction(a, args, hooks.openTech);
+    inspectorAction(a, args, hooks.openTech, pressed);
     renderPanels(true);
   });
 }
 
-function inspectorAction(a: string, args: string[], openTech: (id?: string) => void) {
+function inspectorAction(a: string, args: string[], openTech: (id?: string) => void, pressed: HTMLElement) {
   const g = ui.g;
   const sel = ui.sel;
   if (a === 'close') return select(null);
@@ -151,6 +155,16 @@ function inspectorAction(a: string, args: string[], openTech: (id?: string) => v
     if (a === 'upg') {
       if (!upgrade(g, n.id, args[0] as Track)) toast('Not enough credits', 'bad');
     } else if (a === 'upgall') {
+      // One press buys what the button said, or nothing. The button is drawn on the panels' beat, and credits come in
+      // between: where they have brought another node within reach since, the press would spend more than was
+      // written on it. It is drawn afresh instead (the refresh that follows every press here), and says so.
+      const plan = bulkPlan(g, n.type, args[0] as Track);
+      const said = Number(pressed.dataset.count);
+      if (plan.count > 0 && pressed.dataset.count != null && plan.count !== said) {
+        const names = `${NODE_DEFS[n.type].name}${plan.count > 1 ? 's' : ''}`;
+        toast(`${PressWord()} again: ${plan.count} ${names} in reach now, for <b>${fmt(plan.cost)}¢</b>`, 'info');
+        return;
+      }
       const c = upgradeAll(g, n.type, args[0] as Track);
       toast(c ? `Upgraded ${c} ${NODE_DEFS[n.type].name}${c > 1 ? 's' : ''}` : 'Not enough credits', c ? 'good' : 'bad');
     } else if (a === 'del') {
@@ -593,8 +607,8 @@ function renderHot(force: boolean) {
 /**
  * On a phone the build bar scrolls sideways once it holds more than fits (Market, Lab and Void went off its
  * right edge unseen). It says so: `more-r` while there is more to the right, `more-l` to the left
- * (phone.css fades that edge and puts a chevron on it). Looked at when its slots change, when it scrolls and when
- * the window does.
+ * (phone.css fades that edge and shows the chevron button that moves the bar that way: pageButton). Looked at when
+ * its slots change, when it scrolls and when the window does.
  */
 function hotMore() {
   const phone = env.phone;
@@ -611,6 +625,76 @@ const hotMoreSoon = () => {
     hotMore();
   });
 };
+
+/** The width of a chevron button over the bar's edge, and the gap between two slots (phone.css). */
+const PAGE_BTN = 46;
+const PAGE_GAP = 6;
+/** When the bar was last moved by a page (ms), and for how long after that it takes no press on a slot. */
+let pagedAt = -1e9;
+const PAGE_DEAF = 600;
+
+/**
+ * Move the phone's build bar on (1) or back (-1) by a page: the first slot that the chevron lay over comes to stand
+ * clear, just inside the chevron at the other edge. With reduced motion the bar jumps there. For PAGE_DEAF ms after,
+ * the slots take no press: a chevron that has done its work goes away, and a second tap aimed at it would land on
+ * the slot that stands where it was (the Void, which is free).
+ */
+function hotPage(dir: 1 | -1) {
+  const view = hotEl.getBoundingClientRect();
+  const at = hotEl.scrollLeft;
+  const max = hotEl.scrollWidth - hotEl.clientWidth;
+  // Each slot's edges along the bar's content.
+  const slots = Array.from(hotEl.querySelectorAll<HTMLElement>('.hb')).filter((e) => e.offsetWidth > 0).map((e) => {
+    const r = e.getBoundingClientRect();
+    return { x0: r.left - view.left + at, x1: r.right - view.left + at };
+  });
+  let to: number;
+  if (dir > 0) {
+    const edge = at + view.width - PAGE_BTN;
+    const next = slots.find((s) => s.x1 > edge + 1);
+    to = next ? next.x0 - PAGE_BTN - PAGE_GAP : max;
+  } else {
+    const edge = at + PAGE_BTN;
+    const prev = slots.reverse().find((s) => s.x0 < edge - 1);
+    to = prev ? prev.x1 + PAGE_GAP + PAGE_BTN - view.width : 0;
+  }
+  // (Always some way in the direction asked, never past either end, and not to within a chevron's width of an end:
+  // the bar would rest a few pixels short of it.)
+  to = dir > 0 ? Math.max(to, at + PAGE_BTN) : Math.min(to, at - PAGE_BTN);
+  to = to < PAGE_BTN ? 0 : to > max - PAGE_BTN ? max : to;
+  pagedAt = performance.now();
+  hotEl.scrollTo({ left: to, behavior: env.calm ? 'auto' : 'smooth' });
+}
+
+/**
+ * A chevron over the build bar's edge: a press moves the bar by a page. A finger that comes down on it and slides
+ * moves the bar with it instead, as it does anywhere else on the bar (the chevron lies over the bar, so the browser's
+ * own scrolling does not start there).
+ */
+function pageButton(btn: HTMLElement | null, dir: 1 | -1) {
+  if (!btn) return;
+  let down: { id: number; x: number; left: number } | null = null;
+  let slid = false;
+  btn.addEventListener('pointerdown', (e) => {
+    slid = false;
+    down = e.pointerType === 'mouse' ? null : { id: e.pointerId, x: e.clientX, left: hotEl.scrollLeft };
+  });
+  btn.addEventListener('pointermove', (e) => {
+    if (!down || e.pointerId !== down.id) return;
+    const dx = e.clientX - down.x;
+    if (!slid && Math.abs(dx) < 8) return;
+    slid = true;
+    hotEl.scrollLeft = down.left - dx;
+  });
+  const up = (e: PointerEvent) => {
+    if (down && e.pointerId === down.id) down = null;
+  };
+  btn.addEventListener('pointerup', up);
+  btn.addEventListener('pointercancel', up);
+  onPress(btn, () => {
+    if (!slid) hotPage(dir);
+  });
+}
 
 /** Hotbar node types in key order (unlocked only). */
 export function hotbarTypes(g: Game) {
@@ -675,8 +759,23 @@ function statusBlock(g: Game, n: GNode): string {
     title = `Blocked: ${matName(dx.mat)} output is full`;
     if (dx.openPort) body = `${matName(dx.mat)} has nowhere to go. ${isTouch() ? 'Tap its port, then tap an empty spot' : 'Drag from its port into empty space'} to send it somewhere.`;
     else {
-      body = 'Whatever is downstream cannot keep up.';
-      if (dx.culprit != null) actions += `<button class="ghostbtn" data-act="jump:${dx.culprit}">Jump to the cause</button>`;
+      // What is full downstream, named, with the way on in one press where there is one: Speed on the Lab or machine
+      // that takes no more (the same button a starved machine has for its source), and Show to go there.
+      const on = wayOn(g, n, dx);
+      const next = on ? nodeById(g, on.node) : null;
+      if (on && next) {
+        const name = NODE_DEFS[next.type].name;
+        // (With room: its Speed has just been raised, by the button below as likely as not, and this box is about to go.)
+        body = on.waits ? `The ${name} it feeds is waiting for ${matName(on.waits)}.`
+          : on.room ? `The ${name} it feeds has room now.`
+            : !on.speed ? `The ${name} it feeds cannot take more.`
+              : next.type === 'lab' ? `The ${name} it feeds is full.` : `The ${name} it feeds is at full speed.`;
+        if (on.speed) actions += buyBtn(`upgsrc:${next.id}`, upgradeCost(next, 'speed'), g.credits, `Upgrade ${name} · `, 'upg-next');
+        actions += `<button class="ghostbtn" data-act="jump:${next.id}" data-testid="show-next" aria-label="Show the ${name}">Show</button>`;
+      } else {
+        body = 'Whatever is downstream cannot keep up.';
+        if (dx.culprit != null) actions += `<button class="ghostbtn" data-act="jump:${dx.culprit}">Jump to the cause</button>`;
+      }
     }
     if (dx.victim) cls = 'blocked';
   }
@@ -719,6 +818,28 @@ function flowSection(g: Game, n: GNode): string {
     <div class="bar"><span style="width:${pct(n.util)}%;background:#7AA2FF"></span></div></div>`;
 }
 
+/**
+ * "Upgrade all · 819¢": the bulk button says what one press would spend, before the press (bulkPlan in status.ts counts
+ * it as upgradeAll does it). It looks as the single-level button beside it does: gold when the press would buy
+ * something, filling up while it would buy nothing. Where the credits reach only some of the nodes, it says how many
+ * ("Upgrade 6 of 9 · 512¢"): that is what the press would do. (A button with an edge, 44 px tall for a finger: goal 20
+ * asks for it.)
+ */
+function bulkBtn(g: Game, n: GNode, t: Track): string {
+  const def = NODE_DEFS[n.type];
+  const plan = bulkPlan(g, n.type, t);
+  const some = plan.count > 0;
+  const part = some && plan.count < plan.of;
+  const price = some ? plan.cost : plan.total;
+  const words = part ? `Upgrade ${plan.count} of ${plan.of}` : 'Upgrade all';
+  const about = part
+    ? `Upgrade ${plan.count} of ${plan.of} ${def.name}s by one level, lowest level first, for ${fmt(price)}¢`
+    : `Upgrade every ${def.name} by one level for ${fmt(price)}¢${some ? '' : ': not enough credits yet'}`;
+  const id = `upgall-${t}`;
+  return `<button class="buy bulk${some ? ' ok' : ''}${marked(id)}" data-act="upgall:${t}" data-testid="${id}" data-count="${plan.count}" data-of="${plan.of}" data-cost="${price}" title="${about}" aria-label="${about}">${
+    some ? '' : `<span class="fill" style="width:${pct(g.credits / Math.max(1, price))}%"></span>`}<span class="lab">${words} · <span class="mono">${fmt(price)}¢</span></span></button>`;
+}
+
 function upgradeSection(g: Game, n: GNode): string {
   const def = NODE_DEFS[n.type];
   if (!def.tracks.length) return '';
@@ -734,9 +855,7 @@ function upgradeSection(g: Game, n: GNode): string {
     const max = maxLevel(g, t);
     if (lv >= max) return `<div class="uprow"><div><b>${TRACK_INFO[t].name} <span class="mono muted">Lv ${lv}</span></b><small>Maxed${t === 'speed' && TECHS.U2 && !has(g, 'U2') ? ` · ${esc(TECHS.U2.name)} raises the cap` : ''}</small></div></div>`;
     const cost = upgradeCost(n, t);
-    const all = `upgall-${t}`;
-    // (A button with an edge, 44 px tall for a finger: as a text link it was 66 by 15 px on a tablet, and goal 20 asks for it.)
-    const bulk = has(g, 'S1') ? `<button class="bulkbtn${marked(all)}" data-act="upgall:${t}" data-testid="${all}" title="Upgrade every ${def.name} by one level" aria-label="Upgrade every ${def.name} by one level">Upgrade all</button>` : '';
+    const bulk = has(g, 'S1') ? bulkBtn(g, n, t) : '';
     const buy = buyBtn(`upg:${t}`, cost, g.credits, '', `upg-${t}`);
     // (With "Upgrade all" the two buttons are kept together: where the row is narrow they go under the words as a pair.)
     return `<div class="uprow${bulk ? ' hasbulk' : ''}"><div><b>${TRACK_INFO[t].name} <span class="mono muted">Lv ${lv} → ${lv + 1}</span></b><small>${TRACK_INFO[t].desc(n)}</small></div>${bulk ? `<span class="upbtns">${bulk}${buy}</span>` : buy}</div>`;
@@ -820,7 +939,7 @@ function nodeInspector(g: Game, n: GNode): string {
     body += `<div class="sec flow"><span class="lbl">Stored</span>${stored.map((m) => `<div><div class="row sm"><span>${matGlyph(m, 12)} ${MATERIALS[m].name}</span><span class="mono"><b>${Math.round(n.inb[m] ?? 0)}</b> / ${passCap(n)}</span></div><div class="bar"><span style="width:${pct((n.inb[m] ?? 0) / passCap(n))}%;background:${MATERIALS[m].color}"></span></div></div>`).join('') || '<div class="note">Empty.</div>'}
       <div class="note">Holds up to ${passCap(n)} of each material.</div></div>`;
   }
-  else body += `<div class="sec"><div class="note">${def.blurb}</div></div>`;
+  // (A Void or a Merger has nothing more to show: what it does is said once, under its name.)
   body += upgradeSection(g, n);
   const refund = refundOf(g, n);
   const fixed = n.type === 'well';
@@ -906,8 +1025,9 @@ let inspOpenedFor = '';
 /**
  * Scroll the inspector, just opened, so what the player most likely came for is in view: the control "Show me" has
  * ringed, the "Upgrade all" the goal on the card asks for (goal 20, whether it can be afforded yet or not), the warning
- * of a node with a problem (opened from the alert's Show, or by a tap: it says what is wrong and how to fix it, and the
- * first upgrade below it was the wrong fix), on a Router the rows of its wires with their Favour buttons,
+ * of a node with a problem (opened from the alert's Show, the Flow ring, or by a tap: it says what is wrong and how to
+ * fix it, and the first upgrade below it was the wrong fix; where it is taller than the scroller, its buttons come
+ * before its title), on a Router the rows of its wires with their Favour buttons,
  * on anything else the first upgrade they can afford. Below the fold of a phone's sheet those were missed, or showed a
  * sliver over Duplicate and Delete. Nothing moves when it is in view already, nor
  * once a finger is on the panel.
@@ -950,7 +1070,12 @@ function revealInInspector(opened: string, again = false) {
   const foot = isTouch() ? SHEET_FADE : 0;
   if (top >= 0 && bottom <= room - foot) return;
   // The whole of it where it fits, its top where it does not; 12 px clear of the edge.
-  const shift = bottom - top + 24 + foot <= room ? bottom - room + 12 + foot : top - 12;
+  let shift = bottom - top + 24 + foot <= room ? bottom - room + 12 + foot : top - 12;
+  // A warning too tall for the scroller (a short phone, with a tall strip above the sheet) has its fix at its foot:
+  // the buttons stand clear of the scroller's foot, under as much of the warning's words as there is room for. Its top
+  // alone showed what is wrong and a sliver of the button that puts it right.
+  const fix = want === warn ? warn[0].querySelector<HTMLElement>('.st-actions') : null;
+  if (fix) shift = Math.max(shift, span([fix]).bottom - (room - foot - 2));
   box.scrollTop = Math.max(0, Math.min(box.scrollHeight - room, box.scrollTop + shift));
   revealedAt = box.scrollTop;
 }

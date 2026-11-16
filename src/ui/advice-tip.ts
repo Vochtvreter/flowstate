@@ -841,6 +841,8 @@ export interface WaitLine {
   need: number;
   /** Seconds left at the income the adviser measured; Infinity when nothing is coming in. */
   eta: number;
+  /** What is being saved for, as the adviser names it ("the Assembler", "Assembly"); absent where the goal buys nothing. */
+  name?: string;
 }
 
 /**
@@ -861,5 +863,5 @@ export function waitLine(g: Game): WaitLine | null {
   const have = Math.min(inHand(g, info.unit), info.need);
   if (have >= info.need - 1e-6) return null;
   const rate = isFinite(info.eta) && info.eta > 0 ? (info.need - info.have) / info.eta : 0;
-  return { unit: info.unit, have, need: info.need, eta: rate > 1e-9 ? (info.need - have) / rate : Infinity };
+  return { unit: info.unit, have, need: info.need, eta: rate > 1e-9 ? (info.need - have) / rate : Infinity, ...(info.name ? { name: info.name } : {}) };
 }

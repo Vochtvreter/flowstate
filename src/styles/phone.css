@@ -135,19 +135,25 @@ html.phone body { position: fixed; inset: 0; width: 100%; }
 #app.phone .hb.locked { color: #8894ad; background: transparent; }
 #app.phone .hb.locked .p { font-size: 11px; letter-spacing: 0; color: #5eead4; }
 #app.phone .hb.tip, #app.phone #hot .grow { display: none; }
-/* More slots than fit: the edge with more beyond it fades out, and a chevron stands on it (panels.ts sets
-   `more-r` and `more-l`). The chevron (#hot-more, after #hot in index.html) takes no press: a tap there still
-   reaches the slot under it. */
-#hot-more { display: none; }
+/* More slots than fit: the edge with more beyond it fades out, and a round chevron stands on it (panels.ts sets
+   `more-r` and `more-l`). Each chevron is a button (#hot-more and #hot-less, after #hot in index.html) that moves
+   the bar on or back by a page: 46 px wide and as tall as the bar, so that a tap on the chevron, or beside it on
+   the faded slot under it, never takes up a machine the player did not mean. The round face is 26 px, as it was
+   when it was only a picture. */
+.hot-page { display: none; }
 #app.phone #hot.more-r { -webkit-mask-image: linear-gradient(to left, transparent 0, #000 48px); mask-image: linear-gradient(to left, transparent 0, #000 48px); }
 #app.phone #hot.more-l { -webkit-mask-image: linear-gradient(to right, transparent 0, #000 48px); mask-image: linear-gradient(to right, transparent 0, #000 48px); }
 #app.phone #hot.more-l.more-r { -webkit-mask-image: linear-gradient(to right, transparent 0, #000 48px, #000 calc(100% - 48px), transparent 100%); mask-image: linear-gradient(to right, transparent 0, #000 48px, #000 calc(100% - 48px), transparent 100%); }
-#app.phone #hot.more-r + #hot-more {
-  display: flex; grid-row: 3; grid-column: 1; justify-self: end; align-self: start; z-index: 21; pointer-events: none;
-  align-items: center; justify-content: center; width: 26px; height: 26px; margin: 23px calc(var(--edge-r) + 2px) 0 0;
-  border-radius: 50%; background: #1a2338; border: 1px solid #3a4a70; box-shadow: 0 2px 10px rgba(0, 0, 0, 0.5);
+#app.phone #hot.more-r ~ #hot-more, #app.phone #hot.more-l ~ #hot-less {
+  display: flex; grid-row: 3; grid-column: 1; align-self: stretch; z-index: 21;
+  align-items: flex-start; justify-content: center; width: 46px; padding: 23px 0 0; border: 0; background: none; cursor: pointer;
 }
-#app.phone #hot.more-r + #hot-more::before { content: ''; width: 7px; height: 7px; margin-left: -3px; border-right: 2px solid #dbe6ff; border-top: 2px solid #dbe6ff; transform: rotate(45deg); }
+#app.phone #hot-more { justify-self: end; margin-right: calc(var(--edge-r) - 8px); }
+#app.phone #hot-less { justify-self: start; margin-left: calc(var(--edge-l) - 8px); }
+.hot-page i { display: flex; align-items: center; justify-content: center; width: 26px; height: 26px; border-radius: 50%; background: #1a2338; border: 1px solid #3a4a70; box-shadow: 0 2px 10px rgba(0, 0, 0, 0.5); }
+.hot-page i::before { content: ''; width: 7px; height: 7px; margin-left: -3px; border-right: 2px solid #dbe6ff; border-top: 2px solid #dbe6ff; transform: rotate(45deg); }
+#hot-less i::before { margin-left: 3px; transform: rotate(-135deg); }
+.hot-page:active i { background: #223060; }
 
 /* ----- one strip at the top of the board: goal, order, alert, toasts ----- */
 /* The strip is the HUD's (#hud-strip in #hud: the goal card, the order chip, the alert chip, then

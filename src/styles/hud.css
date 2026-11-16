@@ -51,6 +51,11 @@
 .gc-num b { font-weight: 600; color: var(--text); }
 .gc-eta { color: var(--muted); }
 .gc-eta::before { content: '·'; margin-right: 8px; }
+/* While something is being saved for, the card says what the count is for (hud.ts, savingFor): "Saving for the
+   Assembler · 38 / 600¢ · about 2 min". The words and the count are two items of the row; the dot between them is
+   drawn as the one before the time left is. A phone's card sets the words on a line of their own ("phone seating"). */
+.gc-for { white-space: nowrap; }
+.gc-prog.named .gc-num::before { content: '·'; margin-right: 8px; color: var(--muted); }
 /* Nothing is coming in: the wait would never end. Said in the colour of a warning. */
 .gc-eta.never { color: #fcd34d; }
 /* Paused: no time left is promised. */
@@ -181,15 +186,17 @@ html[data-input='touch'] .res.credits.flow-on::after { content: ''; position: ab
 #insp .row .short { color: #fcd34d; }
 
 /* ---------- inspector: "Upgrade all" ----------
-   A quiet button beside the price (panels.ts), not a text link: 30 px for a mouse, 44 px for a finger. */
-.bulkbtn { flex: none; height: 30px; padding: 0 10px; border-radius: 8px; border: 1px solid #3a4a70; background: #141c2e; color: #9db8ff; font-size: 12px; font-weight: 600; white-space: nowrap; }
-/* Where the two buttons would leave the words beside them less than about 130 px (the 320 px inspector), the pair goes
-   under the words, at the right, rather than squeeze them into four lines. */
+   A buy button like the single-level one beside it (panels.ts: bulkBtn), with what one press costs written on it:
+   gold when the press would buy something, filling up while it would not. Its words are set in the interface's
+   face and only the price in the mono one; it is as wide as they are. */
+.buy.bulk { flex: none; min-width: 0; font-family: inherit; }
+.buy.bulk .mono { font-family: var(--mono); }
+/* Where the two buttons would leave the words beside them less than about 130 px (the 320 px inspector, a phone's
+   sheet), the pair goes under the words, at the right, rather than squeeze them into four lines. */
 .uprow.hasbulk { flex-wrap: wrap; row-gap: 8px; }
 .uprow.hasbulk > div { flex: 1 1 130px; }
-.upbtns { flex: none; display: flex; align-items: center; gap: 8px; margin-left: auto; }
-.bulkbtn:hover { background: #1a2338; }
-html[data-input='touch'] #insp .bulkbtn { height: 44px; padding: 0 12px; font-size: 13px; }
+/* (Should the two ever be wider than the row together, a total of six figures, the single button goes under the other.) */
+.upbtns { flex: 0 1 auto; display: flex; flex-wrap: wrap; justify-content: flex-end; align-items: center; gap: 8px; margin-left: auto; max-width: 100%; }
 
 /* ---------- Market inspector: demand gauges ---------- */
 .dg { display: flex; flex-direction: column; gap: 5px; padding: 2px 0 4px; }
@@ -525,6 +532,11 @@ html[data-input='touch'] .claim-ghost { animation-name: claim-sink-touch; }
 #hud-strip.tight.stack:not(.over-tech) { grid-template-columns: minmax(0, 1fr); grid-template-areas: 'goal' 'order' 'alert'; }
 #hud-strip.tight.stack:not(.over-tech) #order, #hud-strip.tight.stack:not(.over-tech) #hud-alert { justify-self: stretch; }
 #hud-strip.tight.stack .alertchip { width: 100%; }
+/* (A card this narrow, a tablet held upright with the inspector open, has no room for what the count is for beside the
+   count: the words go on a line of their own over the bar, as on a phone. Left to wrap, the count started the second
+   line with its dot.) */
+#hud-strip.tight.stack .gc-prog.named .gc-for { order: -1; flex: 1 0 100%; overflow: hidden; text-overflow: ellipsis; }
+#hud-strip.tight.stack .gc-prog.named .gc-num::before { content: none; }
 /* With a window of 1000 px or more the squeezed card is still wide enough for the pips to ride in its head
    row, after the step (as on a phone held sideways): no line of their own. */
 @media (min-width: 1000px) {
@@ -629,6 +641,11 @@ html[data-input='mouse'] #hud-strip.tight .claim.sm { height: 32px; }
 #app.phone .gc-hint { font-size: 12.5px; line-height: 16px; }
 #app.phone .gc-prog { margin-top: 1px; gap: 0 8px; font-size: 11.5px; line-height: 14px; }
 #app.phone .gc-eta::before { margin-right: 6px; }
+/* What the count is for stands on a line of its own over the bar, the count and the time left, always: at 360 px
+   "Saving for the Fabricator · 1,877 / 4,800¢ · about 3 min" does not fit beside a bar, and a row that wrapped only
+   when a number grew a digit would make the card jump in the middle of a wait. */
+#app.phone .gc-prog.named .gc-for { order: -1; flex: 1 0 100%; overflow: hidden; text-overflow: ellipsis; }
+#app.phone .gc-prog.named .gc-num::before { content: none; }
 /* ("nothing is being sold yet" often drops to a line of its own on a phone: no separator to start that line with.) */
 #app.phone .gc-eta.never::before { content: none; }
 #app.phone .gc-valve { line-height: 14px; }
@@ -735,6 +752,9 @@ html[data-input='mouse'] #hud-strip.tight .claim.sm { height: 32px; }
   #app.phone .gc-prog .pbar, #app.phone .gc-prog .fl-bar { flex: none; width: 48px; }
   /* (Beside the title there is room for the count and the time left, or for a bar: while a time is shown, not for both.) */
   #app.phone .gc-prog.eta > .pbar { display: none; }
+  /* (Nor for what the count is for: "Saving 38 / 600¢ · about 2 min", as the row read before it was named.) */
+  #app.phone .gc-prog.named .gc-for { order: 0; flex: none; margin-right: -4px; }
+  #app.phone .gc-prog.named .gc-what { display: none; }
   #app.phone .gc-prog .fl-bar .pbar { flex: 1; width: auto; }
   #app.phone .gc-valve { flex: 0 1 auto; }
   #app.phone div.gc-rewards { grid-area: prog; margin: 0; flex-wrap: nowrap; }
