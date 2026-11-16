@@ -1128,6 +1128,8 @@ export function tidy(input: TidyInput): Map<number, Pt> {
   // 1. The board as it stands, mended.
   const a = fine(start);
   mend(a, SHARE_AS_IT_STANDS);
+  // Nothing to mend, and no wire behind a card: the board is tidy, and is not laid out afresh to find out.
+  if (!a.moves && !apart.size && baseGrade.under === 0 && baseGrade.charge < UNDER) return new Map();
   offer(a, false);
   // (Its whole share counts as spent, used or not: what follows must not depend on how the board stood.)
   spent = SHARE_AS_IT_STANDS * TOTAL;
