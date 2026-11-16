@@ -820,7 +820,7 @@ function nodeInspector(g: Game, n: GNode): string {
     body += `<div class="sec flow"><span class="lbl">Stored</span>${stored.map((m) => `<div><div class="row sm"><span>${matGlyph(m, 12)} ${MATERIALS[m].name}</span><span class="mono"><b>${Math.round(n.inb[m] ?? 0)}</b> / ${passCap(n)}</span></div><div class="bar"><span style="width:${pct((n.inb[m] ?? 0) / passCap(n))}%;background:${MATERIALS[m].color}"></span></div></div>`).join('') || '<div class="note">Empty.</div>'}
       <div class="note">Holds up to ${passCap(n)} of each material.</div></div>`;
   }
-  else body += `<div class="sec"><div class="note">${def.blurb}</div></div>`;
+  // (A Void or a Merger has nothing more to show: what it does is said once, under its name.)
   body += upgradeSection(g, n);
   const refund = refundOf(g, n);
   const fixed = n.type === 'well';
