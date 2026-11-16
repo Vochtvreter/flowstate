@@ -230,7 +230,7 @@ This is the most important section. The editor *is* the game. Sizes, layouts and
 - **Auto-recipe:** a machine built from a port, or wired into, takes the unlocked recipe that best fits what is wired in.
 - **Machines first:** a fan-out feeds machines before Markets, Labs and Voids (§4.3).
 - **Placement:** a machine built from the menu stands at the point the player chose, moved only as far as it takes to keep clear of other cards, ports, deposits and whatever covers the board.
-- **Tidy** (`T`, from six nodes): lays the whole board out again so that wires are short and cross little. Wells stay on their deposits, the cards glide to their places, and one undo puts everything back.
+- **Tidy** (`T`, from six nodes): lays the whole board out again so that no wire runs behind a card it does not end at, and wires are short and cross little. Wells stay on their deposits, the cards glide to their places, and one undo puts everything back.
 - *Not built:* a ratio hint while placing ("needs 2.0/s Glint · 1.4/s spare upstream").
 
 ### 7.3 Readability
@@ -322,7 +322,7 @@ Several goals have a wait in them: Data to save for a research, credits for a ma
   tools/         pacing.ts: the scripted players
   ```
 - **Undo** keeps a snapshot of the board's structure and the credits spent for each step, up to 200.
-- **Tests:** `npm test` runs 502 tests, among them the pacing targets on four order sequences. `npm run pacing` plays six scripted players and checks each run against the pacing targets.
+- **Tests:** `npm test` runs 535 tests, among them the pacing targets on four order sequences. `npm run pacing` plays six scripted players and checks each run against the pacing targets.
 - **Size and speed:** the shipped JavaScript and CSS are about 224 kB gzipped. Frame rates are in [PITCH_PLAN.md](./PITCH_PLAN.md#outcome).
 - **Outside requests:** the page loads its typefaces from Google Fonts and shows system fonts until they arrive. Nothing else leaves the page.
 - **Publishing:** `.github/workflows/deploy.yml` runs the tests and the build on every push to `main` and deploys the result to GitHub Pages.

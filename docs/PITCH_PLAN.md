@@ -21,7 +21,7 @@ The plan was carried out. What the build is, system by system, is in [DESIGN.md]
 | Where credits come from | at least 65% from sales and orders by the capstone | 80–82% (fast bots), 75–76% (card followers) | met |
 | Phone | every goal completable by touch at 360×740; primary targets ≥ 44px | a scripted touch player reached the first Lens at 390×844. At 360×740, goals 1–14 were played from a new game; of the later goals only parts were tried, from prepared saves. On the screens measured, every button is 44 px or has a 44 px press area. | **shown in part** |
 | Frame rate | ≥ 50 fps at 45 nodes under 4× CPU throttle | at rest 57–58 fps at 1440×900 and 60 at 390×844. While panning at 1440×900: 54 fps at 100% zoom, 50 at 70% (single runs 41–55); on the phone 60 frames are drawn but the camera moves in only about 50 of them | met at rest; **at the line** while panning the desktop board at 70% |
-| Quality | no page errors; `tsc` clean; tests pass | `tsc` clean; 502 tests pass; no page error in the scripted sessions | met |
+| Quality | no page errors; `tsc` clean; tests pass | `tsc` clean; 535 tests pass; no page error in the scripted sessions | met |
 
 At normal CPU speed the same board holds 60 fps at rest and 58–60 while panning, on both sizes. The shipped JavaScript and CSS are about 224 kB gzipped. Over 15 minutes at rest the heap went from 4.9 to 5.2 MB, nearly all of it in the first two and a half minutes, and the page's element count stayed flat.
 
@@ -46,7 +46,7 @@ At normal CPU speed the same board holds 60 fps at rest and 58–60 while pannin
 
 **How it was tested.** Only by scripts, only in headless Chromium.
 
-- `npm test`: 502 tests of the rules, exploits, saves, the adviser and the pacing targets (seeds 0–3).
+- `npm test`: 535 tests of the rules, exploits, saves, the adviser and the pacing targets (seeds 0–3).
 - `npm run pacing`: six scripted players on the real rules.
 - Scripted players and scripted reviewers drove the real interface with a mouse (1440×900, 1024×768) and by touch (390×844, 360×740, 844×390, 768×1024). Runs from a new game to the first Lens were made on the build before the last fixes. What those fixes changed was checked again on the final build, from prepared saves.
 - Speed, as above.
@@ -282,5 +282,6 @@ Found during the work and left for after the pitch. Each is stated as a player w
 9. If the first Lens is made before "Build a Fabricator" has been claimed, Keep playing leads through two more Claims before free play starts.
 10. Free play opens with the Fabricator blocked: no goal card says to wire the Lens to a Market, only the alert chip does.
 11. Tidy pressed from the overview at 1440×900 can stutter for one frame of about a tenth of a second.
-12. The tune-up on "Build a Fabricator" has the player wire a new Refiner to the Market, which can be a plot away. On a phone the board zooms out to the overview for that tap, and stays there.
+12. The tune-up on "Build a Fabricator" has the player wire a new Refiner to the Market, which can be a plot away. On a phone the board zooms out to the overview for that tap, and stays there; the hand that acted the wire out leaves at the first tap, so nothing points at the Market, and Show me pressed again while the port is armed zooms back in to the port.
 13. What the tune-up remembers (which of its steps have stopped paying) is not saved: after a reload in the last minute of that wait, a step that had left the card can be offered once more for a few seconds.
+14. Tidy brings wires out from behind cards at a price: over the 26 saved test boards its layouts have about a fifth more crossings and a quarter more wire than before, and on a board of 25 cards one new card can make it move about half of them. On the 47-card test board it still leaves 9 wires drawn across cards (23 before).
