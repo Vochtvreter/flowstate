@@ -6,21 +6,22 @@
 // (a wire that has to run backwards loops, and is long), plus a charge for every pair of wires that
 // cross, a much larger one for every card a wire runs behind, and a small one for a wire that only
 // brushes past a card. A card only moves when that is clearly worth it, and only to ground with room
-// around it for its wires. Up to three kinds of layout are worked out, and the best is taken (fewest
-// wires behind cards first, then the lowest score):
+// around it for its wires. Up to three kinds of layout are worked out, and the best is taken (one with
+// no wire behind a card beats any that has one; otherwise the lowest score wins):
 //   1. the board as it stands, mended: wires brought out from behind cards, then improved one card at a
 //      time (a card moves to a free spot, or two cards change places, whenever that lowers the score).
 //      Little moves, and a board the player has arranged stays theirs;
 //   2. plain columns: every card in the column its depth in the line gives it, level with what feeds
 //      it, improved as if a wire behind a card cost little (short wires and straight rows first), and
 //      then mended; where a few cards are still stuck with a wire behind one, those are shaken loose
-//      (see `anneal`) and mended again;
+//      (see `anneal`) and mended again; and where one or two wires are behind cards even then, every
+//      card is shaken, from where it stands;
 //   3. only where that still leaves a wire behind a card: a fresh layout built card by card where its
 //      wires cost the least, shaken into shape as a whole, and mended.
 // Where the cards stood before plays no part in 2 and 3, so the same factory always gets the same
 // layout from them; they have to beat 1 by a margin, since they move every card; and what the next Tidy
 // would do first is done before the answer is given. So a board that has been tidied is left alone by
-// the next Tidy.
+// the next Tidy (which finds nothing to mend and no wire behind a card, and stops there).
 //
 // The layout taken never has more wires behind cards than the board as it stands; and it has no more
 // crossings and no more wire either, unless that is what it took to bring a wire out from behind a
@@ -916,13 +917,12 @@ const COOLING = 3.6243;
  * the place of another card). A move that lowers the score is always made; one that raises it is made
  * now and then, often at first and hardly ever by the end. That is what gets cards past each other: one
  * card at a time, always downhill, a layout sticks with its wires tangled round the Market, because every
- * way out begins with a step that makes things worse. Returns the best layout seen on the way, and how
- * much better than the one it began with its score is.
+ * way out begins with a step that makes things worse. Returns the best layout seen on the way.
  *
  * The numbers that decide are the same on every run, and nothing here is worked out with anything but
  * plus, minus, times and divide (which every machine does alike): so the layout is the same everywhere.
  */
-function anneal(L: Layout, loose: number[], trials: number, seed: number, hot = HOT): { at: Pt[]; gain: number } {
+function anneal(L: Layout, loose: number[], trials: number, seed: number, hot = HOT): Pt[] {
   const { nodes, input } = L;
   const grid = input.grid;
   const bestX = Float64Array.from(L.x), bestY = Float64Array.from(L.y);
@@ -1002,7 +1002,7 @@ function anneal(L: Layout, loose: number[], trials: number, seed: number, hot = 
       }
     }
   }
-  return { at: nodes.map((_, i) => ({ x: bestX[i], y: bestY[i] })), gain: -best };
+  return nodes.map((_, i) => ({ x: bestX[i], y: bestY[i] }));
 }
 
 /** A layout in numbers: what the player sees (`boardStats`) and what the search charges for it. */
@@ -1112,7 +1112,7 @@ export function tidy(input: TidyInput): Map<number, Pt> {
       const rough = new Layout(inp, nodes, wf, wt, L.positions(), COARSE, COARSE_STEP);
       const shaken = anneal(rough, among, trials, seed + round, wide ? HOT : WARM);
       spent += rough.work * ROUGH;
-      L = fine(shaken.at);
+      L = fine(shaken);
       mend(L, Math.max(0, until - spent) / TOTAL, extra);
     }
     return L;
@@ -1172,7 +1172,7 @@ export function tidy(input: TidyInput): Map<number, Pt> {
         fresh(rough, depth, core);
         const shaken = anneal(rough, core, trials, 1 + k, HOT);
         spent += rough.work * ROUGH;
-        let b = fine(shaken.at);
+        let b = fine(shaken);
         fresh(b, depth, leaves);
         mend(b, share * 0.4);
         b = unstick(b, share * 0.6, 1 + k);
