@@ -1405,6 +1405,9 @@ function applyUnlocks(g: Game, r: GoalReward) {
   } else if (r.unlock === 'end') endDemo(g);
 }
 
+/** The game second at which each game's list of lines done when the goal came up (Game.goalAt.had) was last looked through. */
+const hadLooked = new WeakMap<Game, number>();
+
 /** How far down the chain each game's unlocks have been checked. */
 const unlocksChecked = new WeakMap<Game, number>();
 
@@ -1421,8 +1424,10 @@ function repairChain(g: Game) {
   if (!g.goalAt || g.goalAt.i !== g.goal.i) g.goalAt = { i: g.goal.i, t: g.time };
   if (!g.goalAt.had) g.goalAt.had = linesDone(g);
   // One of those that has been undone since (the player wired the Glyph back into a Lab; a producer stopped flowing)
-  // is a line like any other from then on: done again, it is ticked off before the player's eyes.
-  else if (g.goalAt.had.length) {
+  // is a line like any other from then on: done again, it is ticked off before the player's eyes. Looked at once a
+  // game second, and not in a look-ahead copy, where nobody reads the card.
+  else if (g.goalAt.had.length && !isLookahead(g) && Math.floor(g.time) !== hadLooked.get(g)) {
+    hadLooked.set(g, Math.floor(g.time));
     const lines = GOALS[g.goal.i]?.meanwhile ?? [];
     const still = g.goalAt.had.filter((id) => lines.find((l) => l.id === id)?.done(g));
     if (still.length !== g.goalAt.had.length) g.goalAt.had = still;

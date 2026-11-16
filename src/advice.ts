@@ -11,6 +11,7 @@
 //   savingFor(g)      the research the card is saving for; researchDelay(g, id) what another research costs it
 //   advice(g)         one tip, or null
 //   lineAdvice(g)     the next step of the goal card's "while you wait" line, in the shape of a tip, or null
+//   tuneState(g)      where the Fabricator card's tune-up stands: a step on offer, done, or nothing worth saying
 //   applyAdvice(g, a) do what a tip or a line's step says, through the normal actions (for bots and tests)
 //
 // Few tips, and large ones. The moves that matter most are on the goal cards themselves (Goal.meanwhile in
@@ -217,7 +218,7 @@ export const ADVICE = {
   lineHold: 10,
   /**
    * A step of a card's line that earns credits (a level of Speed on a machine its Well outruns, a Refiner on a Well
-   * that only feeds a Lab: the Fabricator card's lines) is given past the reserve, from the credits in hand, while
+   * that only feeds a Lab: the Fabricator card's tune-up) is given past the reserve, from the credits in hand, while
    * what it earns before the card's own purchase can be made covers its price (paysBack): then the purchase comes
    * sooner for it, not later. `payLead`: seconds before such a step starts to earn: a level of Speed, and a machine
    * that is built and then wired on.
@@ -1598,6 +1599,8 @@ export function adviceLife(g: Game): number {
  *  - the board:           `expand: true` (`cost` is the price of the expansion)
  *  - a research:          `research` (the tech's id; `cost` 0: its price is Data, in its sentence)
  *  - a wire to cut:       `cut { wire, from, to }`, `node` = from
+ *  - a level of Speed:    `upgrade: 'speed'`, `node` (and `culprit`, the producer it is for: the Flow goal's line, the tune-up)
+ *  - a machine from a port: `build: 'refiner'` or `'void'`, `node` = what it is built from, `port` (the tune-up)
  * While a step is on offer here, advice(g) does not give it (or another ending to its first gesture) as a tip.
  */
 export function lineAdvice(g: Game): Advice | null {
