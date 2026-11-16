@@ -1760,6 +1760,8 @@ export function initBoard(root: HTMLElement) {
       },
       // The build menu's outline while it is open: the spot found for the suggested card, the card on show, the camera.
       site: () => siteState(),
+      // The outline the menu would show if it were opened from this port at each of these points (see `buildPreview`).
+      preview: (from: number, port: number, pts: Pt[], blind = false) => buildPreview(from, port, pts, blind),
       covers: () => coverBoxes(),
       place: () => goalPlace(ui.g),
       frameBoxes: (boxes: Box[], readable = false) => frameBoxes(boxes, readable),
@@ -3585,8 +3587,15 @@ function followArmed(touchy: boolean) {
  * the overview, as far out as it takes. From the overview the zoom is kept when they fit at it.
  */
 function frameTogether(a: GNode, b: GNode) {
-  const boxes = [cardBox(a), cardBox(b)];
-  const readable = !over;
+  frameBoth([cardBox(a), cardBox(b)], !over);
+}
+
+/**
+ * The same for world boxes (the two ends of a gesture: a card, and the empty spot a card is to be built on): all of
+ * them at a readable zoom when they fit there, by the least move; otherwise in the overview, as far out as it takes.
+ * `readable`: from the overview the camera comes back in among the cards when they fit there (false keeps its zoom).
+ */
+export function frameBoth(boxes: Box[], readable = true) {
   let plan = framePlan(boxes, readable, { hintRoom: true });
   if (!plan.all) plan = framePlan(boxes, false, { least: ZOOM.least, hintRoom: true });
   if (plan.view && !sameView(plan.view, viewAhead())) moveView(plan.view.x, plan.view.y, plan.view.k, true, FRAME_MS);
@@ -4614,6 +4623,30 @@ function findSite(r: RadialState) {
   r.sight ??= sightNow();
   r.card = card;
   r.site = buildSpot(r.at, card, { alts, wire: r.dir === 'consume' ? { from: r.a } : { to: r.a }, sight: r.sight });
+}
+
+/**
+ * The outline the build menu would show if it were opened from this output port at each of these points (board
+ * units): where its suggested card would stand (see `findSite`), or null where the plot has no room. For whoever
+ * points at an empty spot before the player has chosen one (the guiding hand): a point whose outline is centred on
+ * it is one the menu accepts as it stands. `blind`: as if all of the board could be seen (to choose a spot before
+ * the camera has been brought to it).
+ */
+export function buildPreview(from: number, port: number, pts: Pt[], blind = false): (Box | null)[] {
+  const g = ui.g;
+  const n = nodeById(g, from);
+  const a = n && outPorts(g, n)[port];
+  if (!a) return pts.map(() => null);
+  const mats = materialsAt(g, from, port);
+  const first: RadialState = { at: a, dir: 'consume', from, port, to: 0, mat: mats[0] ?? null, a, opts: consumeOptions(g, mats) };
+  suggest(g, first);
+  const sight: Sight = blind ? { view: null, covers: [] } : sightNow();
+  return pts.map((at) => {
+    const r: RadialState = { ...first, at, sight };
+    findSite(r);
+    const o = r.opts[r.best ?? 0];
+    return o ? optSite(r, o) : null;
+  });
 }
 
 /** Where this option's card stands: on the middle of the spot found for the menu. */
