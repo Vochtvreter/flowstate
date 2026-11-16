@@ -30,10 +30,10 @@ import { NodeType } from '../content';
 import { goalView } from '../goals';
 import { graph } from '../sim';
 import { Game, GNode } from '../state';
-import { armedPort, boardRect, radialOpen, toClient, toWorld } from './board';
+import { armedPort, boardRect, buildPreview, radialOpen, toClient, toWorld } from './board';
 import { el, setClass, setStyle } from './dom';
 import { Overlay, addOverlay, ring } from './fx';
-import { Pt, bezierAt, inPorts, matColor, nodeSize, outPorts } from './geom';
+import { Box, Pt, bezierAt, inPorts, matColor, nodeSize, outPorts } from './geom';
 import { env } from './phone-env';
 import { Signals, onBeat, onFrame, onNewGame, ui } from './ui';
 
@@ -95,8 +95,8 @@ interface Plan {
   wire: { from: Pt; end: Pt } | null;
   /** The card to light up as the target (world space), or null. */
   card: { x: number; y: number; w: number; h: number } | null;
-  /** Draw the outline of a card that would be built at `b`. */
-  ghost: boolean;
+  /** Draw the outline of the card that would be built by a press at `b`: where the game would put it (world space), or null. */
+  ghost: Box | null;
   color: string;
   loops: number;
   /** Only the start of the gesture is shown, because its far end is off the screen (see firstHalf). */
@@ -177,7 +177,7 @@ function wirePlan(g: Game, from: GNode, portIndex: number, to: GNode, source: So
   const inPort = ins.find((p) => p.mat && p.mat === port.mat) ?? ins[0] ?? { x: to.x, y: to.y + h / 2 };
   return {
     kind: 'wire', source, mode, a: mode === 'tap2' ? null : world(port), b: world({ x: to.x + Math.min(34, w / 2), y: to.y + h / 2 + 6 }),
-    wire: { from: { x: port.x, y: port.y }, end: { x: inPort.x, y: inPort.y } }, card: { x: to.x, y: to.y, w, h }, ghost: false,
+    wire: { from: { x: port.x, y: port.y }, end: { x: inPort.x, y: inPort.y } }, card: { x: to.x, y: to.y, w, h }, ghost: null,
     color: matColor(port.mat), loops,
   };
 }
@@ -192,59 +192,112 @@ function firstWirePlan(g: Game): Plan | null {
 }
 
 /**
- * Offsets from the port (world px) to try for "an empty spot", nearest and most natural first: to the
- * right of the port, and when there is no room there (a Well on a new deposit sits against the edge
- * of the board) under or over its own card, then to the left of it.
+ * Offsets from the port (world px) to the left side of "an empty spot" to try, nearest and most natural first: to
+ * the right of the port, and when there is no room there (a Well on a new deposit sits against the edge of the
+ * board) under or over its own card, then to the left of it.
  */
 const SPOTS: [number, number][] = [
   [210, 40], [210, 130], [210, -80], [150, 110], [150, -100], [280, 0], [160, 180], [160, -140], [110, 150], [110, -130], [340, 90],
   [-190, 130], [-190, -130], [-190, 220], [-190, -220], [-430, 30], [-430, -90], [-430, 150],
 ];
 
-/** A build from `from`'s output port into empty space. */
+/** The middles of the spots liked for a card built from this port (see SPOTS). */
+const likedSpots = (port: Pt): Pt[] => SPOTS.map(([dx, dy]) => ({ x: port.x + dx + 86, y: port.y + dy }));
+const middle = (b: Box): Pt => ({ x: (b.x0 + b.x1) / 2, y: (b.y0 + b.y1) / 2 });
+
+/** Further points round the port (offsets to the middle of a spot, world px), for a board with no room near it. */
+const WIDER: [number, number][] = [];
+for (const dy of [0, 200, -200, 400, -400]) for (const dx of [346, 606, -174, 866, -434]) if (dx !== 346 || dy) WIDER.push([dx, dy]);
+
+/**
+ * How badly the wire to a card built in this outline, drawn as the board draws it, would read: 0 when it passes
+ * behind no card and skims none; a point for every stretch of it within 6 px of a card, and a hundred for every
+ * stretch behind one.
+ */
+function wireCost(g: Game, port: Pt, b: Box): number {
+  const end = { x: b.x0, y: (b.y0 + b.y1) / 2 };
+  let cost = 0;
+  for (let i = 1; i < 24; i++) {
+    const p = bezierAt(port, end, i / 24);
+    let worst = 0;
+    for (const n of g.nodes) {
+      const { w, h } = nodeSize(n);
+      if (p.x > n.x + 2 && p.x < n.x + w - 2 && p.y > n.y + 2 && p.y < n.y + h - 2) worst = 100;
+      else if (!worst && p.x > n.x - 6 && p.x < n.x + w + 6 && p.y > n.y - 6 && p.y < n.y + h + 6) worst = 1;
+    }
+    cost += worst;
+  }
+  return cost;
+}
+
+/**
+ * The empty spot a build from this port is shown at: the outline of the card as the game would build it for a press
+ * on its middle (the board's own rule, `buildPreview`), among those `fits` allows. Each liked spot is asked for: where
+ * it has room the game answers with the spot itself, and where it is tight with the open spot nearest to it, so the
+ * dashed card is never drawn where no card would be built. Of the answers, the one whose wire would read best
+ * (`wireCost`); among equals, the most natural first. For a port with nothing free anywhere near it, the same for
+ * points further off.
+ * `blind`: wherever the camera is (to choose a spot before the camera is brought to it).
+ */
+function buildSpots(g: Game, from: GNode, portIndex: number, port: Pt, blind: boolean, fits: (b: Box) => boolean): { box: Box; cost: number } | null {
+  const liked = likedSpots(port);
+  const boxes = buildPreview(from.id, portIndex, liked, blind);
+  const best = (list: (Box | null)[]): { box: Box; cost: number } | null => {
+    let pick: { box: Box; cost: number } | null = null;
+    for (const b of list) {
+      if (!b || !fits(b)) continue;
+      const cost = wireCost(g, port, b);
+      if (!pick || cost < pick.cost) pick = { box: b, cost };
+    }
+    return pick;
+  };
+  return best(boxes) ?? best(buildPreview(from.id, portIndex, WIDER.map(([dx, dy]) => ({ x: port.x + dx, y: port.y + dy })), blind));
+}
+
+/** The same, among the spots that can be seen from the camera as it stands: all of the outline (`whole`), or at least its middle. */
+function seenSpot(g: Game, from: GNode, portIndex: number, port: Pt, whole: boolean): { box: Box; cost: number } | null {
+  // Where the fingertip may go: on the part of the board that shows, and clear of the floating buttons at its foot.
+  const free = freeBox(36);
+  free.y1 -= env.cover().row;
+  const edge = freeBox(4);
+  return buildSpots(g, from, portIndex, port, false, (b) => inBox(toClient(middle(b)), free)
+    && (!whole || (inBox(toClient({ x: b.x0 - 4, y: b.y0 - 4 }), edge) && inBox(toClient({ x: b.x1 + 4, y: b.y1 + 4 }), edge))));
+}
+
+/**
+ * The empty spot a build from this port will be shown at (board units), for framing the gesture before it is acted
+ * out: the one the hand will take once the camera has been brought to the port and to it. With the port already in
+ * view, a spot that can be seen now is kept when the wire to it would pass behind no card, or reads no worse: the
+ * camera then has nothing to do. Null: no room on the plot.
+ */
+export function buildTarget(from: GNode, portIndex: number): Box | null {
+  const port = outPorts(ui.g, from)[portIndex];
+  if (!port) return null;
+  const any = buildSpots(ui.g, from, portIndex, port, true, () => true);
+  if (inBox(toClient(port), freeBox(8))) {
+    const seen = seenSpot(ui.g, from, portIndex, port, true);
+    if (seen && (seen.cost < 100 || !any || seen.cost <= any.cost)) return seen.box;
+  }
+  return any?.box ?? null;
+}
+
+/**
+ * A build from `from`'s output port into empty space. The dashed card is drawn where the game would build the card
+ * for a press on its middle: so a wire let go there builds the card inside it.
+ */
 function buildPlan(g: Game, from: GNode, portIndex: number, source: Source, loops: number): Plan | null {
   const port = outPorts(g, from)[portIndex];
   if (!port) return null;
   const mode = wireMode(from.id, portIndex);
   if (!mode) return null;
-  const used = new Set(g.nodes.map((n) => n.depositId));
-  const boxes = g.nodes.map((n) => ({ x: n.x, y: n.y, ...nodeSize(n) }));
-  for (const d of g.deposits) if (!used.has(d.id)) boxes.push({ x: d.x, y: d.y, w: 172, h: 72 });
-  // Where the fingertip may go: on the part of the board that shows, and clear of the floating buttons at its foot.
-  const free = freeBox(36);
-  free.y1 -= env.cover().row;
-  const ok = (p: Pt, whole: boolean) => {
-    // Room for the card that would be built here, with some air around it.
-    const x0 = p.x - 30, y0 = p.y - 56, x1 = p.x + 190, y1 = p.y + 56;
-    if (x0 < 10 || y0 < 10 || x1 > g.board.w - 10 || y1 > g.board.h - 10) return false;
-    if (boxes.some((b) => x0 < b.x + b.w && x1 > b.x && y0 < b.y + b.h && y1 > b.y)) return false;
-    if (!inBox(toClient(p), free)) return false;
-    return !whole || inBox(toClient({ x: p.x + 176, y: p.y + 40 }), freeBox(4));
+  // First a spot where the whole outline of the new card can be seen; failing that (a narrow screen), one where at
+  // least the fingertip can.
+  const b = (seenSpot(g, from, portIndex, port, true) ?? seenSpot(g, from, portIndex, port, false))?.box;
+  if (!b) return null;
+  return {
+    kind: 'build', source, mode, a: mode === 'tap2' ? null : world(port), b: world(middle(b)),
+    wire: { from: { x: port.x, y: port.y }, end: { x: b.x0, y: (b.y0 + b.y1) / 2 } }, card: null, ghost: b, color: matColor(port.mat), loops,
   };
-  const plan = (p: Pt): Plan => ({ kind: 'build', source, mode, a: mode === 'tap2' ? null : world(port), b: world(p), wire: { from: { x: port.x, y: port.y }, end: p }, card: null, ghost: true, color: matColor(port.mat), loops });
-  // First a spot near the port where the whole outline of the new card can be seen; failing that (a narrow
-  // screen), one where at least the fingertip can.
-  for (const whole of [true, false]) {
-    for (const [dx, dy] of SPOTS) {
-      const p = { x: port.x + dx, y: port.y + dy };
-      if (ok(p, whole)) return plan(p);
-    }
-  }
-  // Nothing near the port is free and in sight (a port at the edge of a phone's screen, with cards all
-  // round it): any empty spot that can be seen will do, the nearest first. The new card is wired to the
-  // port wherever it is built.
-  const k = ui.view.k || 1;
-  const step = 36;
-  const at = toClient(port);
-  const spots: { p: Pt; d: number }[] = [];
-  for (let y = free.y0; y <= free.y1; y += step) {
-    for (let x = free.x0; x <= free.x1; x += step) spots.push({ p: toWorld(x, y), d: Math.hypot(x - at.x, y - at.y) });
-  }
-  spots.sort((u, v) => u.d - v.d);
-  for (const whole of [true, false]) {
-    for (const { p, d } of spots) if (d > 60 * Math.min(1, k) && ok(p, whole)) return plan(p);
-  }
-  return null;
 }
 
 /** The gesture the active goal needs, if it is one the hand teaches and the player has not done it yet. */
@@ -346,10 +399,10 @@ function resolve(g: Game, a: Act): Plan | 'done' | null {
       const b = world({ x: d.x + 86, y: d.y + 36 });
       const card = { x: d.x, y: d.y, w: 172, h: 72 };
       // The Well is already in hand: only where to put it is shown.
-      if (own) return { kind: 'place', source: a.source, mode: 'tap2', a: null, b, wire: null, card, ghost: false, color: '#fff', loops: a.loops };
+      if (own) return { kind: 'place', source: a.source, mode: 'tap2', a: null, b, wire: null, card, ghost: null, color: '#fff', loops: a.loops };
       const btn = controlAt(byTestId(`hot-${a.type}`));
       if (!btn) return null;
-      return { kind: 'place', source: a.source, mode: 'taps', a: screen(btn), b, wire: null, card, ghost: false, color: '#fff', loops: a.loops };
+      return { kind: 'place', source: a.source, mode: 'taps', a: screen(btn), b, wire: null, card, ghost: null, color: '#fff', loops: a.loops };
     }
     case 'press': {
       if (blockedAnywhere()) return null;
@@ -362,7 +415,7 @@ function resolve(g: Game, a: Act): Plan | 'done' | null {
       }
       // A control that is part of the board (Expand board) moves with the camera: the hand stays on it.
       const b = hit.el.closest('#board') ? world(toWorld(hit.at.x, hit.at.y)) : screen(hit.at);
-      return { kind: 'press', source: a.source, mode: 'tap', a: null, b, wire: null, card: null, ghost: false, color: '#fff', loops: a.loops };
+      return { kind: 'press', source: a.source, mode: 'tap', a: null, b, wire: null, card: null, ghost: null, color: '#fff', loops: a.loops };
     }
     case 'point': {
       if (blockedAnywhere()) return null;
@@ -372,7 +425,7 @@ function resolve(g: Game, a: Act): Plan | 'done' | null {
       if (!a.el?.isConnected) a.el = a.at ? buttonAt(a.at) : null;
       const onScreen = (p: Pt) => p.x > 0 && p.y > 0 && p.x < window.innerWidth && p.y < window.innerHeight;
       const p = a.el ? spotOf(a.el) : a.at && onScreen(a.at) ? a.at : null;
-      return p ? { kind: 'point', source: a.source, mode: 'tap', a: null, b: screen(p), wire: null, card: null, ghost: false, color: '#fff', loops: a.loops } : null;
+      return p ? { kind: 'point', source: a.source, mode: 'tap', a: null, b: screen(p), wire: null, card: null, ghost: null, color: '#fff', loops: a.loops } : null;
     }
   }
 }
@@ -792,12 +845,12 @@ function drawCard(c: CanvasRenderingContext2D, box: { x: number; y: number; w: n
   }
 }
 
-/** The card that building here would make: a dashed outline with a plus in it. */
-function drawGhostCard(c: CanvasRenderingContext2D, at: Pt, alpha: number) {
+/** The card that building here would make, where the game would put it: a dashed outline with a plus in its middle. */
+function drawGhostCard(c: CanvasRenderingContext2D, box: Box, alpha: number) {
   if (alpha <= 0) return;
   const k = ui.view.k;
-  drawCard(c, { x: at.x, y: at.y - 36, w: 172, h: 72 }, alpha, true, '#9DB8FF');
-  const m = toClient({ x: at.x + 86, y: at.y });
+  drawCard(c, { x: box.x0, y: box.y0, w: box.x1 - box.x0, h: box.y1 - box.y0 }, alpha, true, '#9DB8FF');
+  const m = toClient(middle(box));
   c.globalAlpha = alpha;
   c.strokeStyle = '#9DB8FF';
   c.lineWidth = Math.max(2, 3 * k);
@@ -832,13 +885,13 @@ const overlay: Overlay = {
     const b = client(p.b);
     const target = (alpha: number, strong = true) => {
       if (p.card) drawCard(c, p.card, alpha * (strong ? 1 : 0.5), false, '#fff');
-      else if (p.ghost && strong) drawGhostCard(c, p.b, alpha);
+      else if (p.ghost && strong) drawGhostCard(c, p.ghost, alpha);
     };
     if (reduced()) {
       // No motion: the whole gesture as one still picture.
       if (p.wire) drawWire(c, p.wire.from, p.wire.end, p.color, 0.75, true);
       if (p.card) drawCard(c, p.card, 0.8, false, '#fff');
-      else if (p.ghost) drawGhostCard(c, p.b, 0.8);
+      else if (p.ghost) drawGhostCard(c, p.ghost, 0.8);
       c.globalAlpha = 1;
       return;
     }
@@ -854,7 +907,7 @@ const overlay: Overlay = {
       }
       if (p.wire) drawWire(c, p.wire.from, p.wire.end, p.color, (u > 1.7 ? 0.95 : 0.4 * seg(u, 0.6, 0.9)) * fade, u <= 1.7);
       if (p.card) drawCard(c, p.card, seg(u, 0.6, 0.9) * fade * (u > 1.7 ? 1 : 0.5), false, '#fff');
-      else if (p.ghost) drawGhostCard(c, p.b, seg(u, 1.6, 1.8) * fade);
+      else if (p.ghost) drawGhostCard(c, p.ghost, seg(u, 1.6, 1.8) * fade);
       drawRing(c, b, seg(u, 1.55, 1.83), '#fff', fade);
     } else if (p.mode === 'tap2') {
       // The port is already lit (the player tapped it): only the second tap is shown.
@@ -885,7 +938,7 @@ const overlay: Overlay = {
         if (p.half && go >= 1) drawWire(c, p.b, p.wire.end, p.color, 0.5 * fade, true);
       }
       if (p.card) drawCard(c, p.card, seg(go, 0.75, 0.9) * fade, false, '#fff');
-      else if (p.ghost) drawGhostCard(c, p.b, seg(u, 1.66, 1.8) * fade);
+      else if (p.ghost) drawGhostCard(c, p.ghost, seg(u, 1.66, 1.8) * fade);
       if (!p.half) drawRing(c, released && p.card ? toClient(p.wire.end) : b, seg(u, 1.66, 2.05), released ? p.color : '#fff', fade);
     }
     c.globalAlpha = 1;

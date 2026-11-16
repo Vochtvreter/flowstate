@@ -11,10 +11,11 @@ import { NodeType, TECHS } from '../content';
 import { expansionCost, has, matUnlocked, nodeUnlocked } from '../economy';
 import { activeGoal, goalDeposit, goalFocus } from '../goals';
 import { Deposit, Game, GNode } from '../state';
-import { armedPort, boardRect, fitView, frameBoxes, frameNodes as boardFrames, gestureActive, radialOpen, toClient, toWorld, zoomBy } from './board';
+import { armedPort, boardRect, fitAll, frameBoth, frameBoxes, frameNodes as boardFrames, gestureActive, radialOpen, toClient, toWorld, zoomBy } from './board';
 import { celebrating } from './celebrate';
 import { Overlay, addOverlay } from './fx';
 import { Pt, nodeSize, outPorts } from './geom';
+import { buildTarget } from './hand';
 import { isStarted, screenOpen } from './hud-screens';
 import { env } from './phone-env';
 import { closeTech, openTech } from './tech';
@@ -314,7 +315,7 @@ export function showAdvice(g: Game, a: Advice, render: () => void): boolean {
         // Not on show at all (hidden, or waiting off the board: a phone held sideways has no free place for it while
         // cards lie all along the thumb row): the whole board is framed (Fit), which gives it a place again; the
         // ring is on it when it comes, and the hand waits for it.
-        if (b.hidden || !b.getClientRects().length) fitView(true);
+        if (b.hidden || !b.getClientRects().length) fitAll(true);
         // Docked (class `dock`, board.ts), it stands fixed in the free part of the stage, where it can always be
         // pressed: moving the camera would not bring it any nearer, so the board stays where the player left it.
         else if (!b.classList.contains('dock')) {
@@ -363,8 +364,15 @@ export function showAdvice(g: Game, a: Advice, render: () => void): boolean {
         const port = a.port ?? 0;
         detail = { build: { type, from: from.id, port } };
         after = () => {
-          frameNodes([from]);
+          // The port and the empty spot the hand will point at are framed together (the spot named first: when they
+          // cannot be shown together the port is, where the gesture starts). On a crowded board the nearest open
+          // spot may be a screen away from the port: without it in view there is nothing to point at.
+          const spot = buildTarget(from, port);
+          const { w, h } = nodeSize(from);
+          if (spot) frameBoth([{ x0: spot.x0 - 16, y0: spot.y0 - 20, x1: spot.x1 + 16, y1: spot.y1 + 12 }, { x0: from.x - 10, y0: from.y - 14, x1: from.x + w + 10, y1: from.y + h + 4 }]);
+          else frameNodes([from]);
           beacon(() => outPorts(g, from)[port] ?? null);
+          if (spot) beacon(() => ({ x: (spot.x0 + spot.x1) / 2, y: (spot.y0 + spot.y1) / 2 }));
         };
       }
     }
