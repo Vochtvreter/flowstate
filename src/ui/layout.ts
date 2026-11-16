@@ -959,6 +959,8 @@ function anneal(L: Layout, loose: number[], trials: number, seed: number, hot = 
         const ws = L.touch[i];
         const w = ws[Math.floor(r() * ws.length)];
         const a = L.wf[w], b = L.wt[w], wire = input.wires[w];
+        // (A card that is off the board for now stands nowhere: nothing may go by where it used to be.)
+        if (!L.on[a] || !L.on[b]) continue;
         const nx = Math.round((b === i ? L.x[a] + nodes[a].w + SPAN : L.x[b] - nodes[i].w - SPAN) / grid) * grid;
         const ny = Math.round((b === i ? L.y[a] + wire.ay - wire.by : L.y[b] + wire.by - wire.ay) / grid) * grid;
         let px: number, py: number;
