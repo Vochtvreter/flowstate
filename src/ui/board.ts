@@ -5068,56 +5068,72 @@ function refreshBuildSheet() {
   });
 }
 
+/**
+ * The room the fan of `n` options needs, and how it is made: `clear(p)` gives where a fan round the stage point `p`
+ * stands (kept on the stage), after sliding the board down, when the goal card hangs over that place, by as much as
+ * brings the fan out from under it (and from under the chips below it, when there is room for that).
+ */
+function fanRoom(n: number) {
+  // Wide enough that neighbouring slots never overlap, however the fan is turned.
+  const R = n >= 8 ? 180 : n === 7 ? 158 : n >= 6 ? 142 : 122;
+  const rect = rectOf();
+  const m = R + 58;
+  const mx = Math.min(m, rect.width / 2), my = Math.min(m, rect.height / 2);
+  const clear = (p: Pt): Pt => {
+    const c = { x: Math.max(mx, Math.min(rect.width - mx, p.x)), y: Math.max(my, Math.min(rect.height - my, p.y)) };
+    const s = env.strip();
+    if (s && c.x + m > s.x0 && c.x - m < s.x1) {
+      const fits = (edge: number) => rect.height - (edge + 8) >= m * 2;
+      const edge = fits(s.bottom) ? s.bottom : fits(s.goalBottom) ? s.goalBottom : -1;
+      // (No room under the card at all, on a very short window: as low as the menu can go.)
+      const top = edge >= 0 ? edge + 8 + m : rect.height - my;
+      if (c.y < top) {
+        const y0 = ui.view.y;
+        ui.view.y += top - p.y;
+        glide = null;
+        applyView();
+        // (The board may not have gone all the way: it is kept on the stage.)
+        c.y = Math.max(my, Math.min(rect.height - my, Math.max(top, p.y + ui.view.y - y0)));
+      }
+    }
+    return c;
+  };
+  return { R, m, my, rect, clear };
+}
+
 function openRadial(state: RadialState) {
   suggest(ui.g, state);
+  const before = { ...viewAhead() };
+  const fan = env.phone ? null : fanRoom(state.opts.length);
+  // Outside the phone layout the menu is a fan round the point, which needs room under the goal card: where the
+  // point lies too near the card for that, the board slides down first, so the fan, the wire and the new card stay
+  // where they belong to each other. (The fan's own move: taken back when it goes, see `unmove`.)
+  if (fan) fan.clear(toScreen(state.at));
   // Where the card will stand is settled now, before anything is chosen, and shown as an outline until the pick or
   // the cancel (see `findSite`, `drawSite`). With no room anywhere there is nothing to choose.
   findSite(state);
   if (!state.site || !state.card) {
+    if (!sameView(before, ui.view)) moveView(before.x, before.y, before.k, false);
     toast(NO_ROOM, 'bad');
     return;
   }
   radial = state;
   menuOpenedAt = performance.now();
   menuPressAt = -Infinity;
-  if (env.phone) {
+  if (!fan) {
     openBuildSheet(state);
     return;
   }
   const g = ui.g;
   const n = state.opts.length;
-  // Wide enough that neighbouring slots never overlap, however the fan is turned.
-  const R = n >= 8 ? 180 : n === 7 ? 158 : n >= 6 ? 142 : 122;
-  // Keep the whole menu on screen. It stands round the middle of the outline: where the wire was let go, unless the
-  // card has to stand elsewhere.
-  const rect = rectOf();
+  const { R } = fan;
+  // The fan stands round the middle of the outline: where the wire was let go, unless the card has to stand
+  // elsewhere (then it is brought clear of the goal card there too). The whole menu is kept on screen.
   const mid = { x: state.site.x + state.card.w / 2, y: state.site.y + state.card.h / 2 };
-  let raw = toScreen(mid);
+  const c = fan.clear(toScreen(mid));
+  if (!sameView(before, ui.view)) state.moved = { from: before, to: { ...ui.view } };
   // (Where the pointer is, on the stage: the menu may have to stand elsewhere, but no option may lie under it.)
   const pointer = toScreen(state.at);
-  const before = { ...viewAhead() };
-  const m = R + 58;
-  const mx = Math.min(m, rect.width / 2), my = Math.min(m, rect.height / 2);
-  const c = { x: Math.max(mx, Math.min(rect.width - mx, raw.x)), y: Math.max(my, Math.min(rect.height - my, raw.y)) };
-  // The menu opens clear of the goal card (and of the chips under it, when there is room for that).
-  // If the spot the player chose is under the strip, the board slides down first, so the menu, the
-  // wire and the new node all stay where they belong to each other.
-  const s = env.strip();
-  if (s && c.x + m > s.x0 && c.x - m < s.x1) {
-    const fits = (edge: number) => rect.height - (edge + 8) >= m * 2;
-    const edge = fits(s.bottom) ? s.bottom : fits(s.goalBottom) ? s.goalBottom : -1;
-    // (No room under the card at all, on a very short window: as low as the menu can go.)
-    const top = edge >= 0 ? edge + 8 + m : rect.height - my;
-    if (c.y < top) {
-      ui.view.y += top - raw.y;
-      glide = null;
-      applyView();
-      raw = toScreen(mid);
-      c.y = Math.max(my, Math.min(rect.height - my, Math.max(top, raw.y)));
-      // (The menu's own move: taken back when the menu goes, see `unmove`.)
-      if (!sameView(before, ui.view)) state.moved = { from: before, to: { ...ui.view } };
-    }
-  }
   const a = toScreen(state.a);
   hideTemp();
   const back = Math.atan2(a.y - c.y, a.x - c.x); // direction the wire comes from
