@@ -532,6 +532,11 @@ html[data-input='touch'] .claim-ghost { animation-name: claim-sink-touch; }
 #hud-strip.tight.stack:not(.over-tech) { grid-template-columns: minmax(0, 1fr); grid-template-areas: 'goal' 'order' 'alert'; }
 #hud-strip.tight.stack:not(.over-tech) #order, #hud-strip.tight.stack:not(.over-tech) #hud-alert { justify-self: stretch; }
 #hud-strip.tight.stack .alertchip { width: 100%; }
+/* (A card this narrow, a tablet held upright with the inspector open, has no room for what the count is for beside the
+   count: the words go on a line of their own over the bar, as on a phone. Left to wrap, the count started the second
+   line with its dot.) */
+#hud-strip.tight.stack .gc-prog.named .gc-for { order: -1; flex: 1 0 100%; overflow: hidden; text-overflow: ellipsis; }
+#hud-strip.tight.stack .gc-prog.named .gc-num::before { content: none; }
 /* With a window of 1000 px or more the squeezed card is still wide enough for the pips to ride in its head
    row, after the step (as on a phone held sideways): no line of their own. */
 @media (min-width: 1000px) {
