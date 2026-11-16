@@ -136,20 +136,26 @@ const backCost = (ax: number, bx: number) => (bx - ax < FORWARD ? BACK + (ax + F
 
 /**
  * True when two wires cross: the chain in `p` from `oa` and the one in `q` from `ob`, each of `n2 / 2`
- * pieces, looked at `d / 2` points at a time. (Whether their bounding boxes meet at all is the caller's to check.)
+ * pieces, looked at `d / 2` points at a time. Only the pieces of each that reach into the other's
+ * bounding box (`pb` from `opb`, `qb` from `oqb`) can cross anything: the rest are passed over.
  */
-function crosses(p: Float64Array, oa: number, q: Float64Array, ob: number, n2: number, d: number): boolean {
+function crosses(p: Float64Array, oa: number, pb: Float64Array, opb: number, q: Float64Array, ob: number, qb: Float64Array, oqb: number, n2: number, d: number): boolean {
+  const px0 = pb[opb], py0 = pb[opb + 1], px1 = pb[opb + 2], py1 = pb[opb + 3];
+  const qx0 = qb[oqb], qy0 = qb[oqb + 1], qx1 = qb[oqb + 2], qy1 = qb[oqb + 3];
+  if (px1 < qx0 || qx1 < px0 || py1 < qy0 || qy1 < py0) return false;
   for (let i = 0; i < n2; i += d) {
     const ax = p[oa + i], ay = p[oa + i + 1], bx = p[oa + i + d], by = p[oa + i + d + 1];
     const lox = ax < bx ? ax : bx, hix = ax < bx ? bx : ax, loy = ay < by ? ay : by, hiy = ay < by ? by : ay;
+    if (hix < qx0 || lox > qx1 || hiy < qy0 || loy > qy1) continue;
     for (let j = 0; j < n2; j += d) {
       const cx = q[ob + j], cy = q[ob + j + 1], dx = q[ob + j + d], dy = q[ob + j + d + 1];
       if ((cx < lox && dx < lox) || (cx > hix && dx > hix) || (cy < loy && dy < loy) || (cy > hiy && dy > hiy)) continue;
       const d1 = (dx - cx) * (ay - cy) - (dy - cy) * (ax - cx);
       const d2 = (dx - cx) * (by - cy) - (dy - cy) * (bx - cx);
+      if (!((d1 > 0 && d2 < 0) || (d1 < 0 && d2 > 0))) continue;
       const d3 = (bx - ax) * (cy - ay) - (by - ay) * (cx - ax);
       const d4 = (bx - ax) * (dy - ay) - (by - ay) * (dx - ax);
-      if (((d1 > 0 && d2 < 0) || (d1 < 0 && d2 > 0)) && ((d3 > 0 && d4 < 0) || (d3 < 0 && d4 > 0))) return true;
+      if ((d3 > 0 && d4 < 0) || (d3 < 0 && d4 > 0)) return true;
     }
   }
   return false;
@@ -183,8 +189,6 @@ function entersBox(p: Float64Array, o: number, segs: number, x0: number, y0: num
   return false;
 }
 
-const boxesMeet = (a: Float64Array, oa: number, b: Float64Array, ob: number) => !(a[oa + 2] < b[ob] || b[ob + 2] < a[oa] || a[oa + 3] < b[ob + 1] || b[ob + 3] < a[oa + 1]);
-
 /** The board as the player sees it, in numbers: wire crossings, total wire length, cards on top of one another, wires behind cards. */
 export function boardStats(input: TidyInput, at?: Map<number, Pt>): BoardStats {
   const pos = new Map<number, TidyNode>();
@@ -200,7 +204,7 @@ export function boardStats(input: TidyInput, at?: Map<number, Pt>): BoardStats {
     if (backCost(a.x + a.w, b.x) > 0) backward++;
   });
   for (let i = 0; i < wires.length; i++) {
-    for (let j = i + 1; j < wires.length; j++) if (boxesMeet(box, i * 4, box, j * 4) && crosses(pts, i * stride, pts, j * stride, SEGS * 2, 2)) crossings++;
+    for (let j = i + 1; j < wires.length; j++) if (crosses(pts, i * stride, box, i * 4, pts, j * stride, box, j * 4, SEGS * 2, 2)) crossings++;
     for (const c of cards) {
       if (c.id === wires[i].from || c.id === wires[i].to) continue;
       if (box[i * 4 + 2] < c.x || box[i * 4] > c.x + c.w || box[i * 4 + 3] < c.y || box[i * 4 + 1] > c.y + c.h) continue;
@@ -266,6 +270,10 @@ class Layout {
    * machine), so that a big board cannot hold the page up.
    */
   work = 0;
+  /** Counts the moves made: nothing about the layout has changed while this stands still. */
+  moves = 0;
+  /** For each card, the count of moves at which it was last tried on every free row of its columns and nothing came of it: until something moves, there is no point in trying again. */
+  readonly barren: Int32Array;
 
   constructor(readonly input: TidyInput, readonly nodes: TidyNode[], readonly wf: Int32Array, readonly wt: Int32Array, start: Pt[], readonly segs: number, /** Crossings are looked for on every `step`-th point of a wire's path. */ readonly step: number, private readonly under = UNDER, private readonly brush = BRUSH) {
     const n = (this.n = nodes.length), m = (this.m = wf.length);
@@ -299,6 +307,7 @@ class Layout {
     this.tbeh = new Float64Array(m * n);
     this.tcol = new Float64Array(n * m);
     this.mark = new Uint8Array(m);
+    this.barren = new Int32Array(n).fill(-1);
     for (let w = 0; w < m; w++) {
       this.touch[wf[w]].push(w);
       if (wt[w] !== wf[w]) this.touch[wt[w]].push(w);
@@ -320,7 +329,7 @@ class Layout {
 
   /** 1 when wire `w` (its path in `p`, `pb`) crosses wire `v` (in `q`, `qb`). */
   private meet(p: Float64Array, pb: Float64Array, w: number, q: Float64Array, qb: Float64Array, v: number): number {
-    return boxesMeet(pb, w * 4, qb, v * 4) && crosses(p, w * this.stride, q, v * this.stride, this.segs * 2, this.step * 2) ? 1 : 0;
+    return crosses(p, w * this.stride, pb, w * 4, q, v * this.stride, qb, v * 4, this.segs * 2, this.step * 2) ? 1 : 0;
   }
 
   /** What wire `w` (its path in `p`, `pb`) is charged for card `k`: UNDER when it runs behind it, BRUSH when it only passes too close, nothing when it is clear of it or ends at it. */
@@ -411,6 +420,7 @@ class Layout {
   /** Make the move last tried. */
   commit() {
     const { n, m, live, mark, stride } = this;
+    this.moves++;
     const ids = this.tIds, to = this.tTo, ws = this.tWs;
     for (let k = 0; k < ids.length; k++) {
       this.x[ids[k]] = to[k].x;
@@ -487,6 +497,19 @@ class Layout {
     for (const w of this.touch[k]) for (let j = 0; j < n; j++) u += beh[w * n + j];
     for (let v = 0; v < m; v++) u += beh[v * n + k];
     return u;
+  }
+
+  /** True when card `k`, put at (px, py), would stand in the way of a wire that does not end at it. */
+  blocks(k: number, px: number, py: number): boolean {
+    const wasX = this.x[k], wasY = this.y[k];
+    this.x[k] = px;
+    this.y[k] = py;
+    this.work += this.m;
+    let hit = false;
+    for (let v = 0; v < this.m && !hit; v++) hit = this.live[v] === 1 && this.charge(this.pts, this.box, v, k) >= this.under;
+    this.x[k] = wasX;
+    this.y[k] = wasY;
+    return hit;
   }
 
   /**
@@ -630,7 +653,8 @@ function spotsFor(L: Layout, i: number, cols: number[], rows: boolean): Pt[] {
     const xs = new Set<number>([L.x[i]]);
     for (let k = 0; k < wired; k++) xs.add(Math.round(tries[k].x / grid) * grid);
     const ys = rowsFor(input, nodes[i].room);
-    for (const x of xs) for (const y of ys) if (free(x, y)) add({ x, y });
+    // (Not where it would stand in another wire's way: that cures nothing.)
+    for (const x of xs) for (const y of ys) if (free(x, y) && !L.blocks(i, x, y)) add({ x, y });
   }
   return spots;
 }
@@ -678,8 +702,10 @@ function improve(L: Layout, keep: Keep, cols: number[], budget: number, rows: bo
     let changed = false;
     for (let i = 0; i < L.n && L.work < budget; i++) {
       if (nodes[i].fixed || !L.touch[i].length) continue;
-      const { p } = bestOf(L, i, spotsFor(L, i, cols, rows && L.trouble(i) > 0), keep, budget);
+      const scan = rows && L.barren[i] !== L.moves && L.trouble(i) > 0;
+      const { p } = bestOf(L, i, spotsFor(L, i, cols, scan), keep, budget);
       if (p && moveIf(L, i, p, keep)) changed = true;
+      else if (scan && !p && L.work < budget) L.barren[i] = L.moves;
     }
     // Two cards change places.
     for (let i = 0; i < L.n && L.work < budget; i++) {
@@ -710,9 +736,10 @@ function repair(L: Layout, cols: number[], budget: number) {
   for (let round = 0; round < 40 && L.work < budget; round++) {
     const found: { i: number; p: Pt; gain: number }[] = [];
     for (let i = 0; i < L.n && L.work < budget; i++) {
-      if (nodes[i].fixed || !L.touch[i].length || L.trouble(i) <= 0) continue;
+      if (nodes[i].fixed || !L.touch[i].length || L.barren[i] === L.moves || L.trouble(i) <= 0) continue;
       const { p, gain } = bestOf(L, i, spotsFor(L, i, cols, true), anyGain, budget);
       if (p) found.push({ i, p, gain });
+      else if (L.work < budget) L.barren[i] = L.moves;
     }
     if (!found.length) break;
     found.sort((a, b) => b.gain - a.gain || a.i - b.i);
@@ -994,8 +1021,8 @@ function gradeOf(L: Layout): Grade {
  */
 const TOTAL = 3400000, ROUGH = 0.4;
 const SHARE_AS_IT_STANDS = 0.1, SHARE_PLAIN = 0.2, SHARE_MEND = 0.15, SHARE_UNSTICK = 0.3;
-/** Trials each card gets when a layout is shaken: all of it (a fresh layout), or just the cards round a wire that is stuck behind one (and three times as many again when that was not enough). */
-const SHAKE_PER_CARD = 1500, GENTLE_PER_CARD = 1000, GENTLE_ROUNDS = 2;
+/** Trials each card gets when a layout is shaken: all of it (a fresh layout: this many at most, and at least so many for it to be worth doing), or just the cards round a wire that is stuck behind one (and three times as many again when that was not enough). */
+const SHAKE_PER_CARD = 1500, SHAKE_AT_LEAST = 250, GENTLE_PER_CARD = 1000, GENTLE_ROUNDS = 2;
 /** A fresh layout is shaken this many times, each time with other numbers deciding: where one run ends up is a matter of luck, and the better of two short ones beats one long one. */
 const SHAKES = 2;
 /** A layout that moves every card (plain columns, a fresh one) has to beat the board as it stands, mended, by this share of its score. */
@@ -1120,9 +1147,12 @@ export function tidy(input: TidyInput): Map<number, Pt> {
       for (let w = 0; w < wf.length; w++) if (!leaves.includes(wf[w]) && !leaves.includes(wt[w])) live++;
       const perTrial = (2 * live * (live + nodes.length)) / core.length + live;
       const left = Math.max(0, TOTAL - spent);
-      const trials = Math.floor(Math.min(SHAKE_PER_CARD * core.length, (left * 0.55) / ROUGH / perTrial / SHAKES));
-      const share = (left * 0.45) / TOTAL / SHAKES;
-      for (let k = 0; k < SHAKES; k++) {
+      // Twice if there is comparing left for two proper shakes, once if only for one; a board too big for even that is not shaken at all.
+      const all = (left * 0.55) / ROUGH / perTrial;
+      const shakes = all >= SHAKES * SHAKE_AT_LEAST * core.length ? SHAKES : all >= SHAKE_AT_LEAST * core.length ? 1 : 0;
+      const trials = Math.floor(Math.min(SHAKE_PER_CARD * core.length, all / Math.max(1, shakes)));
+      const share = (left * 0.45) / TOTAL / Math.max(1, shakes);
+      for (let k = 0; k < shakes; k++) {
         const rough = new Layout(inp, nodes, wf, wt, start, COARSE, COARSE_STEP);
         for (const i of leaves) rough.lift(i);
         fresh(rough, depth, core);
@@ -1143,15 +1173,20 @@ export function tidy(input: TidyInput): Map<number, Pt> {
     const gc = gradeOf(c);
     if (passes(gc) && gc.score < baseGrade.score - 1) best = c;
   }
-  // What the next Tidy would do first is done now, until it changes nothing: a board that has been tidied is left alone by the next Tidy.
-  for (let pass = 0; pass < 3 && best !== base; pass++) {
+  // What the next Tidy would do with this layout is done now, until it changes nothing: so a board that has
+  // been tidied is left alone by the next Tidy. (It would mend it; and, that changing nothing, take the careful way.)
+  for (let pass = 0; pass < 6 && best !== base; pass++) {
     const before = best.positions();
     const next = fine(before);
     const limit = SHARE_AS_IT_STANDS * TOTAL;
+    const same = () => next.positions().every((p, i) => p.x === before[i].x && p.y === before[i].y);
     repair(next, cols, limit);
     improve(next, anyGain, cols, limit, true);
-    const after = next.positions();
-    if (after.every((p, i) => p.x === before[i].x && p.y === before[i].y)) break;
+    if (same()) {
+      next.work = 0;
+      improve(next, noLoss, cols, limit, false);
+      if (same()) break;
+    }
     const s = gradeOf(next);
     if (!passes(s) || s.under > bestGrade.under || s.score >= bestGrade.score) break;
     best = next;
