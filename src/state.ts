@@ -228,8 +228,11 @@ export interface Game {
   /**
    * When the active goal became the active one: its index and the game time. Kept by src/goals.ts (goalAge).
    * A save from before this field starts counting when it is loaded, a goal index set by hand on the next tick.
+   * `had`: the ids of that goal's "while you wait" lines that were done already at that moment (a wire cut two
+   * goals earlier): the card does not show those, ticked, as if they had just been done (meanwhileAt in
+   * src/goals.ts). Absent in a save from before this field, or with a goal set by hand: filled in on the next tick.
    */
-  goalAt?: { i: number; t: number };
+  goalAt?: { i: number; t: number; had?: string[] };
   ordersOn: boolean;
   order: Order | null;
   /** Running seed of the order generator. */
@@ -503,6 +506,8 @@ export function deserialize(json: string): Game | null {
     const at = raw.goalAt;
     const since = at && typeof at === 'object' && at.i === g.goal.i && typeof at.t === 'number' && isFinite(at.t) ? Math.max(0, Math.min(at.t, g.time)) : g.time;
     g.goalAt = { i: g.goal.i, t: since };
+    // (The lines that were done when it came up: kept as saved; a save without them has them worked out on the next tick.)
+    if (at && typeof at === 'object' && at.i === g.goal.i && Array.isArray(at.had)) g.goalAt.had = at.had.filter((x: unknown): x is string => typeof x === 'string');
     const made: Game['made'] = {};
     if (raw.made && typeof raw.made === 'object') for (const m in raw.made) if (MATERIALS[m as MatId] && raw.made[m]) made[m as MatId] = true;
     g.made = made;

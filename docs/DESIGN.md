@@ -183,18 +183,19 @@ Measured with scripted players on the real rules (`npm run pacing`, 15 order seq
 
 | Scripted player | First Lens |
 |---|---|
-| Knows the game, one action every 3–4 s | 14:24–15:30 |
-| Does only what the goal card says, 6 s an action, claims 8–16 s after Claim lights | 17:34–18:14 |
-| The same at 10 s an action | 19:36–20:19 |
-| The same at 6 s, but claims at once (1–3 s) | 16:15–16:48 |
+| Knows the game, one action every 3–4 s | 14:30–15:39 |
+| Does only what the goal card says, 6 s an action, claims 8–16 s after Claim lights | 17:36–18:11 |
+| The same at 10 s an action | 19:43–20:22 |
+| The same at 6 s, but claims at once (1–3 s) | 16:15–16:40 |
 | Reads the hints and the tips, never a "while you wait" line | 22:25–29:26 |
 
-The fast players make the first Glyph at 7:04–7:45 and the Paradox, the last free-play goal, at 24:11–27:27.
+The fast players make the first Glyph at 7:04–7:45 and the Paradox, the last free-play goal, at 24:17–27:55.
 
 **Waiting.** "Nothing to do" means free hands, no goal or order to claim, and no step of the card's line that can be done now.
 
-- The card follower who claims 8–16 s late has nothing to do for 26–30% of the time to the first Lens, never for more than 58 seconds at a stretch. The build is tuned for this player.
-- The one who claims at once has nothing to do for 38–41% of it. "Assemble your first Glyph" and "Build a Fabricator" hold 81–105 and 83–104 seconds of that, in stretches of up to about a minute. This was accepted for the pitch build: cheaper prices would let the fast players finish in under 14 minutes.
+- The card follower who claims 8–16 s late has nothing to do for 23–27% of the time to the first Lens, never for more than 58 seconds at a stretch. The build is tuned for this player.
+- The one who claims at once has nothing to do for 34–37% of it. "Assemble your first Glyph" holds 81–105 seconds of that, in stretches of up to 42. This was accepted for the pitch build: cheaper prices would let the fast players finish in under 14 minutes.
+- "Build a Fabricator", the last wait, held 83–104 seconds of it earlier. Its card now has a tune-up to do while saving (§9.1), and 42–52 seconds are left, never more than 41 at a stretch.
 
 More in [CONTENT.md](./CONTENT.md#where-the-pacing-lands).
 
@@ -287,7 +288,7 @@ No text walls: a card is a title and one sentence.
 
 Several goals have a wait in them: Data to save for a research, credits for a machine.
 
-- **Lines on the card.** Seven goals (11, 15, 16, 18, 19, 21, 22) carry up to three "while you wait" lines, shown one at a time ("While you wait · 1 of 2"). **Show me** acts the line's next step out on the board, and a done line is ticked. On goal 22 the lines are the goal's own two wires and read "Next step". When the line's next step costs credits that the card's own purchase needs, the card says "Saving for this" with the price and about how long, instead of offering it.
+- **Lines on the card.** Seven goals (11, 15, 16, 18, 19, 21, 22) carry up to three "while you wait" lines, shown one at a time ("While you wait · 1 of 2"). **Show me** acts the line's next step out on the board, and a done line is ticked. A line that was done before its goal came up is left out, and not counted. On goal 21 the line is a tune-up for the wait before the Fabricator: a level of Speed on the machine a Well outruns, then a Refiner on a Well that only feeds a Lab, its goods sold. Its words are its next step's own, each step is only on the card while it pays for itself before the Fabricator can be bought, and the line leaves when none does. On goal 22 the lines are the goal's own two wires and read "Next step". When the line's next step costs credits that the card's own purchase needs, the card says "Saving for this" with the price and about how long, instead of offering it.
 - **The adviser.** While a goal is a wait, the adviser may offer one tip. Every candidate is tried on a copy of the game against an untouched copy, with the real rules. A tip is given only if it saves at least 15 seconds of the wait, ends a wait that would never end, or (on the Flow goal) gets the producer it names flowing. It keeps quiet for 20 seconds after any change to the board, never reverses a goal card, and does not repeat the card's line (one exception, on the Flow goal, is in CONTENT.md). It runs in a Web Worker.
 - The lines carry the game; tips are rare. A scripted player who follows the cards is offered none in fifteen runs. One who ignores the lines is offered seven to ten.
 
@@ -321,7 +322,7 @@ Several goals have a wait in them: Data to save for a research, credits for a ma
   tools/         pacing.ts: the scripted players
   ```
 - **Undo** keeps a snapshot of the board's structure and the credits spent for each step, up to 200.
-- **Tests:** `npm test` runs 489 tests, among them the pacing targets on four order sequences. `npm run pacing` plays six scripted players and checks each run against the pacing targets.
+- **Tests:** `npm test` runs 502 tests, among them the pacing targets on four order sequences. `npm run pacing` plays six scripted players and checks each run against the pacing targets.
 - **Size and speed:** the shipped JavaScript and CSS are about 224 kB gzipped. Frame rates are in [PITCH_PLAN.md](./PITCH_PLAN.md#outcome).
 - **Outside requests:** the page loads its typefaces from Google Fonts and shows system fonts until they arrive. Nothing else leaves the page.
 - **Publishing:** `.github/workflows/deploy.yml` runs the tests and the build on every push to `main` and deploys the result to GitHub Pages.
@@ -347,7 +348,7 @@ Settled by the build:
 
 Still open:
 
-1. **The waits.** A player who claims at once has nothing to do for about two fifths of the run (§6.5). Only real players can say whether that hurts.
+1. **The waits.** A player who claims at once has nothing to do for about a third of the run (§6.5). Only real players can say whether that hurts.
 2. **Real players and real devices.** No first-time player has been watched. Nothing has run on a real phone, in Safari or in Firefox, and nobody has heard the sound.
 3. **After the demo.** Free play is four goals, and a fast scripted player has made the last of them, the Paradox, by minute 24 to 27. What holds a player for hours is not designed.
 4. **Prestige.** Not designed. The numbers are tuned for the demo alone.

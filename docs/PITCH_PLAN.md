@@ -14,14 +14,14 @@ The plan was carried out. What the build is, system by system, is in [DESIGN.md]
 |---|---|---|---|
 | First two minutes (fast bot) | an action at least every 10 s; machine by 0:45; Lab by 1:30 | longest wait 3–8 s; 0:21–0:23; 0:37–0:40 | met |
 | First Glyph (fast bot) | 6–8 min | 7:04–7:45 | met |
-| First Lens (fast bot) | 16–19 min | 14:24–15:30 | **not met**: sooner than planned |
-| Content after the capstone (fast bot) | not exhausted before minute 24 | the last free-play goal, the Paradox, at 24:11–27:27 | met, by 11 s on the quickest run |
+| First Lens (fast bot) | 16–19 min | 14:30–15:39 | **not met**: sooner than planned |
+| Content after the capstone (fast bot) | not exhausted before minute 24 | the last free-play goal, the Paradox, at 24:17–27:55 | met, by 17 s on the quickest run |
 | Slow bot | Lens by 28 min; never over 4 min on one goal | Lens at 21:40–22:38; 4:48–7:11 on "Make your first Mist" | Lens met; **4 minutes not met** |
 | Dead stretches (fast bot) | none over 60 s before minute 10, none over 120 s before the capstone | 38–44 s; 38–56 s | met |
-| Where credits come from | at least 65% from sales and orders by the capstone | 80–82% (fast bots), 74–75% (card followers) | met |
+| Where credits come from | at least 65% from sales and orders by the capstone | 80–82% (fast bots), 75–76% (card followers) | met |
 | Phone | every goal completable by touch at 360×740; primary targets ≥ 44px | a scripted touch player reached the first Lens at 390×844. At 360×740, goals 1–14 were played from a new game; of the later goals only parts were tried, from prepared saves. On the screens measured, every button is 44 px or has a 44 px press area. | **shown in part** |
 | Frame rate | ≥ 50 fps at 45 nodes under 4× CPU throttle | at rest 57–58 fps at 1440×900 and 60 at 390×844. While panning at 1440×900: 54 fps at 100% zoom, 50 at 70% (single runs 41–55); on the phone 60 frames are drawn but the camera moves in only about 50 of them | met at rest; **at the line** while panning the desktop board at 70% |
-| Quality | no page errors; `tsc` clean; tests pass | `tsc` clean; 489 tests pass; no page error in the scripted sessions | met |
+| Quality | no page errors; `tsc` clean; tests pass | `tsc` clean; 502 tests pass; no page error in the scripted sessions | met |
 
 At normal CPU speed the same board holds 60 fps at rest and 58–60 while panning, on both sizes. The shipped JavaScript and CSS are about 224 kB gzipped. Over 15 minutes at rest the heap went from 4.9 to 5.2 MB, nearly all of it in the first two and a half minutes, and the page's element count stayed flat.
 
@@ -29,24 +29,24 @@ At normal CPU speed the same board holds 60 fps at rest and 58–60 while pannin
 
 | Card follower | Target | Measured |
 |---|---|---|
-| First Lens | 17:30–21:00 | 17:34–18:14 |
-| First Lens at 10 s an action | by 24:00 | 19:36–20:19 |
+| First Lens | 17:30–21:00 | 17:36–18:11 |
+| First Lens at 10 s an action | by 24:00 | 19:43–20:22 |
 | Longest time on one goal | 4 min | 3:01–3:17 ("Assemble your first Glyph") |
-| Nothing to do, share of the time to the Lens | at most 30% | 26–30% |
+| Nothing to do, share of the time to the Lens | at most 30% | 23–27% |
 | Longest stretch with nothing to do | at most 60 s | 51–58 s |
 | Most time with nothing to do on one goal | at most 75 s | 51–70 s |
 | Offered a tip by the adviser | — | never in fifteen runs: the card's own lines carry the waits |
 
 **Not met, and what was decided.**
 
-1. **The fast bot's Lens comes too soon** (14:24–15:30 against 16–19 min). Prices were set to keep the card follower's waits short, which brings a fast player's Lens forward too; the fast bot's target was moved to 14:00–18:00.
+1. **The fast bot's Lens comes too soon** (14:30–15:39 against 16–19 min). Prices were set to keep the card follower's waits short, which brings a fast player's Lens forward too; the fast bot's target was moved to 14:00–18:00.
 2. **The slow bot spends up to seven minutes on one goal.** It reads no "while you wait" line, and the prices assume the lines. It was dropped from the regular runs; the card followers above took its place as the floor.
-3. **The waiting targets hold only for a player who takes 8–16 seconds to notice a finished goal.** A scripted player who claims at once reaches the Lens at 16:15–16:48, under the 17:30 floor, with nothing to do for 38–41% of that time. "Assemble your first Glyph" and "Build a Fabricator" hold 81–105 and 83–104 seconds of it, in stretches of up to about a minute. This was accepted for the pitch build: cheaper prices would bring the fast bot's Lens under 14 minutes.
+3. **The waiting targets hold only for a player who takes 8–16 seconds to notice a finished goal.** A scripted player who claims at once reaches the Lens at 16:15–16:40, under the 17:30 floor, with nothing to do for 34–37% of that time. "Assemble your first Glyph" holds 81–105 seconds of it, in stretches of up to 42. This was accepted for the pitch build: cheaper prices would bring the fast bot's Lens under 14 minutes. "Build a Fabricator" held 83–104 seconds earlier; its card now has a tune-up to do while saving, and 42–52 seconds are left, never more than 41 at a stretch.
 4. **The phone criterion is shown only in part** (see the table).
 
 **How it was tested.** Only by scripts, only in headless Chromium.
 
-- `npm test`: 489 tests of the rules, exploits, saves, the adviser and the pacing targets (seeds 0–3).
+- `npm test`: 502 tests of the rules, exploits, saves, the adviser and the pacing targets (seeds 0–3).
 - `npm run pacing`: six scripted players on the real rules.
 - Scripted players and scripted reviewers drove the real interface with a mouse (1440×900, 1024×768) and by touch (390×844, 360×740, 844×390, 768×1024). Runs from a new game to the first Lens were made on the build before the last fixes. What those fixes changed was checked again on the final build, from prepared saves.
 - Speed, as above.
@@ -171,7 +171,7 @@ Unlocked by goal 11. **One** order at a time, shown beside the goal: "Deliver N 
 - Shard becomes lime so the first refined material is visibly different from Glint.
 - Start from the pacing bot's `proposed` profile (rising tech prices, Fabricator 3,000¢), then tune against the real rules until section 1 is met on both the fast and the slow policy. Data prices must not wall the slow policy.
 
-**Built:** wires and Shard as planned. The Fabricator costs 4,800¢. Prices were tuned against the fast bots and against scripted players who follow the goal card, not against the slow policy (see "Outcome").
+**Built:** wires and Shard as planned. The Fabricator costs 5,000¢. Prices were tuned against the fast bots and against scripted players who follow the goal card, not against the slow policy (see "Outcome").
 
 ### 2.7 Smaller rule fixes
 - **Refunds are truly free:** deleting a node refunds what it would cost to buy it back, plus its upgrades.
@@ -271,7 +271,7 @@ New materials or machines, timed contracts, blueprints, multi-select, prestige, 
 
 Found during the work and left for after the pitch. Each is stated as a player would meet it.
 
-1. A player who presses Claim the moment it lights has nothing to do for about two fifths of the run, most of all on "Assemble your first Glyph" and "Build a Fabricator" (80 to 105 seconds each).
+1. A player who presses Claim the moment it lights has nothing to do for about a third of the run, most of all on "Assemble your first Glyph" (80 to 105 seconds). On "Build a Fabricator" 42 to 52 seconds are left, at the end of the wait, once the card's tune-up is done.
 2. When "Assemble your first Glyph" comes up, the card says "about 6 min" or "about 7 min" for a wait that takes about three once the player follows its line.
 3. A "while you wait" step that has just come up can read "Saving for this · about 3 min" and be offered a few seconds later.
 4. A step stays on the card for up to 10 seconds after the player has spent credits elsewhere. Taken then, it puts off the card's own purchase.
@@ -282,3 +282,5 @@ Found during the work and left for after the pitch. Each is stated as a player w
 9. If the first Lens is made before "Build a Fabricator" has been claimed, Keep playing leads through two more Claims before free play starts.
 10. Free play opens with the Fabricator blocked: no goal card says to wire the Lens to a Market, only the alert chip does.
 11. Tidy pressed from the overview at 1440×900 can stutter for one frame of about a tenth of a second.
+12. The tune-up on "Build a Fabricator" has the player wire a new Refiner to the Market, which can be a plot away. On a phone the board zooms out to the overview for that tap, and stays there.
+13. What the tune-up remembers (which of its steps have stopped paying) is not saved: after a reload in the last minute of that wait, a step that had left the card can be offered once more for a few seconds.

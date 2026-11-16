@@ -93,7 +93,7 @@ export const NODE_DEFS: Record<NodeType, NodeDef> = {
   well: { type: 'well', name: 'Well', base: 10, growth: 1.15, tracks: ['speed'], verb: 'extract', blurb: 'Extracts a raw material. Must sit on a deposit.' },
   refiner: { type: 'refiner', name: 'Refiner', base: 50, growth: 1.15, tech: 'P1', tracks: ['speed', 'eff', 'buffer'], verb: 'refine', blurb: 'One input in, something better out.' },
   assembler: { type: 'assembler', name: 'Assembler', base: 600, growth: 2.5, tech: 'P4', tracks: ['speed', 'eff', 'buffer'], verb: 'assemble', blurb: 'Combines two inputs.' },
-  fabricator: { type: 'fabricator', name: 'Fabricator', base: 4800, growth: 1.15, tech: 'P7', tracks: ['speed', 'eff', 'buffer'], verb: 'fabricate', blurb: 'Combines up to three inputs.' },
+  fabricator: { type: 'fabricator', name: 'Fabricator', base: 5000, growth: 1.15, tech: 'P7', tracks: ['speed', 'eff', 'buffer'], verb: 'fabricate', blurb: 'Combines up to three inputs.' },
   router: { type: 'router', name: 'Router', base: 25, growth: 1.1, tech: 'L1', tracks: [], verb: 'split', blurb: 'Splits a stream by ratio, priority or filter.' },
   merger: { type: 'merger', name: 'Merger', base: 25, growth: 1.1, tech: 'L2', tracks: [], verb: 'merge', blurb: 'A junction: many wires in, one stream out.' },
   silo: { type: 'silo', name: 'Silo', base: 200, growth: 1.2, tech: 'L5', tracks: ['buffer'], verb: 'store', blurb: 'A big buffer that smooths bursts.' },

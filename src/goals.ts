@@ -19,14 +19,17 @@
 // shortens that wait most for a player who does only what the cards say. The card is the channel every
 // player obeys, so the structural advice lives there and not in the adviser's tips (src/advice.ts), which
 // nobody is sure to follow. How the lines were chosen is in docs/CONTENT.md ("While you wait").
-import { EXPANSION_DEPOSITS, MATERIALS, MatId, NODE_DEFS, NodeType, RECIPES, RULES, TECHS } from './content';
-import { cycleTime, endDemo, expansionCost, grantTech, has, labRate, maxLevel, nodeCost, nodeCount, recipeOf, trackAvailable, upgradeCost, wellRate } from './economy';
+import { EXPANSION_DEPOSITS, MATERIALS, MatId, NODE_DEFS, NodeType, RECIPES, RULES, Recipe, TECHS } from './content';
+import {
+  cycleTime, demandRate, endDemo, expansionCost, grantTech, has, labRate, maxLevel, nodeCost, nodeCount, nodeUnlocked, pickRecipe, recipeOf, trackAvailable,
+  upgradeCost, valueOf, wellRate,
+} from './economy';
 import { countsForFlow, isFlowing, nearShare } from './flow';
 import { graph, isMachine, isPass } from './graph';
 import { startOrders } from './orders';
 import { Game, GNode, GoalReward, Wire, isLookahead, nodeNoun } from './state';
 import { clearHistory } from './actions';
-import { flowLineWords, lineFocus, lineHeld, lineSpot, waitKind } from './advice';
+import { flowLineWords, lineFocus, lineHeld, lineSpot, tuneLineWords, tuneState, waitKind } from './advice';
 
 /** [current, target, unit]. Unit '¢' means "saving up credits"; 'α' / 'β' / 'γ' mean saving up Data. */
 export type GoalProgress = [current: number, target: number, unit: string];
@@ -93,6 +96,12 @@ export interface Meanwhile {
    * it (goal 22's wires into the Fabricator). goalView passes it on, and the card says "Next step", with no count.
    */
   required?: boolean;
+  /**
+   * The line is only worth saying while its steps pay (the Fabricator card's tune-up: tuneState in src/advice.ts):
+   * once it does not apply it does not come back. So the card's count ("1 of 2") leaves it out unless it applies now
+   * or has been shown; a line without this is counted from the start, because it may still come.
+   */
+  closes?: boolean;
 }
 
 // ---------- helpers for predicates ----------
@@ -488,6 +497,173 @@ const EXPAND_LABS: Meanwhile = {
   when: (g) => has(g, 'R1'),
 };
 
+/**
+ * What the Fabricator card's tune-up can put right, looking at the board only: a counted Well or machine that makes
+ * more than everything it is wired to can take, so that it stands blocked part of the time and does not flow (the
+ * press of Upgrade all on the Wells that the card before asks for leaves several like that).
+ *  - `labs`: it feeds only Labs, they cannot study all of it, and Lab Speed is not researched: with it Labs study
+ *    twice as fast.
+ *  - `level`: it feeds only machines, and they run flat out: a level of Speed on the one whose next level is the
+ *    cheapest (`speed`). `extra` is how much more of the material that level lets it take a second, and `flows`
+ *    whether the producer then flows.
+ * Of several outrun alike, the one of which the least is taken (by what the machines can take at their levels, not
+ * by its utilisation of the moment, which wavers: two Wells equally outrun would take turns on the card), and the
+ * older of two. null where nothing is outrun in that way. (A port that also sells, or feeds a Lab with room, is
+ * never outrun: what the machines leave goes there. So this never asks for a raw Well to be wired to the Market,
+ * which the Flow goal's own line may.)
+ */
+export interface TuneLabs { n: GNode; mat: MatId; research: string }
+export interface TuneLevel { n: GNode; mat: MatId; speed: GNode; extra: number; flows: boolean }
+
+/**
+ * outrun and refineNext look at every node, and the Fabricator card asks for them several times at each look (is
+ * the line done, does it apply, what is its step): what they found is kept for the moment it was worked out at,
+ * the game's time and the board as it stood. Beside the game, not in it.
+ */
+const boardReads = new WeakMap<Game, { time: number; rev: number; techs: number; tune?: { labs: TuneLabs | null; level: TuneLevel | null }; refine?: RefineStep | null }>();
+function readsAt(g: Game) {
+  let m = boardReads.get(g);
+  if (!m || m.time !== g.time || m.rev !== g.rev || m.techs !== g.techs.length) boardReads.set(g, (m = { time: g.time, rev: g.rev, techs: g.techs.length }));
+  return m;
+}
+
+export function outrun(g: Game): { labs: TuneLabs | null; level: TuneLevel | null } {
+  const m = readsAt(g);
+  return (m.tune ??= findOutrun(g));
+}
+
+function findOutrun(g: Game): { labs: TuneLabs | null; level: TuneLevel | null } {
+  const c = graph(g);
+  const F = RULES.flow.flowing;
+  let labs: TuneLabs | null = null;
+  let level: TuneLevel | null = null;
+  let share = Infinity;
+  for (const n of g.nodes) {
+    if (!countsForFlow(g, n)) continue;
+    const r = n.type === 'well' ? null : recipeOf(n);
+    const made: (readonly [MatId, number])[] = n.type === 'well' ? (n.material ? [[n.material, 1]] : []) : r?.outputs ?? [];
+    for (let port = 0; port < made.length; port++) {
+      const [m, qty] = made[port];
+      const gives = n.type === 'well' ? wellRate(n) : r ? qty / cycleTime(n, r) : 0;
+      const to = (c.outs.get(n.id)?.[port] ?? []).map((w) => c.byId.get(w.to)).filter((x): x is GNode => !!x);
+      if (!to.length || gives <= 0) continue;
+      if (to.every((x) => x.type === 'lab')) {
+        if (labs || has(g, 'R2') || !has(g, 'R1')) continue;
+        if (to.reduce((sum, x) => sum + labRate(g, x), 0) < F * gives) labs = { n, mat: m, research: 'R2' };
+        continue;
+      }
+      if (!to.every((x) => isMachine(x))) continue;
+      /** What this machine takes of the material a second, at a Speed level. */
+      const takes = (x: GNode, lv = x.lv.speed) => {
+        const rx = recipeOf(x);
+        const q = rx?.inputs.find((i) => i[0] === m)?.[1] ?? 0;
+        return rx && q ? q / cycleTime({ ...x, lv: { ...x.lv, speed: lv } }, rx) : 0;
+      };
+      const taken = to.reduce((sum, x) => sum + takes(x), 0);
+      if (taken >= F * gives || taken / gives >= share - 1e-9) continue;
+      const taker = to.filter((x) => takes(x) > 0 && x.util >= F && trackAvailable(g, x, 'speed') && x.lv.speed < maxLevel(g, 'speed'))
+        .sort((a, b) => upgradeCost(a, 'speed') - upgradeCost(b, 'speed'))[0];
+      if (!taker) continue;
+      const extra = Math.min(gives - taken, takes(taker, taker.lv.speed + 1) - takes(taker));
+      level = { n, mat: m, speed: taker, extra, flows: taken + extra >= F * gives - 1e-9 };
+      share = taken / gives;
+    }
+  }
+  return { labs, level };
+}
+
+/** Does this Well send what it gives to Labs and nowhere else? */
+const feedsLabsOnly = (g: Game, n: GNode) => {
+  const ws = graph(g).outs.get(n.id)?.[0] ?? [];
+  return n.type === 'well' && !!n.material && ws.length > 0 && ws.every((w) => typeOf(g, w.to) === 'lab');
+};
+
+/** Refiners built on a Well that a Lab studies too: what the Fabricator card's tune-up has the player build. */
+export function turnedRefiners(g: Game): GNode[] {
+  const c = graph(g);
+  return g.nodes.filter((n) => n.type === 'refiner' && !!recipeOf(n) && (c.ins.get(n.id) ?? []).some((w) => {
+    const from = c.byId.get(w.from);
+    return !!from && from.type === 'well' && (c.outs.get(from.id)?.[0] ?? []).some((x) => typeOf(g, x.to) === 'lab');
+  }));
+}
+
+/**
+ * The next gesture of "build a Refiner from a Well that only feeds a Lab, and sell its goods", looking at the
+ * board only. First what a Refiner built that way still lacks: its product wired to the Market (`sell`), then a
+ * Void for a by-product (`dump`: the Silt of an Ink Refiner). Then the next Well (`well`): one that sends what it
+ * gives to Labs and nowhere else, for which a Refiner has a recipe, which gives at least what keeps that Refiner
+ * flowing, and whose product the Markets would still buy at full price (so nothing here ever sells over demand).
+ * The dearest product first. `gives` is that product, in items a second. null when there is nothing (more) to do.
+ */
+export type RefineStep =
+  | { sell: GNode; port: number; mat: MatId; market: GNode }
+  | { dump: GNode; port: number; mat: MatId }
+  | { well: GNode; recipe: Recipe; out: MatId; gives: number };
+
+export function refineNext(g: Game): RefineStep | null {
+  const m = readsAt(g);
+  if (m.refine === undefined) m.refine = findRefine(g);
+  return m.refine;
+}
+
+function findRefine(g: Game): RefineStep | null {
+  const c = graph(g);
+  const market = g.nodes.find((x) => x.type === 'market') ?? null;
+  if (!market || !nodeUnlocked(g, 'refiner')) return null;
+  for (const n of turnedRefiners(g)) {
+    const outs = recipeOf(n)!.outputs;
+    for (let port = 0; port < outs.length; port++) {
+      const mat = outs[port][0];
+      if ((c.outs.get(n.id)?.[port] ?? []).length) continue;
+      if (MATERIALS[mat].value >= RULES.orders.junkValue) return { sell: n, port, mat, market };
+      if (nodeUnlocked(g, 'void')) return { dump: n, port, mat };
+    }
+  }
+  let best: { well: GNode; recipe: Recipe; out: MatId; gives: number } | null = null;
+  for (const n of g.nodes) {
+    if (!feedsLabsOnly(g, n)) continue;
+    const recipe = pickRecipe(g, 'refiner', [n.material!]);
+    if (!recipe || recipe.inputs.length !== 1) continue;
+    const takes = recipe.inputs[0][1] / recipe.time;
+    const rate = wellRate(n);
+    if (rate < RULES.flow.flowing * takes) continue;
+    const [out, qty] = recipe.outputs[0];
+    const gives = (Math.min(rate, takes) / recipe.inputs[0][1]) * qty;
+    if ((g.soldRate[out] ?? 0) + gives > demandRate(g, out)) continue;
+    if (!best || gives * valueOf(g, out) > best.gives * valueOf(g, best.out) + 1e-9) best = { well: n, recipe, out, gives };
+  }
+  return best;
+}
+
+/** The Fabricator still has to be saved for: none stands, and its price is not in hand. */
+const savingForFabricator = (g: Game) => count(g, 'fabricator') === 0 && g.credits < nodeCost(g, 'fabricator');
+
+/**
+ * The tune-up before the Fabricator: one line whose words are its next step's own. The wait for the Fabricator's
+ * price is the longest of the demo, and the board has two kinds of slack by then.
+ *  - "The Murk Well outruns its Refiner: buy Speed on the Refiner (32¢)." The card before had every Well upgraded
+ *    at once: a Well that feeds one machine and nothing else now makes more than that machine takes, stands blocked
+ *    a fifth of the time, and Flow (which every sale is paid by) is down. A level of Speed on the machine puts it
+ *    right (outrun); where it is Labs that a Well outruns, and Lab Speed is not researched, that research does.
+ *  - "You have enough α: build a Refiner from a Well that only feeds a Lab, and sell its goods." Fabrication is the
+ *    last research of the demo and its α is in hand: a Well that a Lab studies earns nothing toward the Fabricator.
+ *    A Refiner built from its port takes what it needs first (machines are fed before Labs), the Lab keeps the
+ *    rest, and the Spark, Ink or Shard is sold: nothing raw, and nothing over its demand (refineNext). Its product
+ *    is wired to the Market, and an Ink Refiner's Silt gets a Void.
+ * A step that costs credits is only on the card while what it brings in pays its price back before the Fabricator
+ * can be bought (tuneState in src/advice.ts): one that would make the Fabricator later is not said. When no step
+ * is left that pays, the line is ticked if the player has done some of it, and leaves the card if not; it does not
+ * come back. Its own words below are for the line once ticked.
+ */
+const TUNE_UP: Meanwhile = {
+  id: 'tune-up',
+  closes: true,
+  text: hint('Your line is tuned: nothing else pays for itself before the Fabricator.'),
+  say: (g) => tuneLineWords(g),
+  done: (g) => tuneState(g) === 'done',
+  when: (g) => savingForFabricator(g) && tuneState(g) !== 'none',
+};
+
 /** Seconds the active goal has been the active one (0 until the first tick has seen it). */
 export const goalAge = (g: Game) => (g.goalAt && g.goalAt.i === g.goal.i ? Math.max(0, g.time - g.goalAt.t) : 0);
 
@@ -869,7 +1045,10 @@ export const GOALS: Goal[] = [
     // (Its second line wired each Well with a Lab of its own to the Market too: four wires across the whole board at
     // minute 17, and a minute later the game said that what they sold went at a quarter of the price, as every
     // card player first sold over demand there. The Fabricator's price came down instead: docs/CONTENT.md.)
-    meanwhile: [CUT_GLYPH],
+    // Then the tune-up, for the wait itself: the Wells that outrun their machines are put right (a level of Speed
+    // each), and the Wells that only feed Labs get a Refiner whose goods are sold. Each step only while it pays for
+    // itself before the Fabricator can be bought; nothing is sold raw or over its demand.
+    meanwhile: [CUT_GLYPH, TUNE_UP],
     reward: { b: 40 },
   },
   {
@@ -1031,23 +1210,53 @@ function lineText(g: Game, line: Meanwhile, touch: boolean): string {
 }
 
 /**
+ * For each game: the lines of its active goal that have applied to its board since the goal came up (or since this
+ * copy of the game was first asked). Kept beside the game, not in it: nothing is saved, and a copy starts afresh.
+ */
+const linesSeen = new WeakMap<Game, { goal: number; at: number; ids: Set<string> }>();
+
+/** The ids of the active goal's lines that are done on the board as it stands (Game.goalAt.had, when a goal comes up). */
+const linesDone = (g: Game): string[] => (GOALS[g.goal.i]?.meanwhile ?? []).filter((l) => l.done(g)).map((l) => l.id);
+
+/**
  * The active goal's "while you wait" line on the card right now, with its place among the goal's lines (1-based
  * `step` of `of`): the first line that applies and is not done yet, in the goal's order; once every line that
  * applies is done, the last of them (done). null when the goal has no line that applies to this board, or is
  * ready to claim.
+ *
+ * A line that was done already when the goal came up (Game.goalAt.had) is not shown and not counted: the card does
+ * not tick off, as if just done, a wire that was cut two goals earlier. (Undone again, it is a line like any other:
+ * tickGoal takes it off that list.) And the count is of the lines the card shows, has shown or may still show: a line
+ * that only applies while its steps pay (Meanwhile.closes) is left out of `of`, and of the places before `step`,
+ * unless it applies now or has applied since the goal came up, so the card reads "1 of 2" only where there is a second.
  */
 export function meanwhileAt(g: Game): { line: Meanwhile; step: number; of: number } | null {
-  const lines = activeGoal(g)?.meanwhile;
-  if (!lines?.length || g.goal.ready) return null;
+  const all = activeGoal(g)?.meanwhile;
+  if (!all?.length || g.goal.ready) return null;
+  const had = g.goalAt && g.goalAt.i === g.goal.i ? g.goalAt.had : undefined;
+  let seen = linesSeen.get(g);
+  if (!seen || seen.goal !== g.goal.i || g.time < seen.at) linesSeen.set(g, (seen = { goal: g.goal.i, at: g.time, ids: new Set() }));
+  seen.at = g.time;
+  // One pass, asking each line no more than is needed: whether it is done only up to the line the card shows (and
+  // of a line that was done when the goal came up), whether it applies only up to there and of a line that closes.
+  let found: { line: Meanwhile; step: number; of: number } | null = null;
   let last: { line: Meanwhile; step: number; of: number } | null = null;
-  for (let i = 0; i < lines.length; i++) {
-    const line = lines[i];
-    if (line.when && !line.when(g)) continue;
-    const at = { line, step: i + 1, of: lines.length };
-    if (!line.done(g)) return at;
-    last = at;
+  let count = 0;
+  for (const line of all) {
+    if (had?.includes(line.id) && line.done(g)) continue;
+    const ask = !found || !!line.closes;
+    const on = ask ? !line.when || line.when(g) : false;
+    if (on) seen.ids.add(line.id);
+    if (!on && line.closes && !seen.ids.has(line.id)) continue;
+    count++;
+    if (found || !on) continue;
+    const at = { line, step: count, of: 0 };
+    if (line.done(g)) last = at;
+    else found = at;
   }
-  return last;
+  const at = found ?? last;
+  if (at) at.of = count;
+  return at;
 }
 
 /** The line meanwhileAt(g) gives, done or not; null when there is none. lineAdvice(g) gives its next step. */
@@ -1196,6 +1405,9 @@ function applyUnlocks(g: Game, r: GoalReward) {
   } else if (r.unlock === 'end') endDemo(g);
 }
 
+/** The game second at which each game's list of lines done when the goal came up (Game.goalAt.had) was last looked through. */
+const hadLooked = new WeakMap<Game, number>();
+
 /** How far down the chain each game's unlocks have been checked. */
 const unlocksChecked = new WeakMap<Game, number>();
 
@@ -1206,8 +1418,20 @@ const unlocksChecked = new WeakMap<Game, number>();
  */
 function repairChain(g: Game) {
   if (g.goal.i > GOALS.length) g.goal = { i: GOALS.length, ready: false };
-  // Since when this goal has been the active one: set here for a save without it, or a goal set by hand.
+  // Since when this goal has been the active one: set here for a save without it, or a goal set by hand. With it,
+  // which of its lines are done already (in a save from before that was kept, too: what is done when the save is
+  // loaded is not ticked off on the card as if it had just been done).
   if (!g.goalAt || g.goalAt.i !== g.goal.i) g.goalAt = { i: g.goal.i, t: g.time };
+  if (!g.goalAt.had) g.goalAt.had = linesDone(g);
+  // One of those that has been undone since (the player wired the Glyph back into a Lab; a producer stopped flowing)
+  // is a line like any other from then on: done again, it is ticked off before the player's eyes. Looked at once a
+  // game second, and not in a look-ahead copy, where nobody reads the card.
+  else if (g.goalAt.had.length && !isLookahead(g) && Math.floor(g.time) !== hadLooked.get(g)) {
+    hadLooked.set(g, Math.floor(g.time));
+    const lines = GOALS[g.goal.i]?.meanwhile ?? [];
+    const still = g.goalAt.had.filter((id) => lines.find((l) => l.id === id)?.done(g));
+    if (still.length !== g.goalAt.had.length) g.goalAt.had = still;
+  }
   const from = unlocksChecked.get(g) ?? 0;
   if (from >= g.goal.i) return;
   for (let i = from; i < g.goal.i; i++) applyUnlocks(g, GOALS[i].reward);
@@ -1251,6 +1475,7 @@ export function claimGoal(g: Game): boolean {
   g.data.b += r.b ?? 0;
   g.data.g += r.g ?? 0;
   g.goal = { i: index + 1, ready: false };
+  // (Which of the next goal's lines are done already is noted by tickGoal below, once this reward's unlocks are in.)
   g.goalAt = { i: index + 1, t: g.time };
   // Rewards are not undoable, so neither is what earned them: undo stops at the last claim. (Undoing the step
   // a goal was for kept the reward, refunded the step, and could meet the next card for nothing.)
