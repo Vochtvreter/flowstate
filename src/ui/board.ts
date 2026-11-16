@@ -4160,7 +4160,16 @@ function steer(cx: number, cy: number, hovering = false) {
     case 'wire': {
       const d = drag;
       d.p = p;
-      if (!d.armed && Math.hypot(cx - d.sx, cy - d.sy) > d.slop) wireUnderWay(d);
+      if (!d.armed && Math.hypot(cx - d.sx, cy - d.sy) > d.slop) {
+        // Out in the overview a finger's drag moves the board wherever it starts, as it does across a card there
+        // (the port dots stand close together): a dot is armed by a tap, and the wire ends with a tap on a target.
+        if (d.touch && over) {
+          boardEl.classList.remove('wiring');
+          drag = { kind: 'pan', sx: cx, sy: cy, vx: ui.view.x, vy: ui.view.y, moved: true, slop: 0, place: false };
+          break;
+        }
+        wireUnderWay(d);
+      }
       const can = (n: GNode) => wireOk(g, d.from, d.port, n.id);
       const tn = !d.armed ? null : d.touch ? snapTarget(p, can) : snapExact(p, can, 'in');
       d.target = tn?.id ?? null;
