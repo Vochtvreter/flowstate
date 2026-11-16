@@ -333,8 +333,10 @@ function applyView() {
   placeExpand(true);
   if (!renderedGame) return;
   if (hintsBox && ui.g.goal.i < HINTS_UNTIL) syncHints(ui.g, false);
-  // Back in among the cards by the player's own hand: Fit has nothing left to return to.
-  if (wasOver && !over) fitBack = fitAt = null;
+  // The camera has left the place the player's own Fit took it to (and is not on its way there): Fit has nothing left
+  // to return to, and fits again. Back in among the cards, the zoom to come back in to is forgotten too.
+  if (fitBack && fitAt && !(glide && glide === fitGlide) && !sameView(ui.view, fitAt)) fitBack = fitAt = null;
+  if (wasOver && !over) ovFrom = null;
   // The deposits' second line is worded for the type size.
   if (big !== wasBig) syncDeposits(ui.g);
   // Text that was left alone in the overview is brought up to date on the way back in, and the second
@@ -648,29 +650,58 @@ function fitTarget(box: Box, detailed = false, kMax = 1): View {
 
 /** How long Fit, a tap on a card in the overview, and a camera move that follows a build take, in ms. */
 const FIT_MS = 360, FRAME_MS = 320;
-/** The view the player had before Fit (or an expansion) took the camera into the overview, and where that left it. */
+/**
+ * The way back from the player's own Fit: the view they had before it took the camera into the overview, where it
+ * left the camera, the camera move that takes it there, and the board (its revision) as it was then. Only a Fit the
+ * player pressed has one, and only until the camera or the board changes (see `fitGoesBack`).
+ */
 let fitBack: View | null = null;
 let fitAt: View | null = null;
+let fitGlide: Glide | null = null;
+let fitRev = -1;
+/** The zoom the camera had before Fit or an expansion took it into the overview: a tap on a card there comes back in to it. */
+let ovFrom: number | null = null;
 /** For a moment after a game is loaded or the layout changes, Fit is the opening view, not the player's own press. */
 let openingUntil = 0;
 
 const sameView = (a: View, b: View) => Math.abs(a.x - b.x) < 2 && Math.abs(a.y - b.y) < 2 && Math.abs(a.k - b.k) < 0.004;
 
 /**
- * Show what has been built, as large as it fits clear of the strip, an open sheet and the corner
- * controls: among the cards when the factory fits the screen at a readable zoom, and in the overview
- * (every card an icon) when it does not. Pressed again from that overview, Fit returns to the view the
- * player had. A game that has just been loaded opens among the cards, on the middle of the factory.
+ * A press on Fit now would go back to the view the player had before their last Fit, not fit: that Fit was their
+ * own, it took the camera into the overview, and neither the camera nor the board has changed since. (For the
+ * button's title, and for `fitView`.)
+ */
+export function fitGoesBack(): boolean {
+  return !!fitBack && !!fitAt && !!renderedGame && fitRev === ui.g.rev && sameView(viewAhead(), fitAt);
+}
+
+/**
+ * Show what has been built, as large as it fits clear of the strip, an open sheet and the corner controls: among
+ * the cards when the factory fits the screen at a readable zoom, and in the overview (every card an icon) when it
+ * does not. Fit always fits, with one exception: a second press straight after the player's own Fit from among the
+ * cards into the overview, with the camera and the board untouched in between, goes back to the view they had
+ * (`fitGoesBack`; the button says so while it would). A fit the game made itself (the opening view, an expansion, a celebration) has no
+ * way back: pressed after one, Fit fits. A game that has just been loaded opens among the cards, on the middle of
+ * the factory.
  */
 export function fitView(smooth = false) {
+  fit(smooth, byHand());
+}
+
+/** The same, never as the player's own press: for a caller that fits the board for a purpose of its own (Show me). */
+export function fitAll(smooth = false) {
+  fit(smooth, false);
+}
+
+function fit(smooth: boolean, hand: boolean) {
   const g = ui.g;
-  const hand = byHand();
   const animate = smooth || hand;
   const now = viewAhead();
-  if (hand && fitBack && fitAt && sameView(now, fitAt)) {
-    const back = fitBack;
+  if (hand && fitGoesBack()) {
+    const back = fitBack!;
     fitBack = fitAt = null;
     moveView(back.x, back.y, back.k, animate, FIT_MS);
+    syncFitControl();
     return;
   }
   if (!renderedGame || renderedGame !== g || performance.now() < openingUntil) {
@@ -678,11 +709,41 @@ export function fitView(smooth = false) {
     return;
   }
   const t = fitTarget(builtBox() ?? { x0: 0, y0: 0, x1: g.board.w, y1: g.board.h });
-  if (t.k < zoomFloor()) {
-    if (!fitBack || !over) fitBack = { ...now };
+  const out = t.k < zoomFloor();
+  if (out && now.k >= zoomFloor()) ovFrom = now.k;
+  // (Only a view among the cards is one to come back to: from an overview, the game's or the player's, Fit just fits.)
+  if (hand && out && now.k >= zoomFloor()) {
+    fitBack = { ...now };
     fitAt = t;
+    fitRev = g.rev;
   } else fitBack = fitAt = null;
   moveView(t.x, t.y, t.k, animate, FIT_MS);
+  fitGlide = glide;
+  syncFitControl();
+}
+
+/** What the Fit controls say while a press would go back, and otherwise (the wide layout's button names its key to a keyboard). */
+const FIT_BACK = 'Back to the last view';
+
+/**
+ * The Fit controls (the zoom row's button, the phone's floating one) say what a press would do: while it would go
+ * back to the view before Fit, their title and label say that. (Their own words are put back as they were.)
+ */
+function syncFitControl() {
+  const back = fitGoesBack();
+  // (Looked at a few times a second: the panels write the button's own words again when the pointer in use changes.)
+  const wide = document.querySelector<HTMLElement>('#zoom [data-act="fit"]'), fab = document.querySelector<HTMLElement>('[data-testid="fab-fit"]');
+  const put = (e: HTMLElement | null, title: string | null, label: string) => {
+    if (!e) return;
+    if (e.getAttribute('aria-label') !== label) e.setAttribute('aria-label', label);
+    if (title == null) {
+      if (e.hasAttribute('title')) e.removeAttribute('title');
+    } else if (e.getAttribute('title') !== title) e.setAttribute('title', title);
+  };
+  const wideWords = back ? withKey(FIT_BACK, 'F') : withKey('Fit board', 'F');
+  put(wide, wideWords, wideWords);
+  put(fab, back ? FIT_BACK : null, back ? FIT_BACK : 'Show my supply line');
+  for (const e of [wide, fab]) e?.classList.toggle('back', back);
 }
 
 /**
@@ -829,8 +890,9 @@ export function jumpTo(id: number) {
 function zoomInTo(id: number) {
   const n = nodeById(ui.g, id);
   if (!n) return;
-  const k = fitBack && fitBack.k >= zoomFloor() ? fitBack.k : READ_ZOOM;
+  const k = ovFrom != null && ovFrom >= zoomFloor() ? ovFrom : READ_ZOOM;
   fitBack = fitAt = null;
+  ovFrom = null;
   const t = centredOn(n, k);
   moveView(t.x, t.y, t.k, true, FIT_MS);
 }
@@ -1820,11 +1882,9 @@ function expand(ev?: Event) {
   const box = boxUnion(builtBox(), strip);
   const now = viewAhead();
   const t = fitTarget(box);
-  // (Fit, pressed afterwards, goes back to where the player was: see `fitView`.)
-  if (t.k < zoomFloor()) {
-    if (!fitBack || !over) fitBack = { ...now };
-    fitAt = t;
-  }
+  // (The game's own move: Fit, pressed afterwards, fits. A tap on a card comes back in to the zoom the player had.)
+  fitBack = fitAt = null;
+  if (t.k < zoomFloor() && now.k >= zoomFloor()) ovFrom = now.k;
   moveView(t.x, t.y, t.k, true, 600);
 }
 
@@ -2757,6 +2817,7 @@ export function updateSlow(part?: 'nodes' | 'wires') {
   }
   placeExpand();
   if (ui.placing) updateGhost();
+  syncFitControl();
   if (radial) {
     refreshBuildSheet();
     // The board changed under the open menu (an undo by key): its spot is found again, and the outline moves there.
@@ -3449,15 +3510,30 @@ function markTargets(from: number, port: number, quiet = false) {
     const can = n.id !== from && wireOk(g, from, port, n.id);
     refs.el.classList.toggle('can', can);
     refs.el.classList.toggle('cant', !can && n.id !== from);
+    // (See `tapTarget`: a card lit up for a finger answers a tap on whatever shows of it.)
+    if (can && !quiet) refs.el.addEventListener('click', tapTarget);
+    else refs.el.removeEventListener('click', tapTarget);
     marked.add(n.id);
   }
 }
+
+/**
+ * A card lit up as a possible end of the wire carries this listener, which does nothing. A browser moves a tap
+ * that lands beside a control on to the control (the goal card is one), and counts only elements that listen for
+ * clicks as things a tap can be meant for: the board hears presses, not clicks, so a tap on the strip of a card that
+ * showed under the goal card went to the goal card. With the listener, a tap on the card is a tap on the card.
+ */
+function tapTarget() {}
 
 function clearMarks() {
   if (!markedFor) return;
   markedFor = null;
   boardEl.classList.remove('arming', 'marking');
-  for (const id of marked) nodeEls.get(id)?.el.classList.remove('can', 'cant');
+  for (const id of marked) {
+    const e = nodeEls.get(id)?.el;
+    e?.classList.remove('can', 'cant');
+    e?.removeEventListener('click', tapTarget);
+  }
   marked.clear();
 }
 
@@ -3512,22 +3588,34 @@ let shownWire: { from: number; to: number; port?: number } | null = null;
  */
 const tapCovers = () => coverBoxes(0);
 
+/** A finger needs this much of a card clear, each way, to tap it (screen px). */
+const TAP_ROOM = 44;
+
 /**
- * Enough of this card can be seen and tapped from view `v`: at least half of it (sampled on a grid of 6 by 3)
- * lies on the stage, under nothing in `covers`.
+ * Enough of this card can be seen and tapped from view `v`: a part of it at least TAP_ROOM by TAP_ROOM on screen
+ * (its whole width or height, where the card is drawn smaller than that) lies on the stage, under nothing in
+ * `covers`. (A Market whose bottom 20 px showed under the goal card counted as in view, and could not be tapped.)
  */
 function reachable(n: GNode, covers: Box[], v: View = viewAhead()): boolean {
   const { w, h } = nodeSize(n);
   const r = rectOf();
-  let ok = 0;
-  for (let i = 0; i < 6; i++) {
-    for (let j = 0; j < 3; j++) {
-      const x = (n.x + (w * (i + 0.5)) / 6) * v.k + v.x, y = (n.y + (h * (j + 0.5)) / 3) * v.k + v.y;
-      if (x < 0 || y < 0 || x > r.width || y > r.height) continue;
-      if (!covers.some((c) => x >= c.x0 && x <= c.x1 && y >= c.y0 && y <= c.y1)) ok++;
+  const x0 = Math.max(0, n.x * v.k + v.x), y0 = Math.max(0, n.y * v.k + v.y);
+  const x1 = Math.min(r.width, (n.x + w) * v.k + v.x), y1 = Math.min(r.height, (n.y + h) * v.k + v.y);
+  const needW = Math.min(TAP_ROOM, w * v.k), needH = Math.min(TAP_ROOM, h * v.k);
+  if (x1 - x0 < needW - 0.5 || y1 - y0 < needH - 0.5) return false;
+  // A clear part of that size can always be slid left and up until it meets the card's own side or a cover's.
+  const xs = [x0], ys = [y0];
+  for (const c of covers) {
+    if (c.x1 > x0 && c.x1 < x1) xs.push(c.x1);
+    if (c.y1 > y0 && c.y1 < y1) ys.push(c.y1);
+  }
+  for (const ax of xs) {
+    for (const ay of ys) {
+      if (ax + needW > x1 + 0.5 || ay + needH > y1 + 0.5) continue;
+      if (!covers.some((c) => ax < c.x1 - 0.5 && ax + needW > c.x0 + 0.5 && ay < c.y1 - 0.5 && ay + needH > c.y0 + 0.5)) return true;
     }
   }
-  return ok >= 9;
+  return false;
 }
 
 /**

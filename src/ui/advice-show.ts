@@ -11,7 +11,7 @@ import { NodeType, TECHS } from '../content';
 import { expansionCost, has, matUnlocked, nodeUnlocked } from '../economy';
 import { activeGoal, goalDeposit, goalFocus } from '../goals';
 import { Deposit, Game, GNode } from '../state';
-import { armedPort, boardRect, fitView, frameBoth, frameBoxes, frameNodes as boardFrames, gestureActive, radialOpen, toClient, toWorld, zoomBy } from './board';
+import { armedPort, boardRect, fitAll, frameBoth, frameBoxes, frameNodes as boardFrames, gestureActive, radialOpen, toClient, toWorld, zoomBy } from './board';
 import { celebrating } from './celebrate';
 import { Overlay, addOverlay } from './fx';
 import { Pt, nodeSize, outPorts } from './geom';
@@ -315,7 +315,7 @@ export function showAdvice(g: Game, a: Advice, render: () => void): boolean {
         // Not on show at all (hidden, or waiting off the board: a phone held sideways has no free place for it while
         // cards lie all along the thumb row): the whole board is framed (Fit), which gives it a place again; the
         // ring is on it when it comes, and the hand waits for it.
-        if (b.hidden || !b.getClientRects().length) fitView(true);
+        if (b.hidden || !b.getClientRects().length) fitAll(true);
         // Docked (class `dock`, board.ts), it stands fixed in the free part of the stage, where it can always be
         // pressed: moving the camera would not bring it any nearer, so the board stays where the player left it.
         else if (!b.classList.contains('dock')) {
