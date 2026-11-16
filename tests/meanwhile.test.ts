@@ -1006,6 +1006,8 @@ describe('"Build a Fabricator": the tune-up before the Fabricator', () => {
     expect(meanwhileAt(g)).toMatchObject({ step: 1, of: 1 });
     // The game notes it by itself when the goal comes up (a save from before this was kept: on its first tick).
     delete g.goalAt!.had;
+    // (And before that tick the card reads the same: it is drawn once before it, and keeps the count it first read.)
+    expect(meanwhileAt(g)).toMatchObject({ step: 1, of: 1 });
     run(g, 0.05);
     expect(g.goalAt!.had).toEqual(['cut-glyph']);
     expect(deserialize(serialize(g))!.goalAt!.had).toEqual(['cut-glyph']);

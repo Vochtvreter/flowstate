@@ -1233,7 +1233,10 @@ const linesDone = (g: Game): string[] => (GOALS[g.goal.i]?.meanwhile ?? []).filt
 export function meanwhileAt(g: Game): { line: Meanwhile; step: number; of: number } | null {
   const all = activeGoal(g)?.meanwhile;
   if (!all?.length || g.goal.ready) return null;
-  const had = g.goalAt && g.goalAt.i === g.goal.i ? g.goalAt.had : undefined;
+  // (Not noted yet, in a save from before it was kept or with a goal set by hand: the lines done now, as the next tick
+  // will note them. The page draws the card once before that tick, and the card keeps the count it first read while
+  // the same line stays on it: "1 of 2" stood under a line whose second had been done before the save was loaded.)
+  const had = (g.goalAt && g.goalAt.i === g.goal.i ? g.goalAt.had : undefined) ?? linesDone(g);
   let seen = linesSeen.get(g);
   if (!seen || seen.goal !== g.goal.i || g.time < seen.at) linesSeen.set(g, (seen = { goal: g.goal.i, at: g.time, ids: new Set() }));
   seen.at = g.time;
