@@ -19,7 +19,7 @@ describe('numbers (2.6)', () => {
   it('Shard is lime; machine and tech prices are the ones tuned with the pacing bot', () => {
     expect(MATERIALS.shard.color).toBe('#B8F26B');
     expect(NODE_DEFS.assembler.base).toBe(600);
-    // (7,250¢ until the second fix round: the card player's longest wait, two minutes of nothing to do before the
+    // (It was 7,250¢ in an earlier build: the card player's longest wait, two minutes of nothing to do before the
     // Lens. The fast players are the floor: their first Lens stays after 14:00.)
     expect(NODE_DEFS.fabricator.base).toBe(4800);
     // The second Assembler (Prism) is a purchase in its own right: 1,500¢, so that part of what the Fabricator
@@ -34,7 +34,7 @@ describe('numbers (2.6)', () => {
     expect(TECHS.P2.cost).toEqual({ a: 40 }); // a player who claims at once waits under 30 s on goal 8
     expect(TECHS.P3.cost).toEqual({ a: 195 }); // the card player's wait for it, under a minute
     // (Assembly and Breeze Deposits went up when the cards' lines came to turn the credits a card player used to
-    // leave idle into α; they were tuned again with the second fix round's cheaper Labs and Deep Analysis line.)
+    // leave idle into α; they were tuned again with the cheaper Labs and the Deep Analysis line.)
     expect(TECHS.P4.cost).toEqual({ a: 1325 });
     expect(TECHS.P5.cost).toEqual({ a: 1875 });
     expect(TECHS.P7.cost).toEqual({ a: 720, b: 100 }); // lower than the curve: the card players' last wait is for credits, not for α

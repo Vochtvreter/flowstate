@@ -330,13 +330,13 @@ describe('advice: the repertoire, one board at a time', () => {
     const t = trial(g, step, 3000);
     expect(t.applied).toBe(true);
     expect(t.tip).toBeLessThan(t.idle - 60);
-    // The same board once orders exist. An order asks for 45–90 s of what is SOLD of a material and pays α by
+    // The same board once orders exist. An order asks for 25–50 s of what is SOLD of a material and pays α by
     // the item: Ink taken from the Market makes every Ink order smaller. The look-ahead counts the orders to
     // come, so the Ink wire is worth less than it was, and raw material (which no order asks for while
     // something refined is made) is now the better tip. Not the free Glint deposit, though: on this card that
     // deposit is the line's ("a Well and a Lab built from its port"), and a tip does not give it another ending.
     const o = midGame();
-    at(o, 'make-glyph'); // Assembly: 1,140 α
+    at(o, 'make-glyph'); // Assembly: 1,325 α
     o.credits = 1e6;
     run(o, 0.1);
     expect(o.ordersOn).toBe(true);
@@ -1443,7 +1443,7 @@ describe('advice: few tips, and never in a chain', () => {
     run(g, 40);
     expect(lab.util).toBeGreaterThan(0.95);
     expect(second.util).toBeGreaterThan(0.95);
-    at(g, 'make-glyph'); // 1,140 α at 2 α a second
+    at(g, 'make-glyph'); // 1,325 α at 2 α a second
     g.credits = 700; // the Assembler's price is in hand: the wait is for α alone
     g.data.a = 0;
     run(g, 0.1);

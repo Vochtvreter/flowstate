@@ -191,7 +191,7 @@ const pct = (frac: number) => Math.round(Math.max(0, Math.min(1, frac)) * 1000) 
 const tok = (m: MatId, q?: number) =>
   `<span class="tok">${matGlyph(m, 13)}${q != null ? `<span class="mono">${q}</span> ` : ''}${MATERIALS[m].name}</span>`;
 
-/** A tech's price with each kind of Data in its own colour: "1,180α 100β". Read from TECHS, never written out here. */
+/** A tech's price with each kind of Data in its own colour: "720α 100β". Read from TECHS, never written out here. */
 const techPrice = (t: Tech) => (['a', 'b', 'g'] as DataTier[]).filter((k) => t.cost[k])
   .map((k) => `<span class="mono" style="color:${DATA_COLORS[k]}">${fmt(t.cost[k]!)}${DATA_NAMES[k]}</span>`).join(' ') || costText(t);
 
@@ -592,7 +592,7 @@ function renderHot(force: boolean) {
 
 /**
  * On a phone the build bar scrolls sideways once it holds more than fits (Market, Lab and Void went off its
- * right edge unseen: rev-phone F6). It says so: `more-r` while there is more to the right, `more-l` to the left
+ * right edge unseen). It says so: `more-r` while there is more to the right, `more-l` to the left
  * (phone.css fades that edge and puts a chevron on it). Looked at when its slots change, when it scrolls and when
  * the window does.
  */
@@ -907,9 +907,9 @@ let inspOpenedFor = '';
  * Scroll the inspector, just opened, so what the player most likely came for is in view: the control "Show me" has
  * ringed, the "Upgrade all" the goal on the card asks for (goal 20, whether it can be afforded yet or not), the warning
  * of a node with a problem (opened from the alert's Show, or by a tap: it says what is wrong and how to fix it, and the
- * first upgrade below it was the wrong fix: final-phone F5), on a Router the rows of its wires with their Favour buttons,
+ * first upgrade below it was the wrong fix), on a Router the rows of its wires with their Favour buttons,
  * on anything else the first upgrade they can afford. Below the fold of a phone's sheet those were missed, or showed a
- * sliver over Duplicate and Delete (rev-phone F5, rev-wide F2, fr-rules). Nothing moves when it is in view already, nor
+ * sliver over Duplicate and Delete. Nothing moves when it is in view already, nor
  * once a finger is on the panel.
  */
 function revealInInspector(opened: string, again = false) {

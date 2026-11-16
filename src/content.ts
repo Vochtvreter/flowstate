@@ -168,8 +168,9 @@ const T = (
  *    does what the goal card says, its "while you wait" lines included (Goal.meanwhile in src/goals.ts), so that
  *    the card keeps that player busy: nothing to do for at most 30% of the time to the first Lens, never for
  *    more than a minute at a stretch, never more than 75 s on one goal, and the first Lens at 17:30–21:00
- *    (decision D1 of the second fix round, "idle over length"; `npm run pacing`, policy cardonly). The fast
- *    players are the floor (no first Lens before 14:00), so the spine could not simply come down. What came
+ *    (the pacing rule: where a later first Lens would cost waits with nothing to do in them, the waits are
+ *    kept short; `npm run pacing`, policy cardonly). The fast players are the floor (no first Lens before
+ *    14:00), so the spine could not simply come down. What came
  *    down is what the card's player pays for and the fast players hardly do: the Labs of the lines (×1.1 a Lab,
  *    it was ×1.3) and the Fabricator; and "Make your first Mist" has a line for Lab Speed and Deep Analysis
  *    (the fast players buy Deep Analysis after Breeze Deposits, never before it). Assembly is 1,325α, Breeze

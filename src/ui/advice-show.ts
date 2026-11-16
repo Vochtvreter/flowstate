@@ -373,7 +373,7 @@ export function showAdvice(g: Game, a: Advice, render: () => void): boolean {
   after?.();
   revealMark();
   // On a phone the inspector is a sheet that slides in: the ringed control is brought into its scroller again once it
-  // is up, so the ring is never left below the part of the sheet that shows (fr-feel: the scroller ended at 705 px,
+  // is up, so the ring is never left below the part of the sheet that shows (the scroller ended at 705 px,
   // the ringed Speed button began at 711).
   if (env.phone && mark && mark.testid !== EXPAND) {
     const ringed = mark;
@@ -399,7 +399,7 @@ const SHEET_IN = 320;
 // a research that has opened up the deposit the goal names, that deposit is what is brought in.
 //
 // Closing a sheet (the inspector, the build sheet) leaves the camera where it is: the player opened it on something,
-// and that is where they are looking (final-phone F5: the camera glided away from the Ember Well the alert had shown).
+// and that is where they are looking (the camera glided away from the Ember Well the alert had shown).
 // The one exception is a look that came due while the sheet was up: it was put off, and runs once the sheet has gone.
 //
 // Never while the player is in the middle of something on the board (a drag, a pinch, an armed port, a node being

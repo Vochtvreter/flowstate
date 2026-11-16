@@ -819,7 +819,8 @@ export const GOALS: Goal[] = [
       // Then Lab Speed and Deep Analysis: every Lab gives half as much again, for the rest of this wait and every
       // one after it. The β it costs comes from the Glyph the card before had the player study; the Speed line comes
       // first so that it is in hand by then. (A fast player buys Deep Analysis too, but after Breeze Deposits: this
-      // line is what the card-following player has instead of that player's upgrades. Second fix round, D1.)
+      // line is what the card-following player has instead of that player's upgrades. It is there for the pacing
+      // rule: see the tech prices in src/content.ts.)
       {
         id: 'deep-analysis',
         text: hint('Research Lab Speed, then Deep Analysis: every item studied gives half as much Data again.'),

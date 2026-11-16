@@ -646,7 +646,7 @@ function startBow() {
       wires.push({ pts, from: depth.get(wire.from)! * step, to: d * step, color: ends.mat ? MATERIALS[ends.mat].color : '#9DB8FF' });
     }
   }
-  // Bring the line into view if part of it is off screen, never zooming in (rev-consultant's answer (b)): a line
+  // Bring the line into view if part of it is off screen, never zooming in: a line
   // that fits at the zoom the player has is slid into view at that zoom, as little as it takes (the board's
   // frameNodes, the Wells first and the Lens last, so that the Lens is the one shown if they cannot all be). One that
   // does not fit: on a phone, Fit, whose overview (every card an icon) is how a phone shows the whole factory;

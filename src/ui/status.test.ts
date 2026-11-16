@@ -94,7 +94,7 @@ describe('the alert names the node the goal is about first', () => {
   });
 });
 
-describe('starved means starved (final-desktop F5)', () => {
+describe('starved means starved', () => {
   /** A Shard Refiner fed by the opening Glint Well; the simulation is not run: their states are set by hand. */
   function refinerFedByWell(): { g: Game; well: GNode; ref: GNode } {
     clearHistory();

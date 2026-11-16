@@ -53,7 +53,7 @@ describe('orders (2.5)', () => {
     expect(take(g, 'order-new').length).toBe(0);
   });
 
-  it('asks for something the player makes right now, never junk, sized to 45–90 s of what reaches Markets', () => {
+  it('asks for something the player makes right now, never junk, sized to 25–50 s of what reaches Markets', () => {
     const g = factory();
     g.stats.ordersFilled = 1; // the first order has its own, shorter size (below)
     expect(outputRates(g).shard).toBeCloseTo(0.5, 1);
@@ -125,10 +125,10 @@ describe('orders (2.5)', () => {
       if (o.mat !== 'shard') continue;
       seen++;
       expect(o.need).toBeGreaterThanOrEqual(Math.floor(0.25 * RULES.orders.minSeconds) - 1);
-      expect(o.need).toBeLessThanOrEqual(Math.ceil(0.25 * RULES.orders.maxSeconds) + 1); // 23 at most, where output would give 45
+      expect(o.need).toBeLessThanOrEqual(Math.ceil(0.25 * RULES.orders.maxSeconds) + 1); // 13 at most, where output would give 25
     }
     expect(seen).toBeGreaterThan(5);
-    // So it really does take 45 to 90 s, with nothing rerouted.
+    // So it really does take 25 to 50 s, with nothing rerouted.
     unlock(g);
     while (g.order!.mat !== 'shard') g.order = makeOrder(g);
     const o = g.order!;
@@ -313,7 +313,7 @@ describe('orders (2.5)', () => {
     for (let i = 0; i < 400; i++) {
       const o = makeOrder(g);
       count[o.mat] = (count[o.mat] ?? 0) + 1;
-      if (o.mat === 'spark') expect(o.need).toBe(RULES.orders.minNeed); // 45–90 s of nothing
+      if (o.mat === 'spark') expect(o.need).toBe(RULES.orders.minNeed); // 25–50 s of nothing
     }
     expect(count.ink).toBeGreaterThan(count.shard);
     expect(count.shard).toBeGreaterThan(count.spark);

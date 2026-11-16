@@ -189,7 +189,7 @@ describe('"while you wait": the lines', () => {
     // Four pairs: a Well and then its Lab each, but the Ember Well alone (0.8 a second: its Lab had room).
     expect(presses).toBe(7);
     // Then Lab Speed and Deep Analysis. With no α in hand the step is saved for in Data, and the card says so
-    // (contract C1: nothing is coming in on this board, so no time); with the Data, the two researches.
+    // (nothing is coming in on this board, so no time); with the Data, the two researches.
     expect(goalView(g)!.meanwhile).toEqual({
       text: TEXT['deep-analysis'].mouse, done: false, step: 3, of: 3, held: { cost: TECHS.R2.cost.a, sym: 'α', eta: Infinity },
     });
@@ -865,7 +865,7 @@ describe('"Make your first Lens": a line for each input the Fabricator lacks', (
   it('built from the Prism Assembler\'s port: "2 of 2" asks for the Glyph wire, the progress counts inputs, and the Lens follows within 30 s', () => {
     const { g, f } = board('port');
     const v = goalView(g)!;
-    // The goal's own requirement, not something to do while waiting: the card says "Next step" (contract C2).
+    // The goal's own requirement, not something to do while waiting: the card says "Next step".
     expect(v.meanwhile).toEqual({ text: TEXT['glyph-fab'].mouse, done: false, step: 2, of: 2, required: true });
     expect(v.progress).toEqual([1, 2, 'inputs wired']);
     expect(v.inputs).toEqual([{ mat: 'prism', name: 'Prism', fed: true }, { mat: 'glyph', name: 'Glyph', fed: false }]);

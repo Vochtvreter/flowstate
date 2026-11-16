@@ -1344,7 +1344,7 @@ function judgeFlow(g: Game, w: Wait, cands: Cand[]): Verdict | null {
   cands.forEach((c, rank) => {
     // The fix the card's line names is the line's to say, unless the goal would not complete without it within
     // the look-ahead (the valve's steps included): a player who reads no line is then not left on a board that
-    // no valve step passes (the rules review's F1: a second Glyph Assembler built ahead, three producers short).
+    // no valve step passes (a second Glyph Assembler built ahead, three producers short).
     if (c.line && isFinite(base.t)) return;
     const copy = lookahead(g);
     if (!copy || !perform(copy, c.act)) return;

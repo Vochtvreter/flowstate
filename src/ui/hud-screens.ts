@@ -1,5 +1,5 @@
 // Full-screen cards: the start screen, the end-of-demo summary and the time-away card.
-// Owned by the HUD track.
+// Part of the HUD.
 //
 // Contracts with the other modules:
 //  - #app gets the class `started` the moment the player presses Start or Continue. Until then the
@@ -232,7 +232,7 @@ export function showStart(hasSave: boolean) {
 /**
  * The game starts. `pressed`: by the player's press on Start or Continue (not `?play`). A save that was paused
  * when it was left comes back running when the player presses Continue: they came back to play, and a frozen
- * board whose rates look alive reads as broken (rev-robust F3). Time away is not credited for it (main.ts):
+ * board whose rates look alive reads as broken. Time away is not credited for it (main.ts):
  * the line was paused all along.
  */
 function begin(pressed = true) {
@@ -311,7 +311,7 @@ let shownResult = '';
 /**
  * Real milliseconds after the summary opens during which it takes no press, from a pointer or a key. It comes up as
  * the First Lens card leaves, under a thumb or a pointer that may already be on its way to something else (a tap on
- * the spot where Claim had been for twenty goals landed on Keep playing, and the summary went unseen: final-phone F2).
+ * the spot where Claim had been for twenty goals landed on Keep playing, and the summary went unseen).
  */
 export const SUMMARY_GUARD = 600;
 /** When the summary last opened (performance.now). */
@@ -532,9 +532,9 @@ const UPRIGHT_AFTER = 1200;
 let uprightDue = false;
 
 /**
- * A phone held sideways gives the board a strip a few cards high (rev-wide F2). A newcomer who starts that way is
+ * A phone held sideways gives the board a strip a few cards high. A newcomer who starts that way is
  * told once that it plays better upright: one short line with a way to dismiss it. Not at the start, where it lay over
- * goal 1's Well and Market and the board slid under it (final-wide F1): once goal 1 is claimed, and at the top of the
+ * goal 1's Well and Market and the board slid under it: once goal 1 is claimed, and at the top of the
  * screen, in the top bar's free middle (between the credits and the gear), never over the board. It goes by itself
  * after a few seconds, or as soon as the phone is turned. (Under reduced motion, as everywhere, it only fades.)
  */

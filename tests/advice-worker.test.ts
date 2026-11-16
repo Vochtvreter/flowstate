@@ -123,7 +123,7 @@ describe('the adviser through its worker code', () => {
   });
 });
 
-// The adviser as the last rules round left it keeps three things between calls. Two are in the game itself and
+// The adviser keeps three things between calls. Two are in the game itself and
 // travel with every copy (Game.edits: the quiet after a change, and no repeat of what was just done). The
 // third hangs on the game OBJECT (which tip was on offer, which have left): it only works here because the
 // copies are poured into one long-lived game. Each is held to through the worker's code, as the page uses it.
@@ -163,7 +163,7 @@ describe('what the adviser remembers, through its worker code', () => {
   test('a tip is said once on an untouched board; an adviser handed a new game each time would say it again and again', () => {
     // The newcomer who follows tips and no lines, a minute and a half into the wait for Breeze Deposits (order seed
     // 3): two tips come and go there, and without the adviser's memory they come back again and again. (It was a
-    // minute into the wait for Assembly, on seed 1, until the second fix round's prices and Labs.)
+    // minute into the wait for Assembly, on seed 1, with an earlier build's prices and Labs.)
     let n = 0;
     let board: Game | null = null;
     playByTheCard({

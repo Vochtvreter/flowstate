@@ -1,4 +1,4 @@
-// The Flow ring: a ring around the credits coin with Flow as a percentage beside it. Owned by the HUD track.
+// The Flow ring: a ring around the credits coin with Flow as a percentage beside it. Part of the HUD.
 // (What that Flow earns, the price bonus, is in the ring's tooltip and in what it says when pressed.)
 //
 // Hidden until the Flow meter is unlocked. The arc is stepped with the panels (four times a second)
@@ -24,7 +24,7 @@ let pct: HTMLElement;
 /**
  * Wrap the coin of the credits chip in the ring button and add the Flow percentage after the numbers. Once the Flow
  * meter is on, the whole chip (coin and ring, the credits, the percentage) answers a press as the ring does: goal 16's
- * card says "tap the Flow ring", and the ring alone is 26 px across (final-phone F6). The chip carries `flow-on` then.
+ * card says "tap the Flow ring", and the ring alone is 26 px across. The chip carries `flow-on` then.
  */
 export function initFlowRing() {
   app = document.getElementById('app')!;

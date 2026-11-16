@@ -1,7 +1,7 @@
 // Saves from elsewhere: one written by the public version of the game (branch main), which charged less for
 // everything, and saves damaged in any of the ways a save can be (a later version's, a hand edit, a crash).
-// Brought in from the rules review (its tests rev-migrate and rev-corrupt), against fixtures made with the
-// public version's own code (tests/fixtures/public-version.ts) and a board of the scripted card player.
+// Checked against fixtures made with the public version's own code (tests/fixtures/public-version.ts) and a
+// board of the scripted card player.
 import { describe, expect, it } from 'vitest';
 import { claimGoal, claimOrder, clearHistory, connect, deleteNode, expandBoard, favour, placeNode, refundOf, upgrade, upgradeAll } from '../src/actions';
 import { TECHS } from '../src/content';
@@ -96,7 +96,7 @@ describe('a save from the public version', () => {
 
 /**
  * The gestures of the hints a board from the public version still needs (the rest of its goals are met on
- * arrival), as the rules review's player did them: a Router toward the Lab, the board's expansion, Glyph into a
+ * arrival): a Router toward the Lab, the board's expansion, Glyph into a
  * Lab, Fabrication and the Fabricator, the Fabricator fed, and one press of Upgrade all. True if one was made.
  */
 function hint(g: Game): boolean {

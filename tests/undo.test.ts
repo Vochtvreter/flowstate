@@ -1,6 +1,6 @@
 // Undo and the goal chain: undo stops at the last claim (rewards are not undoable, so neither is what earned
 // them), an undo that takes away what a ready goal stands on takes its Claim too, and the board's expansion is
-// one undo step like any other. Brought in from the rules review (rev-undo-goals) and the consultant's F2.
+// one undo step like any other.
 import { describe, expect, it } from 'vitest';
 import { canUndo, claimGoal, connect, expandBoard, placeNode, redo, undo, upgrade } from '../src/actions';
 import { expansionCost } from '../src/economy';
