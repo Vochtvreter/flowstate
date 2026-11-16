@@ -206,6 +206,15 @@ export const ADVICE = {
    * in meanwhile pays for it (cardReserve). false: the whole price is kept back from the moment the goal comes up.
    */
   reserveEarned: true,
+  /**
+   * A step of a card's line that has been given stays given for this many game seconds after the free funds last
+   * covered it, for as long as its credits are still in hand (lineGiven). The reserve is worked out from the game's
+   * smoothed rates, which ripple as the machines work in bursts (the credits a second swing between 3.3 and 4.3 on
+   * a board of minute seven), and with minutes to go that moves it by 150¢ within seconds: without the dwell the
+   * step blinked, on offer, then "Saving for this · about 2½ min", then on offer again, on a board nobody had
+   * touched. Longer than the ripple's period; 0: no dwell, the step follows the reserve from moment to moment.
+   */
+  lineHold: 10,
 };
 
 // =====================================================================================
@@ -1584,15 +1593,59 @@ export function lineAdvice(g: Game): Advice | null {
  * nodes it is about). Looks at the board only: no copy of the game is run.
  *
  * A step that costs credits is only given from what the card is not saving for (cardReserve): the line never
- * makes the goal itself wait. Where it waits on that, lineHeld(g) says for how much and about how long.
+ * makes the goal itself wait. Where it waits on that, lineHeld(g) says for how much and about how long. Once
+ * given it does not come and go with the reserve's ripple: it stays for ADVICE.lineHold seconds after the free
+ * funds last covered it, while its credits are in hand (lineGiven).
  */
 function lineStep(g: Game, any = false): Cand | null {
   const next = lineNext(g);
   if (!next) return null;
   if (any) return next.c;
   if (next.c.act.t === 'research' && !techAffordable(g, TECHS[next.c.act.tech])) return null;
-  if (next.need <= 1e-9) return next.c;
-  return next.need <= lineFunds(g, next) + 1e-6 ? next.c : null;
+  return lineGiven(g, next) ? next.c : null;
+}
+
+/** The line's next gesture as lineNext gives it: the candidate, the credits that must be free for it, the line it is of. */
+type LineNext = { c: Cand; need: number; line: string; pair?: boolean };
+
+/**
+ * The step of a card's line that the free funds were last seen to cover, per game: which step (the goal, the line,
+ * its action and its price) and the game time of that look. Kept here and not in the Game: nothing of it is saved,
+ * a copy of the game starts without it, and the simulation does not know of it.
+ */
+const lineCover = new WeakMap<Game, { step: string; at: number }>();
+
+/**
+ * Is the line's next step given right now (a "Show me" on the card), as far as its credits go? A step that costs
+ * nothing always is. One that costs credits is given when the free funds cover it (lineFunds), and from then on
+ * stays given while those credits are still in hand, until the free funds have not covered it for ADVICE.lineHold
+ * game seconds on end: the reserve ripples with the smoothed rates it is worked out from, and a step must not
+ * come and go with it. Whenever the free funds cover it again the count starts over. Credits that are not in hand
+ * at all (spent on something else) withdraw it at once, and it is then not given again until the free funds cover
+ * it. So the line can take from the card's own purchase no more than the ripple moves the reserve by.
+ *
+ * The dwell belongs to one step of one game: another step (another action, or the same at another price), another
+ * line or goal, or a game whose clock has gone back, starts with none. It is counted in game time from the looks
+ * that saw the step covered, whoever looked (lineAdvice, lineHeld, the adviser): looking more often can only see
+ * it covered more often, so it can only keep a step on offer longer, and by no more than the gap between looks;
+ * with no look for ADVICE.lineHold seconds there is no dwell left. Never stricter than the free funds alone:
+ * whatever they cover is given. lineStep and lineHeld both ask here, so they cannot disagree.
+ */
+function lineGiven(g: Game, next: LineNext): boolean {
+  if (next.need <= 1e-9) return true;
+  const step = `${g.goal.i}|${next.line}|${JSON.stringify(next.c.act)}|${next.need}`;
+  const seen = lineCover.get(g);
+  if (next.need <= lineFunds(g, next) + 1e-6) {
+    if (seen) {
+      seen.step = step;
+      seen.at = g.time;
+    } else lineCover.set(g, { step, at: g.time });
+    return true;
+  }
+  if (!seen) return false;
+  if (seen.step === step && g.time >= seen.at && g.time - seen.at < ADVICE.lineHold && g.credits >= next.need - 1e-6) return true;
+  lineCover.delete(g);
+  return false;
 }
 
 /**
@@ -1621,11 +1674,12 @@ const lineFunds = (g: Game, next?: { pair?: boolean }) => (next?.pair ? Math.max
  *  - cut-glyph (goals 19 and 21): the first wire that still takes Glyph to a Lab is cut.
  *  - prism-fab, glyph-fab (goal 22): the maker's port wired to the Fabricator.
  */
-function lineNext(g: Game): { c: Cand; need: number; pair?: boolean } | null {
+function lineNext(g: Game): LineNext | null {
   const at = meanwhileAt(g);
   if (!at || at.line.done(g)) return null;
-  const paid = (c: Cand, need = c.cost) => ({ c, need });
-  const free = (c: Cand | null) => (c ? { c, need: 0 } : null);
+  const line = at.line.id;
+  const paid = (c: Cand, need = c.cost): LineNext => ({ c, need, line });
+  const free = (c: Cand | null): LineNext | null => (c ? { c, need: 0, line } : null);
   switch (at.line.id) {
     case 'ink-lab': {
       const p = ports(g).find((x) => x.mat === 'ink' && isMachine(x.n));
@@ -1770,7 +1824,9 @@ function cardReserve(g: Game): number {
  * `cost`: the credits to have in hand when it is given (its price, or for a Well its price and its Lab's; and,
  * where the card's purchase comes first, that purchase's price as well: the Expand of 500¢ after the Assembler of
  * 600¢ is "1,100¢"); `eta`: about how many game seconds until then at the current income (Infinity when no
- * credits come in). null when the line has no step, its step can be done now, or costs nothing.
+ * credits come in). null when the line has no step, its step is given (lineStep: that includes a step kept on
+ * offer through the reserve's ripple, lineGiven), or costs nothing: never a step and held at once, and never
+ * neither while a step that costs credits is next.
  *
  * What a card can say: "Saving for this · 1,100¢ · about 40 s". The arithmetic follows the reserve: while some of
  * the card's purchase can still be earned back before it can be made, what is free to spend stays where it is
@@ -1793,7 +1849,7 @@ export function lineHeld(g: Game): { cost: number; sym: '¢' | 'α' | 'β' | 'γ
     }
     return worst;
   }
-  if (next.need <= 1e-9 || next.need <= lineFunds(g, next) + 1e-6) return null;
+  if (lineGiven(g, next)) return null;
   const p = ADVICE.lineReserve && !next.pair ? cardPurchase(g) : null;
   const rate = Math.max(0, g.creditRate);
   const need = next.need;
