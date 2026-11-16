@@ -51,7 +51,7 @@
 .gc-num b { font-weight: 600; color: var(--text); }
 .gc-eta { color: var(--muted); }
 .gc-eta::before { content: '·'; margin-right: 8px; }
-/* During a wait the card says what the count is for, where the adviser names it (hud.ts, waitHtml): "Saving for the
+/* While something is being saved for, the card says what the count is for (hud.ts, savingFor): "Saving for the
    Assembler · 38 / 600¢ · about 2 min". The words and the count are two items of the row; the dot between them is
    drawn as the one before the time left is. A phone's card sets the words on a line of their own ("phone seating"). */
 .gc-for { white-space: nowrap; }

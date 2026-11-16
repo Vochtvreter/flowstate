@@ -256,18 +256,35 @@ function rewardChips(r: GoalReward | Reward): string {
 
 // ---------- goal card ----------
 
-/** The progress line: a bar and what it counts, in words. */
-function progressHtml(p: GoalProgress): string {
+/**
+ * What the count is for, where it is named: "Saving for the Assembler", then the count as an item of its own ("38 /
+ * 600¢"). The bar had turned to "Saving 38 / 600¢" in the middle of goal 15, with nothing to say what the 600 was.
+ * The words stand apart from the count so that a narrow card can set them on a line of their own (hud.css).
+ */
+const savingFor = (name: string, count: string) =>
+  `<span class="gc-for" data-testid="goal-for">Saving<span class="gc-what"> for ${esc(name)}</span></span><span class="gc-num">${count}</span>`;
+
+/**
+ * What the goal's own count is saved for, as the adviser names it for the wait (waitInfo in src/advice.ts, from the
+ * same purchase): the tech the Data researches, or the thing the credits buy. Undefined where the goal buys nothing.
+ */
+function boughtWith(g: Game, v: GoalView): string | undefined {
+  const step = v.goal.step?.(g) ?? null;
+  return !step ? undefined : 'tech' in step ? TECHS[step.tech]?.name : step.what;
+}
+
+/** The progress line: a bar and what it counts, in words. `name`: what a count being saved up is for (boughtWith). */
+function progressHtml(p: GoalProgress, name?: string): string {
   const [cur, target, unit] = p;
   const share = target > 0 ? cur / target : 0;
-  // Saving up, in credits or in Data: "Saving 7 / 12¢", then "Saved 12 / 12¢" once there is enough.
+  // Saving up, in credits or in Data: "Saving 7 / 12¢" (named: "Saving for the Well · 7 / 12¢"), then "Saved 12 / 12¢"
+  // once there is enough.
   const saving = cur + 1e-6 >= target ? 'Saved' : 'Saving';
-  if (unit === '¢') {
-    return `${bar(share, '#FFC857')}<span class="gc-num">${saving} <b class="mono">${fmt(Math.floor(cur))} / ${fmt(target)}¢</b></span>`;
-  }
   const tier = DATA_OF[unit];
-  if (tier) {
-    return `${bar(share, DATA_COLORS[tier])}<span class="gc-num">${saving} <b class="mono" style="color:${DATA_COLORS[tier]}">${fmt(Math.floor(cur))} / ${fmt(target)}${unit}</b></span>`;
+  if (unit === '¢' || tier) {
+    const color = tier ? DATA_COLORS[tier] : '#FFC857';
+    const count = `<b class="mono"${tier ? ` style="color:${color}"` : ''}>${fmt(Math.floor(cur))} / ${fmt(target)}${unit}</b>`;
+    return `${bar(share, color)}${name && saving === 'Saving' ? savingFor(name, count) : `<span class="gc-num">${saving} ${count}</span>`}`;
   }
   if (unit === 's') {
     // Seconds count down.
@@ -291,14 +308,8 @@ function waitHtml(w: WaitLine, paused: boolean): string {
   const left = paused ? 'paused' : isFinite(w.eta) ? aboutTime(w.eta) : tier ? `nothing is bringing in ${w.unit} yet` : 'nothing is being sold yet';
   const cls = paused ? ' paused' : isFinite(w.eta) ? '' : ' never';
   const count = `<b class="mono"${tier ? ` style="color:${color}"` : ''}>${fmt(Math.floor(w.have))} / ${fmt(w.need)}${w.unit}</b>`;
-  const eta = `<span class="gc-eta${cls}" data-testid="goal-eta">${left}</span>`;
-  // What the count is for, where the adviser names it: "Saving for the Assembler · 38 / 600¢ · about 2 min" (the bar
-  // turned to "Saving 38 / 600¢" in the middle of goal 15, with nothing to say what the 600 was). The words stand
-  // apart from the count, so that a narrow card can set them on a line of their own (hud.css).
-  if (w.name) {
-    return `${bar(w.need > 0 ? w.have / w.need : 0, color)}<span class="gc-for" data-testid="goal-for">Saving<span class="gc-what"> for ${esc(w.name)}</span></span><span class="gc-num">${count}</span>${eta}`;
-  }
-  return `${bar(w.need > 0 ? w.have / w.need : 0, color)}<span class="gc-num">Saving ${count}</span>${eta}`;
+  // (What the count is for, where the adviser names it: "Saving for the Assembler · 38 / 600¢ · about 2 min".)
+  return `${bar(w.need > 0 ? w.have / w.need : 0, color)}${w.name ? savingFor(w.name, count) : `<span class="gc-num">Saving ${count}</span>`}<span class="gc-eta${cls}" data-testid="goal-eta">${left}</span>`;
 }
 
 /**
@@ -493,7 +504,7 @@ function renderGoal(g: Game, force: boolean) {
     const inputs = (v as GoalView & { inputs?: Inputs }).inputs;
     const flowView = !!v.flow;
     const lensInputs = !!inputs?.length && !!v.progress && v.progress[0] < v.progress[1] && inputs.some((x) => !x.fed);
-    const body = flowView ? flowHtml(v.flow!, v.progress) : lensInputs ? inputsHtml(inputs!) : wait ? waitHtml(wait, g.paused) : v.progress ? progressHtml(v.progress) : '';
+    const body = flowView ? flowHtml(v.flow!, v.progress) : lensInputs ? inputsHtml(inputs!) : wait ? waitHtml(wait, g.paused) : v.progress ? progressHtml(v.progress, boughtWith(g, v)) : '';
     prog = body ? `<div class="gc-prog${flowView ? ' flow' : ''}${body.includes('gc-eta') ? ' eta' : ''}${body.includes('gc-for') ? ' named' : ''}">${body}</div>` : '';
     rows = lineHtml(g, narrow) + tipHtml(g);
     // A wait (what the goal asks for next has to be saved up for, or Flow has to be held): what there is to do
