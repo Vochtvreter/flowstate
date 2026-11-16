@@ -41,7 +41,7 @@ At normal CPU speed the same board holds 60 fps at rest and 58–60 while pannin
 
 1. **The fast bot's Lens comes too soon** (14:30–15:39 against 16–19 min). Prices were set to keep the card follower's waits short, which brings a fast player's Lens forward too; the fast bot's target was moved to 14:00–18:00.
 2. **The slow bot spends up to seven minutes on one goal.** It reads no "while you wait" line, and the prices assume the lines. It was dropped from the regular runs; the card followers above took its place as the floor.
-3. **The waiting targets hold only for a player who takes 8–16 seconds to notice a finished goal.** A scripted player who claims at once reaches the Lens at 16:15–16:40, under the 17:30 floor, with nothing to do for 34–37% of that time. "Assemble your first Glyph" holds 81–105 seconds of it, in stretches of up to 42. This was accepted for the pitch build: cheaper prices would bring the fast bot's Lens under 14 minutes. "Build a Fabricator" held 83–104 seconds earlier; its card now has a tune-up to do while saving, and 42–52 seconds are left, never more than 41 at a stretch.
+3. **The waiting targets hold only for a player who takes 8–16 seconds to notice a finished goal.** A scripted player who claims at once reaches the Lens at 16:15–16:40, under the 17:30 floor, with nothing to do for 34–37% of that time. "Assemble your first Glyph" holds 81–105 seconds of it, in stretches of up to 42. This was accepted for the pitch build: cheaper prices would bring the fast bot's Lens under 14 minutes. "Build a Fabricator" held 83–104 seconds earlier; its card now has a tune-up to do while saving, and 42–52 seconds are left, never more than 41 at a stretch. Played in the page by a script that claims at once and follows the guiding hand, 76–82 seconds are left on it (114 before), in stretches of up to 44.
 4. **The phone criterion is shown only in part** (see the table).
 
 **How it was tested.** Only by scripts, only in headless Chromium.
@@ -271,7 +271,7 @@ New materials or machines, timed contracts, blueprints, multi-select, prestige, 
 
 Found during the work and left for after the pitch. Each is stated as a player would meet it.
 
-1. A player who presses Claim the moment it lights has nothing to do for about a third of the run, most of all on "Assemble your first Glyph" (80 to 105 seconds). On "Build a Fabricator" 42 to 52 seconds are left, at the end of the wait, once the card's tune-up is done.
+1. A player who presses Claim the moment it lights has nothing to do for about a third of the run, most of all on "Assemble your first Glyph" (80 to 105 seconds). On "Build a Fabricator" 42 to 52 seconds are left (76 to 82 when played in the page), at the end of the wait, once the card's tune-up is done.
 2. When "Assemble your first Glyph" comes up, the card says "about 6 min" or "about 7 min" for a wait that takes about three once the player follows its line.
 3. A "while you wait" step that has just come up can read "Saving for this · about 3 min" and be offered a few seconds later.
 4. A step stays on the card for up to 10 seconds after the player has spent credits elsewhere. Taken then, it puts off the card's own purchase.
