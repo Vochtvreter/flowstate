@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import {
-  BUILD_AIR, BUILD_REACH, Box, CARD_GAP, Card, Footprint, PLOT_MARGIN, PORT_OUT, SiteQuery, WIRE_REACH, bestWindow, boxClear, buildSite, cardsOverlap,
+  BUILD_AIR, BUILD_REACH, Box, CARD_GAP, Card, Footprint, MORE_REACH, PLOT_MARGIN, PORT_OUT, SiteQuery, WIRE_REACH, bestWindow, boxClear, buildSite, cardsOverlap,
   clearPoint, dockSpot, fadeColor, fitBox, fitsAt, frameBox, freeSpot, heldRate, pinchView, samples, separate, siteFor, spotFree, wholeGain,
 } from './geom';
 
@@ -395,6 +395,26 @@ describe('buildSite: where a card built at a point the player chose stands', () 
     expect(samples(from, end, 24).some((s) => s.x > 362 && s.x < 530 && s.y > 302 && s.y < 370)).toBe(false);
     expect(far(p, { x: 540, y: 380 })).toBeLessThanOrEqual(BUILD_REACH + 60);
     expect(WIRE_REACH).toBeLessThan(BUILD_REACH);
+  });
+
+  it('is never more than a reach and two steps further from the point than the nearest free spot, whatever the wire and the camera', () => {
+    const r = rng(91);
+    for (let n = 0; n < 300; n++) {
+      const cards = randomBoard(r, 30);
+      const vx = r() * 700, vy = r() * 300;
+      const view = { x0: vx, y0: vy, x1: vx + 400 + r() * 900, y1: vy + 350 + r() * 500 };
+      const at = { x: view.x0 + r() * (view.x1 - view.x0), y: view.y0 + r() * (view.y1 - view.y0) };
+      if (at.x < 0 || at.y < 0 || at.x > BOARD.w || at.y > BOARD.h) continue;
+      const q = { at, card: LAB, cards, deposits: [], board: BOARD, grid: GRID };
+      const plain = freeSpot({ x: at.x - 86, y: at.y - 36, w: 172, h: 72, avoid: cards.map((b) => ({ x0: b.x0 - 8 - 2 * PORT_OUT, y0: b.y0 - 8, x1: b.x1 + 8 + 2 * PORT_OUT, y1: b.y1 + 8 })), board: BOARD, grid: GRID, gap: 8 });
+      const p = buildSite({ ...q, view, covers: [], wire: { from: { x: 100 + r() * 900, y: 60 + r() * 600 } } });
+      if (!plain || !p) {
+        expect(!!p).toBe(!!plain);
+        continue;
+      }
+      const want = { x: Math.round((at.x - 86) / GRID) * GRID, y: Math.round((at.y - 36) / GRID) * GRID };
+      expect(far(p, want)).toBeLessThanOrEqual(far(plain, want) + BUILD_REACH + 2 * MORE_REACH + 1e-6);
+    }
   });
 
   it('answers null only when the plot has no room at all', () => {

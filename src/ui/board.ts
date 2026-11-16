@@ -5104,6 +5104,9 @@ function fanRoom(n: number) {
 function openRadial(state: RadialState) {
   suggest(ui.g, state);
   const before = { ...viewAhead() };
+  // (Where the pointer is, on the stage, before anything slides under it: the fan may have to stand elsewhere, but no
+  // option may come to lie under the pointer.)
+  const pointer = toScreen(state.at);
   const fan = env.phone ? null : fanRoom(state.opts.length);
   // Outside the phone layout the menu is a fan round the point, which needs room under the goal card: where the
   // point lies too near the card for that, the board slides down first, so the fan, the wire and the new card stay
@@ -5132,8 +5135,6 @@ function openRadial(state: RadialState) {
   const mid = { x: state.site.x + state.card.w / 2, y: state.site.y + state.card.h / 2 };
   const c = fan.clear(toScreen(mid));
   if (!sameView(before, ui.view)) state.moved = { from: before, to: { ...ui.view } };
-  // (Where the pointer is, on the stage: the menu may have to stand elsewhere, but no option may lie under it.)
-  const pointer = toScreen(state.at);
   const a = toScreen(state.a);
   hideTemp();
   const back = Math.atan2(a.y - c.y, a.x - c.x); // direction the wire comes from

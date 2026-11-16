@@ -316,6 +316,8 @@ export function freeSpot(q: SpotQuery): Pt | null {
 export const BUILD_AIR = 40;
 /** How much further a card goes for a spot with that air, for one where it can be seen whole, and to stay on the near side of another card from its port. */
 export const BUILD_REACH = 100;
+/** ...and how much more for each further shortcoming of a spot that already has one. */
+export const MORE_REACH = 20;
 /** ...and for a spot whose new wire passes behind no card at all: among spots about equally near, that one wins. */
 export const WIRE_REACH = 30;
 /** A card's ports stand out this far from its sides (style.css: 14 px dots centred a px past the edge): cards are kept that much further apart across. */
@@ -396,19 +398,19 @@ export function fitsAt(p: Pt, f: Footprint, q: { cards: Box[]; deposits: Box[]; 
  * plot has no room left.
  *
  * A spot is free when the card stands inside the plot there and keeps the usual gap (CARD_GAP, and the ports'
- * reach across) from every other card and every free deposit. Every free spot has a handicap, which depends on
- * the board and the camera alone: BUILD_REACH when it has no air round it (BUILD_AIR from every other card), and
- * BUILD_REACH again when the card could not be seen whole there (`view`: on the stage, under none of `covers`).
- * The card goes to the free spot whose distance from the wanted one, plus its handicap, is least. Sideways counts
- * a little less: cards are wider than tall. So:
+ * reach across) from every other card and every free deposit. A free spot may have shortcomings, which depend on
+ * the board and the camera alone: no air round it (BUILD_AIR from every other card); the card could not be seen
+ * whole there (`view`: on the stage, under none of `covers`); and, counted only when the card cannot stand on the
+ * point itself, it lies on the far side of another card from the port of the wire it arrives on (the straight
+ * line from the port to the card's side crosses that card). A spot with a shortcoming counts as BUILD_REACH
+ * further off (and MORE_REACH more for each further one); a spot with none whose wire, drawn as the board draws
+ * it, would pass behind a card counts as WIRE_REACH further off. The card goes to the free spot whose distance
+ * from the wanted one, plus that handicap, is least. Sideways counts a little less: cards are wider than tall. So:
  *
- *  - Centred on the point (on the grid) when the card has air there and can be seen; a step aside for air or to
- *    come on to the stage, never a walk.
- *  - When it cannot stand on the point, the wire it arrives on counts too. A spot on the far side of another card
- *    from the wire's port (the straight line from the port to the card's side crosses that card) counts as
- *    BUILD_REACH further off: the card stays on the near side while there is room within that reach. And one whose
- *    wire, drawn as the board draws it, would pass behind any card counts as WIRE_REACH further off: among spots
- *    about equally near, a clear wire wins.
+ *  - Centred on the point (on the grid) when the card has air there and can be seen; a step aside for air, to
+ *    come on to the stage, or to stay on the near side of a card, never a walk: the card is never more than
+ *    BUILD_REACH + 2 × MORE_REACH further from the point than the nearest free spot.
+ *  - Among spots about equally near, one whose wire passes behind no card wins.
  *  - A point outside the plot, or under something that covers the stage, is measured from the nearest point
  *    inside and clear (`clearPoint`).
  *  - A spot under one of `covers` is taken only when the plot has no other.
@@ -434,8 +436,8 @@ export function buildSite(q: SiteQuery): Pt | null {
     return x - VIEW_SIDE >= v.x0 && x + card.w + VIEW_SIDE <= v.x1 && y - VIEW_PILL >= v.y0 && y + card.h + VIEW_FOOT <= v.y1 && uncovered(x, y);
   };
   const inside = (p: Pt, c: Box) => p.x > c.x0 + 2 && p.x < c.x1 - 2 && p.y > c.y0 + 2 && p.y < c.y1 - 2;
-  /** What the card's new wire, to or from the middle of its side, adds to a spot's handicap (see above). */
-  const wireShare = (x: number, y: number): number => {
+  /** The card's new wire, to or from the middle of its side: 2 when the spot is on the far side of another card from its port, 1 when the wire would pass behind a card, else 0. */
+  const wireFault = (x: number, y: number): number => {
     const w = q.wire;
     if (!w || (!w.from && !w.to)) return 0;
     const a = w.from ?? { x: x + card.w, y: y + card.h / 2 }, b = w.from ? { x, y: y + card.h / 2 } : w.to!;
@@ -444,19 +446,19 @@ export function buildSite(q: SiteQuery): Pt | null {
     const own = (c: Box) => port.y >= c.y0 && port.y <= c.y1 && Math.abs(port.x - (w.from ? c.x1 : c.x0)) < 1;
     for (let i = 1; i < 24; i++) {
       const p = { x: a.x + ((b.x - a.x) * i) / 24, y: a.y + ((b.y - a.y) * i) / 24 };
-      for (const c of cards) if (!own(c) && inside(p, c)) return BUILD_REACH;
+      for (const c of cards) if (!own(c) && inside(p, c)) return 2;
     }
-    for (const p of samples(a, b, 24)) for (const c of cards) if (inside(p, c)) return WIRE_REACH;
+    for (const p of samples(a, b, 24)) for (const c of cards) if (inside(p, c)) return 1;
     return 0;
   };
   const inX = (v: number) => Math.max(lo, Math.min(gx1, snap(v))), inY = (v: number) => Math.max(lo, Math.min(gy1, snap(v)));
   const spotOf = (p: Pt): Pt => ({ x: inX(p.x - card.w / 2), y: inY(p.y - card.h / 2) });
-  // What a spot's handicap is, without the wire's share: worked out once a spot (the first time it is asked for). -1: not free.
-  const known = new Float32Array(nx * ny);
+  // A spot's shortcomings, the wire's apart (0, 1 or 2): worked out once a spot, the first time it is asked for. -1: not free.
+  const known = new Int8Array(nx * ny);
   let clear = true;
-  const handicap = (x: number, y: number): number => {
+  const faults = (x: number, y: number): number => {
     const i = ((y - lo) / grid) * nx + (x - lo) / grid;
-    if (known[i] === -2) known[i] = !keepsClear(x, y, card, cards, deposits) || (clear && !uncovered(x, y)) ? -1 : (keepsClear(x, y, card, cards, [], BUILD_AIR) ? 0 : BUILD_REACH) + (seen(x, y) ? 0 : BUILD_REACH);
+    if (known[i] === -2) known[i] = !keepsClear(x, y, card, cards, deposits) || (clear && !uncovered(x, y)) ? -1 : (keepsClear(x, y, card, cards, [], BUILD_AIR) ? 0 : 1) + (seen(x, y) ? 0 : 1);
     return known[i];
   };
   /** The free spot whose distance from `from` plus its handicap is least; the nearer one of two that tie. */
@@ -476,9 +478,11 @@ export function buildSite(q: SiteQuery): Pt | null {
           if (x < lo || x > gx1) continue;
           const d = Math.hypot(i * grid * 0.9, j * grid);
           if (d > bestCost) continue;
-          const h = handicap(x, y);
-          if (h < 0) continue;
-          const cost = d + h + (wired ? wireShare(x, y) : 0);
+          const f = faults(x, y);
+          if (f < 0) continue;
+          const w = wired ? wireFault(x, y) : 0;
+          const n = f + (w === 2 ? 1 : 0);
+          const cost = d + (n ? BUILD_REACH + (n - 1) * MORE_REACH : w ? WIRE_REACH : 0);
           if (cost < bestCost || (cost === bestCost && d < bestD)) {
             bestCost = cost;
             bestD = d;
