@@ -392,6 +392,8 @@ html[data-input='touch'] #zoom .zl { height: 44px; }
 .tok { display: inline-flex; align-items: center; gap: 5px; padding: 4px 8px 4px 6px; border-radius: 8px; background: #182033; border: 1px solid var(--border); font-size: 12px; }
 .bar { height: 6px; border-radius: 3px; background: #1e2740; overflow: hidden; }
 .bar span { display: block; height: 6px; border-radius: 3px; transition: width 0.2s linear; }
+/* Asked for less motion, the inspector's bars take their new width at once. (After the rule above: the later one wins.) */
+@media (prefers-reduced-motion: reduce) { .bar span { transition: none; } }
 .flow { gap: 9px; }
 .statusbox { border-radius: 12px; padding: 12px; border: 1px solid #34405c; background: #151c2d; }
 .statusbox.starved { background: #24131a; border-color: #5a2630; }
