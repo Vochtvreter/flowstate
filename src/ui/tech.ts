@@ -20,6 +20,7 @@
 // While the goal on the card is saving up for a tech, the tree opens on that tech, says how long it takes in
 // the card's own words and numbers (waitLine, from the adviser), warns on any other tech that would spend the
 // same Data, and the top bar's "N ready" leaves those out (readyCount).
+import { lineAdvice } from '../advice';
 import { BRANCHES, Branch, DATA_COLORS, DATA_NAMES, DataTier, NODE_DEFS, NodeType, TECHS, Tech } from '../content';
 import { fmtInt, fmtRate, readyTechs, research, techAffordable, techAvailable, techEta, techHidden, techProgress } from '../economy';
 import { GOALS, activeGoal, claimGoal } from '../goals';
@@ -233,6 +234,8 @@ function creditsIn(g: Game, s: GoalSaving): number {
 export function goalDelay(g: Game, t: Tech): { tiers: DataTier[]; seconds: number; saving: GoalSaving } | null {
   const s = goalSaving(g);
   if (!s || s.tech?.id === t.id) return null;
+  // The card's own line asks for it (Lab Speed, then Deep Analysis, on "Make your first Mist"): no warning against the card.
+  if (lineAdvice(g)?.research === t.id) return null;
   const tiers = TIERS.filter((k) => (t.cost[k] ?? 0) > 0 && (s.need[k] ?? 0) > 0 && g.data[k] - (t.cost[k] ?? 0) < (s.need[k] ?? 0) - 1e-9);
   if (!tiers.length) return null;
   const before = savedIn(g, s, {});
