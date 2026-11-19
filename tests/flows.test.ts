@@ -3,6 +3,7 @@ import { describe, expect, it } from 'vitest';
 import { connect, placeNode, upgrade } from '../src/actions';
 import { MAT_IDS, MATERIALS } from '../src/content';
 import { MatFlow, flows, traceOf } from '../src/flows';
+import { lineFrom } from '../src/graph';
 import { Game } from '../src/state';
 import { market, rich, run, well } from './helpers';
 import { playByTheCard } from './cardPlayer';
@@ -152,5 +153,45 @@ describe('tracing a material on the board', () => {
     expect([...glass.wires].sort()).toEqual([w3.id, w4.id, w5.id].sort());
     // Nothing on this board has to do with Copper.
     expect(traceOf(g, 'spark').nodes.size + traceOf(g, 'spark').wires.size).toBe(0);
+  });
+});
+
+describe('a card\'s line, for moving it as one block', () => {
+  it('the card and everything it feeds; never a Drill, and not the Market that other lines sell at too', () => {
+    const g = rich();
+    const sand = well(g);
+    const glass = placeNode(g, 'refiner', 400, 120)!;
+    const lab = placeNode(g, 'lab', 700, 120)!;
+    const oil = placeNode(g, 'well', 0, 0, { depositId: 3 })!;
+    const plastic = placeNode(g, 'refiner', 400, 400)!;
+    const dump = placeNode(g, 'void', 640, 520)!;
+    connect(g, sand.id, 0, glass.id);
+    connect(g, glass.id, 0, lab.id);
+    connect(g, glass.id, 0, market(g).id);
+    connect(g, oil.id, 0, plastic.id);
+    connect(g, plastic.id, 0, market(g).id);
+    connect(g, plastic.id, 1, dump.id);
+    // The Glass line: the Refiner and its Lab. The Market also takes Plastic, so it belongs to neither line.
+    expect(lineFrom(g, glass.id).sort()).toEqual([glass.id, lab.id].sort());
+    expect(lineFrom(g, plastic.id).sort()).toEqual([plastic.id, dump.id].sort());
+    // From the Drill: the same line, without the Drill, which stays on its deposit.
+    expect(lineFrom(g, sand.id).sort()).toEqual([glass.id, lab.id].sort());
+    // A card that feeds nothing is its own line; a Market asked for itself is that Market.
+    expect(lineFrom(g, lab.id)).toEqual([lab.id]);
+    expect(lineFrom(g, market(g).id)).toEqual([market(g).id]);
+  });
+
+  it('a Market that only one line sells at goes with that line, and a loop of Routers does not hang', () => {
+    const g = rich();
+    const glass = placeNode(g, 'refiner', 400, 120)!;
+    connect(g, well(g).id, 0, glass.id);
+    connect(g, glass.id, 0, market(g).id);
+    expect(lineFrom(g, glass.id).sort()).toEqual([glass.id, market(g).id].sort());
+    const a = placeNode(g, 'router', 600, 400)!;
+    const b = placeNode(g, 'merger', 760, 400)!;
+    connect(g, glass.id, 0, a.id);
+    connect(g, a.id, 0, b.id);
+    connect(g, b.id, 0, a.id);
+    expect(lineFrom(g, glass.id).sort()).toEqual([glass.id, market(g).id, a.id, b.id].sort());
   });
 });

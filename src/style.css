@@ -151,6 +151,9 @@ html[data-input='touch'] .fl-go { height: 40px; padding: 0 14px; }
 .fl-key { display: flex; flex-wrap: wrap; gap: 4px 12px; padding: 12px 16px 16px; font-size: 10.5px; color: var(--muted); }
 .fl-key span { display: inline-flex; align-items: center; gap: 5px; white-space: nowrap; }
 .fl-key i { width: 9px; height: 9px; border-radius: 2px; }
+/* A card that is one of a block (board.ts: Shift and a click, or a double click for a whole line): ringed, as the
+   selected card is, so that what will move together is seen before it moves. */
+.node.blk:not(.sel) { border-color: var(--sel); box-shadow: 0 0 0 2px rgba(122, 162, 255, 0.32), 0 8px 22px rgba(0, 0, 0, 0.4); }
 /* While a material is traced, what has nothing to do with it stands back. */
 .node.untraced { opacity: 0.26; }
 #board.tracing .deposit { opacity: 0.4; }

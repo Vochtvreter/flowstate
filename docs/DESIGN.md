@@ -218,6 +218,7 @@ This is the most important section. The editor *is* the game. Sizes, layouts and
 | Branch | Drag from the *middle of a wire* → a new wire from that wire's source port. | — (a drag on a wire pans) |
 | Cut | Hold `Shift` and drag across wires. Or select a wire and press `Del`. | Tap the wire, then "Cut wire". |
 | Move | Drag a node. It settles on a 20 px grid, clear of other cards. | Drag, after 10 px. |
+| Move several | `Shift`+click cards into a block (double-click one for its whole line), then drag any of them: they move together, as one undo step. | — |
 | Delete | `Del` or `Backspace`, or Delete in the inspector. Always full refund, except for a node from a save of the earlier public version, which refunds no more than was paid for it. The last Drill cannot be deleted. | Delete in the inspector. |
 | Undo / redo | `Ctrl+Z` / `Ctrl+Shift+Z` or `Ctrl+Y`. Restores credits. Up to 200 steps, back to the last goal claimed. | Undo button; Redo in the gear menu. |
 | Duplicate | `Ctrl+D`: another node of the same type and recipe to place, at the normal price. | Duplicate in the inspector. |
@@ -225,7 +226,7 @@ This is the most important section. The editor *is* the game. Sizes, layouts and
 | Camera | Wheel zooms; drag empty board (or middle or right drag) pans; `F` fits; `T` tidies. | Pinch zooms; drag empty board pans; Fit and Tidy buttons. |
 | Other keys | `1`–`9`, `0` build bar or menu option · `R` tech tree · `P` pause · `Esc` backs out | |
 
-*Not built:* box-select and moving groups, named groups or frames round a line, copy/paste of a selection, a trash target, a grid toggle, right-drag cutting, a node tooltip on hover.
+*Not built:* box-select, a block of cards for a finger, named groups or frames round a line, copy/paste of a selection, a trash target, a grid toggle, right-drag cutting, a node tooltip on hover.
 
 ### 7.2 Auto-behaviors
 
@@ -233,6 +234,7 @@ This is the most important section. The editor *is* the game. Sizes, layouts and
 - **Machines first:** a fan-out feeds machines before Markets, Labs and Dumps (§4.3).
 - **Placement:** a machine built from the menu stands in the outline the menu shows while it is open. That is centred on the point the player chose (or the nearest point inside the plot and clear) when it has room there. Otherwise it is the nearest free spot, preferring, within about 100 px, one with air round it, one the player can see whole, one on the near side of other cards from its port, and one whose new wire passes behind no card.
 - **Level:** cards stand on a 20 px grid and their ports do not (a card with one port has it 36 px down, one with two 31 and 61, a small card 30), so a wire between two cards of different shapes never ran straight. A card that is dragged within 9 px of the height at which one of its wires would be a straight line comes level by itself: the wire lights up, a soft click says so, and the card stays there, a few pixels off the grid, when it is let go.
+- **Block:** several cards can be put in a block and moved as one (§7.1): the way to set a whole line in a row, or to make room for one, without a drag a card.
 - **Tidy** (`T`, from six nodes): lays the whole board out again so that no wire runs behind a card it does not end at, and wires are short and cross little. Then cards come level as under the hand, where that takes under half a grid step. Drills stay on their deposits, the cards glide to their places, and one undo puts everything back. *The layout does not set cards in rows:* on two boards played by the card, Tidy left 2 of 22 and 4 of 34 wires straight. A row is made by hand.
 - *Not built:* a ratio hint while placing ("needs 2.0/s Sand · 1.4/s spare upstream").
 
@@ -241,7 +243,7 @@ This is the most important section. The editor *is* the game. Sizes, layouts and
 - **Wires** are smooth curves, thicker with throughput, with dots in the material's color and shape travelling along them. A wire with nothing flowing turns dashed and still.
 - **Rate labels** show when they answer a question (pillar 2), never in the overview.
 - **Node rings** show utilization; status color is unmistakable.
-- **Labels in plain words.** A card with a problem of its own carries a label that says it as a person would: "Needs more Copper" ("Needs Copper" when nothing wired in brings any), "Tar has no exit" for a port with no wire, "Backed up" for an output that is wired and still full, "No input". A Drill says only that its material has no exit. The Drill or machine that a starved one is waiting on, when it works flat out, says "Can't keep up", and its inspector names who is waiting and offers Speed: it used to stand in healthy green beside the red one. (The simulation's own words, blocked, starved and idle, are not shown anywhere.)
+- **Labels in plain words.** A card with a problem of its own carries a label that says it as a person would: "Needs more Copper" ("Needs Copper" when nothing wired in brings any), "Tar has no exit" for a port with no wire, "Backed up" for an output that is wired and still full, "No input". A Drill says only that its material has no exit. A machine that runs a little short but works most of its time (60% or more, and under 88%) is no problem and raises no alert; it carries "Short of Ore" in amber, so that the card, the Flow meter and the Flows panel agree. The Drill or machine that a starved one is waiting on, when it works flat out, says "Can't keep up", and its inspector names who is waiting and offers Speed: it used to stand in healthy green beside the red one. (The simulation's own words, blocked, starved and idle, are not shown anywhere.)
 - **Flows.** A panel that lists every material on the board, from Sand down to the Phone: how much is made a second, and a bar of where it goes (to machines, sold, studied, dumped, and hatched, what machines wanted and did not get). A material is *short* (a machine stands waiting for it), has *no exit*, has some *to spare* (more could be made than is taken: no fault), or is fine. A row that is short or has no exit has a Show button that goes to the Drill or machine to look at, and the button in the top bar counts those rows. A press on a row traces the material: what makes it, what uses it and the wires that carry it stay lit, with their rates, and the rest stands back. The amounts are read off the wires, which stand still where a machine's own rate swings with its bursts. It arrives with the second raw material (goal 9).
 - **One alert chip** under the goal card names one problem at a time: the one the goal card is about first, otherwise the worst. Its Show button jumps there.
 - **Overview:** below 70% zoom (74% on a phone) cards become small tiles with an icon and a status ring. The camera goes out only as far as it takes to show the whole factory (on a desktop, the whole plot) with a margin, and never past 15%. Wiring still works there: ports show as dots.
@@ -268,7 +270,7 @@ This is the most important section. The editor *is* the game. Sizes, layouts and
 
 One goal at a time, on a card: a title, a sentence or two, progress, and the reward.
 
-**A card says what to bring about and why, not where to click.** The title is an outcome in the game's world ("Sell your Sand", "Turn Sand into Glass"), and the sentence under it is the why: "Two Sand sell for 2¢. Melted into one Glass they sell for 3¢. A Refiner does the melting." It names no gesture, so it is the same for a mouse and a finger. A goal about a recipe has it drawn on the card, and where several things are put together each input is ticked as it is wired in. A player who knows why a wire is wanted finds where it goes: the port without a wire pulses, and the machine says what it lacks. The gesture, worded for the pointer in use ("Drag from a Drill's port into empty space, let go, and pick Refiner."), is behind the card's **How?** button, and comes out by itself once the goal has been within reach for 20 seconds with the board left alone. Sent away with **Why?**, it does not come back on that goal. *Whether a newcomer finds the first wire from the why alone, and whether 20 seconds is the right wait, has not been tried with a person.*
+**A card says what to bring about and why, not where to click.** The title is an outcome in the game's world ("Sell your Sand", "Turn Sand into Glass"), and the sentence under it is the why: "Two Sand sell for 2¢. Melted into one Glass they sell for 3¢. A Refiner does the melting." It names no gesture, so it is the same for a mouse and a finger. A goal about a recipe has it drawn on the card, and where several things are put together each input is ticked as it is wired in. A player who knows why a wire is wanted finds where it goes: the port without a wire pulses, and the machine says what it lacks. The gesture, worded for the pointer in use ("Drag from a Drill's port into empty space, let go, and pick Refiner."), is behind the card's **How?** button, and comes out by itself once the goal has been within reach for 20 seconds with the board left alone. Sent away with **Why?**, it does not come back on that goal. The how follows the board: with a Refiner already placed from the build bar and fed by nothing, it names the wire into it, not a second Refiner. *Whether a newcomer finds the first wire from the why alone, and whether 20 seconds is the right wait, has not been tried with a person.*
  A goal completes when its condition holds, at once if the player got there early, and then waits for one press on **Claim**. Rewards are credits, Data, techs and features. 22 goals lead to the first Phone (table in [CONTENT.md](./CONTENT.md#goal-chain)):
 
 | Goals | The player… | Lesson, and what it unlocks |
@@ -331,8 +333,8 @@ Several goals have a wait in them: Data to save for a research, credits for a ma
   tools/         pacing.ts: the scripted players
   ```
 - **Undo** keeps a snapshot of the board's structure and the credits spent for each step, up to 200.
-- **Tests:** `npm test` runs 574 tests, among them the pacing targets on four order sequences. `npm run pacing` plays six scripted players and checks each run against the pacing targets.
-- **Size and speed:** the shipped JavaScript and CSS are about 259 kB gzipped. Frame rates are in [PITCH_PLAN.md](./PITCH_PLAN.md#outcome).
+- **Tests:** `npm test` runs 578 tests, among them the pacing targets on four order sequences. `npm run pacing` plays six scripted players and checks each run against the pacing targets.
+- **Size and speed:** the shipped JavaScript and CSS are about 260 kB gzipped. Frame rates are in [PITCH_PLAN.md](./PITCH_PLAN.md#outcome).
 - **Outside requests:** the page loads its typefaces from Google Fonts and shows system fonts until they arrive. Nothing else leaves the page.
 - **Publishing:** `.github/workflows/deploy.yml` runs the tests and the build on every push to `main` and deploys the result to GitHub Pages.
 
@@ -342,7 +344,7 @@ Several goals have a wait in them: Data to save for a research, credits for a ma
 
 **In:** Drill, Refiner, Assembler, Fabricator, Router (Even/Ratio/Priority/Filter), Merger, Silo, Market, Lab, Dump · 16 materials and 11 recipes, T0–T3 · the tech tree of 29 · deposits and board expansion · node upgrades · wire tiers · 22 goals and four free-play goals · orders · Flow · "while you wait" lines and the adviser · the gestures of §7.1 · saving and time away · the phone layout · sound · celebrations · the overview · Tidy · real-world materials with a why-and-how goal card · plain-word labels and the Flows panel · cards that come level · a first screen that starts with a Drill and a Market.
 
-**Not built:** prestige ("Reflow"), timed contracts, multi-select and copy/paste, named groups round a line, a layout that sets cards in rows, blueprints, achievements, events/modifiers, T4+ content, export and import of saves, accounts.
+**Not built:** prestige ("Reflow"), timed contracts, box-select and copy/paste, named groups round a line, a layout that sets cards in rows, blueprints, achievements, events/modifiers, T4+ content, export and import of saves, accounts.
 
 ---
 

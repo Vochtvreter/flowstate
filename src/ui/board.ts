@@ -20,6 +20,7 @@ import {
   expansionCost, fmt, fmtRate, labRate, matUnlocked, nodeCost, nodeUnlocked, recipeOf, recipeUnlocked,
 } from '../economy';
 import { bagTotal, graph, isMachine, isSink, outPortCount } from '../sim';
+import { lineFrom } from '../graph';
 import { lineAdvice, lineSpot } from '../advice';
 import { GOALS, activeGoal, goalDeposit, goalFocus } from '../goals';
 import { GRID, Game, GNode, Wire, snap } from '../state';
@@ -28,7 +29,7 @@ import {
   Beacon, Flow, floater, flowPoint, fly, frameFx, invalidateFx, makeFlow, setBeacons, setFlowPath, setFlows,
 } from './fx';
 import {
-  Box, Card, Footprint, LEVEL_GAP, LEVEL_REACH, LevelCard, LevelEnd, LevelWire, Port, Pt, View, ZOOM, bestWindow, bezierAt, boxClear, boxUnion, buildSite, centreView,
+  Box, CARD_GAP, Card, Footprint, LEVEL_GAP, LEVEL_REACH, LevelCard, LevelEnd, LevelWire, Port, Pt, View, ZOOM, bestWindow, bezierAt, boxClear, boxUnion, buildSite, centreView,
   clearPoint, dockSpot, fadeColor, fitBox, fitZoom, fitsAt, frameBox, freeSpot as nearestSpot, heldRate, inPorts, levelCards, levelY, matColor, nodeSize, outPorts,
   pathD, pinchView, roomFor,
   segmentsCross, separate, siteFor, spotFree, wholeGain, wireEnds,
@@ -207,7 +208,9 @@ type Drag =
       near?: { id: number; port: number } }
   | { kind: 'node'; id: number; ox: number; oy: number; x0: number; y0: number; moved: boolean; sx: number; sy: number; slop: number;
       /** The wires of the card that run dead straight where it is held now (see `levelWith`); none: it stands on the grid. */
-      level?: number[] }
+      level?: number[];
+      /** The card is one of a block (see `block`): the others that move with it, and where each stood when the drag began. */
+      others?: { id: number; x0: number; y0: number }[] }
   | WireDrag
   | { kind: 'wireIn'; to: number; mat: MatId | null; b: Pt; p: Pt; target: number | null; tp: Pt; blend: number; armed: boolean; sx: number; sy: number; slop: number }
   | { kind: 'wirePress'; wireId: number; sx: number; sy: number; slop: number; touch: boolean }
@@ -1839,6 +1842,7 @@ export function initBoard(root: HTMLElement) {
   (boardEl.parentElement ?? boardEl).appendChild(buildEl);
 
   boardEl.addEventListener('pointerdown', onDown);
+  boardEl.addEventListener('dblclick', onDouble);
   boardEl.addEventListener('pointermove', onMove);
   boardEl.addEventListener('pointerup', onUp);
   boardEl.addEventListener('pointercancel', onCancel);
@@ -2670,20 +2674,6 @@ function layoutWires() {
   invalidateFx();
 }
 
-/** After a node moved: redo the wires attached to it, then chips and occlusion for all. */
-function relayoutNode(n: GNode) {
-  const g = ui.g;
-  const gr = graph(g);
-  const fix = (w: Wire) => {
-    const refs = wireEls.get(w.id);
-    const ends = drawnEnds(g, w);
-    if (refs && ends) setWirePath(refs, ends.a, ends.b);
-  };
-  for (const w of gr.ins.get(n.id) ?? []) fix(w);
-  for (const port of gr.outs.get(n.id) ?? []) if (port) for (const w of port) fix(w);
-  layoutWires();
-}
-
 // ---------- structure: the rest ----------
 
 function syncDeposits(g: Game) {
@@ -2726,6 +2716,7 @@ function syncStructure() {
     nodeEls.clear();
     wireEls.clear();
     selNodeId = selWireId = targetId = null;
+    block.clear();
     flashQueue.length = 0;
     hoverNode = hoverWire = null;
     settling.clear();
@@ -2749,6 +2740,7 @@ function syncStructure() {
   syncDeposits(g);
   syncNodes(g, fresh);
   syncTrace(true);
+  syncBlock();
   syncWires(g, fresh);
   syncChips();
   layoutWires();
@@ -4319,6 +4311,12 @@ function onDown(e: PointerEvent) {
     return;
   }
   if (e.shiftKey) {
+    // Shift on a card puts it in the block of cards that move together, or takes it out; anywhere else it cuts.
+    const on = touchy || over ? null : mouseHit(t, p);
+    if (on?.kind === 'node') {
+      toggleBlock(on.id);
+      return;
+    }
     drag = { kind: 'knife', a: p, b: p };
     return;
   }
@@ -4346,6 +4344,10 @@ function onDown(e: PointerEvent) {
       kind: 'node', id: hit.id, ox: p.x - n.x, oy: p.y - n.y, x0: n.x, y0: n.y, moved: false,
       sx: e.clientX, sy: e.clientY, slop: touchy ? TOUCH_SLOP : MOUSE_SLOP,
     };
+    // One of a block: the rest go where it goes.
+    if (block.size > 1 && block.has(n.id) && n.type !== 'well') {
+      drag.others = [...block].filter((id) => id !== n.id).map((id) => nodeById(g, id)).filter((m): m is GNode => !!m && m.type !== 'well').map((m) => ({ id: m.id, x0: m.x, y0: m.y }));
+    }
     return;
   }
   if (hit?.kind === 'wire') {
@@ -4444,19 +4446,13 @@ function steer(cx: number, cy: number, hovering = false) {
       const level = levelWith(g, n, pos.x, p.y - drag.oy, w, h);
       if (level) pos.y = level.y;
       markLevel(drag, level?.wires ?? []);
-      if (pos.x !== n.x || pos.y !== n.y) {
-        n.x = pos.x;
-        n.y = pos.y;
-        const refs = nodeEls.get(n.id);
-        if (refs) {
-          refs.el.style.left = n.x + 'px';
-          refs.el.style.top = n.y + 'px';
-          refs.x = n.x;
-          refs.y = n.y;
-          refs.el.classList.add('dragging');
-        }
-        relayoutNode(n);
+      if (drag.others?.length) {
+        // A block: every card goes as far as this one, and no further than the plot lets all of them go.
+        const by = blockStep(g, drag, pos.x - n.x, pos.y - n.y);
+        if (by.x || by.y) carry(g, [n.id, ...drag.others.map((o) => o.id)], by.x, by.y);
+        break;
       }
+      if (pos.x !== n.x || pos.y !== n.y) carry(g, [n.id], pos.x - n.x, pos.y - n.y);
       break;
     }
     case 'wirePress': {
@@ -4609,18 +4605,186 @@ function markLevel(d: Extract<Drag, { kind: 'node' }>, wires: number[]) {
 
 /** Give up on the gesture in progress. A node that was being moved goes back to where it started. */
 function abortDrag() {
-  if (drag?.kind === 'node' && drag.moved) {
-    const n = nodeById(ui.g, drag.id);
-    const refs = nodeEls.get(drag.id);
-    if (n && refs) {
-      n.x = refs.x = drag.x0;
-      n.y = refs.y = drag.y0;
-      refs.el.style.left = n.x + 'px';
-      refs.el.style.top = n.y + 'px';
-      relayoutNode(n);
-    }
-  }
+  if (drag?.kind === 'node' && drag.moved) putBack(ui.g, drag);
   endDrag();
+}
+
+/** Draw cards where they stand in the game: their elements, then the wires at them, then chips and the dots' cover once. */
+function redraw(g: Game, ids: number[], dragging = false) {
+  const gr = graph(g);
+  for (const id of ids) {
+    const n = gr.byId.get(id);
+    const refs = nodeEls.get(id);
+    if (!n || !refs) continue;
+    refs.el.style.left = n.x + 'px';
+    refs.el.style.top = n.y + 'px';
+    refs.x = n.x;
+    refs.y = n.y;
+    if (dragging) refs.el.classList.add('dragging');
+    const fix = (w: Wire) => {
+      const wr = wireEls.get(w.id);
+      const ends = drawnEnds(g, w);
+      if (wr && ends) setWirePath(wr, ends.a, ends.b);
+    };
+    for (const w of gr.ins.get(id) ?? []) fix(w);
+    for (const port of gr.outs.get(id) ?? []) if (port) for (const w of port) fix(w);
+  }
+  layoutWires();
+}
+
+/** Move cards that are being dragged by a step, and draw them there. */
+function carry(g: Game, ids: number[], dx: number, dy: number) {
+  for (const id of ids) {
+    const n = nodeById(g, id);
+    if (!n) continue;
+    n.x += dx;
+    n.y += dy;
+  }
+  redraw(g, ids, true);
+}
+
+/** Put the card being dragged, and the rest of its block, back where the drag found them. */
+function putBack(g: Game, d: Extract<Drag, { kind: 'node' }>) {
+  const ids: number[] = [];
+  for (const o of [{ id: d.id, x0: d.x0, y0: d.y0 }, ...(d.others ?? [])]) {
+    const n = nodeById(g, o.id);
+    if (!n) continue;
+    n.x = o.x0;
+    n.y = o.y0;
+    ids.push(o.id);
+  }
+  redraw(g, ids);
+}
+
+// ----- several cards as one block -----
+// Setting a line in a row meant one drag a card. Cards can be put in a block: Shift and a click on a card adds it (or
+// takes it out), and a double click on a card takes its whole line (lineFrom in src/graph.ts). A block is drawn
+// ringed, and a drag on any card of it moves them all, keeping their places among themselves: the card under the
+// pointer comes level as it does alone, the block stays inside the plot, and it is let go only where every card of it
+// is clear of the cards that are not in it; otherwise it goes back. One undo step. A click on a card or on the empty
+// board, or Escape, lets the block go. A Drill is never part of one. (With a mouse: a finger has no Shift.)
+
+/** The cards that move together. */
+const block = new Set<number>();
+let blockTold = false;
+
+function syncBlock() {
+  if (block.size) {
+    const byId = graph(ui.g).byId;
+    for (const id of block) if (byId.get(id)?.type === 'well' || !byId.has(id)) block.delete(id);
+  }
+  for (const [id, refs] of nodeEls) setClass(refs.el, 'blk', block.has(id));
+}
+
+function clearBlock() {
+  if (!block.size) return;
+  block.clear();
+  syncBlock();
+}
+
+function setBlock(ids: number[]) {
+  block.clear();
+  for (const id of ids) block.add(id);
+  // (A block has no inspector: the panel would stand over the cards being arranged.)
+  if (ui.sel) select(null);
+  syncBlock();
+  if (block.size > 1 && !blockTold) {
+    blockTold = true;
+    toast(`<b>${block.size} cards</b> move together now: drag any one of them. <b>Esc</b> lets them go.`, 'info', 5200);
+  }
+}
+
+/** Shift and a click on a card: into the block, or out of it. The card that was selected comes along as the first. */
+function toggleBlock(id: number) {
+  const g = ui.g;
+  const n = nodeById(g, id);
+  if (!n) return;
+  if (n.type === 'well') {
+    toast('A Drill stays on its deposit: it cannot be moved with the others.', 'info');
+    return;
+  }
+  const ids = new Set(block);
+  if (!ids.size && ui.sel?.kind === 'node' && ui.sel.id !== id && nodeById(g, ui.sel.id)?.type !== 'well') ids.add(ui.sel.id);
+  if (ids.has(id)) ids.delete(id);
+  else ids.add(id);
+  setBlock([...ids]);
+}
+
+/** A double click on a card takes its whole line as the block (not in the overview, where a click goes in to the card). */
+function onDouble(e: MouseEvent) {
+  if (over || ui.placing || radial || tapWire) return;
+  // (The board holds the pointer while it is down, so the event names the board: what lies under the pointer is asked for.)
+  const under = document.elementFromPoint(e.clientX, e.clientY) as HTMLElement | null;
+  const hit = under ? mouseHit(under, toWorld(e.clientX, e.clientY)) : null;
+  if (hit?.kind !== 'node') return;
+  const line = lineFrom(ui.g, hit.id);
+  if (line.length > 1) setBlock(line);
+}
+
+/** How far a block can go of the step its dragged card wants to take: no card of it past the plot's margin. */
+function blockStep(g: Game, d: Extract<Drag, { kind: 'node' }>, dx: number, dy: number): Pt {
+  const b = g.board;
+  let x0 = -Infinity, x1 = Infinity, y0 = -Infinity, y1 = Infinity;
+  for (const id of [d.id, ...(d.others ?? []).map((o) => o.id)]) {
+    const n = nodeById(g, id);
+    if (!n) continue;
+    const { w, h } = nodeSize(n);
+    x0 = Math.max(x0, 20 - n.x);
+    x1 = Math.min(x1, b.w - w - 20 - n.x);
+    y0 = Math.max(y0, 20 - n.y);
+    y1 = Math.min(y1, b.h - h - 20 - n.y);
+  }
+  return { x: Math.max(x0, Math.min(x1, dx)), y: Math.max(y0, Math.min(y1, dy)) };
+}
+
+/**
+ * Let a block go: where every card of it keeps clear of the cards that are not in it and of the free deposits, it
+ * stays, as one undo step; otherwise all of it goes back to where the drag found it.
+ */
+function dropBlock(d: Extract<Drag, { kind: 'node' }>) {
+  const g = ui.g;
+  const all = [{ id: d.id, x0: d.x0, y0: d.y0 }, ...(d.others ?? [])];
+  const ids = new Set(all.map((o) => o.id));
+  const avoid = depositBoxes();
+  for (const n of g.nodes) {
+    if (ids.has(n.id)) continue;
+    const { w, h } = nodeSize(n);
+    avoid.push({ x0: n.x, y0: n.y, x1: n.x + w, y1: n.y + roomFor(n.type, h) });
+  }
+  const lead = nodeById(g, d.id);
+  const moved = !!lead && (lead.x !== d.x0 || lead.y !== d.y0);
+  // (Off the grid, level with a wire or beside a card that is: half the gap will do, as for one card. geom.ts)
+  const onGrid = !!lead && (lead.x - d.x0) % GRID === 0 && (lead.y - d.y0) % GRID === 0;
+  const fits = all.every((o) => {
+    const n = nodeById(g, o.id);
+    if (!n) return true;
+    const { w, h } = nodeSize(n);
+    return spotFree(n.x, n.y, w, roomFor(n.type, h), avoid, onGrid ? CARD_GAP : LEVEL_GAP);
+  });
+  for (const id of ids) nodeEls.get(id)?.el.classList.remove('dragging');
+  if (!moved) return;
+  if (!fits) {
+    putBack(g, d);
+    toast('No room for all of them there.', 'bad');
+    return;
+  }
+  const to = new Map<number, Pt>();
+  for (const o of all) {
+    const n = nodeById(g, o.id);
+    if (!n) continue;
+    to.set(o.id, { x: n.x, y: n.y });
+    n.x = o.x0;
+    n.y = o.y0;
+  }
+  act(g, () => {
+    for (const [id, at] of to) {
+      const n = nodeById(g, id)!;
+      n.x = at.x;
+      n.y = at.y;
+    }
+    return 0;
+  });
+  if (d.level?.length) for (const id of d.level) { const refs = wireEls.get(id); if (refs) oneShot(refs.g, 'leveled', 520); }
 }
 
 /** Finish moving a node: settle it on a free spot and record one undo step for the move. */
@@ -4630,6 +4794,11 @@ function dropNode(d: Extract<Drag, { kind: 'node' }>) {
   nodeEls.get(d.id)?.el.classList.remove('dragging');
   appEl?.classList.remove('carrying');
   if (!n) return; // deleted while it was being dragged: nothing to record
+  if (d.others?.length) {
+    // One of a block. Moved, the block is let go together and stays a block; only pressed, the card is a card again.
+    if (d.moved) return dropBlock(d);
+    clearBlock();
+  } else if (block.size) clearBlock();
   if (d.moved) {
     const { w, h } = nodeSize(n);
     // Dropping a loose node on a wire splices it in.
@@ -4703,7 +4872,10 @@ function onUp(e: PointerEvent) {
       } else if (tapDeposit(p)) {
         endDrag();
         return;
-      } else if (ui.sel) select(null);
+      } else {
+        if (ui.sel) select(null);
+        clearBlock();
+      }
       break;
     case 'node':
       if (!d.moved && tapWire) tapNode(d.id);
@@ -5403,6 +5575,11 @@ export function pickRadial(i: number) {
 export function cancelGesture(): boolean {
   const d = drag;
   const busy = !!d && (d.kind === 'wire' || d.kind === 'wireIn' || d.kind === 'knife' || (d.kind === 'node' && d.moved));
+  // (With nothing else under way, Escape lets a block of cards go.)
+  if (!radial && !busy && !tapWire && block.size) {
+    clearBlock();
+    return true;
+  }
   if (!radial && !busy && !tapWire) return false;
   if (radial) closeRadial();
   if (busy) abortDrag();

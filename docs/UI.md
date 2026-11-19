@@ -29,7 +29,7 @@ The phone layout is on when the window is under 700 px wide, or is wider than ta
 | Inspector | 320 px panel at the right; the board gets narrower | Bottom sheet | Sheet at the right, at most 340 px |
 | Build menu | Fan round where the new card will stand (the pointer, unless the card has to stand elsewhere), with its outline | Bottom sheet, the card's outline on the board above it | Sheet at the right, the outline beside it |
 | Zoom, Fit, Tidy | Buttons above the minimap, bottom right | Pinch; Fit, Undo and Tidy float above the build bar | The same |
-| Minimap, key hints | Shown | Not shown | Not shown |
+| Minimap | Shown | Not shown | Not shown |
 | Undo, Redo, Pause, Sound | Top bar | Undo floats; all four in the gear menu | The same |
 | Claim | On the goal card | In the thumb row, above the build bar | The same |
 
@@ -38,7 +38,7 @@ The phone layout is on when the window is under 700 px wide, or is wider than ta
 - Under 1596 px wide the minimap hides while the inspector is open, and the zoom buttons drop into its corner.
 - On a stage under 1200 px wide (the inspector's width counts as stage) a machine is not selected when it is built, and the inspector closes when a port is armed, a wire is dragged out or a goal is claimed. Wider than that, with a mouse, a new machine is selected from goal 6 on.
 - Where the stage beside an open inspector is under 794 px (always measured as if it were open, so the card never moves when it opens), the order and the alert go under the card (`#hud-strip.tight`). At 1024×768 this is the case.
-- At 1240 px the logo loses its word; at 1100 px the Data chips lose their rates; at 900 px the key hints go, Data becomes one block and "Tech tree" becomes "Tech".
+- At 1240 px the logo loses its word; at 1100 px the Data chips lose their rates; at 900 px Data becomes one block and "Tech tree" becomes "Tech".
 - A finger on this layout gets 44 px buttons, no key labels, and the "Tap where…" line under the goal card.
 
 **Phone.** The inspector sheet takes at most 45% of the screen and, where it can, leaves 176 px of board under the strip; the build sheet may grow taller, keeping 120 px for the spot being built on. The thumb row holds, on the left, Claim when a goal is ready, or the "Tap where…" line with its ✕ while a port is armed or a card is in hand, or else the docked Expand button; on the right Fit and Undo, with Tidy above Undo. The card folds its hint behind a tap when the strip would take more than 45% of the stage, and during a wait; a new goal always opens with its hint showing.
@@ -70,6 +70,8 @@ From the top: a row of pips (one for each of the 22 goals, larger for the six bi
 | While you wait | A step from the goal itself: a tick box, "While you wait · 1 of 2", one sentence and **Show me**. It reads "Next step" when the step is the goal's own requirement (goal 22). When the step costs credits the card is keeping for its own purchase, **Show me** gives way to "Saving for this · 1,100¢ · about 40 s". A step that has been offered is not taken back for a passing dip in income: it stays until it has been out of reach for 10 s, or the player no longer has the credits for it (`ADVICE.lineHold` in `src/advice.ts`). Done, the box is ticked and the row says what the step bought. A line that was done before its goal came up is not shown at all. On goal 21 the line is the tune-up before the Fabricator: its sentence is its next step's own, a step is only on the card while it pays for itself before the Fabricator can be bought (it is never "Saving for this"), and when none is left the row is ticked if the player did some of it and closes if not ([CONTENT.md](./CONTENT.md), "While you wait"). |
 | Tip | The adviser's one suggestion (`src/advice.ts`, run in a Worker). It appears after 6 s of waiting with the board left alone, never repeats the line's own step, and has its own **Show me**. A narrow card (phone, squeezed desktop) shows one of the two rows at a time, the line first. |
 
+**The how follows the board.** Where the how has the player build a machine from a port and that machine already stands unfed (placed from the build bar), it names the wire instead ("Drag from a Drill's port to the Refiner.": goals 4 and 7), and at goal 4 the guiding hand acts that wire out.
+
 **Show me** does nothing for the player: it frames what the step is about (and selects it where the step is a button in the inspector), puts a ring on the button to press, and a hand acts the gesture out twice (`advice-show.ts`, `hand.ts`).
 
 When the goal is done the card says "✓ Done", shows the reward and a green **Claim** button, the loudest thing on screen. The card itself never moves when a goal is claimed: the old text lifts away, the new rises, the pip pops. While the tech tree covers the board, a ready goal rides above it as a slim bar with Claim (on a phone the tree has its own "Goal complete · Claim" bar). In free play the card reads "Free play 1 / 4".
@@ -92,9 +94,9 @@ For what nothing else on screen says: refusals, refunds, "Tidied. Ctrl Z puts it
 
 A dot grid (24 px) with the plot as a dashed outline labelled "Board · 2 plots". The label stands at the plot's top left corner; where the goal card or the stage's edge would cut it, it slides along the plot's top edge to where it reads whole, or is hidden until it can be. The overview does not show it. Cards and wires are DOM and SVG; wire dots, particles and floating gains are drawn on one canvas above them.
 
-- **Card:** 172 px wide and 72, 92 or 112 px tall by its number of ports (a Router, Merger or Dump is 136×60 px). On a Drill or a machine, a ring round the glyph of what it makes shows utilisation; then the name, a second line (for a machine, its recipe in words) and a rate line ("0.50/s · 100%"). Positions snap to a 20 px grid, and cards never overlap.
+- **Card:** 172 px wide and 72, 92 or 112 px tall by its number of ports (a Router, Merger or Dump is 136×60 px). On a Drill or a machine, a ring round the glyph of what it makes shows utilisation; then the name ("Sand Drill"; a machine by what it makes, its kind after it in small type: "Glass Refiner"), a second line (for a machine, its recipe in words, or "makes Circuit" where the recipe is too long for the line) and a rate line ("0.50/s · 100%"). Positions snap to a 20 px grid, and cards never overlap.
 - **Ports:** 14 px dots on the card's sides, inputs left and outputs right, in the material's colour. An output with no wire pulses. A machine with two outputs labels them.
-- **Wire:** a curve in the material's colour, 2 to 7 px wide by its rate, with dots in the material's shape travelling along it. A full wire glows brighter; a wire carrying nothing is dashed and has no dots. While something is selected, wires that are not its own are drawn faint.
+- **Wire:** a curve in the material's colour, 2 to 7 px wide by its rate, with dots in the material's shape travelling along it. A full wire glows brighter; a wire carrying nothing is grey, dashed and has no dots (in its material's colour it read as an alarm: Copper is red). While something is selected, wires that are not its own are drawn faint.
 - **Rate chip:** on a wire only when it has something to say: the wire is selected or runs to the selected card, carries nothing ("0/s") or is full ("MAX"), was made in the last 3 s, or is under the mouse.
 - **Deposit:** a dashed tile the size of a card ("Sand deposit · empty · place a Drill"; "Unknown deposit · needs research"). Until there is a Lab a locked deposit is a faint outline with a lock and no words, and until the Drill has its slot in the build bar a free deposit says only "empty".
 - **Gains:** once a second "+5¢" floats above each Market and "+1α" above each Lab, and coins fly to the credits pill.
@@ -107,9 +109,10 @@ A dot grid (24 px) with the plot as a dashed outline labelled "Board · 2 plots"
 | Output full, the port has no wire | amber | amber | "Tar has no exit" (the material by name; on a Drill too) |
 | Output full, the port is wired | amber | amber | "Backed up" (not on a Drill) |
 | An input short | red | red | "Needs more Copper"; "Needs Copper" when nothing wired in brings any |
+| An input a little short: at work 60% of its time or more, and under 88% (until back over 92%) | amber | plain | "Short of Ore", in amber: no problem, no alert |
 | No recipe, or nothing wired in | grey | dashed | "No input" |
 | Suffering from a problem elsewhere | amber | plain | none |
-| Working flat out while a machine it feeds goes short | green | blue | "Can't keep up" |
+| Working flat out while a machine it feeds needs more, or is short | green | blue | "Can't keep up" |
 
 The label is set in sentence case at 10.5 px (14 px in the larger type), on the card's top edge; none is longer than 20 characters (`pillFor` in `status.ts`, where the words are tested). The simulation's own words (blocked, starved, idle) are not shown anywhere. A Drill that is ahead of what it feeds changes only its ring. A machine is called starved only when it works less than 60% of its time, averaged over 3 s, and stays so until it is back over 65% (`status.ts`). Between that and full speed it is drawn as working; its inspector says how short it is in one amber line ("Receiving 0.80 of 1.00 Ore/s") with the fix under it. A node the player has just changed gets a moment's grace before it is judged.
 
@@ -131,7 +134,6 @@ The camera goes only as far out as it takes to show everything, so a small facto
 - **Tidy** (`T`, offered once six cards stand) lays the board out again so that no wire runs behind a card it does not end at, and wires are short and cross little: bringing a wire out from behind a card comes first, and may cost some wire or a crossing. A board with nothing to mend is left as it is ("Already tidy."). The layout is worked out in a Worker (`layout.ts`); cards glide to their places over 400 ms; Drills stay on their deposits; the camera stays on what the player was looking at; one undo puts every card back. After the layout, cards come level with the wire that feeds them where that takes under half a grid step (see "Move" in section 5); pressed again on a board it has tidied, it says "Already tidy."
 - **Minimap** (desktop): 160×106 px, each card in its status colour (Markets gold, Labs violet) and the camera's frame. It is a picture only; it takes no clicks. It appears at goal 9, or once eight cards stand; the zoom buttons and Fit at goal 4.
 - **Expand** appears from goal 14. Its home is just under the plot ("Expand board 500¢ · New plot · reveals deposits"). When that place is off screen or covered, it docks as a one-line button in the free part of the board (on a phone: in the thumb row). It turns gold when affordable and pulses when the card asks for it. It stands back, faint and deaf to presses, while a port is armed, a wire is drawn, a card is in hand or the build menu is open. After an expansion the camera glides out to show the new plot, and its deposits pop in one after another.
-- **Key hints** (mouse on a desktop, from goal 4 to goal 7): one row at the bottom left that names drag port, ⇧ drag, Del, Ctrl Z and T with what each does. It hides whenever a card lies under it.
 
 ---
 
@@ -155,7 +157,7 @@ The camera goes only as far out as it takes to show everything, so a small facto
 
 **From the build bar.** A ghost of the card follows the pointer and shows where it will stand and what it costs; a Drill's ghost sits on the nearest free deposit. A finger's ghost starts in the middle of the view and a tap places it. A slot fills from below while it is out of reach and pulses once when it comes within reach. One locked slot is shown as a silhouette with the name of the tech that opens it. Over a deposit and in the overview the ghost is only an outline; its words ("Quartz Drill · 31¢ · tap to place") then stand beside it on the screen, the same size at every zoom, under or above it, clear of the goal card and the build bar.
 
-**Splice.** A machine placed on a wire, or an unwired card dropped on one, is spliced into it (the wire has to pass within about 16 px of the spot). **Branch.** With a mouse, dragging off the middle of a wire starts a second wire from the same port. **Move.** A card follows after 4 px (mouse) or 10 px (finger); dropped on another card it glides to the nearest free spot. **Level.** Cards stand on the grid and their ports do not, so a wire between cards of different shapes was never straight. A card dragged within 9 px (on screen) of the height at which one of its wires would run dead straight stands at that height, a whole number of pixels and a few off the grid; the wire lights up and a soft click plays as it comes level (`levelY` in `geom.ts`). Let go there, it stays, if the spot is free; across, it keeps to the grid. A wire or a card dragged within 52 px of the edge scrolls the board.
+**Splice.** A machine placed on a wire, or an unwired card dropped on one, is spliced into it (the wire has to pass within about 16 px of the spot). **Branch.** With a mouse, dragging off the middle of a wire starts a second wire from the same port. **Move.** A card follows after 4 px (mouse) or 10 px (finger); dropped on another card it glides to the nearest free spot. **Level.** Cards stand on the grid and their ports do not, so a wire between cards of different shapes was never straight. A card dragged within 9 px (on screen) of the height at which one of its wires would run dead straight stands at that height, a whole number of pixels and a few off the grid; the wire lights up and a soft click plays as it comes level (`levelY` in `geom.ts`). The wire only lights where the card may stay: level, it may stand half the usual gap (8 px) from another card. Let go there, it stays; across, it keeps to the grid. **Block** (mouse). `Shift` and a click on a card puts it in a block of cards that move together, or takes it out; a double click on a card takes its whole line (the card and all it feeds, without Drills and without a Market, Lab or Dump that another line feeds too). The block is ringed and has no inspector. A drag on any card of it moves them all, keeping their places among themselves and inside the plot; the card under the pointer comes level as it does alone. Let go where every card of it is clear of the cards that are not in it, the block stays, as one undo step; otherwise all of it goes back ("No room for all of them there."). A click on a card or on the empty board, or `Esc`, lets the block go. A Drill cannot be part of one. A wire or a card dragged within 52 px of the edge scrolls the board.
 
 **Cut.** `Shift`+drag draws a red dashed line and cuts every wire it crosses (mouse only). Or select the wire and press `Del`, or **Cut wire** in the inspector.
 
@@ -192,6 +194,7 @@ Opens when a card or a wire is selected: a 320 px panel beside the board on a de
 | Section | Contents |
 |---|---|
 | Header | Icon, name, one line on what the node does, ✕ |
+| (Until goal 6) | A card's inspector holds the header, the status and the body only: nothing to buy. Duplicate and Delete come at goal 4. |
 | Status | Only for a problem: a box with what is wrong and its fix, titled in plain words ("Not enough Copper", "Tar has no exit", "Glass is backed up", "Nothing is coming in"); the amber line for a machine that is merely short; and for a machine whose card says "Can't keep up", a blue box that names who is waiting and for what, with Speed in one press and "Show who waits" |
 | Body, by type | *Machine:* the recipe as chips, with **Change** when it has a choice; Flow bars for each input (received / needed) and output; utilisation. *Drill:* extraction rate. *Router:* mode (Even, Ratio, Priority, Filter; a locked mode leads to its tech), one row per wire with its share and its control, and **Favour** to send one wire the bigger share. *Market:* what sells here and what it earns; after the first sale over demand, a demand gauge per material. *Lab:* what it studies and what each item gives. *Silo:* what it holds |
 | Upgrades | One row per track: level, effect, and a buy button that fills as credits come in. With the Bulk Upgrade tech each row also has a second buy button with the price of one press on it ("Upgrade all · 819¢"): it raises every node of that type by one level, lowest level first. Where the credits reach only some it says how many ("Upgrade 6 of 9 · 512¢"); a press that would buy more than the button said buys nothing and asks for a second press |
@@ -261,9 +264,9 @@ The first screen is a Drill, a Market, the goal card, the credits, Pause, Sound 
 | From | What arrives |
 |---|---|
 | Goal 2, "Dig up more Sand" | The Drill's slot in the build bar; Undo and Redo |
-| Goal 4, "Turn Sand into Glass" | The zoom buttons and Fit; the Delete tip under the build bar; the row of keys (until goal 8) |
+| Goal 4, "Turn Sand into Glass" | The zoom buttons and Fit; the Delete tip under the build bar; Duplicate and Delete in a card's inspector |
 | The Lab (goal 5's reward) | The Tech tree button; locked deposits say "needs research" |
-| Goal 6, "Speed up a Drill" | The Market's slot (sooner, the moment a second Market can be paid for) |
+| Goal 6, "Speed up a Drill" | The Market's slot (sooner, the moment a second Market can be paid for); the upgrades in a card's inspector (sooner, once anything has been upgraded) |
 | Goal 9, "Turn Oil into Plastic" | The Flows button; the minimap (sooner, once eight cards stand) |
 | Six cards | Tidy |
 | Goal 11's reward | The order chip |
