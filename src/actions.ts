@@ -250,7 +250,7 @@ export function upgradeAll(g: Game, type: NodeType, track: Track): number {
   });
   if (count) {
     noteEdit(g, upgradeAllNote(type, track));
-    // "Upgrade all your Drills at once" (goal 20) counts a press that raised Drills, and no other kind. The time is
+    // "Speed up every Drill at once" (goal 20) counts a press that raised Drills, and no other kind. The time is
     // part of the undo step (state.ts snapshot), so an undo of the press takes the goal's readiness back with it.
     if (type === 'well') g.bulkAt = g.time;
   }

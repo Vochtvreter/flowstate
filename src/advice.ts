@@ -203,7 +203,7 @@ export const ADVICE = {
   lineReserve: true,
   /**
    * ...and of those, only what the income cannot bring back in before that purchase can be made: the Assembler
-   * of "Assemble your first Circuit" can only be bought once Assembly is researched, minutes away, and whatever comes
+   * of "Make your first Circuit" can only be bought once Assembly is researched, minutes away, and whatever comes
    * in meanwhile pays for it (cardReserve). false: the whole price is kept back from the moment the goal comes up.
    */
   reserveEarned: true,
@@ -280,7 +280,7 @@ function needOf(g: Game): Purse | null {
     need.credits = step.credits;
     return need;
   }
-  // A goal that counts credits or Data without a purchase behind it ("Study Circuit for β").
+  // A goal that counts credits or Data without a purchase behind it ("Study Circuits for β").
   const p = goal.progress?.(g) ?? null;
   if (p && p[0] < p[1] - 1e-9) {
     const k = KEYS.find((x) => UNIT[x] === p[2]);
@@ -396,7 +396,7 @@ export function researchDelay(g: Game, id: string): number {
   const goal = savingFor(g);
   const t = TECHS[id];
   if (!goal || !t || goal === id) return 0;
-  // The card's own line asks for it (Lab Speed, then Deep Analysis, on "Make your first Silicon"): the line is the
+  // The card's own line asks for it (Lab Speed, then Deep Analysis, on "Make and sell Silicon"): the line is the
   // card's plan for its wait, and the two together end it sooner. The tree does not warn against the card.
   const step = lineStep(g, true);
   if (step?.act.t === 'research' && step.act.tech === id) return 0;
@@ -581,14 +581,14 @@ export const SAY = {
   lineWell: (mat: string, cost: number) => `Place a Drill on the free ${mat} deposit (${cents(cost)}), then build a Lab from its port.`,
   lineLab: (mat: string, cost: number) => `Build a Lab from the new ${mat} Drill's port (${cents(cost)}): a Lab of its own is 1 α a second.`,
   lineExpand: (cost: number) => `Expand the board (${cents(cost)}): it brings new deposits for a Drill and a Lab of its own.`,
-  // --- "Make your first Copper", second line: a Lab of its own for the Sand Drill that only sells ---
+  // --- "Make and sell Copper", second line: a Lab of its own for the Sand Drill that only sells ---
   lineOwnLab: (port: string, cost: number) => `Build a Lab from ${port} (${cents(cost)}): Sand is 1 α each in a Lab.`,
   // --- "Make your first Phone": what the Fabricator is not fed yet ---
-  lineFeed: (port: string, to: string, n: string, mat: string) => `Wire ${port} to ${to}: a Phone takes ${n} ${mat}.`,
-  // --- "Make your first Silicon", second line: Speed on a Drill with a Lab of its own, then on the Lab ---
+  lineFeed: (port: string, to: string, n: string, mat: string) => `Wire ${port} to ${to}: a Phone takes ${n} ${mat}${n === 'one' ? '' : 's'}.`,
+  // --- "Make and sell Silicon", second line: Speed on a Drill with a Lab of its own, then on the Lab ---
   linePairWell: (well: string, cost: number) => `Buy Speed on ${well} (${cents(cost)}): its Lab of its own then gets more to study.`,
   linePairLab: (mat: string, cost: number) => `Buy Speed on the ${mat} Drill's own Lab (${cents(cost)}): the pair then gives more α.`,
-  // --- "Make your first Silicon", third line: Lab Speed, then Deep Analysis ---
+  // --- "Make and sell Silicon", third line: Lab Speed, then Deep Analysis ---
   lineLabSpeed: (name: string, cost: string) => `Research ${name} (${cost}): Labs then study twice as fast, and Deep Analysis opens.`,
   lineDeep: (name: string, cost: string) => `Research ${name} (${cost}): every item studied then gives half as much Data again.`,
   // --- "Hold 95% Flow": the line itself, naming the node its step acts on (flowLineWords below; its other fix, a

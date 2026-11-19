@@ -32,7 +32,7 @@
 //    the stylesheet, which would otherwise need has() selectors.
 import { materialsAt, nodeById } from '../actions';
 import type { Advice } from '../advice';
-import { DATA_COLORS, DATA_NAMES, DataTier, MATERIALS, MatId, NODE_DEFS, RECIPES, TECHS } from '../content';
+import { DATA_COLORS, DATA_NAMES, DataTier, MATERIALS, MatId, NODE_DEFS, RECIPES, Recipe, TECHS } from '../content';
 import { fmt } from '../economy';
 import { FlowGoalView, GOALS, GoalProgress, GoalView, MAIN_GOALS, claimGoal, goalFocus, goalView } from '../goals';
 import { claimOrder, orderView } from '../orders';
@@ -94,6 +94,12 @@ export function initHud() {
         lastOrderClaim = now;
         if (pressed) pressClaim(pressed, true);
       }
+    } else if (a === 'how') {
+      // The card's "How?": the gesture in place of the why, and back again. Sent away, it does not come by itself.
+      if (howGoal === g.goal.i) {
+        howGoal = -1;
+        whyGoal = g.goal.i;
+      } else howGoal = g.goal.i;
     } else if (a === 'show' || a === 'show-line') {
       // The player is being taken to the board: on a phone the card gives it room first.
       foldHint();
@@ -174,6 +180,9 @@ export function initHud() {
     lastClaim = lastOrderClaim = -1e9;
     focusAfter = false;
     heldBefore = false;
+    howGoal = whyGoal = -1;
+    idleFrom = -1;
+    idleKey = '';
     // (A new game is this tab's own: main.ts saves it again, and the slot no longer says another tab has it.)
     elsewhere = false;
   });
@@ -417,6 +426,60 @@ function inputsHtml(inputs: Inputs): string {
   return `${bar(inputs.length ? fed / inputs.length : 0, '#7AA2FF')}<span class="gc-num gc-inputs" data-testid="goal-inputs" aria-label="${esc(inputs.map((x) => `${x.name} ${x.fed ? 'wired' : 'not wired'}`).join(', '))}">${parts.join('<i class="gi-sep">·</i>')}</span>`;
 }
 
+// ---------- why, and how ----------
+// The card says why (Goal.why), and draws the recipe the goal is about. The gesture (Goal.hint) is behind its "How?"
+// button, and comes out by itself once the goal has been within reach, with the board left as it is, for HOW_AFTER
+// game seconds: nobody is left guessing for long, and nobody who is getting on is told where to click.
+
+/** Game seconds a goal can be acted on, with the board left alone, before the card says how by itself. */
+export const HOW_AFTER = 20;
+/** The goal the card is saying the how of (-1: none), and the goal on which the player sent the how away again. */
+let howGoal = -1;
+let whyGoal = -1;
+/** Since when (game time) the goal on the card has been within reach with the board as it is; -1 while it is not. */
+let idleFrom = -1;
+let idleKey = '';
+
+/** Note how long the player has had the goal within reach without touching the board: after HOW_AFTER the card says how. */
+function tendHow(g: Game, v: GoalView, waiting: boolean) {
+  const i = g.goal.i;
+  if (v.ready || waiting || g.paused) {
+    idleFrom = -1;
+    return;
+  }
+  const key = `${i}|${g.rev}`;
+  if (key !== idleKey || idleFrom < 0 || g.time < idleFrom) {
+    idleKey = key;
+    idleFrom = g.time;
+  }
+  if (howGoal !== i && whyGoal !== i && g.time - idleFrom >= HOW_AFTER) howGoal = i;
+}
+
+/** For scripts: what the card is saying under its title. */
+export const cardSaying = (g: Game): 'why' | 'how' => (howGoal === g.goal.i ? 'how' : 'why');
+
+/**
+ * A recipe as the card draws it: "2 Sand → Glass", each thing with its picture. Where several things are put
+ * together and the machine stands (GoalView.fed), each input says whether it is wired in, and what comes out
+ * whether it goes anywhere: what is left to do can be read off the card, with no word about where to click.
+ */
+function recipeHtml(r: Recipe, fed?: GoalView['fed']): string {
+  const chip = (m: MatId, q: number, state: '' | 'ok' | 'no') =>
+    `<span class="rc${state ? ' ' + state : ''}" data-mat="${m}">${matGlyph(m, 14)}${q > 1 ? `<b class="mono">${q}</b>` : ''}<span>${esc(MATERIALS[m].name)}</span>${state ? icon(state === 'ok' ? 'check' : 'close', 11) : ''}</span>`;
+  const ins = r.inputs.map(([m, q]) => chip(m, q, fed ? (fed.fed[m] ? 'ok' : 'no') : '')).join('<i class="rc-op">+</i>');
+  const outs = r.outputs.map(([m, q], port) => chip(m, q, fed && port === 0 ? (fed.out ? 'ok' : 'no') : '')).join('<i class="rc-op">+</i>');
+  const words = (xs: [MatId, number][]) => xs.map(([m, q]) => `${q > 1 ? q + ' ' : ''}${MATERIALS[m].name}`).join(' and ');
+  return `<span class="gc-recipe" data-testid="goal-recipe" role="img" aria-label="${esc(`${words(r.inputs)} make ${words(r.outputs)}`)}">${ins}<i class="rc-op">→</i>${outs}</span>`;
+}
+
+/** Under the title: the recipe, then the why, or the how in its place, with the button that swaps them. */
+function whyHtml(g: Game, v: GoalView): string {
+  const how = howGoal === g.goal.i;
+  // ("Make your first Phone" has a row of its own for what is wired in: the recipe is drawn plain there.)
+  const recipe = v.recipe ? recipeHtml(v.recipe, v.inputs ? undefined : v.fed) : '';
+  return `<p class="gc-hint${how ? ' how' : ''}" data-testid="goal-hint" data-say="${how ? 'how' : 'why'}">${recipe}<span class="gc-say">${esc(how ? v.hint : v.why)}</span> <button class="gc-how" data-act="how" data-testid="goal-how" aria-pressed="${how}" title="${how ? 'Why this goal' : 'How to do it'}">${how ? 'Why?' : 'How?'}</button></p>`;
+}
+
 function goalHtml(g: Game, v: GoalView, rows: string, prog: string): string {
   const step = `${v.free ? 'Free play' : 'Goal'} ${v.number} / ${v.total}`;
   const gh = ghostsHtml(performance.now());
@@ -431,7 +494,7 @@ function goalHtml(g: Game, v: GoalView, rows: string, prog: string): string {
   }
   return `<div class="gc-main">${pipsHtml(g)}${body}<div class="gc-head"><span class="gc-step">${step}</span><span class="gc-rewards">${rewardChips(v.reward)}</span></div>
       <h3 class="gc-title">${esc(v.goal.title)}</h3>
-      <p class="gc-hint">${esc(v.hint)}</p>
+      ${whyHtml(g, v)}
       ${prog}
       ${rows}</div>${gh.card}</div>${gh.press}`;
 }
@@ -513,7 +576,11 @@ function renderGoal(g: Game, force: boolean) {
     // "Make your first Phone" folds it too once there is a Fabricator: its inputs row and its line say what the hint
     // says, wire by wire (with the hint open as well, the strip took 44.6% of a 360x740 stage).
     setClass(goalEl, 'wait', !!wait || saving(v.progress) || flowView || !!inputs?.length);
-  } else setClass(goalEl, 'wait', false);
+    tendHow(g, v, !!wait || saving(v.progress));
+  } else {
+    setClass(goalEl, 'wait', false);
+    tendHow(g, v, false);
+  }
   goalPanel.render(goalHtml(g, v, rows, prog), force);
   announceTips(goalEl);
 }

@@ -88,7 +88,7 @@ export interface CardRun {
   longestTipless: number;
   /** When the first surplus sale was noted (g.seenSurplus), or null. */
   surplusAt: number | null;
-  /** Every step of a card's line the player took, and the levels "Upgrade all your Drills at once" bought. */
+  /** Every step of a card's line the player took, and the levels "Speed up every Drill at once" bought. */
   lines: LineStep[];
   bulkLevels: number;
 }

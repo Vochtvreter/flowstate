@@ -1,8 +1,8 @@
 import { describe, expect, it } from 'vitest';
 import { claimGoal, connect, cutWire, expandBoard, favour, placeNode, redo, setMode, setWeight, undo, upgrade, upgradeAll } from '../src/actions';
-import { RULES, TECHS } from '../src/content';
+import { MATERIALS, RECIPES, RULES, TECHS } from '../src/content';
 import { has, nodeCost, research } from '../src/economy';
-import { GOALS, MAIN_GOALS, activeGoal, goalAge, goalById, goalDeposit, goalView, rewardText, routerFavoursLab } from '../src/goals';
+import { GOALS, MAIN_GOALS, activeGoal, goalAge, goalById, goalDeposit, goalView, recipeFeeds, rewardText, routerFavoursLab } from '../src/goals';
 import { Game, deserialize, serialize } from '../src/state';
 import { fresh, market, rich, run, take, well } from './helpers';
 
@@ -17,26 +17,26 @@ describe('goal chain: the table (2.4)', () => {
   it('has the 22 goals of the plan, in order, then four free-play goals', () => {
     expect(MAIN_GOALS).toBe(22);
     expect(GOALS.map((x) => x.title).slice(0, 22)).toEqual([
-      'Wire the Drill to the Market',
-      'Place a second Drill',
-      'Wire it to the Market too',
-      'Build a Refiner from a Drill\'s port',
+      'Sell your Sand',
+      'Dig up more Sand',
+      'Sell that Sand too',
+      'Turn Sand into Glass',
       'Sell your first Glass',
-      'Upgrade a Drill',
-      'Build a Lab and feed it',
-      'Research Oil Deposits',
-      'Refine Oil into Plastic',
+      'Speed up a Drill',
+      'Study Glass in a Lab',
+      'Open up the Oil deposit',
+      'Turn Oil into Plastic',
       'Give the Tar somewhere to go',
-      'Make your first Copper',
+      'Make and sell Copper',
       'Fill your first order',
       'Route more to a Lab than to the Market',
-      'Expand the board',
-      'Assemble your first Circuit',
+      'Open up more land',
+      'Make your first Circuit',
       'Hold 95% Flow for 10 seconds',
-      'Study Circuit for β',
-      'Make your first Silicon',
-      'Assemble your first Screen',
-      'Upgrade all your Drills at once',
+      'Study Circuits for β',
+      'Make and sell Silicon',
+      'Make your first Screen',
+      'Speed up every Drill at once',
       'Build a Fabricator',
       'Make your first Phone',
     ]);
@@ -223,12 +223,15 @@ describe('goal chain: ready, claim, skip ahead', () => {
     expect(has(g, 'S1')).toBe(true);
     expect(take(g, 'tech').map((e) => e.id)).toEqual(['S1']);
     expect(take(g, 'goal-claimed')[0].reward.techs).toEqual(['S1']);
-    // "Upgrade all your Drills at once": not met on arrival, though the Drills were upgraded all at once before.
+    // "Speed up every Drill at once": not met on arrival, though the Drills were upgraded all at once before.
     expect(activeGoal(g)!.id).toBe('bulk-upgrade');
     run(g, 1);
     expect(g.goal.ready).toBe(false);
-    expect(goalView(g)!.hint).toBe('Select a Drill and press Upgrade all beside Speed: every Drill gets one level more.');
-    expect(goalView(g, true)!.hint).toBe('Tap a Drill and tap Upgrade all beside Speed: every Drill gets one level more.');
+    expect(goalView(g)!.hint).toBe('Select a Drill and press Upgrade all beside Speed.');
+    expect(goalView(g, true)!.hint).toBe('Tap a Drill and tap Upgrade all beside Speed.');
+    // (Why, the card says under the title: the same for a mouse and a finger.)
+    expect(goalView(g)!.why).toBe(goalView(g, true)!.why);
+    expect(goalView(g)!.why).toContain('Upgrade all raises every machine of one kind');
     // One press now upgrades every Drill by a level, cheapest first, as one undo step, and meets the card.
     const before = g.credits;
     expect(upgradeAll(g, 'well', 'speed')).toBe(2);
@@ -247,7 +250,7 @@ describe('goal chain: ready, claim, skip ahead', () => {
     expect(TECHS.S1.cost).toEqual({});
   });
 
-  it('"Upgrade all your Drills at once" keeps its Claim a minute and more after the press: through an undo of something else, and a reload', () => {
+  it('"Speed up every Drill at once" keeps its Claim a minute and more after the press: through an undo of something else, and a reload', () => {
     const g = rich();
     g.techs = ['P1', 'R1', 'L1', 'S1'];
     g.credits = 1000;
@@ -272,7 +275,7 @@ describe('goal chain: ready, claim, skip ahead', () => {
     expect(claimGoal(back)).toBe(true);
   });
 
-  it('"Upgrade all your Drills at once" counts a press on the Drills only, and an undo of that press takes its Claim back', () => {
+  it('"Speed up every Drill at once" counts a press on the Drills only, and an undo of that press takes its Claim back', () => {
     const g = rich();
     g.techs = ['P1', 'R1', 'L1', 'S1'];
     g.credits = 5000;
@@ -399,7 +402,7 @@ describe('goal chain: conditions and progress', () => {
     expect(free.total).toBe(4);
   });
 
-  it('"Wire it to the Market too" needs a wire out of every Drill', () => {
+  it('"Sell that Sand too" needs a wire out of every Drill', () => {
     const g = fresh();
     g.credits = 100;
     at(g, 'wire-all-wells');
@@ -495,14 +498,18 @@ describe('goal chain: conditions and progress', () => {
       expect(hint.mouse, id).toContain(what);
       expect(hint.touch, id).toContain(what);
     }
-    expect(goalById('silt-exit')!.hint.mouse).toContain('sell the Plastic at the Market');
+    expect(goalById('silt-exit')!.hint.mouse).toContain('Wire the Refiner\'s Plastic port to the Market');
+    // And the card says so before anyone asks how: in its title, or in its why.
+    for (const id of ['make-spark', 'make-mist']) expect(goalById(id)!.title, id).toMatch(/sell/);
+    for (const id of ['make-glyph', 'make-prism']) expect(goalById(id)!.why, id).toMatch(/sells for \d+¢/);
+    expect(goalById('silt-exit')!.why).toContain('Plastic sells');
   });
 
   it('the Assembler cards say where to build from, and name the Market before the wire that completes the goal', () => {
     // The goal completes with the first Circuit (or Screen), and a card that is ready shows Claim and no hint. With
     // the Market last in the sentence, the gesture still to come was the sale, and it was the one left out.
-    expect(goalById('make-glyph')!.hint.mouse).toBe('Research Assembly, build an Assembler from the Refiner\'s Plastic port, wire it to the Market, then wire Copper into it to make Circuit.');
-    expect(goalById('make-prism')!.hint.mouse).toBe('Build another Assembler from the Silicon Refiner\'s port, wire it to the Market, then wire Glass into it to make Screen (two for every Silicon).');
+    expect(goalById('make-glyph')!.hint.mouse).toBe('Research Assembly, build an Assembler from the Refiner\'s Plastic port, wire it to the Market, then wire Copper into it to make a Circuit.');
+    expect(goalById('make-prism')!.hint.mouse).toBe('Build another Assembler from the Silicon Refiner\'s port, wire it to the Market, then wire Glass into it to make a Screen.');
     expect(goalById('build-fabricator')!.hint.mouse).toBe('Research Fabrication, then save up and build a Fabricator from the Screen Assembler\'s port: orders and a high Flow get you there faster.');
     const longest = (touch: boolean) => Math.max(...['silt-exit', 'route-lab'].map((id) => [...(touch ? goalById(id)!.hint.touch : goalById(id)!.hint.mouse)].length));
     for (const id of ['make-glyph', 'make-prism', 'build-fabricator']) {
@@ -587,7 +594,7 @@ describe('goal chain: conditions and progress', () => {
     expect(step('research-murk')).toEqual({ tech: 'P2' });
   });
 
-  it('"Study Circuit for β" asks for 40 β in hand', () => {
+  it('"Study Circuits for β" asks for 40 β in hand', () => {
     const g = rich();
     at(g, 'study-glyph');
     g.data.b = 39;
@@ -597,7 +604,7 @@ describe('goal chain: conditions and progress', () => {
     expect(activeGoal(g)!.done(g)).toBe(true);
   });
 
-  it('"Hold 95% Flow" reads the hold timer, and "Expand the board" the expansion count', () => {
+  it('"Hold 95% Flow" reads the hold timer, and "Open up more land" the expansion count', () => {
     const g = rich();
     at(g, 'hold-flow');
     g.flowHold = 4;
@@ -873,6 +880,88 @@ describe('"Hold 95% Flow": the bar, and the valve for a board nobody can fix', (
     expect(old.goal.ready).toBe(false);
     run(old, 2);
     expect(old.goal.ready).toBe(true);
+  });
+});
+
+describe('the card says what to bring about and why, and keeps the gesture for whoever asks how', () => {
+  const GESTURE = /\b(click|clicks|drag|drags|tap|taps|press|presses|select|key|keys|swipe|button)\b/i;
+
+  it('every goal has a why: a sentence or two about the game\'s world, the same for a mouse and a finger, with no gesture in it', () => {
+    for (const goal of GOALS) {
+      const g = fresh();
+      at(g, goal.id);
+      const mouse = goalView(g)!, touch = goalView(g, true)!;
+      expect(mouse.why, goal.id).toBe(goal.why);
+      expect(touch.why, goal.id).toBe(goal.why);
+      expect([...goal.why].length, goal.id).toBeGreaterThanOrEqual(40);
+      // It stands where the hint stood: no longer than the longest hint the card was laid out for.
+      expect([...goal.why].length, goal.id).toBeLessThanOrEqual(125);
+      expect(goal.why, goal.id).not.toMatch(GESTURE);
+      expect(goal.why, goal.id).toMatch(/[.]$/);
+      // The how is still there, for the "How?" button, and is another sentence.
+      expect(mouse.hint, goal.id).toBe(goal.hint.mouse);
+      expect(goal.hint.mouse, goal.id).not.toBe(goal.why);
+    }
+  });
+
+  it('a title is an outcome: none names a gesture, a port or a wire', () => {
+    for (const goal of GOALS) {
+      expect(goal.title, goal.id).not.toMatch(GESTURE);
+      expect(goal.title, goal.id).not.toMatch(/\b(port|wire|Wire)\b/);
+    }
+    expect(goalById('wire-market')!.title).toBe('Sell your Sand');
+    expect(goalById('build-refiner')!.title).toBe('Turn Sand into Glass');
+  });
+
+  it('the first Glass is worth the trouble by the card\'s own numbers, which are the game\'s', () => {
+    expect(goalById('build-refiner')!.why).toBe(`Two Sand sell for ${2 * MATERIALS.glint.value}¢. Melted into one Glass they sell for ${MATERIALS.shard.value}¢. A Refiner does the melting.`);
+    expect(MATERIALS.shard.value).toBeGreaterThan(2 * MATERIALS.glint.value);
+    expect(goalById('make-glyph')!.why).toContain(`sells for ${MATERIALS.glyph.value}¢`);
+    expect(goalById('make-prism')!.why).toContain(`sells for ${MATERIALS.prism.value}¢`);
+  });
+
+  it('a goal about a recipe shows it: every "make" goal, and no other', () => {
+    const shown = Object.fromEntries(GOALS.filter((x) => x.recipe).map((x) => [x.id, x.recipe]));
+    expect(shown).toEqual({
+      'build-refiner': 'shard', 'make-ink': 'ink', 'make-spark': 'spark', 'make-glyph': 'glyph', 'make-mist': 'mist', 'make-prism': 'prism', 'make-lens': 'lens',
+      'make-clay': 'clay', 'make-coil': 'coil', 'make-dynamo': 'dynamo', 'make-paradox': 'paradox',
+    });
+    for (const goal of GOALS) {
+      const g = fresh();
+      at(g, goal.id);
+      expect(goalView(g)!.recipe, goal.id).toBe(goal.recipe ? RECIPES[goal.recipe] : undefined);
+    }
+  });
+
+  it('where several things are put together, the card ticks off each input as it is wired in, and what comes out when it goes somewhere', () => {
+    const g = rich();
+    at(g, 'make-glyph');
+    // No Assembler yet: nothing to tick. (And nothing for a recipe with one input, ever.)
+    expect(recipeFeeds(g, RECIPES.glyph)).toBeNull();
+    expect(goalView(g)!.fed).toBeUndefined();
+    expect(recipeFeeds(g, RECIPES.shard)).toBeNull();
+    const murk = placeNode(g, 'well', 0, 0, { depositId: 3 })!;
+    const ember = placeNode(g, 'well', 0, 0, { depositId: 4 })!;
+    const ink = placeNode(g, 'refiner', 400, 400)!;
+    const spark = placeNode(g, 'refiner', 400, 560)!;
+    connect(g, murk.id, 0, ink.id);
+    connect(g, ember.id, 0, spark.id);
+    // An Assembler with no recipe yet is the one the card is about.
+    const glyph = placeNode(g, 'assembler', 700, 400)!;
+    expect(recipeFeeds(g, RECIPES.glyph)).toEqual({ fed: { ink: false, spark: false }, out: false });
+    connect(g, ink.id, 0, glyph.id);
+    expect(goalView(g)!.fed).toEqual({ fed: { ink: true, spark: false }, out: false });
+    connect(g, glyph.id, 0, market(g).id);
+    expect(goalView(g)!.fed).toEqual({ fed: { ink: true, spark: false }, out: true });
+    // Through a Router counts as wired in.
+    const router = placeNode(g, 'router', 560, 620)!;
+    connect(g, spark.id, 0, router.id);
+    connect(g, router.id, 0, glyph.id);
+    expect(goalView(g)!.fed).toEqual({ fed: { ink: true, spark: true }, out: true });
+    // Ready to claim: the card shows Claim, and ticks nothing.
+    run(g, 20);
+    expect(g.goal.ready).toBe(true);
+    expect(goalView(g)!.fed).toBeUndefined();
   });
 });
 

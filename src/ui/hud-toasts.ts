@@ -20,7 +20,7 @@ import { esc, icon, matGlyph } from './icons';
 import { env } from './phone-env';
 import { onBeat, toast, ui } from './ui';
 
-/** The goal whose card is about making (or first selling) this material: "Make your first Copper" for Copper. -1 when there is none. */
+/** The goal whose card is about making (or first selling) this material: "Make and sell Copper" for Copper. -1 when there is none. */
 const goalAbout = (m: MatId) => GOALS.findIndex((x) => x.id === (m === 'shard' ? 'sell-shard' : `make-${m}`));
 
 /**

@@ -154,7 +154,7 @@ export function setCardWait(fn: (g: Game) => CardWait | null) {
 
 /** What the goal on the card is saving Data for, and how much of each kind it needs. */
 export interface GoalSaving {
-  /** The tech its next step names; null for a goal that counts Data itself ("Study Circuit for β"). */
+  /** The tech its next step names; null for a goal that counts Data itself ("Study Circuits for β"). */
   tech: Tech | null;
   need: Partial<Record<DataTier, number>>;
   /** Credits the same step needs straight after the research (the machine it asks for next); 0 or absent: none. */
@@ -234,7 +234,7 @@ function creditsIn(g: Game, s: GoalSaving): number {
 export function goalDelay(g: Game, t: Tech): { tiers: DataTier[]; seconds: number; saving: GoalSaving } | null {
   const s = goalSaving(g);
   if (!s || s.tech?.id === t.id) return null;
-  // The card's own line asks for it (Lab Speed, then Deep Analysis, on "Make your first Silicon"): no warning against the card.
+  // The card's own line asks for it (Lab Speed, then Deep Analysis, on "Make and sell Silicon"): no warning against the card.
   if (lineAdvice(g)?.research === t.id) return null;
   const tiers = TIERS.filter((k) => (t.cost[k] ?? 0) > 0 && (s.need[k] ?? 0) > 0 && g.data[k] - (t.cost[k] ?? 0) < (s.need[k] ?? 0) - 1e-9);
   if (!tiers.length) return null;

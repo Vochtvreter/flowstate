@@ -1408,7 +1408,7 @@ const ex = {
 const EXPAND_GOAL = GOALS.findIndex((x) => x.id === 'expand');
 
 /**
- * Whether the button is on the board at all: from the goal "Expand the board" on (or once the board has been
+ * Whether the button is on the board at all: from the goal "Open up more land" on (or once the board has been
  * expanded, in free play, or when a "while you wait" line asks for it). Before that it would only be one more
  * thing beside the first instructions, and a tap meant for an empty spot could buy a plot.
  */
@@ -1424,7 +1424,7 @@ function expandShown(g: Game): boolean {
 const expandQuiet = () => !!tapWire || !!ui.placing || !!radial || (!!drag && (drag.kind === 'wire' || drag.kind === 'wireIn'));
 
 /**
- * The goal card is asking for the expansion: the goal is "Expand the board", or the next step of the
+ * The goal card is asking for the expansion: the goal is "Open up more land", or the next step of the
  * goal's "while you wait" line is to expand (which the line only asks for when it can be paid for).
  */
 function expandAsked(g: Game): boolean {
@@ -3428,7 +3428,7 @@ function showDeposits(tapped?: number) {
   if (env.touch || tapped != null) mouse = { x: best.x + 86, y: best.y + 36 };
 }
 
-/** The first goal that needs the inspector ("Upgrade a Drill"). */
+/** The first goal that needs the inspector ("Speed up a Drill"). */
 const INSPECT_FROM = GOALS.findIndex((x) => x.id === 'upgrade-well');
 
 /** A stage this wide (with the inspector's room counted in) has space for the inspector beside the board. */
@@ -3792,7 +3792,7 @@ function reachable(n: GNode, covers: Box[], v: View = viewAhead()): boolean {
 /**
  * The far end the card names for a wire from this port, if any: the node "Show me" acted this wire out to, the far
  * end of the line's next wire, or, when the goal is about this port's node (goalFocus), the first other node it is
- * about that the wire can go to ("Wire the Drill to the Market", "...wire it to the Market").
+ * about that the wire can go to ("Sell your Sand", "...wire it to the Market").
  */
 function namedEnd(g: Game, from: number, port: number): GNode | null {
   const end = (id: number | undefined) => {

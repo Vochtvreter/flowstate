@@ -65,7 +65,7 @@ describe('tech tree: what is shown', () => {
     for (const id of ['L3', 'L4', 'L2', 'S1', 'C2']) expect(byId(g, id)).toBeUndefined();
     g.techs.push('L1', 'C1');
     for (const id of ['L3', 'L4', 'L2', 'S1', 'C2']) expect(byId(g, id)?.veiled).toBe(false);
-    // Bulk Upgrade is itself a goal reward ("Assemble your first Screen"): it says so, and Auto-balance behind it stays out.
+    // Bulk Upgrade is itself a goal reward ("Make your first Screen"): it says so, and Auto-balance behind it stays out.
     expect(byId(g, 'S1')?.state).toBe('goal');
     expect(byId(g, 'S3')).toBeUndefined();
     // Once that goal has paid it out, Auto-balance is one step ahead: it still needs Priority Routing.
@@ -147,21 +147,21 @@ describe('tech tree: the tech the goal asks for', () => {
   };
 
   it('reads it from the goal wording', () => {
-    expect(goalTech(at('Research Oil Deposits'))).toBe('P2');
-    expect(goalTech(at('Make your first Copper'))).toBe('P3');
-    expect(goalTech(at('Assemble your first Circuit'))).toBe('P4');
-    expect(goalTech(at('Make your first Silicon'))).toBe('P5');
+    expect(goalTech(at('Open up the Oil deposit'))).toBe('P2');
+    expect(goalTech(at('Make and sell Copper'))).toBe('P3');
+    expect(goalTech(at('Make your first Circuit'))).toBe('P4');
+    expect(goalTech(at('Make and sell Silicon'))).toBe('P5');
     expect(goalTech(at('Build a Fabricator'))).toBe('P7');
   });
 
   it('is nothing once the tech is owned, the goal is ready, or the goal names no tech', () => {
-    const g = at('Research Oil Deposits');
+    const g = at('Open up the Oil deposit');
     g.techs = ['P1', 'R1', 'P2'];
     expect(goalTech(g)).toBeNull();
-    const h = at('Make your first Copper');
+    const h = at('Make and sell Copper');
     h.goal.ready = true;
     expect(goalTech(h)).toBeNull();
-    expect(goalTech(at('Expand the board'))).toBeNull();
+    expect(goalTech(at('Open up more land'))).toBeNull();
     const done = newGame();
     done.goal = { i: GOALS.length, ready: false };
     expect(goalTech(done)).toBeNull();
@@ -262,7 +262,7 @@ describe('tech tree: nothing priced in a kind of Data the player has not met', (
 });
 
 describe('tech tree: the goal\'s wait', () => {
-  // Goal 11, "Make your first Copper": saving 195α for Ore Deposits.
+  // Goal 11, "Make and sell Copper": saving 195α for Ore Deposits.
   const at11 = (a: number, rate = 0.75) => {
     const g = newGame();
     g.goal = { i: GOALS.findIndex((x) => x.id === 'make-spark'), ready: false };
@@ -310,7 +310,7 @@ describe('tech tree: the goal\'s wait', () => {
     expect(goalDelay(g, TECHS.L3)).toBeNull();
   });
 
-  it('a goal counting β ("Study Circuit for β"): Priority Routing would take from that count', () => {
+  it('a goal counting β ("Study Circuits for β"): Priority Routing would take from that count', () => {
     const g = newGame();
     g.goal = { i: GOALS.findIndex((x) => x.id === 'study-glyph'), ready: false };
     g.techs = ['P1', 'R1', 'P2', 'P3', 'L1', 'P4'];

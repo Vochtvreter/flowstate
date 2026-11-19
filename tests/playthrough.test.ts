@@ -164,7 +164,7 @@ describe('scripted playthrough', () => {
 const on = (run: CardRun, id: string) => run.spent.find((x) => x.id === id)!;
 const lens = (r: CardRun) => r.g.stats.firstLensAt!;
 const SPINE = ['L1', 'P1', 'P2', 'P3', 'P4', 'P5', 'P7', 'R1', 'S1']; // what the goal chain grants or asks for
-/** ...and what a card's line asks the player to research: Lab Speed, then Deep Analysis ("Make your first Silicon"). */
+/** ...and what a card's line asks the player to research: Lab Speed, then Deep Analysis ("Make and sell Silicon"). */
 const LINE_TECHS = ['R2', 'R3'];
 const lineTechs = (run: CardRun) => (run.lines.some((x) => x.line === 'deep-analysis') ? LINE_TECHS : []);
 const LONG = ['make-spark', 'make-glyph', 'make-mist', 'build-fabricator'];
@@ -231,9 +231,9 @@ describe('the whole demo, by the card alone', () => {
   it('the lines are what makes it a twenty-minute game: with the hints alone every long wait is for α, and long', () => {
     const long = bare.spent.filter((x) => x.seconds > 180);
     expect(long.map((x) => `${x.title}: ${x.waitedFor}`)).toEqual([
-      'Make your first Copper: α for Ore Deposits',
-      'Assemble your first Circuit: α for Assembly',
-      'Make your first Silicon: α for Quartz Deposits',
+      'Make and sell Copper: α for Ore Deposits',
+      'Make your first Circuit: α for Assembly',
+      'Make and sell Silicon: α for Quartz Deposits',
       'Build a Fabricator: α and β for Fabrication',
     ]);
     // Most of an hour to the Phone with the hints alone, about seventeen minutes with the lines (this player claims

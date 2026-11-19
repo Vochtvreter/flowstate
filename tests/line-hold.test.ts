@@ -32,7 +32,7 @@ const WAIT = 150;
 const SPARE = 50;
 
 /**
- * "Assemble your first Circuit" where the blinking was seen: its second line up, the first expansion's deposits
+ * "Make your first Circuit" where the blinking was seen: its second line up, the first expansion's deposits
  * each with a Drill and a Lab, the board expanded again. The line's next step is a Drill on a free deposit of the
  * second expansion, given only with its Lab's price free as well. Assembly is 150 s away at 1 α a second, so of the
  * Assembler's 600¢ the reserve keeps what the credits a second do not bring in by then: nothing at 4.3 ¢/s, 105¢ at
@@ -242,7 +242,7 @@ describe('the step of a card\'s line does not blink with the reserve (ADVICE.lin
     g.creditRate = HIGH;
     expect(lineAdvice(g)).toMatchObject({ build: 'well', deposit: was.deposit });
 
-    // Another step at the very same price. On "Make your first Silicon" the line that buys Speed on each Drill with a Lab
+    // Another step at the very same price. On "Make and sell Silicon" the line that buys Speed on each Drill with a Lab
     // of its own goes from pair to pair, and a level costs the same on every Drill. The first pair's Drill is on offer
     // and kept; its level is bought, and its Lab's too, by hand, before the card is looked at again: what the line
     // asks for now is the next pair's Drill, for the price the kept step had. It is another step: held at once.
@@ -278,7 +278,7 @@ describe('the step of a card\'s line does not blink with the reserve (ADVICE.lin
     m.creditRate = 1e3;
     expect(lineAdvice(m)).toMatchObject({ upgrade: 'speed', node: next.node });
 
-    // Another goal with the same line and the same step ("Make your first Silicon" picks the expansion up where the
+    // Another goal with the same line and the same step ("Make and sell Silicon" picks the expansion up where the
     // Circuit card left it): nothing is carried over. (With no credits coming in, all of its purchase is kept back.)
     ({ g } = kept());
     const glyph = lineAdvice(g)!;

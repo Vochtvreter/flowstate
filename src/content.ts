@@ -187,7 +187,7 @@ const T = (
  *    kept short; `npm run pacing`, policy cardonly). The fast players are the floor (no first Phone before
  *    14:00), so the spine could not simply come down. What came
  *    down is what the card's player pays for and the fast players hardly do: the Labs of the lines (×1.1 a Lab,
- *    it was ×1.3) and the Fabricator; and "Make your first Silicon" has a line for Lab Speed and Deep Analysis
+ *    it was ×1.3) and the Fabricator; and "Make and sell Silicon" has a line for Lab Speed and Deep Analysis
  *    (the fast players buy Deep Analysis after Quartz Deposits, never before it). Assembly is 1,325α, Quartz
  *    Deposits 1,875α. (A player who reads only the hints and ignores the lines still needs most of an hour:
  *    the spine is not priced for that.)
@@ -210,7 +210,7 @@ const T = (
  *  - Anything that only matters after the demo costs γ, which does not exist before the first Phone, and the
  *    late Processing techs need all three kinds of Data, so studying Tier 1 items never stops paying.
  * P1, R1, L1 and S1 are goal rewards (src/goals.ts) and cannot be bought. S1 (Bulk Upgrade) comes with
- * "Assemble your first Screen", and the next goal has the player press it once ("Upgrade all your Drills at
+ * "Make your first Screen", and the next goal has the player press it once ("Upgrade all your Drills at
  * once"), just before the save for the Fabricator, so nobody has to press Upgrade a hundred times on a phone;
  * upgrades are not balanced around dozens of tiny purchases.
  *
@@ -221,7 +221,7 @@ const T = (
  */
 export const TECHS: Record<string, Tech> = Object.fromEntries([
   // Processing
-  T('P1', 'Refining', 'processing', 0, 0, {}, [], 'Your first machine. It melts Sand into Glass, which sells for more.', ['Refiner', 'Recipe: 2 Sand → Glass'], { auto: 'Reward for the goal “Wire it to the Market too”' }),
+  T('P1', 'Refining', 'processing', 0, 0, {}, [], 'Your first machine. It melts Sand into Glass, which sells for more.', ['Refiner', 'Recipe: 2 Sand → Glass'], { auto: 'Reward for the goal “Sell that Sand too”' }),
   T('P2', 'Oil Deposits', 'processing', 1, 0, { a: 40 }, ['R1'], 'Drill for Oil and refine it into Plastic. That leaves Tar behind, so you also get the Dump to take it away.', ['Oil Drills', 'Recipe: 2 Oil → Plastic + Tar', 'Dump node']),
   T('P3', 'Ore Deposits', 'processing', 2, 0, { a: 195 }, ['P2'], 'Drill for Ore and refine it into Copper.', ['Ore Drills', 'Recipe: 2 Ore → Copper']),
   T('P4', 'Assembly', 'processing', 3, 0, { a: 1325 }, ['P3'], 'Machines with two inputs. Plastic and Copper make a Circuit, your first assembled part and the source of β Data.', ['Assembler', 'Recipe: Plastic + Copper → Circuit']),
@@ -254,7 +254,7 @@ export const TECHS: Record<string, Tech> = Object.fromEntries([
   T('R3', 'Deep Analysis', 'research', 2, 0, { b: 80 }, ['R2'], 'Every item studied yields 50% more Data.', ['+50% Data per item']),
   T('R4', 'Long Absence', 'research', 1, 1, { a: 210 }, ['R1'], 'Your supply line keeps earning for up to 8 hours while you are away, instead of 2.', ['Offline cap 2h → 8h'], { needsEnd: true }),
   // Scale tools
-  T('S1', 'Bulk Upgrade', 'scale', 1, 0, {}, ['L1'], 'Upgrade every node of the same kind with one click.', ['"Upgrade all" button'], { auto: 'Reward for the goal “Assemble your first Screen”' }),
+  T('S1', 'Bulk Upgrade', 'scale', 1, 0, {}, ['L1'], 'Upgrade every node of the same kind with one click.', ['"Upgrade all" button'], { auto: 'Reward for the goal “Make your first Screen”' }),
   T('S3', 'Auto-balance', 'scale', 2, 0, { b: 50 }, ['S1', 'L4'], 'One click sets a Router\'s weights to match what each destination can actually use.', ['Router: Auto-balance']),
 ].map((t) => [t.id, t]));
 
@@ -403,7 +403,7 @@ export const RULES = {
   /** 2.4 Goal thresholds that are numbers rather than events (the Flow goal's are in `flow` above). */
   goals: {
     /**
-     * "Study Circuit for β": this much β in hand. About a minute of one Assembler's Circuit in a Lab: a goal with
+     * "Study Circuits for β": this much β in hand. About a minute of one Assembler's Circuit in a Lab: a goal with
      * something to watch, between the first Circuit and the wait for Quartz Deposits.
      */
     studyBeta: 40,

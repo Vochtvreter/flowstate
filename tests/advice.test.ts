@@ -168,7 +168,7 @@ function glyphGame(): Game {
 describe('waitInfo: what the card is waiting for', () => {
   it('is null unless the active goal is saving for something it cannot pay yet', () => {
     const g = fresh();
-    expect(waitInfo(g)).toBeNull(); // "Wire the Drill to the Market" asks for an action
+    expect(waitInfo(g)).toBeNull(); // "Sell your Sand" asks for an action
     expect(waitKind(g)).toBeNull();
     connect(g, well(g).id, 0, market(g).id);
     run(g, 0.1);
@@ -602,7 +602,7 @@ describe('advice: the repertoire, one board at a time', () => {
     h.data.b = 5000;
     h.credits = 1e6;
     expect(goalView(h)!.meanwhile).toBeUndefined();
-    // On "Assemble your first Screen" the card asks it too (the β to come covers Fabrication), and the step is the card's.
+    // On "Make your first Screen" the card asks it too (the β to come covers Fabrication), and the step is the card's.
     const k = glyphGame();
     k.data = { a: 5000, b: 5000, g: 0 };
     k.credits = 0;
@@ -1327,7 +1327,7 @@ describe('the words: every sentence of the repertoire fits the card', () => {
     lineFeed: [ports, [...both('Fabricator'), ...both('Phone Fabricator')], ['one', 'two'], mats],
     linePairWell: [wells.flatMap(both), [upgradePrice]],
     linePairLab: [raws, [upgradePrice]],
-    // "Make your first Silicon", third line: Lab Speed, then Deep Analysis (their real names and prices).
+    // "Make and sell Silicon", third line: Lab Speed, then Deep Analysis (their real names and prices).
     lineLabSpeed: [[TECHS.R2.name], [costText(TECHS.R2)]],
     lineDeep: [[TECHS.R3.name], [costText(TECHS.R3)]],
     // The Flow goal's line: who needs what, and the maker to buy Speed on, as for flowSpeed (and "its Ore Drill").
@@ -1572,7 +1572,7 @@ function collect(): { cases: Case[]; runs: Followed[]; mids: Mid[]; studying: Ga
   const cases: Case[] = [];
   const followed: Followed[] = [];
   const mids: Mid[] = [];
-  /** The card players' boards at the first idle second of "Study Circuit for β" (the Circuit wire just made). */
+  /** The card players' boards at the first idle second of "Study Circuits for β" (the Circuit wire just made). */
   const studying: Game[] = [];
   const seen = new Set<string>();
   const runs: { tips: boolean; seed: number; hands?: number; studyAll?: boolean; meanwhile?: boolean }[] = [
@@ -1655,7 +1655,7 @@ describe('every tip on a real board is affordable, can be done, and is true', ()
     expect(said).toBeGreaterThanOrEqual(3); // (the adviser did have things to say on them)
   });
 
-  it('"Study Circuit for β" with raw Drills crowding the one Lab: Circuit starves, and within half a minute the adviser says what ends it', () => {
+  it('"Study Circuits for β" with raw Drills crowding the one Lab: Circuit starves, and within half a minute the adviser says what ends it', () => {
     // A Lab studies one item a second and takes what arrived first. A player who wired their raw Drills into
     // the Lab of goal 7 (instead of giving each a Lab of its own, or on top of that) and then wires the Circuit
     // in, as this card says, gets next to no β: the Drills keep the Lab full. The rule stands; what is tested
@@ -1721,7 +1721,7 @@ describe('every tip on a real board is affordable, can be done, and is true', ()
         clearHistory();
       }
     }
-    console.info(`"Study Circuit for β" on a crowded Lab:\n  ${report.join('\n  ')}`);
+    console.info(`"Study Circuits for β" on a crowded Lab:\n  ${report.join('\n  ')}`);
   });
 
   it('affordable, worded properly, worth 15 s, and never against a goal card', () => {

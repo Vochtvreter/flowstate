@@ -54,7 +54,7 @@ const TEXT: Record<string, { mouse: string; touch: string }> = {
   // (Its words once ticked. While a step is on offer, the card reads the words for that step: Meanwhile.say.)
   'tune-up': { mouse: 'Your line is tuned: nothing else pays for itself before the Fabricator.', touch: '' },
   'prism-fab': { mouse: 'Wire the Screen Assembler\'s port to the Fabricator: a Phone takes one Screen.', touch: '' },
-  'glyph-fab': { mouse: 'Wire the Circuit Assembler\'s port to the Fabricator: a Phone takes two Circuit.', touch: '' },
+  'glyph-fab': { mouse: 'Wire the Circuit Assembler\'s port to the Fabricator: a Phone takes two Circuits.', touch: '' },
 };
 for (const t of Object.values(TEXT)) if (!t.touch) t.touch = t.mouse;
 /** What "expand-labs" reads once its next step is no longer the board's expansion (Meanwhile.say). */
@@ -101,7 +101,7 @@ describe('"while you wait": the lines', () => {
   });
 
   it('shown one at a time: the first that applies and is not done, "2 of 2" after the first, the last one ticked once all are done', () => {
-    // "Make your first Copper": Plastic into the Lab, then a Lab of its own for the Sand Drill that only sells.
+    // "Make and sell Copper": Plastic into the Lab, then a Lab of its own for the Sand Drill that only sells.
     const g = rich();
     g.techs = ['P1', 'R1', 'P2'];
     const m = market(g);
@@ -192,7 +192,7 @@ describe('"while you wait": the lines', () => {
     expect(goalView(g)!.meanwhile).toEqual({ text: FREE, done: true, step: 2, of: 2 });
     expect(followMeanwhile(g)).toBe(false); // nothing more to do
 
-    // "Make your first Silicon": the same expansion is done already, so the card goes on to Speed on the pairs. A line
+    // "Make and sell Silicon": the same expansion is done already, so the card goes on to Speed on the pairs. A line
     // that was done when the goal came up is not shown ticked, and not counted: two lines are left, not three.
     at(g, 'make-mist');
     expect(g.goalAt!.had).toEqual(['expand-labs']);
@@ -217,7 +217,7 @@ describe('"while you wait": the lines', () => {
     clearHistory();
   });
 
-  it('"Make your first Silicon" picks up the second expansion where the Circuit card left it', () => {
+  it('"Make and sell Silicon" picks up the second expansion where the Circuit card left it', () => {
     // A player who left the first expansion's deposits alone and spent the credits on the Assembler first.
     const g = rich();
     g.techs = ['P1', 'R1', 'P2', 'P3', 'P4'];
@@ -255,7 +255,7 @@ describe('"while you wait": the lines', () => {
     const w = connect(g, glyph.id, 0, lab.id)!;
     const line = lineOf('cut-glyph');
     const need = TECHS.P7.cost.b!;
-    // On "Assemble your first Screen" the β to come (this card's and the next one's) covers Fabrication already.
+    // On "Make your first Screen" the β to come (this card's and the next one's) covers Fabrication already.
     at(g, 'make-prism');
     g.credits = 0;
     g.data.b = 0;
@@ -515,7 +515,7 @@ function checkStep(a: Advice, from: string) {
   expect(a.saves, from).toBeUndefined();
   expect(a.eta, from).toBe(0);
   expect(a.steps, from).toBe(1);
-  // Exactly one thing to do (a research too: Lab Speed, then Deep Analysis, on "Make your first Silicon").
+  // Exactly one thing to do (a research too: Lab Speed, then Deep Analysis, on "Make and sell Silicon").
   expect([a.wire, a.build, a.cut, a.expand, a.upgrade, a.research].filter((x) => x != null).length, from).toBe(1);
   expect(a.favour ?? a.to ?? a.all, from).toBeUndefined();
 }
@@ -660,7 +660,7 @@ describe('lineAdvice: the next step of the card\'s line, for its "Show me"', () 
   });
 
   it('the step is what the line says, to the letter', () => {
-    // "Make your first Copper": the Plastic port, never the Tar port; with two Labs, the one with room.
+    // "Make and sell Copper": the Plastic port, never the Tar port; with two Labs, the one with room.
     const g = rich();
     g.techs = ['P1', 'R1', 'P2'];
     const m = market(g);
@@ -682,7 +682,7 @@ describe('lineAdvice: the next step of the card\'s line, for its "Show me"', () 
     expect(applyAdvice(g, lineAdvice(g)!)).toBe(true);
     expect(lineOf('ink-lab').done(g)).toBe(true);
 
-    // "Assemble your first Circuit": a Drill on a free deposit, then a Lab from its port; nothing when it cannot be paid for.
+    // "Make your first Circuit": a Drill on a free deposit, then a Lab from its port; nothing when it cannot be paid for.
     const h = rich();
     h.techs = ['P1', 'R1', 'P2', 'P3'];
     connect(h, well(h).id, 0, market(h).id);
@@ -729,7 +729,7 @@ describe('lineAdvice: the next step of the card\'s line, for its "Show me"', () 
     expect(lineAdvice(k)).toBeNull();
     expect(goalView(k)!.meanwhile!.held).toEqual({ cost: nodeCost(k, 'lab'), sym: '¢', eta: expect.any(Number) });
 
-    // "Make your first Silicon", second line: Speed on a Drill with a Lab of its own, then on its Lab.
+    // "Make and sell Silicon", second line: Speed on a Drill with a Lab of its own, then on its Lab.
     h.credits = 1e9;
     while (followMeanwhile(h)) { /* the rest of the Circuit card's lines */ }
     at(h, 'make-mist');
@@ -919,7 +919,7 @@ describe('"Make your first Phone": a line for each input the Fabricator lacks', 
     // The step, and the Phone.
     const a = lineAdvice(g)!;
     expect(a).toMatchObject({ wire: { from: glyph.id, to: f.id, port: 0 }, node: glyph.id });
-    expect(a.text.mouse).toBe('Wire the Circuit Assembler\'s port to the Phone Fabricator: a Phone takes two Circuit.');
+    expect(a.text.mouse).toBe('Wire the Circuit Assembler\'s port to the Phone Fabricator: a Phone takes two Circuits.');
     expect(applyAdvice(g, a)).toBe(true);
     expect(goalView(g)!.progress).toEqual([0, 1, 'Phone']);
     const t0 = g.time;
@@ -1022,7 +1022,7 @@ describe('"Build a Fabricator": the tune-up before the Fabricator', () => {
     expect(cutWire(g, wire.id)).toBe(true);
     expect(goalView(g)!.meanwhile).toMatchObject({ done: false, step: 2, of: 2 });
     expect(lineAdvice(g)).toMatchObject({ upgrade: 'speed', node: ink.id });
-    // The same on the other cards: "Make your first Silicon" with the second expansion done reads "1 of 2" (see above),
+    // The same on the other cards: "Make and sell Silicon" with the second expansion done reads "1 of 2" (see above),
     // and "Make your first Phone" with the Screen wired shows the Circuit line alone (see below).
     clearHistory();
   });

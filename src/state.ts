@@ -251,7 +251,7 @@ export interface Game {
   edits?: Edit[];
   /**
    * Game time of the last press of Upgrade all on Drills (src/actions.ts upgradeAll; a press on any other kind
-   * leaves it alone). "Upgrade all your Drills at once" is met by such a press made since the goal came up; `edits`
+   * leaves it alone). "Speed up every Drill at once" is met by such a press made since the goal came up; `edits`
    * cannot carry that, as it forgets anything older than a minute, and the Claim then went with the next undo or
    * reload. It is part of the undo step (Snapshot.bulkAt): undoing the press takes the goal's readiness back.
    */
