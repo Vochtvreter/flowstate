@@ -114,6 +114,47 @@ div.hb.locked:hover { background: transparent; border-color: #2a3550; }
 .deposit.locked .dn { color: #8c97ad; }
 /* Before the Lab a locked deposit has no words: an outline and a lock, more to come (reveal.ts). */
 .deposit.locked.quiet { justify-content: center; border-color: #1a2236; background: none; color: #3d4860; }
+/* ---------- the Flows panel (ui/flows.ts) ----------
+   One row a material: its picture and name, a word when it is short or has no exit, how much is made, a bar of where
+   it goes and a line that says the same in numbers. The row is a button (it traces the material on the board); a row
+   in trouble has a second, small one that goes to the machine to look at. */
+.t-flows svg { color: #9db8ff; }
+.techbtn.t-flows.on { border-color: var(--sel); background: #16213d; }
+.techbtn.t-flows.warn { border-color: #5a4718; }
+.techbtn .badge.warn { background: #fbbf24; color: #2a1c00; }
+.fl-rows { display: flex; flex-direction: column; }
+.flrow { position: relative; display: flex; align-items: stretch; border-bottom: 1px solid var(--line); }
+.flrow.on { background: color-mix(in srgb, var(--c) 9%, transparent); box-shadow: inset 3px 0 0 var(--c); }
+.fl-main { flex: 1; min-width: 0; display: flex; align-items: flex-start; gap: 11px; padding: 11px 14px 11px 16px; border: 0; background: none; text-align: left; }
+.fl-main:hover { background: rgba(255, 255, 255, 0.03); }
+.fl-ico { flex: none; width: 30px; height: 30px; display: grid; place-items: center; border-radius: 9px; background: color-mix(in srgb, var(--c) 12%, #121929); border: 1px solid color-mix(in srgb, var(--c) 30%, #27324a); }
+.fl-body { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 5px; }
+.fl-top { display: flex; align-items: center; gap: 7px; min-height: 18px; }
+.fl-name { font-size: 13px; font-weight: 600; color: var(--text); }
+.fl-rate { margin-left: auto; font-size: 12.5px; color: var(--text); }
+.fl-rate small { font-size: 10.5px; color: var(--muted); }
+.fl-tag { font-size: 10px; font-weight: 700; line-height: 15px; padding: 0 7px; border-radius: 999px; border: 1px solid #34405c; color: #c9d3e8; white-space: nowrap; }
+.fl-tag.short { background: #3a1518; color: #fca5a5; border-color: #6a2a31; }
+.fl-tag.stuck { background: #33270c; color: #fcd34d; border-color: #5a4718; }
+.fl-tag.spare { background: #14233f; color: #a9c2ff; border-color: #3b5491; }
+.fl-bar { display: flex; height: 7px; border-radius: 4px; overflow: hidden; background: #1a2236; }
+.fl-bar i { display: block; height: 100%; min-width: 2px; }
+.fl-bar i + i { box-shadow: inset 1px 0 0 #0e1320; }
+.fl-bar .miss, .fl-key .miss { background: repeating-linear-gradient(135deg, rgba(248, 113, 113, 0.9) 0 3px, rgba(248, 113, 113, 0.25) 3px 6px); }
+.fl-note { font-size: 11px; line-height: 15px; color: var(--muted); }
+.fl-note b { font-weight: 600; color: #d3dbec; }
+.fl-note i { font-style: normal; margin: 0 5px; color: #55617c; }
+.flrow.short .fl-note, .flrow.stuck .fl-note { color: #d8c9a8; }
+.fl-go { flex: none; align-self: center; margin-right: 12px; height: 28px; padding: 0 11px; border-radius: 8px; border: 1px solid var(--border); background: #121929; font-size: 11.5px; font-weight: 600; color: var(--text); }
+.fl-go:hover { border-color: var(--sel); }
+html[data-input='touch'] .fl-go { height: 40px; padding: 0 14px; }
+.fl-key { display: flex; flex-wrap: wrap; gap: 4px 12px; padding: 12px 16px 16px; font-size: 10.5px; color: var(--muted); }
+.fl-key span { display: inline-flex; align-items: center; gap: 5px; white-space: nowrap; }
+.fl-key i { width: 9px; height: 9px; border-radius: 2px; }
+/* While a material is traced, what has nothing to do with it stands back. */
+.node.untraced { opacity: 0.26; }
+#board.tracing .deposit { opacity: 0.4; }
+
 /* ---------- start simple ----------
    What has no use yet is not on screen yet: reveal.ts says when each part comes, panels.ts sets these classes. */
 #app.no-zoom #zoom, #app.no-mini #mini, #app.no-plot #plot-label { display: none; }

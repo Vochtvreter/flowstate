@@ -15,6 +15,8 @@ import {
 import { invalidateLayout } from './ui/dom';
 import { fx, initFx } from './ui/fx';
 import { hotbarTypes, initPanels, renderPanels, tickPanels } from './ui/panels';
+import { toggleFlows } from './ui/flows';
+import { revealOf } from './ui/reveal';
 import { closeTech, initTech, openTech, renderTech } from './ui/tech';
 import { initFeel } from './ui/feel';
 import { adviserStats, boardKey, holdAdviser } from './ui/advice-client';
@@ -289,6 +291,8 @@ function onKey(e: KeyboardEvent) {
   }
   if (k === 'delete' || k === 'backspace') {
     e.preventDefault();
+    // (The Flows list is not a thing to delete: the key leaves it open.)
+    if (ui.sel?.kind === 'flows') return;
     if (ui.sel?.kind === 'node') {
       const n = nodeById(g, ui.sel.id);
       if (n) {
@@ -299,6 +303,10 @@ function onKey(e: KeyboardEvent) {
       }
     } else if (ui.sel?.kind === 'wire') cutWire(g, ui.sel.id);
     select(null);
+    return renderPanels();
+  }
+  if (k === 'l' && revealOf(g).flows) {
+    toggleFlows();
     return renderPanels();
   }
   if (k === 'r' && has(g, 'R1')) openTech();

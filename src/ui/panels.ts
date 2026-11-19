@@ -18,7 +18,7 @@ import { activeGoal } from '../goals';
 import { graph, isMachine, passCap } from '../sim';
 import { Game, GNode, RouterMode, Wire , nodeNoun } from '../state';
 import { isMuted, setMuted } from './audio';
-import { boardRect, jumpTo, startPlacing, fitView, zoomBy } from './board';
+import { boardRect, frameNodes, jumpTo, startPlacing, fitView, zoomBy } from './board';
 import { marked, pressedMark, tendMark } from './advice-show';
 import { waitLine } from './advice-tip';
 import { Panel, cachedRect, el, invalidateLayout, makePanel, setAnchor, setAttr, setClass, setHTML, setHidden, setText } from './dom';
@@ -31,6 +31,7 @@ import { env } from './phone-env';
 import { bulkPlan, diagnose, limits, matName, starvedShort, victoryQuiet, wayOn } from './status';
 import { metData, pricedInMet, readyCount, setCardWait, teasedSlot } from './tech';
 import { revealOf, slotShown } from './reveal';
+import { flowTroubles, flowsAction, flowsHtml, flowsOpen, toggleFlows } from './flows';
 import { delegate, onPress, select, signal, toast, touch, ui } from './ui';
 
 let topEl: HTMLElement;
@@ -82,7 +83,10 @@ export function initPanels(refs: {
     const g = ui.g;
     // Whatever is chosen from the gear menu, the menu closes behind it.
     if (a !== 'menu' && ui.menuOpen && el.closest('.menu')) { ui.menuOpen = false; touch(); }
-    if (a === 'undo') { if (!ui.techOpen) undo(g); }
+    if (a === 'flows') {
+      ui.menuOpen = false;
+      toggleFlows();
+    } else if (a === 'undo') { if (!ui.techOpen) undo(g); }
     else if (a === 'redo') { if (!ui.techOpen) redo(g); }
     else if (a === 'pause') { g.paused = !g.paused; touch(); }
     else if (a === 'sound') setMuted(!isMuted());
@@ -143,6 +147,7 @@ function inspectorAction(a: string, args: string[], openTech: (id?: string) => v
   const g = ui.g;
   const sel = ui.sel;
   if (a === 'close') return select(null);
+  if (flowsAction(a, args, jumpTo, (ids) => frameNodes(ids, true))) return;
   if (a === 'tech') return openTech(args[0]);
   if (a === 'jump') return jumpTo(Number(args[0]));
   if (a === 'upgsrc') {
@@ -150,7 +155,7 @@ function inspectorAction(a: string, args: string[], openTech: (id?: string) => v
     else wayPress = { node: Number(args[0]), at: g.time };
     return;
   }
-  if (!sel) return;
+  if (!sel || sel.kind === 'flows') return;
   if (sel.kind === 'node') {
     const n = nodeById(g, sel.id);
     if (!n) return;
@@ -435,6 +440,28 @@ function buildTop() {
   });
   addTopItem('actions', { el: el(`<span class="sep t-sep"></span>`), update() {} });
 
+  // Flows: the list of what is made and where it goes (flows.ts). It comes with the second raw material (reveal.ts),
+  // and counts the materials in trouble on its badge. On a phone it is in the menu: the bar has no room for it.
+  const flowsBtn = el(`<button class="techbtn t-flows" data-act="flows">${icon('flows')}<span class="tlab">Flows</span><span class="badge warn" hidden><b class="mono"></b></span><span class="kbd">L</span></button>`);
+  const flowsBadge = flowsBtn.querySelector<HTMLElement>('.badge')!;
+  const flowsNum = flowsBadge.querySelector('b')!;
+  addTopItem('actions', {
+    el: flowsBtn,
+    update(g) {
+      const on = revealOf(g).flows && !env.phone;
+      if (setHidden(flowsBtn, !on)) invalidateLayout();
+      setAttr(flowsBtn, 'data-testid', on ? 'open-flows' : null);
+      if (!on) return;
+      const n = flowTroubles(g);
+      setClass(flowsBtn, 'on', flowsOpen());
+      setClass(flowsBtn, 'warn', n > 0);
+      setHidden(flowsBadge, !n);
+      setText(flowsNum, String(n));
+      setAttr(flowsBtn, 'aria-pressed', flowsOpen() ? 'true' : 'false');
+      setAttr(flowsBtn, 'aria-label', n ? `Flows, ${n} in trouble` : 'Flows');
+    },
+  });
+
   const techBtn = el(`<button class="techbtn t-tech" data-act="tech">${icon('tree')}<span class="tlab">Tech<span class="tl2"> tree</span></span><span class="badge" hidden><b class="mono"></b><span class="bw">ready</span></span><span class="kbd">R</span></button>`);
   const badge = techBtn.querySelector('.badge')!;
   const badgeNum = badge.querySelector('b')!;
@@ -460,11 +487,11 @@ function buildTop() {
   const mItem = (act: string) =>
     `<button class="m-only" data-act="${act}" data-testid="menu-${act}" role="${act === 'sound' ? 'menuitemcheckbox' : 'menuitem'}"><span class="ml"></span><i class="ms"></i></button>`;
   const menuWrap = el(`<div class="menuwrap t-menu"><button class="ibtn" data-act="menu" data-testid="menu" aria-label="Menu" title="Menu" aria-haspopup="menu">${icon('gear')}</button>`
-    + `<div class="menu" role="menu" hidden>${mItem('pause')}${mItem('sound')}${mItem('undo')}${mItem('redo')}`
+    + `<div class="menu" role="menu" hidden>${mItem('flows')}${mItem('pause')}${mItem('sound')}${mItem('undo')}${mItem('redo')}`
     + `<button class="danger" data-act="reset" data-testid="menu-reset" role="menuitem">New game…</button></div></div>`);
   const gear = menuWrap.querySelector<HTMLElement>('[data-act="menu"]')!;
   const menu = menuWrap.querySelector<HTMLElement>('.menu')!;
-  const [mPause, mSound, mUndo, mRedo] = [...menu.querySelectorAll<HTMLElement>('.m-only')];
+  const [mFlows, mPause, mSound, mUndo, mRedo] = [...menu.querySelectorAll<HTMLElement>('.m-only')];
   const say = (b: HTMLElement, text: string, state = '') => {
     setText(b.firstElementChild!, text);
     setText(b.lastElementChild!, state);
@@ -481,6 +508,10 @@ function buildTop() {
       setClass(topEl, 'menu-open', ui.menuOpen);
       // On a phone the pause button is in here, so the gear itself shows that the game is paused.
       setClass(gear, 'on', g.paused && env.phone);
+      // (Flows, on a phone: with how many materials are in trouble.)
+      const troubles = revealOf(g).flows ? flowTroubles(g) : 0;
+      setHidden(mFlows, !revealOf(g).flows);
+      say(mFlows, 'Flows', troubles ? `${troubles} in trouble` : '');
       say(mPause, g.paused ? 'Resume' : 'Pause', g.paused ? 'Paused' : '');
       setClass(mPause, 'on', g.paused);
       const muted = isMuted();
@@ -1024,7 +1055,7 @@ function renderInspector(force: boolean) {
   } else if (sel?.kind === 'wire') {
     const w = g.wires.find((x) => x.id === sel.id);
     if (w) html = wireInspector(g, w);
-  }
+  } else if (sel?.kind === 'flows') html = flowsHtml(g);
   if (!html && sel) ui.sel = null;
   // Opening or closing changes the width of the stage, so cached screen positions are thrown away.
   // (As a bottom sheet on a phone it lies over the stage instead, and nothing moves.)

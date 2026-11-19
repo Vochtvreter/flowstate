@@ -40,6 +40,7 @@ import { shortNum } from './panels';
 import { env } from './phone-env';
 import { diagnose, pillFor } from './status';
 import { revealOf, slotShown } from './reveal';
+import { traceOf } from '../flows';
 import { delegate, onGame, onPress, onSignal, select, signal, toast, touch, ui } from './ui';
 
 let boardEl: HTMLElement;
@@ -2460,6 +2461,8 @@ const chipScale = () => (big ? 1.42 : 1);
  */
 function chipWanted(w: Wire, refs: WireRefs, now: number): boolean {
   if (over || refs.chipOff) return false;
+  // (While the Flows panel traces a material, the wires that carry it say how much: the rest keep quiet.)
+  if (traced) return traced.wires.has(w.id);
   return refs.on || refs.cFlowing === false || refs.cSat === true || now < refs.fresh
     || hoverWire === w.id || (hoverNode != null && (hoverNode === w.from || hoverNode === w.to));
 }
@@ -2489,7 +2492,7 @@ function syncChips(): boolean {
   for (const w of ui.g.wires) {
     const refs = wireEls.get(w.id);
     if (!refs) continue;
-    const on = !!sel && (sel.kind === 'wire' ? sel.id === w.id : sel.id === w.from || sel.id === w.to);
+    const on = !!sel && sel.kind !== 'flows' && (sel.kind === 'wire' ? sel.id === w.id : sel.id === w.from || sel.id === w.to);
     if (on !== refs.on) {
       refs.on = on;
       refs.chip.classList.toggle('on', on);
@@ -2503,8 +2506,9 @@ function syncChips(): boolean {
       refs.chip.classList.toggle('show', show);
       chips = true;
     }
-    // A wire that was just made is never faint, whatever is selected.
-    const dim = !!sel && !on && !fresh;
+    // A wire that was just made is never faint, whatever is selected. While a material is traced (the Flows panel),
+    // the wires that carry it are the ones that stand out.
+    const dim = traced ? !traced.wires.has(w.id) : !!sel && sel.kind !== 'flows' && !on && !fresh;
     if (dim !== refs.dim) {
       refs.dim = dim;
       refs.g.classList.toggle('dim', dim);
@@ -2713,6 +2717,7 @@ function syncStructure() {
   }
   syncDeposits(g);
   syncNodes(g, fresh);
+  syncTrace(true);
   syncWires(g, fresh);
   syncChips();
   layoutWires();
@@ -2725,8 +2730,29 @@ function syncStructure() {
   updateSlow();
 }
 
+// ----- tracing a material (the Flows panel) -----
+// A press on a row of the Flows panel traces that material: what makes it, what uses it and the wires that carry it
+// stay as they are, and everything else stands back (`untraced` on a card, the faint drawing of a wire that is not the
+// selection's). The trace is ui.trace; what it covers is worked out again when the board changes.
+
+/** What the trace covers right now; null while nothing is traced. */
+let traced: { nodes: Set<number>; wires: Set<number> } | null = null;
+let traceKey = '';
+
+/** Bring the cards in line with the trace. `fresh`: the cards may have been rebuilt, so every one is looked at. */
+function syncTrace(fresh = false) {
+  const m = ui.trace;
+  const key = m ? `${m}|${ui.g.rev}` : '';
+  if (key === traceKey && !fresh) return;
+  traceKey = key;
+  traced = m ? traceOf(ui.g, m) : null;
+  for (const [id, refs] of nodeEls) setClass(refs.el, 'untraced', !!traced && !traced.nodes.has(id));
+  setClass(boardEl, 'tracing', !!traced);
+}
+
 /** Selection, wire target and placing mode are classes on elements that already exist. */
 function syncUi() {
+  syncTrace();
   const sel = ui.sel;
   const node = sel?.kind === 'node' ? sel.id : null;
   const wire = sel?.kind === 'wire' ? sel.id : null;

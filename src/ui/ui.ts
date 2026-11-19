@@ -1,7 +1,11 @@
-import { NodeType } from '../content';
+import { MatId, NodeType } from '../content';
 import { Game, GameEvent } from '../state';
 
-export interface Selection { kind: 'node' | 'wire'; id: number }
+/**
+ * What the panel beside the board (a phone's bottom sheet) is open on: a card, a wire, or the Flows list (`flows`,
+ * whose id is not used). Whatever closes the inspector closes the Flows list too.
+ */
+export interface Selection { kind: 'node' | 'wire' | 'flows'; id: number }
 
 export interface UIState {
   g: Game;
@@ -12,6 +16,8 @@ export interface UIState {
   techSel: string | null;
   recipeMenu: boolean;
   menuOpen: boolean;
+  /** The material the Flows panel is tracing on the board, while that panel is open: everything else stands back. */
+  trace: MatId | null;
   /** Bumped whenever something outside the game state (selection, mode) needs a re-render. */
   uiRev: number;
 }
@@ -25,11 +31,14 @@ export const ui: UIState = {
   techSel: null,
   recipeMenu: false,
   menuOpen: false,
+  trace: null,
   uiRev: 0,
 };
 
 export function select(sel: Selection | null) {
   ui.sel = sel;
+  // (A trace belongs to the Flows panel: it ends when the panel gives way to anything else.)
+  if (sel?.kind !== 'flows') ui.trace = null;
   ui.recipeMenu = false;
   ui.uiRev++;
 }
