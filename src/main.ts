@@ -22,7 +22,7 @@ import { initFeel } from './ui/feel';
 import { adviserStats, boardKey, holdAdviser } from './ui/advice-client';
 import { TIP, lineShown, offerTip, tipBought, tipShown } from './ui/advice-tip';
 import { focusSeen, markedControl, stillMarks } from './ui/advice-show';
-import { alertState, hudAnchors, initHud, setElsewhere, setLineFields } from './ui/hud';
+import { alertState, cardSaying, hudAnchors, initHud, setElsewhere, setLineFields } from './ui/hud';
 import { backToStart, initScreens, isStarted, screenOpen, screensApi, showStart } from './ui/hud-screens';
 import { initPhone } from './ui/phone';
 import { emitBeat, emitFrame, emitGame, emitNewGame, initToasts, onSignal, select, toast, touch, ui } from './ui/ui';
@@ -130,7 +130,8 @@ function boot() {
     ui, tick, fx, view: { fit: fitView, zoomBy, jumpTo, frame: frameNodes, tidy: tidyBoard }, onSignal,
     // (The HUD: the screens, where effects start from, what the alert slot says, the last look at the goal's nodes, and
     // fields laid over the goal's line, for scripts that show the card's side of `required` and `held`.)
-    hud: { ...screensApi, anchors: hudAnchors, alert: alertState, focus: focusSeen, lineFields: setLineFields },
+    // (...and whether the card is saying the why or the how under its title.)
+    hud: { ...screensApi, anchors: hudAnchors, alert: alertState, focus: focusSeen, lineFields: setLineFields, saying: () => cardSaying(ui.g) },
     // The adviser: how it is run and what it cost; the tip on the card and its timing; the control "Show me" ringed,
     // and the still marks it stood on the board under reduced motion; the goal card's "while you wait" line with its
     // next step; what the tip row says a followed tip bought.
