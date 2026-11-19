@@ -112,6 +112,14 @@ div.hb.locked:hover { background: transparent; border-color: #2a3550; }
 .deposit .ds { font-size: 10.5px; color: var(--muted); }
 .deposit.locked { color: #5d6880; }
 .deposit.locked .dn { color: #8c97ad; }
+/* Before the Lab a locked deposit has no words: an outline and a lock, more to come (reveal.ts). */
+.deposit.locked.quiet { justify-content: center; border-color: #1a2236; background: none; color: #3d4860; }
+/* ---------- start simple ----------
+   What has no use yet is not on screen yet: reveal.ts says when each part comes, panels.ts sets these classes. */
+#app.no-zoom #zoom, #app.no-mini #mini, #app.no-plot #plot-label { display: none; }
+#app.no-mini:not(.phone) #zoom { bottom: 16px; }
+/* (On a phone the floating buttons keep their places: the row beside them is measured.) */
+#app.no-zoom #fabs [data-act='fab-fit'], #app.no-undo #fabs [data-act='fab-undo'] { visibility: hidden; }
 #board.placing .deposit:not(.locked) { border-style: solid; background: color-mix(in srgb, var(--c) 12%, transparent); }
 
 /* wires */

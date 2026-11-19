@@ -39,6 +39,7 @@ import { tidy, tidyInput } from './layout';
 import { shortNum } from './panels';
 import { env } from './phone-env';
 import { diagnose, pillFor } from './status';
+import { revealOf, slotShown } from './reveal';
 import { delegate, onGame, onPress, onSignal, select, signal, toast, touch, ui } from './ui';
 
 let boardEl: HTMLElement;
@@ -344,7 +345,7 @@ function applyView() {
     if (over !== wasOver) updateGhost();
     else placeGhostCap();
   }
-  if (hintsBox && ui.g.goal.i < HINTS_UNTIL) syncHints(ui.g, false);
+  if (hintsBox && revealOf(ui.g).keys) syncHints(ui.g, false);
   // The camera has left the place the player's own Fit took it to (and is not on its way there): Fit has nothing left
   // to return to, and fits again. Back in among the cards, the zoom to come back in to is forgotten too.
   if (fitBack && fitAt && !(glide && glide === fitGlide) && !sameView(ui.view, fitAt)) fitBack = fitAt = null;
@@ -621,7 +622,7 @@ function placePlotLabel() {
     const st = env.strip(), c = env.corner();
     if (st) covers.push({ x0: st.x0, y0: -1e6, x1: st.x1, y1: st.bottom });
     if (c) covers.push({ x0: c.x0, y0: c.y0, x1: 1e6, y1: 1e6 });
-    if (hintsBox && g.goal.i < HINTS_UNTIL) covers.push(hintsBox);
+    if (hintsBox && revealOf(g).keys) covers.push(hintsBox);
   }
   // Past the stage's edges it cannot be read either: with the plot's corner off the side of the stage (as the camera
   // stands in the Phone ending) it read "ard · 3 plots" there.
@@ -2653,16 +2654,21 @@ function relayoutNode(n: GNode) {
 function syncDeposits(g: Game) {
   const used = new Set(g.nodes.map((n) => n.depositId));
   const now = performance.now();
+  const words = revealOf(g).depositWords;
+  // (Until the Drill has its slot in the build bar, a free deposit does not ask for one.)
+  const canDrill = slotShown(g, 'well');
   const html = g.deposits
     .filter((d) => !used.has(d.id))
     .map((d) => {
       const ok = matUnlocked(g, d.mat);
+      // Until there is a Lab, "needs research" means nothing: a locked deposit is an outline with a lock (reveal.ts).
+      if (!ok && !words) return `<div class="deposit locked quiet" data-dep="${d.id}" style="left:${d.x}px;top:${d.y}px">${icon('lock', 16)}</div>`;
       // A deposit an expansion has just revealed pops in at its turn (see `expand`).
       const at = popping.get(d.id);
       const pop = at == null ? '' : `animation-delay:${Math.round(at - now)}ms;`;
       return `<div class="deposit${ok ? '' : ' locked'}${at == null ? '' : ' pop'}" data-dep="${d.id}" style="left:${d.x}px;top:${d.y}px;${pop}${ok ? `--c:${MATERIALS[d.mat].color}` : ''}">
         ${ok ? matGlyph(d.mat, 18) : icon('lock', 16)}
-        <div><div class="dn">${ok ? MATERIALS[d.mat].name + ' deposit' : 'Unknown deposit'}</div><div class="ds">${ok ? (big ? 'place a Drill here' : 'empty · place a Drill') : 'needs research'}</div></div>
+        <div><div class="dn">${ok ? MATERIALS[d.mat].name + ' deposit' : 'Unknown deposit'}</div><div class="ds">${ok ? (!canDrill ? 'empty' : big ? 'place a Drill here' : 'empty · place a Drill') : 'needs research'}</div></div>
       </div>`;
     })
     .join('');
@@ -2942,15 +2948,13 @@ export function updateSlow(part?: 'nodes' | 'wires') {
   }
 }
 
-/** The key hints are for the first steps: from this goal on (goal 5 claimed) they are gone. */
-const HINTS_UNTIL = GOALS.findIndex((x) => x.id === 'sell-shard') + 1;
 /** Where the hint row stands on the stage, as last measured while it showed. */
 let hintsBox: Box | null = null;
 
-/** The key-hint row shows for the first five goals, and never over a card. */
+/** The key-hint row shows while the first machines are built (reveal.ts: goals 4 to 7), and never over a card. */
 function syncHints(g: Game, measure = true) {
   if (!hintsEl) return;
-  if (g.goal.i >= HINTS_UNTIL || env.phone) {
+  if (!revealOf(g).keys || env.phone) {
     if (setHidden(hintsEl, true)) ex.stale = true;
     return;
   }
@@ -3264,7 +3268,9 @@ function tapDeposit(p: Pt): boolean {
   const d = depositAt(p);
   if (!d) return false;
   if (!matUnlocked(g, d.mat)) {
-    toast(isTouch() ? 'Research this deposit first (tap <b>Tech</b>), then put a Drill on it.' : 'Research this deposit in the <b>Tech tree</b> first, then put a Drill on it.', 'info');
+    // (Before the Lab there is no research to send anyone to: the deposit is simply not open yet.)
+    if (!revealOf(g).depositWords) toast('This deposit is not open yet. It comes later.', 'info');
+    else toast(isTouch() ? 'Research this deposit first (tap <b>Tech</b>), then put a Drill on it.' : 'Research this deposit in the <b>Tech tree</b> first, then put a Drill on it.', 'info');
     return true;
   }
   if (ui.sel) select(null);

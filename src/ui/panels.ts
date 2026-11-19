@@ -30,6 +30,7 @@ import { esc, icon, matGlyph, nodeIcon } from './icons';
 import { env } from './phone-env';
 import { bulkPlan, diagnose, limits, matName, starvedShort, victoryQuiet, wayOn } from './status';
 import { metData, pricedInMet, readyCount, setCardWait, teasedSlot } from './tech';
+import { revealOf, slotShown } from './reveal';
 import { delegate, onPress, select, signal, toast, touch, ui } from './ui';
 
 let topEl: HTMLElement;
@@ -405,7 +406,9 @@ function buildTop() {
   const undoBtn = el(`<button class="ibtn t-undo" data-act="undo">${icon('undo')}</button>`);
   addTopItem('actions', {
     el: undoBtn,
-    update() {
+    update(g) {
+      // (Undo and Redo come with the second goal: on the first screen there is nothing to take back. reveal.ts)
+      setHidden(undoBtn, !revealOf(g).undo);
       setAttr(undoBtn, 'disabled', canUndo() && !ui.techOpen ? null : '');
       label(undoBtn, 'Undo', 'Ctrl+Z');
     },
@@ -413,7 +416,8 @@ function buildTop() {
   const redoBtn = el(`<button class="ibtn t-redo" data-act="redo">${icon('redo')}</button>`);
   addTopItem('actions', {
     el: redoBtn,
-    update() {
+    update(g) {
+      setHidden(redoBtn, !revealOf(g).undo);
       setAttr(redoBtn, 'disabled', canRedo() && !ui.techOpen ? null : '');
       label(redoBtn, 'Redo', 'Ctrl+Shift+Z');
     },
@@ -568,6 +572,8 @@ function renderHot(force: boolean) {
       if (tease.goal || !has(g, 'R1')) return `<div class="hb locked" data-testid="hot-locked" data-type="${type}" title="${def.name}: comes with this goal" aria-label="${def.name}, locked. It comes with this goal">${body}</div>`;
       return `<button class="hb locked" data-act="locked:${t.id}" data-testid="hot-locked" data-type="${type}" title="${def.name}: research ${esc(t.name)}" aria-label="${def.name}, locked. Research ${esc(t.name)}">${body}</button>`;
     }
+    // (A slot comes when it first has a use: the Drill's with the goal that places one, the Market's later. reveal.ts)
+    if (!slotShown(g, type)) return '';
     key++;
     slots++;
     const cost = nodeCost(g, type);
@@ -589,7 +595,7 @@ function renderHot(force: boolean) {
   // The Delete key is for keyboards: with a finger, Delete is a button in the inspector, which shows the refund.
   // (And only where the rail has room for it under the slots: on a short window a full bar takes it all.)
   const room = env.phone || hotRect().height >= slots * HOT_SLOT + HOT_PAD + HOT_SLOT;
-  const tip = touchy || !room ? '' : `<div class="grow"></div><div class="hb tip" title="Select a node and press Delete. Everything is refunded in full.">${icon('trash')}<span class="p">Del = refund</span></div>`;
+  const tip = touchy || !room || !revealOf(g).trash ? '' : `<div class="grow"></div><div class="hb tip" title="Select a node and press Delete. Everything is refunded in full.">${icon('trash')}<span class="p">Del = refund</span></div>`;
   hotPanel.render(items + tip, force);
   // (Only when the slots themselves change: a price filling up must not make the browser lay the page out.)
   const slotsKey = `${env.phone ? 1 : 0}|${slots}|${tease?.type ?? ''}|${tip ? 1 : 0}`;
@@ -699,7 +705,7 @@ function pageButton(btn: HTMLElement | null, dir: 1 | -1) {
 
 /** Hotbar node types in key order (unlocked only). */
 export function hotbarTypes(g: Game) {
-  return HOTBAR.filter((t) => nodeUnlocked(g, t));
+  return HOTBAR.filter((t) => nodeUnlocked(g, t) && slotShown(g, t));
 }
 
 // ---------- inspector ----------
@@ -1193,7 +1199,20 @@ function renderZoom() {
  * Refresh every panel. Cheap to call often: each part writes only what changed.
  * `force` is for calls made straight from a press inside a panel, which must show at once.
  */
+/** The parts of the interface that are not on show yet are hidden by a class on #app (style.css, "start simple"). */
+let appEl: HTMLElement | null = null;
+function renderReveal() {
+  appEl ??= document.getElementById('app');
+  if (!appEl) return;
+  const r = revealOf(ui.g);
+  setClass(appEl, 'no-zoom', !r.zoom);
+  setClass(appEl, 'no-mini', !r.minimap);
+  setClass(appEl, 'no-plot', !r.plot);
+  setClass(appEl, 'no-undo', !r.undo);
+}
+
 export function renderPanels(force = false) {
+  renderReveal();
   renderTop();
   renderHot(force);
   renderInspector(force);
