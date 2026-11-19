@@ -5,8 +5,10 @@
 // that what is new on screen is always what the card is talking about:
 //
 //   goal 2  "Dig up more Sand"       the Drill's slot in the build bar; Undo and Redo
-//   goal 4  "Turn Sand into Glass"   the zoom buttons and Fit; the Delete tip; the row of keys (mouse and keyboard)
-//   goal 6  "Speed up a Drill"       the Market's slot (or as soon as a second Market can be paid for)
+//   goal 4  "Turn Sand into Glass"   the zoom buttons and Fit; the Delete tip; Duplicate and Delete in a card's
+//                                    inspector
+//   goal 6  "Speed up a Drill"       the Market's slot (or as soon as a second Market can be paid for); upgrades in
+//                                    a card's inspector (Duplicate and Delete are there from goal 4)
 //   the Lab (goal 5's reward)        locked deposits say "needs research": until then they are outlines with a lock
 //   goal 9  "Turn Oil into Plastic"  the minimap (or once the board holds eight cards); the Flows button: with
 //                                    a second raw material there is something to compare
@@ -25,14 +27,13 @@ const FROM = {
   drillSlot: at('second-well'),
   undo: at('second-well'),
   zoom: at('build-refiner'),
-  keys: at('build-refiner'),
+  trash: at('build-refiner'),
   marketSlot: at('upgrade-well'),
+  upgrades: at('upgrade-well'),
   minimap: at('make-ink'),
   flows: at('make-ink'),
   plot: at('expand'),
 };
-/** The row of keys is for the first steps with something to edit: it goes again from this goal on. */
-const KEYS_UNTIL = at('research-murk');
 /** The minimap also comes once the board holds this many cards, whatever the goal. */
 const MINIMAP_CARDS = 8;
 /** ...and the Flows button once this many materials are being made. */
@@ -44,8 +45,7 @@ export interface Reveal {
   /** The zoom buttons and Fit (on a phone the floating Fit). */
   zoom: boolean;
   minimap: boolean;
-  /** The row of keys at the foot of the board, and the Delete tip under the build bar. */
-  keys: boolean;
+  /** The Delete tip under the build bar, and Duplicate and Delete in a card's inspector. */
   trash: boolean;
   /** The plot's label. */
   plot: boolean;
@@ -53,6 +53,8 @@ export interface Reveal {
   depositWords: boolean;
   /** The Flows button: the list of what is made and where it goes (flows.ts). */
   flows: boolean;
+  /** A card's inspector lists its upgrades (before, it says what the machine is and what is wrong with it, and no more). */
+  upgrades: boolean;
 }
 
 export function revealOf(g: Game): Reveal {
@@ -61,11 +63,11 @@ export function revealOf(g: Game): Reveal {
     undo: i >= FROM.undo,
     zoom: i >= FROM.zoom,
     minimap: i >= FROM.minimap || g.nodes.length >= MINIMAP_CARDS,
-    keys: i >= FROM.keys && i < KEYS_UNTIL,
-    trash: i >= FROM.keys,
+    trash: i >= FROM.trash,
     plot: i >= FROM.plot || g.board.expansions > 0,
     depositWords: has(g, 'R1'),
     flows: i >= FROM.flows || Object.keys(g.made).length >= FLOWS_MATS,
+    upgrades: i >= FROM.upgrades || g.nodes.some((n) => n.lv.speed + n.lv.eff + n.lv.buffer > 0),
   };
 }
 

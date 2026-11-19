@@ -7,7 +7,7 @@ import { labRate, maxLevel, upgradeCost } from '../economy';
 import { GOALS } from '../goals';
 import { tick } from '../sim';
 import { Game, GNode, newGame } from '../state';
-import { ALERT_QUIET, alertPick, bulkPlan, diagnose, limits, pillFor, starvedShort, wayOn } from './status';
+import { ALERT_QUIET, SHORT_BELOW, SHORT_CLEAR, alertPick, bulkPlan, diagnose, limits, pillFor, shortOf, starvedShort, wayOn } from './status';
 
 const run = (g: Game, seconds: number) => {
   for (let i = 0; i < seconds * 20; i++) tick(g, 0.05);
@@ -523,7 +523,9 @@ describe('a card in trouble says what is wrong in plain words, and the machine t
     for (const r of [a, b]) expect(pillFor(g, r)).toEqual({ kind: 'starved', text: 'Needs more Sand' });
     expect(drill(g).status).toBe('working');
     expect(diagnose(g, drill(g)).problem).toBeNull();
-    expect([...limits(g)]).toEqual([drill(g).id]);
+    expect([...limits(g).keys()]).toEqual([drill(g).id]);
+    expect([a.id, b.id]).toContain(limits(g).get(drill(g).id)!.taker);
+    expect(limits(g).get(drill(g).id)!.mat).toBe('glint');
     expect(pillFor(g, drill(g))).toEqual({ kind: 'limit', text: 'Can\u2019t keep up' });
     // More Speed on the Drill, and nobody is waiting on it any more.
     for (let i = 0; i < 4; i++) upgrade(g, drill(g).id, 'speed');
@@ -531,6 +533,31 @@ describe('a card in trouble says what is wrong in plain words, and the machine t
     expect(limits(g).size).toBe(0);
     expect(pillFor(g, drill(g)).text).toBe('');
     for (const r of [a, b]) expect(pillFor(g, r).text).toBe('');
+  });
+
+  it('an Ore Drill gives 0.8 a second and its Refiner takes 1: no problem, and a quiet word on both ("Short of Ore", "Can\u2019t keep up")', () => {
+    const g = open();
+    const ore = placeNode(g, 'well', 0, 0, { depositId: 4 })!;
+    const copper = placeNode(g, 'refiner', 400, 540)!;
+    connect(g, ore.id, 0, copper.id);
+    connect(g, copper.id, 0, market(g).id);
+    run(g, 60);
+    // At work four fifths of its time: not a problem (no red, no alert), and not flowing either.
+    expect(copper.util).toBeGreaterThan(0.7);
+    expect(copper.util).toBeLessThan(SHORT_BELOW);
+    expect(diagnose(g, copper).problem).toBeNull();
+    expect(starvedShort(g, copper)).toBe(true);
+    expect(shortOf(g, copper)).toBe('ember');
+    expect(pillFor(g, copper)).toEqual({ kind: 'short', text: 'Short of Ore' });
+    expect(pillFor(g, ore)).toEqual({ kind: 'limit', text: 'Can\u2019t keep up' });
+    expect(limits(g).get(ore.id)).toEqual({ taker: copper.id, mat: 'ember' });
+    // A level of Speed on the Drill (1.0 a second) and both fall silent.
+    upgrade(g, ore.id, 'speed');
+    run(g, 60);
+    expect(shortOf(g, copper)).toBeNull();
+    expect(pillFor(g, copper).text).toBe('');
+    expect(pillFor(g, ore).text).toBe('');
+    expect(SHORT_CLEAR).toBeGreaterThan(SHORT_BELOW);
   });
 
   it('no label is the simulation\'s word for it, and none is longer than a card is wide', () => {

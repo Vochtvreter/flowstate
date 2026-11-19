@@ -552,7 +552,7 @@ describe('damaged and old saves cannot poison the game', () => {
     expect(again.text).toEqual(pending.text);
     expect(again.saves!).toBeGreaterThanOrEqual(15);
     // So is the card's own line for this goal, and its next step (which the tip never repeats).
-    expect(goalView(loaded)!.meanwhile).toEqual({ text: 'Drag from the Refiner\'s Plastic port to the Lab too: studied Plastic is 3 α each.', done: false, step: 1, of: 2 });
+    expect(goalView(loaded)!.meanwhile).toEqual({ text: 'Study Plastic as well as selling it: in a Lab each is worth 3 α.', done: false, step: 1, of: 2 });
     const stepAgain = lineAdvice(loaded)!;
     expect(stepAgain.text).toEqual(step.text);
     expect(stepAgain.wire).toEqual(step.wire);

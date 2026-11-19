@@ -277,7 +277,7 @@ A machine's slot appears when it is unlocked; one locked machine is shown as a s
 Opened from the top bar (`L`; on a phone from the gear menu), it stands where the inspector stands: a 320 px panel beside the board, a bottom sheet on a phone. It is a selection like a card's, so whatever closes the inspector closes it.
 
 - **A row a material**, in the order of the recipes, for everything the board makes or uses: its picture and name, how much is made a second, a bar, and a line of numbers ("2.50 studied · 1.00 to machines · 0.75 sold").
-- **The bar** is where what is made goes: to machines (blue), sold (gold), studied (violet), dumped (grey); and after it, hatched red, what machines wanted and did not get.
+- **The bar** is where what is made goes, in one grey-blue from light to dark: to machines, sold, studied, dumped (none of them a material's colour); and after it, hatched red, what machines wanted and did not get.
 - **A word** on a row that needs one: **Short** (a machine stands waiting for it: "Machines want 1.00/s and get 0.80."), **No exit** (a port that gives it has no wire and its maker has stopped), **To spare** (more could be made than is taken: no fault). Short and No exit rows have a **Show** button that goes to the Drill or machine to look at and opens it.
 - **A press on a row traces the material:** what makes it, what uses it and the wires that carry it stay as they are, with their rate chips; every other card and wire stands back. The camera frames what is traced. A second press, or closing the panel, ends it.
 - The amounts are read off the wires (each wire's rate is measured over whole deliveries), not off the machines, whose own rates swing as they work in bursts.

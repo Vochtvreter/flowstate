@@ -127,6 +127,13 @@ export const matColor = (m: MatId | null) => (m ? MATERIALS[m].color : '#8C97AD'
 /** A card dragged within this many board pixels of level with a port it is wired to comes level with it. */
 export const LEVEL_REACH = 9;
 
+/**
+ * A card that comes level may stand this close to another card or a free deposit: half the usual gap. On the grid
+ * line beside it there is the whole gap, and the level height is at most 9 px from that line; held to the whole gap,
+ * a card that had lit its wire sprang back to the grid when it was let go.
+ */
+export const LEVEL_GAP = 8;
+
 /** One end of a wire of the card being dragged: its own port's height below the card's top, and the height of the port at the other end. */
 export interface LevelEnd { wire: number; own: number; other: number }
 

@@ -37,7 +37,7 @@ import { fmt } from '../economy';
 import { FlowGoalView, GOALS, GoalProgress, GoalView, MAIN_GOALS, claimGoal, goalFocus, goalView } from '../goals';
 import { claimOrder, orderView } from '../orders';
 import { graph } from '../sim';
-import { Game, GNode, GoalReward, Reward } from '../state';
+import { Game, GNode, GoalReward, Reward, nodeNoun } from '../state';
 import { initAdviser, pollAdviser } from './advice-client';
 import { WaitLine, announceTips, lineHtml, lineShown, resetTips, showLine, showTip, tendCard, tipHtml, tipShown, waitLine } from './advice-tip';
 import { tendFocus, tendMark } from './advice-show';
@@ -625,10 +625,8 @@ function renderOrder(g: Game, force: boolean) {
 
 // ---------- bottleneck chip ----------
 
-function nodeName(n: GNode): string {
-  if (n.type === 'well') return `${matName(n.material)} Drill`;
-  return `${NODE_DEFS[n.type].name}${n.recipe && RECIPES[n.recipe] ? ` (${RECIPES[n.recipe].name})` : ''}`;
-}
+/** A node as the alert names it, which is how its card is titled: "Sand Drill", "Glass Refiner", "Lab". */
+const nodeName = (n: GNode): string => nodeNoun(n);
 
 /** What is wrong with a node, in words that say what to do. null when it is fine, or only suffering from a problem elsewhere. */
 function problemText(g: Game, n: GNode): string | null {
@@ -698,7 +696,7 @@ function adviceNodes(g: Game, a: Advice | null | undefined): number[] {
 /**
  * Is the card already about this problem? It is when its hint or line names the node (goalFocus), or the tip on
  * offer or the line's next step is about the node or about where its trouble comes from (a starved machine's
- * supplier: "buy Speed on the Ore Drill" says what "Refiner (Copper) needs more Ore" says).
+ * supplier: "buy Speed on the Ore Drill" says what "Copper Refiner needs more Ore" says).
  */
 function cardSays(g: Game, n: GNode, focus: number[]): boolean {
   const about = new Set<number>([n.id]);

@@ -173,7 +173,9 @@ g.wire .base { stroke: currentColor; stroke-opacity: 0.34; }
 g.wire .glow { stroke: currentColor; stroke-opacity: 0.1; }
 g.wire.sat .glow { stroke-opacity: 0.2; }
 g.wire.sat .base { stroke-opacity: 0.5; }
-g.wire.stalled .base { stroke-dasharray: 5 7; stroke-opacity: 0.55; }
+/* A wire that carries nothing is drawn in grey, not in its material's colour: dashed in Copper's red it read as an
+   alarm, and it is only idle. */
+g.wire.stalled .base { stroke: #7f8aa3; stroke-dasharray: 5 7; stroke-opacity: 0.5; }
 g.wire.stalled:not(.new) .base { stroke-width: 2px !important; }
 g.wire.stalled .glow { stroke-opacity: 0; }
 g.wire.sel .glow { stroke-opacity: 0.35; stroke: var(--sel); }
@@ -219,7 +221,9 @@ g.wire.leveled .glow { animation: wire-leveled 0.5s ease-out; }
 /* No overflow clipping on card text: each clipped box is a separate piece for the compositor to
    track, and a text change inside one forces it to re-plan every layer. Long lines are cut in
    script instead (see nodeSub in board.ts). */
-.nt { font-size: 13px; font-weight: 600; line-height: 16px; white-space: nowrap; }
+.nt { font-size: 13px; font-weight: 600; line-height: 16px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+/* A machine's kind, after what it makes: "Glass Refiner". */
+.nt .nk { font-size: 10.5px; font-weight: 500; color: var(--muted); }
 .ns { font-size: 10.5px; line-height: 14px; color: var(--muted); white-space: nowrap; }
 .nr { font-size: 11px; line-height: 15px; color: #c9d3e8; white-space: nowrap; }
 .ring { position: relative; width: 40px; height: 40px; flex: none; }
@@ -233,7 +237,7 @@ g.wire.leveled .glow { animation: wire-leveled 0.5s ease-out; }
 /* The arc starts at twelve o'clock through a dash offset rather than a rotation, and it steps
    rather than glides: a transition here repaints the whole board layer on every frame it runs. */
 .val { fill: none; stroke-width: 3; stroke-linecap: round; stroke: var(--ok); stroke-dasharray: 0 100; stroke-dashoffset: 25; }
-.node[data-st='blocked'] .val, .node[data-st='victim'] .val { stroke: var(--warn); }
+.node[data-st='blocked'] .val, .node[data-st='victim'] .val, .node[data-st='short'] .val { stroke: var(--warn); }
 .node[data-st='starved'] .val { stroke: var(--bad); }
 .node[data-st='idle'] .val { stroke: var(--idle); }
 .node[data-st='idle'] { border-style: dashed; }
@@ -248,6 +252,7 @@ g.wire.leveled .glow { animation: wire-leveled 0.5s ease-out; }
 .pill:empty { display: none; }
 .pill[data-kind='blocked'] { background: #33270c; color: #fcd34d; border-color: #5a4718; }
 .pill[data-kind='starved'] { background: #3a1518; color: #fca5a5; border-color: #6a2a31; }
+.pill[data-kind='short'] { background: #2a2210; color: #f5d27a; border-color: #4f4018; }
 .pill[data-kind='limit'] { background: #14233f; color: #a9c2ff; border-color: #3b5491; }
 .node.limit:not(.sel) { border-color: #3b5491; }
 /* Ports are centred with a margin, not a transform, and an open port's pulse is drawn on the
@@ -357,7 +362,7 @@ html:not([data-input='touch']) #board.ov .port:hover { --pk: 1.3; }
 /* With no pill to read, a card's state is its colour: a starved or blocked card's whole ring (not only the
    part its use fills) and its tile's edge take the state's colour. */
 #board.ov .node[data-st='starved'] .trk { stroke: var(--bad); stroke-opacity: 0.75; }
-#board.ov .node[data-st='blocked'] .trk, #board.ov .node[data-st='victim'] .trk { stroke: var(--warn); stroke-opacity: 0.75; }
+#board.ov .node[data-st='blocked'] .trk, #board.ov .node[data-st='victim'] .trk, #board.ov .node[data-st='short'] .trk { stroke: var(--warn); stroke-opacity: 0.75; }
 #board.ov .node[data-st='starved']:not(.sel) { border-color: var(--bad); }
 #board.ov .node[data-st='blocked']:not(.sel):not(.t-well), #board.ov .node[data-st='victim']:not(.sel):not(.t-well) { border-color: var(--warn); }
 #board.ov .node { cursor: zoom-in; }
@@ -391,7 +396,6 @@ html[data-input='touch'] #zoom:has([data-testid='tidy']:not([hidden])) { width: 
 }
 
 /* Keys mean nothing to a finger: the hint row is for mouse and keyboard. */
-html[data-input='touch'] #hints { display: none; }
 
 @media (prefers-reduced-motion: reduce) {
   .node .ring { transition: none; }
@@ -432,7 +436,6 @@ html[data-input='touch'] .slot .key { display: none; }
 .toast.bad { border-color: #5a2630; background: #24131a; }
 .toast.out { opacity: 0; transition: opacity 0.3s; }
 @keyframes pop { from { transform: translateY(8px); opacity: 0; } }
-#hints { position: absolute; left: 16px; bottom: 16px; display: flex; gap: 14px; font-size: 11px; color: var(--muted); pointer-events: none; }
 /* (board.ts hides the row with the `hidden` attribute once goal 5 is claimed, and before that whenever a card lies under it.) */
 #zoom { position: absolute; right: 16px; bottom: 132px; width: 160px; display: flex; gap: 4px; align-items: center; }
 #zoom .ibtn { width: 32px; height: 32px; }
@@ -532,7 +535,6 @@ html[data-input='touch'] #zoom .zl { height: 44px; }
 #modal button { height: 44px; padding: 0 28px; border-radius: 10px; border: 0; background: var(--sel); color: #0b1430; font-size: 14px; font-weight: 700; }
 
 @media (max-width: 900px) {
-  #hints { display: none; }
   .logo span { display: none; }
   .logo { width: auto; }
   /* A narrow bar: the Data chips become one block with a line for each kind, set as large as the

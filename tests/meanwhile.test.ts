@@ -36,10 +36,7 @@ const ORDER: Record<string, string[]> = {
   'make-lens': ['prism-fab', 'glyph-fab'],
 };
 const TEXT: Record<string, { mouse: string; touch: string }> = {
-  'ink-lab': {
-    mouse: 'Drag from the Refiner\'s Plastic port to the Lab too: studied Plastic is 3 α each.',
-    touch: 'Tap the Refiner\'s Plastic port, then tap the Lab too: studied Plastic is 3 α each.',
-  },
+  'ink-lab': { mouse: 'Study Plastic as well as selling it: in a Lab each is worth 3 α.', touch: '' },
   'glint-lab': { mouse: 'Build a Lab from the port of the Sand Drill that only sells: studied Sand is 1 α each.', touch: '' },
   'well-labs': { mouse: 'Give each new deposit a Drill and a Lab built from its port: each pair is 1 α a second.', touch: '' },
   'expand-labs': { mouse: 'Expand the board again and give both new deposits a Drill and a Lab of its own.', touch: '' },

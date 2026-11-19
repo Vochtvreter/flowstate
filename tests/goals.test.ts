@@ -913,6 +913,32 @@ describe('the card says what to bring about and why, and keeps the gesture for w
     expect(goalById('build-refiner')!.title).toBe('Turn Sand into Glass');
   });
 
+  it('a Refiner placed from the build bar: the how is the wire into it, not a second Refiner from a port', () => {
+    const g = fresh();
+    g.techs = ['P1'];
+    g.credits = 1000;
+    at(g, 'build-refiner');
+    expect(goalView(g)!.hint).toBe('Drag from a Drill\'s port into empty space, let go, and pick Refiner.');
+    const loose = placeNode(g, 'refiner', 500, 120)!;
+    expect(goalView(g)!.hint).toBe('Drag from a Drill\'s port to the Refiner.');
+    expect(goalView(g, true)!.hint).toBe('Tap a Drill\'s port, then tap the Refiner.');
+    // The why does not change, and the wire completes the goal.
+    expect(goalView(g)!.why).toBe(goalById('build-refiner')!.why);
+    connect(g, well(g).id, 0, loose.id);
+    run(g, 1);
+    expect(g.goal.ready).toBe(true);
+    // The same for a Lab placed loose on "Study Glass in a Lab".
+    const h = fresh();
+    h.techs = ['P1', 'R1'];
+    h.credits = 1000;
+    at(h, 'feed-lab');
+    expect(goalView(h)!.hint).toBe('Drag from the Refiner\'s port into empty space and pick Lab.');
+    placeNode(h, 'lab', 700, 300);
+    expect(goalView(h)!.hint).toBe('Drag from the Refiner\'s port to the Lab.');
+    // The words other parts of the game read for what they name are the goal's own, whatever the board.
+    expect(goalById('build-refiner')!.hint.mouse).toContain('pick Refiner');
+  });
+
   it('the first Glass is worth the trouble by the card\'s own numbers, which are the game\'s', () => {
     expect(goalById('build-refiner')!.why).toBe(`Two Sand sell for ${2 * MATERIALS.glint.value}¢. Melted into one Glass they sell for ${MATERIALS.shard.value}¢. A Refiner does the melting.`);
     expect(MATERIALS.shard.value).toBeGreaterThan(2 * MATERIALS.glint.value);

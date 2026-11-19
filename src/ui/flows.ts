@@ -15,8 +15,11 @@ import { Game } from '../state';
 import { esc, icon, matGlyph } from './icons';
 import { select, ui } from './ui';
 
-/** The colours of where a material goes: the same wherever the panel draws them. */
-const TO = { machines: '#7AA2FF', sold: '#FFC857', studied: '#C4A1FF', dumped: '#64748B' };
+/**
+ * The tints of where a material goes, the same wherever the panel draws them: one grey-blue from light (kept in the
+ * line) to dark (thrown away). They were blue, gold and violet, which on the board are Plastic, Sand and Oil.
+ */
+const TO = { machines: '#E4EAF6', sold: '#A3B3D2', studied: '#6E81AB', dumped: '#465372' };
 
 const TAG: Record<FlowState, string> = { ok: '', short: 'Short', stuck: 'No exit', spare: 'To spare' };
 

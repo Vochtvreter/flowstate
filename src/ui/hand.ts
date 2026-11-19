@@ -308,6 +308,9 @@ function wanted(g: Game): Plan | null {
   if (view.goal.id === 'build-refiner') {
     if (radialOpen()) builtOnce = true;
     const well = g.nodes.find((n) => n.type === 'well');
+    // (A Refiner placed from the build bar stands unfed: the gesture left to show is the wire into it.)
+    const loose = g.nodes.find((n) => n.type === 'refiner' && !g.wires.some((w) => w.to === n.id));
+    if (loose && well) return wirePlan(g, well, 0, loose, 'goal', Infinity);
     if (!buildDone(g) && well) return buildPlan(g, well, 0, 'goal', Infinity);
   }
   return null;

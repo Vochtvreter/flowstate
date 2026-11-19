@@ -394,7 +394,7 @@ button.fav:hover { background: #263252; }
 
 /* ---------- touch ----------
    A finger gets 44px targets, and is never shown a key. */
-html[data-input='touch'] #hints, html[data-input='touch'] .kbd { display: none; }
+html[data-input='touch'] .kbd { display: none; }
 html[data-input='touch'] .alertchip { min-height: 44px; }
 /* (Where the squeezed strip draws it 40 px tall, a tablet held upright, it reaches 3 px into the gap above and the
    board below: 46 px to press. Measured from inside the chip's 1 px border, hence 4 px.) */
@@ -660,6 +660,10 @@ html[data-input='mouse'] #hud-strip.tight .claim.sm { height: 32px; }
 #app.phone .gc-title { font-size: 15px; line-height: 18px; }
 #app.phone .gc-hint { font-size: 12.5px; line-height: 16px; }
 #app.phone .gc-recipe { gap: 3px 4px; margin: 1px 0 3px; }
+/* While the Flows list is up on a phone the card keeps to its title, and an order that is not ready steps aside: the
+   sheet and the card together left a strip of board too thin to see a material traced on. */
+#app.phone.flows-open #goal .gc-hint, #app.phone.flows-open #goal .gc-prog, #app.phone.flows-open #goal .gc-line, #app.phone.flows-open #goal .gc-tip,
+#app.phone.flows-open #order:not([data-ready='1']), #app.phone.flows-open #hud-alert { display: none; }
 #app.phone .rc { height: 21px; padding: 0 6px 0 5px; gap: 4px; font-size: 11.5px; }
 #app.phone .gc-prog { margin-top: 1px; gap: 0 8px; font-size: 11.5px; line-height: 14px; }
 #app.phone .gc-eta::before { margin-right: 6px; }

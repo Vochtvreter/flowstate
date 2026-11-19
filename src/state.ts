@@ -344,6 +344,9 @@ export function newGame(): Game {
   const well = makeNode(g, 'well', dep.x, dep.y);
   well.material = dep.mat;
   well.depositId = dep.id;
+  // The first thing the first goal is about is that this Drill's Sand has nowhere to go: its card says so as soon as
+  // it is full (2 s), before the guiding hand comes (5 s), not after the six seconds a machine just built is given.
+  well.grace = 2;
   const market = makeNode(g, 'market', START.market.x, START.market.y);
   g.nodes.push(well, market);
   return g;

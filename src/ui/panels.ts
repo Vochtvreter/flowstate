@@ -788,13 +788,10 @@ function shortNote(g: Game, n: GNode): string {
  * limits): its inspector says who is waiting and for what, and offers the two ways on, more Speed here or another one.
  */
 function limitNote(g: Game, n: GNode): string {
-  if (!limits(g).has(n.id)) return '';
-  const taker = g.nodes.find((x) => {
-    const d = diagnose(g, x);
-    return d.problem === 'starved' && !d.victim && d.culprit === n.id;
-  });
-  if (!taker) return '';
-  const mat = matName(diagnose(g, taker).mat);
+  const waiting = limits(g).get(n.id);
+  const taker = waiting ? nodeById(g, waiting.taker) : null;
+  if (!waiting || !taker) return '';
+  const mat = matName(waiting.mat);
   const can = trackAvailable(g, n, 'speed') && n.lv.speed < maxLevel(g, 'speed') && !justRaised(g, n.id);
   const speed = can ? buyBtn(`upgsrc:${n.id}`, upgradeCost(n, 'speed'), g.credits, 'Speed · ', 'upg-self') : '';
   return `<div class="sec"><div class="statusbox limit" data-testid="limit-box"><div class="st-title">${icon('warn', 16)}Can’t keep up</div>
@@ -824,7 +821,7 @@ function statusBlock(g: Game, n: GNode): string {
     }
   } else if (dx.problem === 'blocked') {
     title = dx.openPort ? `${matName(dx.mat)} has no exit` : `${matName(dx.mat)} is backed up`;
-    if (dx.openPort) body = `It is full of ${matName(dx.mat)} and has stopped: nothing is wired to that port. ${isTouch() ? 'Tap the port, then tap an empty spot' : 'Drag from the port into empty space'} to send it somewhere.`;
+    if (dx.openPort) body = `It is full of ${matName(dx.mat)} and has stopped: nothing is wired to that port. ${isTouch() ? 'Tap the port, then tap where it should go' : 'Drag from the port to where it should go'}.`;
     else {
       // What is full downstream, named, with the way on in one press where there is one: Speed on the Lab or machine
       // that takes no more (the same button a starved machine has for its source), and Show to go there.
@@ -1010,15 +1007,19 @@ function nodeInspector(g: Game, n: GNode): string {
       <div class="note">Holds up to ${passCap(n)} of each material.</div></div>`;
   }
   // (A Dump or a Merger has nothing more to show: what it does is said once, under its name.)
-  body += upgradeSection(g, n);
+  // The inspector starts small (reveal.ts): until the goal that is about upgrades, a card opened says what it is and
+  // what is wrong with it, and offers nothing to buy; until there is a machine to move, nothing to duplicate or delete.
+  const shown = revealOf(g);
+  if (shown.upgrades) body += upgradeSection(g, n);
   const refund = refundOf(g, n);
   const fixed = n.type === 'well';
+  const foot = !shown.trash ? '' : `
+    <div class="foot"><button class="fbtn" data-act="dup" ${fixed ? 'disabled' : ''}>Duplicate <span class="kbd">Ctrl D</span></button>
+      <button class="fbtn danger" data-act="del" data-testid="delete">Delete${refund > 0 ? ` · <span class="mono">+${fmt(refund)}¢</span>` : ''}</button></div>`;
   return `<div class="sec head"><div class="hicon">${n.type === 'well' && n.material ? matGlyph(n.material, 22) : isMachine(n) && n.recipe ? matGlyph(RECIPES[n.recipe].outputs[0][0], 22) : nodeIcon(n.type, 22)}</div>
       <div class="htxt"><h2>${esc(title)}</h2><p>${esc(def.blurb)}</p></div>
       <button class="ibtn bare" data-act="close" aria-label="Close inspector">${icon('close', 16)}</button></div>
-    <div class="scroll">${body}</div>
-    <div class="foot"><button class="fbtn" data-act="dup" ${fixed ? 'disabled' : ''}>Duplicate <span class="kbd">Ctrl D</span></button>
-      <button class="fbtn danger" data-act="del" data-testid="delete">Delete${refund > 0 ? ` · <span class="mono">+${fmt(refund)}¢</span>` : ''}</button></div>`;
+    <div class="scroll">${body}</div>${foot}`;
 }
 
 function wireInspector(g: Game, w: Wire): string {
@@ -1063,6 +1064,8 @@ function renderInspector(force: boolean) {
   // (The same as a class on #app, for the stylesheets: far cheaper to match than a has() selector on #app.)
   const appEl = inspEl.parentElement;
   if (appEl) setClass(appEl, 'insp-open', !!html);
+  // (For the phone's stylesheet: while the Flows list is up, the goal card keeps to its title. hud.css)
+  if (appEl) setClass(appEl, 'flows-open', !!html && sel?.kind === 'flows');
   if (html || !env.phone) {
     clearTimeout(inspEmpty);
     inspEmpty = 0;

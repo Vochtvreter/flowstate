@@ -8,7 +8,7 @@ const cut = (d: string) => `<path d="${d}" fill="none" stroke="#0B0F17" stroke-o
 
 /**
  * Each material as the thing it is, at 13 to 20 px: a heap of sand, a drop of oil, a lump of ore, a crystal; a pane
- * of glass, a plastic bottle, a puddle of tar, a copper bar, a silicon wafer, a rubber ring; a screen, a chip with
+ * of glass, a plastic bottle, a puddle of tar, a copper bar, a silicon wafer on its side, a rubber ring; a screen, a chip with
  * its legs, a cable; a phone, a laptop, a robot. (The ids are older than the names: see src/content.ts.)
  */
 const SHAPES: Record<MatId, (c: string) => string> = {
@@ -20,7 +20,8 @@ const SHAPES: Record<MatId, (c: string) => string> = {
   ink: (c) => `<path d="M8 1.8h4v3l2.2 3.2v8.7a1.6 1.6 0 0 1-1.6 1.6H7.4a1.6 1.6 0 0 1-1.6-1.6V8l2.2-3.2z" fill="${c}"/>${cut('M5.8 11.5h8.4')}`,
   silt: (c) => `<ellipse cx="10" cy="13.8" rx="8" ry="3.7" fill="${c}"/><circle cx="6.5" cy="7.2" r="2.2" fill="${c}"/><circle cx="12.8" cy="4.6" r="1.5" fill="${c}"/>`,
   spark: (c) => `<polygon points="5.5,5.5 14.5,5.5 18,14.5 2,14.5" fill="${c}"/>${cut('M7.2 8.5h5.6')}`,
-  mist: (c) => `<circle cx="10" cy="10" r="8" fill="${c}"/>${cut('M10 2.5v15M2.5 10h15M6.2 3.8v12.4M13.8 3.8v12.4M3.8 6.2h12.4M3.8 13.8h12.4')}`,
+  // (A wafer seen from above its edge: a disc with a rim and a few dies marked on it. Face on, with a grid, it read as a globe.)
+  mist: (c) => `<path d="M1.5 9v3.2c0 2.6 3.8 4.6 8.5 4.6s8.5-2 8.5-4.6V9z" fill="${c}" fill-opacity=".55"/><ellipse cx="10" cy="9" rx="8.5" ry="4.8" fill="${c}"/>${cut('M6.2 7.2h7.6M5.4 10.6h9.2M8.2 5.2l-1 7.6M12 5l.9 8')}`,
   clay: (c) => `<circle cx="10" cy="10" r="5.7" fill="none" stroke="${c}" stroke-width="4.2"/>`,
   prism: (c) => `<rect x="2" y="3.5" width="16" height="11" rx="1.8" fill="${c}" fill-opacity=".25" stroke="${c}" stroke-width="1.7"/><path d="M6.5 17.5h7M10 14.5v3" class="ic"/>`,
   glyph: (c) => `<path d="M7.5 2v3.5M12.5 2v3.5M7.5 14.5V18M12.5 14.5V18M2 7.5h3.5M2 12.5h3.5M14.5 7.5H18M14.5 12.5H18" class="ic"/><rect x="5" y="5" width="10" height="10" rx="1.8" fill="${c}"/>`,

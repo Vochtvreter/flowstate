@@ -19,7 +19,7 @@ const slots = (g: Game) => HOTBAR.filter((t) => slotShown(g, t));
 describe('start simple: the first screen is a Drill, a Market and one sentence', () => {
   it('on goal 1 nothing is on show that has no use yet', () => {
     const g = at('wire-market');
-    expect(revealOf(g)).toEqual({ undo: false, zoom: false, minimap: false, keys: false, trash: false, plot: false, depositWords: false, flows: false });
+    expect(revealOf(g)).toEqual({ undo: false, zoom: false, minimap: false, trash: false, plot: false, depositWords: false, flows: false, upgrades: false });
     expect(slots(g)).toEqual([]);
   });
 
@@ -30,14 +30,14 @@ describe('start simple: the first screen is a Drill, a Market and one sentence',
     expect(idOf(first((g) => slotShown(g, 'well')))).toBe('second-well');
     expect(idOf(first((g) => revealOf(g).zoom))).toBe('build-refiner');
     expect(idOf(first((g) => revealOf(g).trash))).toBe('build-refiner');
-    expect(idOf(first((g) => revealOf(g).keys))).toBe('build-refiner');
     expect(idOf(first((g) => slotShown(g, 'market')))).toBe('upgrade-well');
     expect(idOf(first((g) => revealOf(g).depositWords))).toBe('upgrade-well'); // the Lab is goal 5's reward
     expect(idOf(first((g) => revealOf(g).minimap))).toBe('make-ink');
     expect(idOf(first((g) => revealOf(g).flows))).toBe('make-ink');
     expect(idOf(first((g) => revealOf(g).plot))).toBe('expand');
-    // Once on show, a part is never taken away again (the row of keys aside, which is for the first machines only).
-    for (const key of ['undo', 'zoom', 'minimap', 'trash', 'plot', 'flows'] as const) {
+    expect(idOf(first((g) => revealOf(g).upgrades))).toBe('upgrade-well');
+    // Once on show, a part is never taken away again.
+    for (const key of ['undo', 'zoom', 'minimap', 'trash', 'plot', 'flows', 'upgrades'] as const) {
       let seen = false;
       for (let i = 0; i <= GOALS.length; i++) {
         const on = revealOf(at(i))[key];
@@ -45,8 +45,10 @@ describe('start simple: the first screen is a Drill, a Market and one sentence',
         seen ||= on;
       }
     }
-    expect(revealOf(at('feed-lab')).keys).toBe(true);
-    expect(revealOf(at('research-murk')).keys).toBe(false);
+    // (A Drill that has been speeded up early shows its upgrades from then on, whatever the goal.)
+    const early = at('second-well');
+    early.nodes[0].lv.speed = 1;
+    expect(revealOf(early).upgrades).toBe(true);
   });
 
   it('a slot is never shown for a machine that is locked, and every unlocked one has its slot by the Lab goal', () => {
@@ -72,6 +74,6 @@ describe('start simple: the first screen is a Drill, a Market and one sentence',
   it('a save that is further on shows all of it at once', () => {
     const g = at('make-glyph', ['P1', 'R1', 'P2', 'P3', 'L1']);
     g.board.expansions = 1;
-    expect(revealOf(g)).toEqual({ undo: true, zoom: true, minimap: true, keys: false, trash: true, plot: true, depositWords: true, flows: true });
+    expect(revealOf(g)).toEqual({ undo: true, zoom: true, minimap: true, trash: true, plot: true, depositWords: true, flows: true, upgrades: true });
   });
 });

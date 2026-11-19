@@ -112,7 +112,7 @@ html.phone body { position: fixed; inset: 0; width: 100%; }
 #app.phone #modal .card { max-width: calc(100% - 24px); }
 
 /* Hidden on a phone: there is pinch for zoom, a Fit button, and no keyboard. */
-#app.phone #mini, #app.phone #zoom, #app.phone #hints { display: none; }
+#app.phone #mini, #app.phone #zoom { display: none; }
 
 /* ----- hotbar: a bottom bar of labelled buttons that scrolls sideways ----- */
 #app.phone #hot {

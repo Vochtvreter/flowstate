@@ -253,7 +253,7 @@ Seven goals carry "while you wait" lines (`Goal.meanwhile`, a list: `Meanwhile[]
 
 | Goal | Lines, in order (id: sentence) | Done when | Worth to the card-only player |
 |---|---|---|---|
-| 11 Make and sell Copper | 1. `ink-lab`: "Drag from the Refiner's Plastic port to the Lab too: studied Plastic is 3 α each." (touch: "Tap the Refiner's Plastic port, then tap the Lab too: …") | Plastic reaches a Lab (straight, or through a Router, Merger or Silo) | 101–111 s |
+| 11 Make and sell Copper | 1. `ink-lab`: "Study Plastic as well as selling it: in a Lab each is worth 3 α." (an outcome, as the cards are; its Show me acts the wire out) | Plastic reaches a Lab (straight, or through a Router, Merger or Silo) | 101–111 s |
 | | 2. `glint-lab`: "Build a Lab from the port of the Sand Drill that only sells: studied Sand is 1 α each." | a Sand Drill reaches a Lab | 13–25 s |
 | 15 Make your first Circuit | 1. `well-labs`: "Give each new deposit a Drill and a Lab built from its port: each pair is 1 α a second." | two pairs on the first expansion's deposits, or three in all | 146–153 s |
 | | 2. `expand-labs`: "Expand the board again and give both new deposits a Drill and a Lab of its own." while its next step is the expansion; otherwise "Give each free deposit a Drill and a Lab of its own." | two pairs on deposits of the second expansion or later, or five in all | 205–227 s (goals 15 and 18 together) |

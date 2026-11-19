@@ -28,7 +28,7 @@ import {
   Beacon, Flow, floater, flowPoint, fly, frameFx, invalidateFx, makeFlow, setBeacons, setFlowPath, setFlows,
 } from './fx';
 import {
-  Box, Card, Footprint, LEVEL_REACH, LevelCard, LevelEnd, LevelWire, Port, Pt, View, ZOOM, bestWindow, bezierAt, boxClear, boxUnion, buildSite, centreView,
+  Box, Card, Footprint, LEVEL_GAP, LEVEL_REACH, LevelCard, LevelEnd, LevelWire, Port, Pt, View, ZOOM, bestWindow, bezierAt, boxClear, boxUnion, buildSite, centreView,
   clearPoint, dockSpot, fadeColor, fitBox, fitZoom, fitsAt, frameBox, freeSpot as nearestSpot, heldRate, inPorts, levelCards, levelY, matColor, nodeSize, outPorts,
   pathD, pinchView, roomFor,
   segmentsCross, separate, siteFor, spotFree, wholeGain, wireEnds,
@@ -349,7 +349,6 @@ function applyView() {
     if (over !== wasOver) updateGhost();
     else placeGhostCap();
   }
-  if (hintsBox && revealOf(ui.g).keys) syncHints(ui.g, false);
   // The camera has left the place the player's own Fit took it to (and is not on its way there): Fit has nothing left
   // to return to, and fits again. Back in among the cards, the zoom to come back in to is forgotten too.
   if (fitBack && fitAt && !(glide && glide === fitGlide) && !sameView(ui.view, fitAt)) fitBack = fitAt = null;
@@ -549,7 +548,7 @@ function fabBoxes(gap = FAB_CLEAR): Box[] {
 
 /**
  * Everything that lies over the board where a card cannot be seen or reached, in stage pixels: the strip
- * (the goal card with the order and the alert), an open sheet, the corner controls, the key hints, the
+ * (the goal card with the order and the alert), an open sheet, the corner controls, the
  * "tap where…" line, and on a phone the floating buttons (with room around them) and a Claim button
  * seated in the thumb row. Reads layout: for moments when the camera may move, not for every frame. `fabGap`: the
  * room kept round the floating buttons. `line`: false leaves the "tap where…" line out (it goes the moment a card
@@ -571,7 +570,6 @@ function coverBoxes(fabGap = FAB_CLEAR, line = true): Box[] {
     if (s) out.push({ x0: s.x0, y0: -1e6, x1: s.x1, y1: s.bottom });
     const c = env.corner();
     if (c) out.push({ x0: c.x0, y0: c.y0, x1: 1e6, y1: 1e6 });
-    push(stageBoxOf(hintsEl));
   }
   if (line) push(stageBoxOf(document.getElementById('tap-hint'), 4));
   return out;
@@ -626,7 +624,6 @@ function placePlotLabel() {
     const st = env.strip(), c = env.corner();
     if (st) covers.push({ x0: st.x0, y0: -1e6, x1: st.x1, y1: st.bottom });
     if (c) covers.push({ x0: c.x0, y0: c.y0, x1: 1e6, y1: 1e6 });
-    if (hintsBox && revealOf(g).keys) covers.push(hintsBox);
   }
   // Past the stage's edges it cannot be read either: with the plot's corner off the side of the stage (as the camera
   // stands in the Phone ending) it read "ard · 3 plots" there.
@@ -915,9 +912,7 @@ function openView() {
   }
   if (env.phone) return go(fitTarget(box, true));
   // Wider than the room under the strip, but whole on the stage at the floor with no card cut or under the
-  // strip, the corner controls or the key hints (a big factory on a wide screen): it opens there, readable.
-  // (The hint row is put away first if the goal is past it.)
-  syncHints(g);
+  // strip or the corner controls (a big factory on a wide screen): it opens there, readable.
   const d = wholeAtFloor(fitTarget(box, true));
   if (d) return go(d);
   // Too big for that, and the goal names no node, but a place (as Show me frames it, advice-show.ts): the free
@@ -1125,7 +1120,7 @@ function framePlan(boxes: Box[], readable: boolean, opts: { least?: number; hint
     }
     if (c) blocks.push({ x0: c.x0 - STRIP_GAP, y0: c.y0 - STRIP_GAP, x1: Infinity, y1: Infinity });
     if (s) blocks.push({ x0: s.x0 - STRIP_GAP, y0: -Infinity, x1: s.x1 + STRIP_GAP, y1: s.bottom + STRIP_GAP });
-    for (const e of [hintsEl, document.getElementById('tap-hint')]) {
+    for (const e of [document.getElementById('tap-hint')]) {
       const b = stageBoxOf(e, 6);
       if (b) blocks.push(b);
     }
@@ -1319,7 +1314,6 @@ function stageResized() {
 //
 // The element is a child of the board, not of the world, and is placed by a transform in stage pixels.
 
-let hintsEl: HTMLElement | null = null;
 let fabsEl: HTMLElement | null = null;
 let toastsEl: HTMLElement | null = null;
 /** The time-away card ("While you were away", hud-screens.ts): up while it has the class `open`. */
@@ -1442,7 +1436,7 @@ function expandAsked(g: Game): boolean {
 /** What the button's surroundings depend on that can be read without reading layout: when it changes, they are measured again. */
 function expandKey(g: Game): string {
   const c = env.cover(), s = env.strip(), k = env.corner();
-  return `${c.top}|${c.right}|${c.bottom}|${c.row}|${s ? `${s.x0},${s.x1},${s.bottom}` : ''}|${k ? `${k.x0},${k.y0}` : ''}|${ui.uiRev}|${g.goal.i}${g.goal.ready ? 'r' : ''}|${toastsEl?.childElementCount ?? 0}|${hintsEl?.hidden ? 1 : 0}|${tidyBtn && !tidyBtn.hidden ? 1 : 0}`;
+  return `${c.top}|${c.right}|${c.bottom}|${c.row}|${s ? `${s.x0},${s.x1},${s.bottom}` : ''}|${k ? `${k.x0},${k.y0}` : ''}|${ui.uiRev}|${g.goal.i}${g.goal.ready ? 'r' : ''}|${toastsEl?.childElementCount ?? 0}|${tidyBtn && !tidyBtn.hidden ? 1 : 0}`;
 }
 
 /** What stands on the stage that the button must keep clear of. Reads layout: only when something may have changed. */
@@ -1507,7 +1501,6 @@ function measureExpand() {
       }
     }
     if (cx < Infinity) out.push({ x0: cx, y0: cy, x1: 1e6, y1: 1e6 });
-    add(hintsEl);
     // (For a finger on a wide screen the "tap where..." line shows under the strip.)
     add(document.getElementById('tap-hint'));
     // Toasts are not in the list: outside the phone layout they step up above the button themselves (hud-toasts.ts).
@@ -1528,7 +1521,7 @@ function watchStage() {
     ex.stale = true;
     placeExpand();
   });
-  for (const id of ['hud-strip', 'toasts', 'fabs', 'hints', 'zoom']) {
+  for (const id of ['hud-strip', 'toasts', 'fabs', 'zoom']) {
     if (watched.has(id)) continue;
     const e = document.getElementById(id);
     if (!e) continue;
@@ -1840,7 +1833,6 @@ export function initBoard(root: HTMLElement) {
   tempEnd = boardEl.querySelector('#temp-end')!;
   knifeLine = boardEl.querySelector('#knife')!;
   appEl = boardEl.closest<HTMLElement>('#app');
-  hintsEl = document.getElementById('hints');
   toastsEl = document.getElementById('toasts');
   modalEl = document.getElementById('modal');
   buildEl = el(`<div id="build-sheet" role="dialog" aria-label="Build menu"></div>`);
@@ -2247,9 +2239,17 @@ function recipeText(r: Recipe): string {
   return `${side(r.inputs)} → ${side(r.outputs)}`;
 }
 
+/**
+ * A card's title, as HTML. A Drill is "Sand Drill". A machine is titled by what it makes, with its kind after it in
+ * small type: "Glass Refiner", "Circuit Assembler" (every one read "Refiner" or "Assembler", and where the second
+ * line is dropped, on a phone and when zoomed out, two of them differed only by a small picture). The kind is what
+ * gives way where the two do not fit.
+ */
 function nodeTitle(n: GNode): string {
-  if (n.type === 'well' && n.material) return `${MATERIALS[n.material].name} Drill`;
-  return NODE_DEFS[n.type].name;
+  if (n.type === 'well' && n.material) return `${esc(MATERIALS[n.material].name)} Drill`;
+  const kind = NODE_DEFS[n.type].name;
+  const r = isMachine(n) ? recipeOf(n) : null;
+  return r ? `${esc(MATERIALS[r.outputs[0][0]].name)} <span class="nk">${kind}</span>` : kind;
 }
 
 /** Longest second line that fits a full-width card. Cut here rather than with CSS: see `.ns` in the stylesheet. */
@@ -2264,7 +2264,7 @@ function nodeSub(n: GNode): string {
       // for the line: cut short it lost its last word, which is the one that matters ("Plastic + Copper →…").
       const max = big ? SUB_CHARS - 2 : SUB_CHARS;
       const whole = r ? recipeText(r) : '';
-      const text = !r ? 'no recipe' : big || whole.length > max ? `makes ${r.outputs.map(([m]) => MATERIALS[m].name).join(' + ')}` : whole;
+      const text = !r ? 'makes nothing yet' : big || whole.length > max ? `makes ${r.outputs.map(([m]) => MATERIALS[m].name).join(' + ')}` : whole;
       return text.length > max ? text.slice(0, max - 1).trimEnd() + '…' : text;
     }
     case 'router': return `${n.mode} split`;
@@ -2304,7 +2304,7 @@ function buildNode(n: GNode, w: number, h: number, ins: Port[], outs: Port[], si
         ${hasRing ? `<svg viewBox="0 0 40 40" width="40" height="40"><circle cx="20" cy="20" r="17" class="trk"/><circle cx="20" cy="20" r="17" class="val" pathLength="100"/></svg>` : ''}
         <div class="glyph">${nodeGlyph(n)}</div>
       </div>
-      <div class="txt"><div class="nt">${esc(nodeTitle(n))}</div><div class="ns">${esc(sub)}</div><div class="nr mono"></div></div>
+      <div class="txt"><div class="nt">${nodeTitle(n)}</div><div class="ns">${esc(sub)}</div><div class="nr mono"></div></div>
       <span class="pill"></span>
     </div>`);
   for (const p of ins) {
@@ -2808,7 +2808,7 @@ function rateLine(g: Game, n: GNode, rate: number, util: number): string {
   switch (n.type) {
     case 'well': return `${fmtRate(rate)}/s`;
     case 'refiner': case 'assembler': case 'fabricator':
-      return n.recipe ? `${fmtRate(rate)}/s · ${Math.round(util * 100)}%` : 'pick a recipe';
+      return n.recipe ? `${fmtRate(rate)}/s · ${Math.round(util * 100)}%` : 'wire something in';
     case 'silo': return `${Math.round(bagTotal(n.inb))} stored`;
     case 'market': return `${fmtRate(rate)}/s sold`;
     case 'lab': return `${fmtRate(rate)} / ${fmtRate(labRate(g, n))} /s`;
@@ -2887,6 +2887,8 @@ function updateNodes(g: Game) {
     const label = pillFor(g, n, dx);
     const pill = label.text;
     if (dx.problem && dx.victim) st = 'victim';
+    // (Short of an input, and at work most of its time: no problem, an amber ring and a quiet word.)
+    else if (label.kind === 'short') st = 'short';
     if (st !== refs.cSt) {
       refs.cSt = st;
       refs.el.dataset.st = st;
@@ -2974,7 +2976,6 @@ export function updateSlow(part?: 'nodes' | 'wires') {
     expandEl.innerHTML = `${icon('plus', 20)}<span><b>Expand<em> board</em> <i class="mono">${fmt(cost)}¢</i></b><small>New plot · reveals deposits</small></span>`;
   }
   setClass(expandEl, 'ok', g.credits >= cost);
-  syncHints(g);
   // Whether the goal card is sending the player to it: looked at twice a second at most.
   const now = performance.now();
   if (now - ex.askedAt > 500) {
@@ -3005,29 +3006,6 @@ export function updateSlow(part?: 'nodes' | 'wires') {
       }
     }
   }
-}
-
-/** Where the hint row stands on the stage, as last measured while it showed. */
-let hintsBox: Box | null = null;
-
-/** The key-hint row shows while the first machines are built (reveal.ts: goals 4 to 7), and never over a card. */
-function syncHints(g: Game, measure = true) {
-  if (!hintsEl) return;
-  if (!revealOf(g).keys || env.phone) {
-    if (setHidden(hintsEl, true)) ex.stale = true;
-    return;
-  }
-  // (Measured on the slow beat only: while the camera moves, the last measurement is used.)
-  if (measure && !hintsEl.hidden) hintsBox = stageBoxOf(hintsEl, 6) ?? hintsBox;
-  let under = false;
-  if (hintsBox) {
-    const { x: vx, y: vy, k } = ui.view;
-    under = g.nodes.some((n) => {
-      const b = cardBox(n);
-      return b.x0 * k + vx < hintsBox!.x1 && b.x1 * k + vx > hintsBox!.x0 && b.y0 * k + vy < hintsBox!.y1 && b.y1 * k + vy > hintsBox!.y0;
-    });
-  }
-  if (setHidden(hintsEl, under)) ex.stale = true;
 }
 
 /** When the wheel last turned (performance.now). */
@@ -4463,7 +4441,7 @@ function steer(cx: number, cy: number, hovering = false) {
       const { w, h } = nodeSize(n);
       const pos = clampToBoard(p.x - drag.ox, p.y - drag.oy, w, h);
       // Within reach of the height at which one of its wires would run straight, the card comes level with it.
-      const level = levelWith(g, n, p.y - drag.oy, h);
+      const level = levelWith(g, n, pos.x, p.y - drag.oy, w, h);
       if (level) pos.y = level.y;
       markLevel(drag, level?.wires ?? []);
       if (pos.x !== n.x || pos.y !== n.y) {
@@ -4590,9 +4568,10 @@ function endDrag() {
  * Where the card being dragged should stand so that one of its wires runs dead straight, if the pointer has it within
  * reach of such a height (`levelY` in geom.ts, where the rule is tested): for each of its wires, how far down the
  * card its own port is and how high the port at the other end stands. The reach is in screen pixels, so that it is the
- * same pull under the hand at every zoom.
+ * same pull under the hand at every zoom. Null too where the card could not stay at that height (another card or a
+ * free deposit within LEVEL_GAP).
  */
-function levelWith(g: Game, n: GNode, y: number, h: number): { y: number; wires: number[] } | null {
+function levelWith(g: Game, n: GNode, x: number, y: number, w: number, h: number): { y: number; wires: number[] } | null {
   const gr = graph(g);
   const ends: LevelEnd[] = [];
   const add = (w: Wire) => {
@@ -4604,7 +4583,10 @@ function levelWith(g: Game, n: GNode, y: number, h: number): { y: number; wires:
   for (const w of gr.ins.get(n.id) ?? []) add(w);
   for (const port of gr.outs.get(n.id) ?? []) if (port) for (const w of port) add(w);
   if (!ends.length) return null;
-  return levelY(y, ends, 20, g.board.h - h - 20, LEVEL_REACH / Math.max(0.5, ui.view.k));
+  const level = levelY(y, ends, 20, g.board.h - h - 20, LEVEL_REACH / Math.max(0.5, ui.view.k));
+  // Only where the card may stay when it is let go (dropNode asks the same): a wire that lights up is a promise.
+  if (!level || !spotFree(x, level.y, w, roomFor(n.type, h), nodeBoxes(n.id, true).concat(depositBoxes()), LEVEL_GAP)) return null;
+  return level;
 }
 
 /** Light the wires that run level while the card is held there, and say so once as each comes level (a click: feel.ts). */
@@ -4658,7 +4640,7 @@ function dropNode(d: Extract<Drag, { kind: 'node' }>) {
     const let_go = { x: n.x, y: n.y };
     // (Held level with a port it is wired to, it stays there, off the grid by a few pixels, when that spot is free.)
     const room = roomFor(n.type, h);
-    const level = d.level?.length && spotFree(n.x, n.y, w, room, nodeBoxes(n.id, true).concat(depositBoxes())) ? { x: n.x, y: n.y } : null;
+    const level = d.level?.length && spotFree(n.x, n.y, w, room, nodeBoxes(n.id, true).concat(depositBoxes()), LEVEL_GAP) ? { x: n.x, y: n.y } : null;
     const spot = level ?? freeSpot(n.x, n.y, w, h, n.id, room) ?? { x: d.x0, y: d.y0 };
     // The node goes back to where it started for a moment, so that the undo step is taken now
     // (at press time it would also roll back anything else done during the drag) and shows only

@@ -65,6 +65,12 @@ export interface Goal {
    * Refiner"), the kind of node the card is about.
    */
   hint: { mouse: string; touch: string };
+  /**
+   * The how as the board stands, where that is another gesture than `hint`: a machine the hint has the player build
+   * from a port stands on the board already, placed from the build bar and fed by nothing, and what is left is the
+   * wire into it (building from the port again would buy a second one). null: `hint` it is.
+   */
+  howNow?(g: Game): { mouse: string; touch: string } | null;
   /** The recipe the goal has the player make, if it is about one: the card shows it as "2 Sand → Glass", in pictures. */
   recipe?: string;
   done(g: Game): boolean;
@@ -137,6 +143,8 @@ const outWires = (g: Game, n: GNode, port?: number) => {
   return c;
 };
 const inWires = (g: Game, n: GNode) => graph(g).ins.get(n.id)?.length ?? 0;
+/** A node of this kind stands with nothing wired into it (placed from the build bar, not built from a port). */
+const unfed = (g: Game, type: NodeType) => g.nodes.some((n) => n.type === type && inWires(g, n) === 0);
 
 /** "Saving up": credits toward a price. */
 const saving = (g: Game, cost: number): GoalProgress => [Math.min(g.credits, cost), cost, '¢'];
@@ -824,6 +832,7 @@ export const GOALS: Goal[] = [
       'Drag from a Drill\'s port into empty space, let go, and pick Refiner.',
       'Tap a Drill\'s port, tap an empty spot, and pick Refiner.',
     ),
+    howNow: (g) => (unfed(g, 'refiner') ? hint('Drag from a Drill\'s port to the Refiner.', 'Tap a Drill\'s port, then tap the Refiner.') : null),
     done: (g) => g.nodes.some((n) => n.type === 'refiner' && inWires(g, n) > 0),
     ...buying((g) => (count(g, 'refiner') ? null : price(nodeCost(g, 'refiner'), THE.refiner))),
     reward: { credits: 20 },
@@ -860,6 +869,7 @@ export const GOALS: Goal[] = [
       'Drag from the Refiner\'s port into empty space and pick Lab.',
       'Tap the Refiner\'s port, tap an empty spot and pick Lab.',
     ),
+    howNow: (g) => (unfed(g, 'lab') ? hint('Drag from the Refiner\'s port to the Lab.', 'Tap the Refiner\'s port, then tap the Lab.') : null),
     done: (g) => g.data.a > 0,
     ...buying((g) => (count(g, 'lab') ? null : price(nodeCost(g, 'lab'), THE.lab))),
     reward: { a: 15 },
@@ -913,10 +923,8 @@ export const GOALS: Goal[] = [
     meanwhile: [
       {
         id: 'ink-lab',
-        text: hint(
-          'Drag from the Refiner\'s Plastic port to the Lab too: studied Plastic is 3 α each.',
-          'Tap the Refiner\'s Plastic port, then tap the Lab too: studied Plastic is 3 α each.',
-        ),
+        // (An outcome, as the cards are: its Show me acts the wire out.)
+        text: hint('Study Plastic as well as selling it: in a Lab each is worth 3 α.'),
         done: (g) => studyWires(g, 'ink').length > 0,
         when: (g) => count(g, 'lab') > 0 && g.nodes.some((n) => n.recipe === 'ink'),
       },
@@ -1263,6 +1271,7 @@ export function goalView(g: Game, touch = false): GoalView | null {
   const inputs = goal.id === 'make-lens' && !g.goal.ready ? lensFeeds(g) : null;
   const recipe = goal.recipe ? RECIPES[goal.recipe] : undefined;
   const fed = recipe && !g.goal.ready ? recipeFeeds(g, recipe) : null;
+  const how = (g.goal.ready ? null : goal.howNow?.(g)) ?? goal.hint;
   return {
     ...(fed ? { fed } : {}),
     ...(goal.id === 'hold-flow' ? { flow: flowGoalView(g) } : {}),
@@ -1274,7 +1283,7 @@ export function goalView(g: Game, touch = false): GoalView | null {
     free,
     ready: g.goal.ready,
     why: goal.why,
-    hint: touch ? goal.hint.touch : goal.hint.mouse,
+    hint: touch ? how.touch : how.mouse,
     ...(goal.recipe && RECIPES[goal.recipe] ? { recipe: RECIPES[goal.recipe] } : {}),
     progress: g.goal.ready ? null : goal.progress?.(g) ?? null,
     reward: goal.reward,

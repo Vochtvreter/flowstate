@@ -76,8 +76,8 @@ export const STARVED_CLEAR = 0.65;
 /** Game seconds over which that share is averaged. */
 const STARVED_AVG = 3;
 
-/** A machine's averaged utilization, when it was last brought up to date (game time), and whether it is under the line. */
-interface WorkShare { u: number; t: number; under: boolean }
+/** A machine's averaged utilization, when it was last brought up to date (game time), and whether it is under the line (and under the line for "short"). */
+interface WorkShare { u: number; t: number; under: boolean; short?: boolean }
 const workShare = new WeakMap<GNode, WorkShare>();
 
 /** The machine's utilization averaged over the last few game seconds (see above). Kept up to date by diagnose. */
@@ -145,6 +145,31 @@ export function diagnose(g: Game, n: GNode): Diagnosis {
 
 export const matName = (m: MatId | null) => (m ? MATERIALS[m].name : 'input');
 
+// ---------- short: not a problem, and still worth a word ----------
+// A machine that runs short of an input but works most of its time is not a problem (starvedShort above): no red, no
+// alert. It was also shown as if nothing were the matter, a green ring and no word, while the Flow goal counted it as
+// not flowing and the Flows panel called its input Short. It now carries a quiet word in amber, "Short of Ore", once
+// it has worked under SHORT_BELOW of its time (averaged), until it is back over SHORT_CLEAR: the same line the Flow
+// meter draws (flowing is 90%), with room either side so that a machine at the line does not blink.
+
+/** A machine short of an input says so on its card under this share of its time at work... */
+export const SHORT_BELOW = 0.88;
+/** ...and until it is back over this. */
+export const SHORT_CLEAR = 0.92;
+
+/** The input a machine is short of, while that is worth a word on its card: null for any machine that is not merely short, or is at work nearly all its time. */
+export function shortOf(g: Game, n: GNode): MatId | null {
+  if (!starvedShort(g, n)) {
+    const kept = workShare.get(n);
+    if (kept) kept.short = false;
+    return null;
+  }
+  const m = averaged(g, n);
+  m.short = m.short ? m.u < SHORT_CLEAR : m.u < SHORT_BELOW;
+  if (!m.short) return null;
+  return n.missing ?? recipeOf(n)?.inputs[0][0] ?? null;
+}
+
 // ---------- what a card says is wrong, in plain words ----------
 // A card in trouble used to be labelled BLOCKED, STARVED or IDLE: the simulation's words, which a newcomer has to be
 // taught. It now says what a person would say, with the material by name: "Needs Copper", "Tar has no exit",
@@ -152,8 +177,11 @@ export const matName = (m: MatId | null) => (m ? MATERIALS[m].name : 'input');
 // not fast enough, says so itself: "Can't keep up". It was drawn in healthy green while the machine it feeds stood
 // red, and the fix (more Speed, a second one) is at the green one.
 
-/** What kind of label a card carries: a problem of its own (the old three), or `limit`: it holds another machine back. */
-export type PillKind = '' | 'blocked' | 'starved' | 'idle' | 'limit';
+/**
+ * What kind of label a card carries: a problem of its own (the old three); `short`: it runs short of an input but
+ * works most of its time (no problem, a quiet word); or `limit`: it holds another machine back.
+ */
+export type PillKind = '' | 'blocked' | 'starved' | 'idle' | 'short' | 'limit';
 export interface Pill { kind: PillKind; text: string }
 const NO_PILL: Pill = { kind: '', text: '' };
 
@@ -161,23 +189,36 @@ const NO_PILL: Pill = { kind: '', text: '' };
 const FLAT_OUT = 0.9;
 
 /**
- * The Drills and machines that hold another machine back: each is what a machine in trouble for want of an input is
- * waiting on (diagnose's culprit), is not in trouble itself, and works flat out. Worked out once for a moment of the
- * game and kept beside it.
+ * The Drills and machines that hold another machine back, each with the machine that waits on it and for what: what a
+ * machine in trouble for want of an input is waiting on (diagnose's culprit), or what a machine that is short of an
+ * input gets it from (shortOf); not in trouble itself, and at work flat out. Of several that wait on one, the worst
+ * off. Worked out once for a moment of the game and kept beside it.
  */
-const limitsAt = new WeakMap<Game, { time: number; rev: number; ids: Set<number> }>();
-export function limits(g: Game): Set<number> {
+export interface Waiting { taker: number; mat: MatId | null }
+const limitsAt = new WeakMap<Game, { time: number; rev: number; ids: Map<number, Waiting> }>();
+export function limits(g: Game): Map<number, Waiting> {
   const kept = limitsAt.get(g);
   if (kept && kept.time === g.time && kept.rev === g.rev) return kept.ids;
-  const ids = new Set<number>();
+  const ids = new Map<number, Waiting>();
   if (!victoryQuiet(g)) {
     const byId = graph(g).byId;
+    const worst = new Map<number, number>();
     for (const n of g.nodes) {
       if (n.status !== 'starved' || !isMachine(n)) continue;
       const dx = diagnose(g, n);
-      if (dx.problem !== 'starved' || dx.victim || dx.culprit == null) continue;
-      const s = byId.get(dx.culprit);
-      if (s && s.status === 'working' && s.util >= FLAT_OUT && !(s.grace > 0)) ids.add(s.id);
+      let from: GNode | null | undefined = null;
+      let mat: MatId | null = null;
+      if (dx.problem === 'starved' && !dx.victim && dx.culprit != null) {
+        from = byId.get(dx.culprit);
+        mat = dx.mat;
+      } else if (!dx.problem) {
+        mat = shortOf(g, n);
+        from = mat ? supplier(g, n.id, mat) : null;
+      }
+      if (!from || from.status !== 'working' || from.util < FLAT_OUT || from.grace > 0) continue;
+      if (worst.has(from.id) && worst.get(from.id)! <= n.util) continue;
+      worst.set(from.id, n.util);
+      ids.set(from.id, { taker: n.id, mat });
     }
   }
   limitsAt.set(g, { time: g.time, rev: g.rev, ids });
@@ -191,6 +232,7 @@ export function limits(g: Game): Set<number> {
  *  - an output that is wired and still full: "Backed up" (not on a Drill, which stays calm: a Drill that feeds a Lab
  *    is often ahead of it, and the board would be full of labels);
  *  - an input that runs short: "Needs more Copper", or "Needs Copper" when nothing wired in brings any;
+ *  - an input that runs a little short, the machine still at work most of its time: "Short of Ore", in amber;
  *  - no recipe, or nothing wired in: "No input";
  *  - it works flat out and a machine it feeds still goes short: "Can't keep up".
  */
@@ -203,7 +245,11 @@ export function pillFor(g: Game, n: GNode, dx: Diagnosis = diagnose(g, n)): Pill
     if (dx.problem === 'starved') return { kind: 'starved', text: `Needs ${dx.culprit == null ? '' : 'more '}${matName(dx.mat)}` };
     if (dx.problem === 'idle') return { kind: 'idle', text: 'No input' };
   }
-  if (!dx.problem && limits(g).has(n.id)) return { kind: 'limit', text: 'Can\u2019t keep up' };
+  if (!dx.problem) {
+    const short = shortOf(g, n);
+    if (short) return { kind: 'short', text: `Short of ${matName(short)}` };
+    if (limits(g).has(n.id)) return { kind: 'limit', text: 'Can\u2019t keep up' };
+  }
   return NO_PILL;
 }
 
