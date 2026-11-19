@@ -16,41 +16,41 @@ describe('numbers (2.6)', () => {
     expect(PIPES.map((p) => p.cap)).toEqual([4, 8, 16, 32]);
   });
 
-  it('Shard is lime; machine and tech prices are the ones tuned with the pacing bot', () => {
+  it('Glass is lime; machine and tech prices are the ones tuned with the pacing bot', () => {
     expect(MATERIALS.shard.color).toBe('#B8F26B');
     expect(NODE_DEFS.assembler.base).toBe(600);
     // (It was 7,250¢ in an earlier build: the card player's longest wait, two minutes of nothing to do before the
-    // Lens. The fast players are the floor: their first Lens stays after 14:00. Then 4,800¢; 5,000¢ since the
-    // Fabricator card's lines have the player earn more while saving for it: the card player's first Lens stays
+    // Phone. The fast players are the floor: their first Phone stays after 14:00. Then 4,800¢; 5,000¢ since the
+    // Fabricator card's lines have the player earn more while saving for it: the card player's first Phone stays
     // after 17:30.)
     expect(NODE_DEFS.fabricator.base).toBe(5000);
-    // The second Assembler (Prism) is a purchase in its own right: 1,500¢, so that part of what the Fabricator
+    // The second Assembler (Screen) is a purchase in its own right: 1,500¢, so that part of what the Fabricator
     // used to ask for is paid before the Fabricator goal begins. The other machines grow gently.
     expect([0, 1, 2].map((n) => nodeCostAt('assembler', n))).toEqual([600, 1500, 3750]);
     expect([0, 1].map((n) => nodeCostAt('fabricator', n))).toEqual([5000, 5750]);
     expect([0, 1, 2].map((n) => nodeCostAt('refiner', n))).toEqual([50, 57, 66]);
-    // A Lab of its own for every Well is what the cards' lines build, five or six of them: Labs grow gently
+    // A Lab of its own for every Drill is what the cards' lines build, five or six of them: Labs grow gently
     // (×1.1; ×1.3 made the sixth 371¢, kept back for the Assembler while Assembly was minutes away).
     expect([0, 1, 2, 3, 4, 5].map((n) => nodeCostAt('lab', n))).toEqual([100, 110, 121, 133, 146, 161]);
     // The Processing spine the goal chain asks for.
     expect(TECHS.P2.cost).toEqual({ a: 40 }); // a player who claims at once waits under 30 s on goal 8
     expect(TECHS.P3.cost).toEqual({ a: 195 }); // the card player's wait for it, under a minute
-    // (Assembly and Breeze Deposits went up when the cards' lines came to turn the credits a card player used to
+    // (Assembly and Quartz Deposits went up when the cards' lines came to turn the credits a card player used to
     // leave idle into α; they were tuned again with the cheaper Labs and the Deep Analysis line.)
     expect(TECHS.P4.cost).toEqual({ a: 1325 });
     expect(TECHS.P5.cost).toEqual({ a: 1875 });
     expect(TECHS.P7.cost).toEqual({ a: 720, b: 100 }); // lower than the curve: the card players' last wait is for credits, not for α
-    // Free play needs all three kinds of Data, and Reclamation cannot be had before the first Lens.
+    // Free play needs all three kinds of Data, and Reclamation cannot be had before the first Phone.
     expect(TECHS.P6.cost).toEqual({ a: 300, g: 25 });
     expect(TECHS.P8.cost).toEqual({ a: 1200, b: 300, g: 100 });
-    // β is what free play has least of: at 500 it was a 37-minute wait. Its α keeps a fast player's first Paradox after 24:00.
+    // β is what free play has least of: at 500 it was a 37-minute wait. Its α keeps a fast player's first Robot after 24:00.
     expect(TECHS.P9.cost).toEqual({ a: 2800, b: 250, g: 450 });
   });
 
   it('side techs are impulse buys: none costs more than a third of the spine tech it competes with', () => {
-    // Before the first Glyph only α exists, and every α side tech is small next to Assembly: together they
+    // Before the first Circuit only α exists, and every α side tech is small next to Assembly: together they
     // cost less than a seventh of it. (Wider Demand used to be among them at 200 α; nothing sells over
-    // demand that early, and an expert who bought it on impulse reached Glyph most of a minute later.)
+    // demand that early, and an expert who bought it on impulse reached Circuit most of a minute later.)
     for (const id of ['R2', 'L2', 'L3']) {
       expect(Object.keys(TECHS[id].cost), id).toEqual(['a']);
       expect(TECHS[id].cost.a!, id).toBeLessThanOrEqual(0.35 * TECHS.P4.cost.a!);
@@ -66,7 +66,7 @@ describe('numbers (2.6)', () => {
     for (const id of ['P6', 'P8', 'P9', 'U2', 'C5', 'L8']) expect(TECHS[id].cost.g, id).toBeGreaterThan(0);
   });
 
-  it('Efficiency Tuning waits for Assembly: it costs β, and there is no β before the first Glyph', () => {
+  it('Efficiency Tuning waits for Assembly: it costs β, and there is no β before the first Circuit', () => {
     // It used to hang on Refining alone, and sat in the tree with a β price ten minutes before any β existed.
     expect(TECHS.U1.requires).toEqual(['P1', 'P4']);
     const g = fresh();
@@ -79,21 +79,21 @@ describe('numbers (2.6)', () => {
     expect(research(g, 'U1')).toBe(true);
   });
 
-  it('a Lab makes Data by tier, except from Silt: a by-product is worth 1 α, not 3', () => {
+  it('a Lab makes Data by tier, except from Tar: a by-product is worth 1 α, not 3', () => {
     const g = fresh();
     const made = (m: MatId) => dataYield(g, m);
     expect(made('glint')).toEqual({ tier: 'a', amount: 1 });
     expect(made('shard')).toEqual({ tier: 'a', amount: 3 });
     expect(made('ink')).toEqual({ tier: 'a', amount: 3 });
     expect(made('silt')).toEqual({ tier: 'a', amount: 1 });
-    expect(made('clay')).toEqual({ tier: 'a', amount: 3 }); // three Silt make one Clay: the same α either way
+    expect(made('clay')).toEqual({ tier: 'a', amount: 3 }); // three Tar make one Rubber: the same α either way
     expect(made('glyph')).toEqual({ tier: 'b', amount: 5 });
     expect(made('lens')).toEqual({ tier: 'g', amount: 8 });
-    // Deep Analysis multiplies Silt's amount like any other.
+    // Deep Analysis multiplies Tar's amount like any other.
     g.techs.push('R3');
     expect(made('silt').amount).toBe(1.5);
     expect(made('shard').amount).toBe(4.5);
-    // Silt is the only material with an amount of its own.
+    // Tar is the only material with an amount of its own.
     expect(MAT_IDS.filter((m) => MATERIALS[m].study != null)).toEqual(['silt']);
   });
 
@@ -129,13 +129,13 @@ describe('numbers (2.6)', () => {
       expect(seconds, `${what}: ${cost}¢ for +${gain.toFixed(2)}¢/s`).toBeGreaterThanOrEqual(60);
       expect(seconds, `${what}: ${cost}¢ for +${gain.toFixed(2)}¢/s`).toBeLessThanOrEqual(180);
     };
-    // Wells: the extra raw material is refined by a machine that has room for it.
+    // Drills: the extra raw material is refined by a machine that has room for it.
     for (const raw of ['glint', 'murk', 'ember', 'breeze'] as MatId[]) {
       const r = Object.values(RECIPES).find((x) => x.inputs.length === 1 && x.inputs[0][0] === raw)!;
       for (const level of [0, 1]) {
         const rate = (lv: number) => wellRate({ ...probe, material: raw, lv: { speed: lv, eff: 0, buffer: 0 } });
         const more = rate(level + 1) - rate(level);
-        check(`${raw} Well L${level + 1}`, upgradeCostAt('well', 'speed', level), (more / r.inputs[0][1]) * worth(r.outputs));
+        check(`${raw} Drill L${level + 1}`, upgradeCostAt('well', 'speed', level), (more / r.inputs[0][1]) * worth(r.outputs));
       }
     }
     // Machines of the demo: the extra input was backing up, so everything the faster machine makes is a gain.
@@ -150,7 +150,7 @@ describe('numbers (2.6)', () => {
 });
 
 describe('starting board (2.7)', () => {
-  it('puts the Market diagonally below-right of the Well, inside about 430 × 250, clear of every deposit', () => {
+  it('puts the Market diagonally below-right of the Drill, inside about 430 × 250, clear of every deposit', () => {
     const g = newGame();
     const w = well(g);
     const m = market(g);
@@ -169,7 +169,7 @@ describe('starting board (2.7)', () => {
   });
 });
 
-/** An Ink Refiner (0.5/s) whose port feeds a Glyph Assembler (needs 0.33/s) and a Router that leads to a Lab and a Market. */
+/** A Plastic Refiner (0.5/s) whose port feeds a Circuit Assembler (needs 0.33/s) and a Router that leads to a Lab and a Market. */
 function routerOnAMachinePort() {
   const g = rich();
   const m = market(g);
@@ -177,7 +177,7 @@ function routerOnAMachinePort() {
   const spark = placeNode(g, 'refiner', 400, 540)!;
   connect(g, placeNode(g, 'well', 0, 0, { depositId: 3 })!.id, 0, ink.id);
   connect(g, placeNode(g, 'well', 0, 0, { depositId: 4 })!.id, 0, spark.id);
-  for (let i = 0; i < 2; i++) upgrade(g, g.nodes.find((n) => n.material === 'ember')!.id, 'speed'); // plenty of Spark
+  for (let i = 0; i < 2; i++) upgrade(g, g.nodes.find((n) => n.material === 'ember')!.id, 'speed'); // plenty of Copper
   connect(g, ink.id, 1, placeNode(g, 'void', 700, 650)!.id);
   const router = placeNode(g, 'router', 650, 380)!;
   const viaRouter = connect(g, ink.id, 0, router.id)!;
@@ -202,13 +202,13 @@ describe('machines-first fan-out (2.1)', () => {
     const toRefiner = connect(g, well(g).id, 0, r.id)!;
     connect(g, r.id, 0, market(g).id);
     run(g, 20);
-    // The Refiner needs all of the Well's 1/s: nothing is left to sell raw.
+    // The Refiner needs all of the Drill's 1/s: nothing is left to sell raw.
     let [fed, sold] = throughput(g, 40, [toRefiner.id, toMarket.id]);
     expect(fed).toBeCloseTo(1, 1);
     expect(sold).toBeLessThan(0.03);
     expect(r.util).toBeGreaterThan(0.95);
     expect(r.status).toBe('working');
-    // Speed the Well up: the Refiner still takes its 1/s and the surplus is sold.
+    // Speed the Drill up: the Refiner still takes its 1/s and the surplus is sold.
     for (let i = 0; i < 3; i++) upgrade(g, well(g).id, 'speed'); // ~1.95/s
     run(g, 20);
     [fed, sold] = throughput(g, 40, [toRefiner.id, toMarket.id]);
@@ -232,7 +232,7 @@ describe('machines-first fan-out (2.1)', () => {
     expect(sold).toBeLessThan(0.03);
   });
 
-  it('Markets, Labs and Voids share the remainder evenly', () => {
+  it('Markets, Labs and Dumps share the remainder evenly', () => {
     const g = rich();
     for (let i = 0; i < 3; i++) upgrade(g, well(g).id, 'speed'); // ~1.95/s
     const r = placeNode(g, 'refiner', 400, 100)!;
@@ -253,15 +253,15 @@ describe('machines-first fan-out (2.1)', () => {
   });
 
   it('a machine that hands over whole items feeds the next machine first as well', () => {
-    // A Refiner finishes one Shard at a time. A wire used to take a fifth of an item per tick, so the rest of
-    // each Shard spilled to the Market on the same port and the Assembler starved at 60%.
+    // A Refiner finishes one Glass at a time. A wire used to take a fifth of an item per tick, so the rest of
+    // each Glass spilled to the Market on the same port and the Assembler starved at 60%.
     const g = rich();
     const m = market(g);
     const shard = placeNode(g, 'refiner', 400, 100)!;
     const mist = placeNode(g, 'refiner', 400, 600)!;
     connect(g, well(g).id, 0, shard.id);
     connect(g, placeNode(g, 'well', 0, 0, { depositId: 5 })!.id, 0, mist.id);
-    const prism = placeNode(g, 'assembler', 700, 300, { recipe: 'prism' })!; // 2 Shard per 4 s: all the Refiner makes
+    const prism = placeNode(g, 'assembler', 700, 300, { recipe: 'prism' })!; // 2 Glass per 4 s: all the Refiner makes
     const sell = connect(g, shard.id, 0, m.id)!; // "sell the rest" was wired first
     const feed = connect(g, shard.id, 0, prism.id)!;
     connect(g, mist.id, 0, prism.id);
@@ -273,7 +273,7 @@ describe('machines-first fan-out (2.1)', () => {
     expect(sold).toBeLessThan(0.01);
     expect(prism.util).toBeGreaterThan(0.97);
     expect(prism.status).toBe('working');
-    // The Mist Refiner makes 0.4/s and the Assembler needs 0.25: the rest of the Mist is sold.
+    // The Silicon Refiner makes 0.4/s and the Assembler needs 0.25: the rest of the Silicon is sold.
     expect(g.soldRate.mist).toBeCloseTo(0.15, 1);
   });
 
@@ -298,7 +298,7 @@ describe('machines-first fan-out (2.1)', () => {
     connect(g, spark.id, 0, glyph.id);
     connect(g, glyph.id, 0, m.id);
     run(g, 60);
-    expect(glyph.util).toBeGreaterThan(0.97); // needs a third of an Ink and of a Spark per second; 0.5 and 0.4 are made
+    expect(glyph.util).toBeGreaterThan(0.97); // needs a third of a Plastic and of a Copper per second; 0.5 and 0.4 are made
     expect(glyph.status).toBe('working');
     expect(glyph.rate).toBeCloseTo(1 / 3, 1);
   });
@@ -306,9 +306,9 @@ describe('machines-first fan-out (2.1)', () => {
   it('a wire still carries no more than its capacity over time, and what does not fit is sold', () => {
     const g = rich();
     const m = market(g);
-    for (let i = 0; i < 8; i++) upgrade(g, well(g).id, 'speed'); // 5.96 Glint/s
+    for (let i = 0; i < 8; i++) upgrade(g, well(g).id, 'speed'); // 5.96 Sand/s
     const r = placeNode(g, 'refiner', 400, 100)!;
-    for (let i = 0; i < 10; i++) upgrade(g, r.id, 'speed'); // could take 5.08 Glint/s
+    for (let i = 0; i < 10; i++) upgrade(g, r.id, 'speed'); // could take 5.08 Sand/s
     const feed = connect(g, well(g).id, 0, r.id)!; // Mk I: 4/s
     const sell = connect(g, well(g).id, 0, m.id)!;
     connect(g, r.id, 0, m.id);
@@ -341,7 +341,7 @@ describe('machines-first fan-out (2.1)', () => {
     expect(glyph.status).toBe('working');
   });
 
-  /** A Well making 1.95 Glint/s whose port feeds a Refiner (takes 1/s), a Market, and whatever `build` hangs on it. */
+  /** A Drill making 1.95 Sand/s whose port feeds a Refiner (takes 1/s), a Market, and whatever `build` hangs on it. */
   function sharedPort(build: (g: Game, port: (to: number) => number) => number) {
     const g = rich();
     for (let i = 0; i < 3; i++) upgrade(g, well(g).id, 'speed');
@@ -514,7 +514,7 @@ describe('demand with two prices (2.2)', () => {
     connect(g, r.id, 0, market(g).id);
     const before = g.credits;
     run(g, 120);
-    // 0.5 Shard/s arrives one whole Shard at a time; demand is 1.5/s
+    // 0.5 Glass/s arrives one whole Glass at a time; demand is 1.5/s
     expect(g.sold.shard).toBeGreaterThan(50);
     expect(g.credits - before).toBeCloseTo(g.sold.shard! * 3, 6);
   });
@@ -535,7 +535,7 @@ describe('demand with two prices (2.2)', () => {
     g.credits = 1000;
     connect(g, well(g).id, 0, market(g).id);
     run(g, 60);
-    expect(g.seenSurplus).toBe(false); // 1/s of Glint against a demand of 2/s
+    expect(g.seenSurplus).toBe(false); // 1/s of Sand against a demand of 2/s
     for (let i = 0; i < 5; i++) upgrade(g, well(g).id, 'speed'); // 3.05/s
     // The bank of unused demand (8 s worth) has to run dry first, then the surplus has to last a few seconds.
     run(g, 8);
@@ -551,7 +551,7 @@ describe('demand with two prices (2.2)', () => {
     const events = take(g, 'surplus');
     expect(events.length).toBe(1);
     expect(events[0].mat).toBe('glint');
-    expect(events[0].text).toBe('Glint is selling faster than Markets want it: the extra goes for 25% of the price.');
+    expect(events[0].text).toBe('Sand is selling faster than Markets want it: the extra goes for 25% of the price.');
     run(g, 60);
     expect(take(g, 'surplus').length).toBe(0); // one-off
     expect(g.techs.filter((id) => id === 'C1')).toEqual(['C1']);
@@ -571,7 +571,7 @@ describe('demand with two prices (2.2)', () => {
     const g = rich();
     const silo = placeNode(g, 'silo', 400, 100)!;
     const fill = connect(g, well(g).id, 0, silo.id)!;
-    run(g, 30); // about 30 Glint stored; the bank holds 16
+    run(g, 30); // about 30 Sand stored; the bank holds 16
     cutWire(g, fill.id);
     const out = connect(g, silo.id, 0, market(g).id)!;
     upgradeWire(g, out.id); // Mk II: 8/s, so it empties in a few seconds
@@ -579,7 +579,7 @@ describe('demand with two prices (2.2)', () => {
     expect(g.sold.glint).toBeGreaterThan(16);
     run(g, 30);
     expect(g.seenSurplus).toBe(false);
-    // Shard at 0.5/s in whole items against a demand of 1.5/s never touches the surplus price.
+    // Glass at 0.5/s in whole items against a demand of 1.5/s never touches the surplus price.
     const r = placeNode(g, 'refiner', 400, 300)!;
     connect(g, well(g).id, 0, r.id);
     connect(g, r.id, 0, market(g).id);
@@ -589,8 +589,8 @@ describe('demand with two prices (2.2)', () => {
   });
 
   it('notices a slow machine too: whole items every few seconds, each sale over demand', () => {
-    // Two Fabricators' worth of Lens (two every 6 s against a demand of one every 4 s) sell 18% under full
-    // price for as long as they run. The over-demand sales come 6 s apart, and a Paradox line's up to 12 s.
+    // Two Fabricators' worth of Phone (two every 6 s against a demand of one every 4 s) sell 18% under full
+    // price for as long as they run. The over-demand sales come 6 s apart, and a Robot line's up to 12 s.
     for (const [mat, every, n] of [['lens', 6, 2], ['paradox', 12, 2]] as const) {
       const g = rich();
       const silo = placeNode(g, 'silo', 400, 100)!;
@@ -608,7 +608,7 @@ describe('demand with two prices (2.2)', () => {
       expect(g.seenSurplus, mat).toBe(true);
       expect(take(g, 'surplus').map((e) => e.mat), mat).toEqual([mat]);
     }
-    // One whole item now and then, under demand on average, is not: a Lens every 6 s.
+    // One whole item now and then, under demand on average, is not: a Phone every 6 s.
     const g = rich();
     const silo = placeNode(g, 'silo', 400, 100)!;
     connect(g, silo.id, 0, market(g).id);
@@ -704,13 +704,13 @@ describe('demand with two prices (2.2)', () => {
   });
 });
 
-/** Six mature producers, all running flat out: five Wells selling to the Market and one Refiner. */
+/** Six mature producers, all running flat out: five Drills selling to the Market and one Refiner. */
 function humming(): { g: Game; refiner: number; wells: number[] } {
   const g = rich();
   const wells = [well(g).id];
   for (const dep of [2, 3, 4, 5]) wells.push(placeNode(g, 'well', 0, 0, { depositId: dep })!.id);
   for (const id of wells) connect(g, id, 0, market(g).id);
-  upgrade(g, wells[0], 'speed'); // a little more Glint than the Refiner needs
+  upgrade(g, wells[0], 'speed'); // a little more Sand than the Refiner needs
   const r = placeNode(g, 'refiner', 400, 100)!;
   connect(g, wells[0], 0, r.id);
   connect(g, r.id, 0, market(g).id);
@@ -731,7 +731,7 @@ describe('Flow (2.3)', () => {
     expect(worstProducer(g)).toBeNull();
   });
 
-  it('ignores producers with no wire, young producers, and everything that is not a Well or machine', () => {
+  it('ignores producers with no wire, young producers, and everything that is not a Drill or machine', () => {
     const { g, wells } = humming();
     run(g, 40);
     expect(g.flow).toBeGreaterThan(0.99);
@@ -760,7 +760,7 @@ describe('Flow (2.3)', () => {
   });
 
   it('counts only producers whose output can reach a Market or a Lab', () => {
-    // Six Wells into a Void are not a supply line: no producers, no Flow, no Flow State.
+    // Six Drills into a Dump are not a supply line: no producers, no Flow, no Flow State.
     const g = rich();
     g.flowOn = true;
     const sink = placeNode(g, 'void', 600, 300)!;
@@ -779,7 +779,7 @@ describe('Flow (2.3)', () => {
     expect(inFlowState(g)).toBe(false);
     expect(flowMult(g)).toBe(1);
 
-    // A path counts however long it is: Well → Refiner → Merger → Lab makes both the Well and the Refiner producers.
+    // A path counts however long it is: Drill → Refiner → Merger → Lab makes both the Drill and the Refiner producers.
     const refiner = placeNode(g, 'refiner', 400, 100)!;
     const merger = placeNode(g, 'merger', 700, 100)!;
     connect(g, wells[0], 0, refiner.id);
@@ -791,7 +791,7 @@ describe('Flow (2.3)', () => {
     expect(countsForFlow(g, refiner)).toBe(true);
     expect(countsForFlow(g, well(g))).toBe(true);
     expect(flowInfo(g).producers).toBe(2);
-    // One of two outputs is enough: an Ink Refiner that sells its Ink counts even though the Silt is dumped.
+    // One of two outputs is enough: a Plastic Refiner that sells its Plastic counts even though the Tar is dumped.
     const ink = placeNode(g, 'refiner', 400, 400, { recipe: 'ink' })!;
     connect(g, wells[2], 0, ink.id);
     connect(g, ink.id, 1, sink.id);
@@ -799,7 +799,7 @@ describe('Flow (2.3)', () => {
     expect(countsForFlow(g, ink)).toBe(false);
     connect(g, ink.id, 0, market(g).id);
     expect(countsForFlow(g, ink)).toBe(true);
-    // The other Wells still pour into the Void and still do not count.
+    // The other Drills still pour into the Dump and still do not count.
     expect(flowInfo(g).producers).toBe(4);
   });
 
@@ -877,11 +877,11 @@ describe('Flow (2.3)', () => {
     expect(g.flowStreak).toBeGreaterThan(40);
     expect(g.stats.flowStates).toBe(1);
 
-    // Break it: a Well feeding only a machine that takes nothing backs up.
+    // Break it: a Drill feeding only a machine that takes nothing backs up.
     cutWire(g, g.wires.find((w) => w.from === wells[3])!.id);
     const dead = placeNode(g, 'assembler', 900, 300)!;
     connect(g, wells[3], 0, dead.id);
-    connect(g, dead.id, 0, market(g).id); // what it made could be sold, so the Well still counts
+    connect(g, dead.id, 0, market(g).id); // what it made could be sold, so the Drill still counts
     run(g, 30);
     expect(g.flowStreak).toBe(0);
     expect(inFlowState(g)).toBe(false);

@@ -249,7 +249,7 @@ describe('buildSite: where a card built at a point the player chose stands', () 
     const other = card(400, 300);
     // 28 px under the other card: the usual gap is kept there, the air is not; a row lower it is.
     expect(site(486, 436, [other])).toEqual({ x: 400, y: 420 });
-    // Between a Well and the plot's left edge with a wall of cards round it, the only air is far off: the card stays by the point.
+    // Between a Drill and the plot's left edge with a wall of cards round it, the only air is far off: the card stays by the point.
     const wall = [card(240, 20, 172, 720)];
     const p = site(120, 300, wall)!;
     expect(far(p, { x: 34, y: 264 })).toBeLessThan(30);
@@ -369,7 +369,7 @@ describe('buildSite: where a card built at a point the player chose stands', () 
   });
 
   it('does not put the card on the far side of another card from its port when the near side has room within reach', () => {
-    // A Well's port at (272, 296); a Market stands to the right of where the player let go, the spot itself is tight.
+    // A Drill's port at (272, 296); a Market stands to the right of where the player let go, the spot itself is tight.
     const cards = [card(100, 260), card(360, 300)];
     const from = { x: 272, y: 296 };
     const p = site(446, 256, cards, { wire: { from } })!;
@@ -446,7 +446,7 @@ describe('separate: cards that rest on one another are pulled apart', () => {
     expect(separate(cards, [], BOARD, GRID).size).toBe(0);
   });
 
-  it('moves the later of two stacked cards, and never a Well', () => {
+  it('moves the later of two stacked cards, and never a Drill', () => {
     const cards = [c(1, 100, 100, true), c(2, 120, 120), c(3, 400, 300), c(4, 420, 320)];
     const moved = separate(cards, [], BOARD, GRID);
     expect([...moved.keys()].sort()).toEqual([2, 4]);

@@ -52,7 +52,7 @@ function supplier(g: Game, id: number, m: MatId, depth = 0): GNode | null {
 }
 
 /**
- * Between the first Lens and free play (the ending's celebration, the bow and the summary) the board is the ending's
+ * Between the first Phone and free play (the ending's celebration, the bow and the summary) the board is the ending's
  * picture: the demo has been done, and no machine is in trouble in it. Nothing is reported for
  * any node, so no pill, no alert and no problem in the inspector, until the player goes on into free play (Keep
  * playing, a save that had already left the summary, or at once under `?nosummary`: freePlay() in hud-screens.ts).
@@ -61,7 +61,7 @@ function supplier(g: Game, id: number, m: MatId, depth = 0): GNode | null {
 export const victoryQuiet = (g: Game): boolean => g.ended && !freePlay();
 
 // ---------- starved means starved ----------
-// The simulation calls a machine starved whenever an input runs short at all: a Spark Refiner at 80% was STARVED in
+// The simulation calls a machine starved whenever an input runs short at all: a Copper Refiner at 80% was STARVED in
 // red, and the alert named it for whole goals. A machine is a problem only when it works less than
 // STARVED_BELOW of its time; above that it is merely short, which the inspector says in amber (panels.ts) and which the
 // Flow ring and the Flow goal still count (flow.ts, unchanged). A machine works in bursts (a craft, then a wait for the
@@ -147,7 +147,7 @@ export const matName = (m: MatId | null) => (m ? MATERIALS[m].name : 'input');
 
 // ---------- a blocked node: the way on ----------
 // A starved machine's box offers Speed on its source in one press. A blocked node whose output is wired had nothing
-// to offer unless a machine further down was in trouble itself: a Well feeding a Lab that studies as fast as it can
+// to offer unless a machine further down was in trouble itself: a Drill feeding a Lab that studies as fast as it can
 // said "whatever is downstream cannot keep up", and the player went looking for the Lab. wayOn names what is full
 // downstream and whether Speed on it would take more. It decides nothing about what blocked means: diagnose does.
 
@@ -202,7 +202,7 @@ function speedTakesMore(g: Game, d: GNode): boolean {
 /**
  * The way on from a blocked node, or null when there is none to name: its output has no wire (the box says to wire it),
  * a machine downstream is in trouble itself (the box jumps to that cause), or nothing downstream is a settled Lab or
- * machine with room on its wire (a Market or a Void takes everything: then a wire is the limit).
+ * machine with room on its wire (a Market or a Dump takes everything: then a wire is the limit).
  * Of several, the one whose Speed is cheapest; with no Speed to offer, the first that takes no more, to be shown;
  * where every one of them has room (the Speed the box offered has just been bought), the first, marked `room`: the
  * box said "cannot take more" of a Lab in the second after its Speed was raised.
@@ -276,7 +276,7 @@ function cardIsAbout(g: Game, n: GNode, focus: number[]): boolean {
  * The node the HUD's alert chip names, with what it says (`textOf`: the chip's words for a node, null when
  * there is nothing to say about it). In this order:
  *  1. a node the active goal or its line is about (goalFocus), in the order the player meets them: the alert
- *     points where the card points (at goal 22 it named the Mist Refiner while the
+ *     points where the card points (at goal 22 it named the Silicon Refiner while the
  *     Fabricator starved);
  *  2. the node it named last, while that is still in trouble (two machines about as badly off would swap
  *     places four times a second);
@@ -285,7 +285,7 @@ function cardIsAbout(g: Game, n: GNode, focus: number[]): boolean {
  * is saying it already (goals 3 and 5). A node the card is about that is in trouble then, or
  * at any time stands idle (nothing wired into it yet: getting it going is what the card is asking for) or is still
  * settling after the player changed it (its grace: the simulation calls it working until it can judge), is the
- * card's to speak of, and the alert names nothing at all meanwhile: at goal 22 it sent the player to the Mist
+ * card's to speak of, and the alert names nothing at all meanwhile: at goal 22 it sent the player to the Silicon
  * Refiner while the card asked for the Fabricator's wires. So is one merely short of an input
  * (starvedShort: at work most of its time, which is not a problem, but is what the Flow goal's line is about). (Once the
  * opening seconds are over, a node in trouble is itself named; the HUD leaves out what the card already says, so the

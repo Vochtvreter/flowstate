@@ -277,7 +277,7 @@ function boughtWith(g: Game, v: GoalView): string | undefined {
 function progressHtml(p: GoalProgress, name?: string): string {
   const [cur, target, unit] = p;
   const share = target > 0 ? cur / target : 0;
-  // Saving up, in credits or in Data: "Saving 7 / 12¢" (named: "Saving for the Well · 7 / 12¢"), then "Saved 12 / 12¢"
+  // Saving up, in credits or in Data: "Saving 7 / 12¢" (named: "Saving for the Drill · 7 / 12¢"), then "Saved 12 / 12¢"
   // once there is enough.
   const saving = cur + 1e-6 >= target ? 'Saved' : 'Saving';
   const tier = DATA_OF[unit];
@@ -407,10 +407,10 @@ function ghostsHtml(now: number): { card: string; press: string } {
 /** A count still being saved up (credits or Data), not yet in hand. */
 const saving = (p: GoalProgress | null) => !!p && (p[2] === '¢' || !!DATA_OF[p[2]]) && p[0] + 1e-6 < p[1];
 
-/** "Make your first Lens": each input the Fabricator takes and whether it is wired in (from the rules, when they give it). */
+/** "Make your first Phone": each input the Fabricator takes and whether it is wired in (from the rules, when they give it). */
 type Inputs = { mat: MatId; name: string; fed: boolean }[];
 
-/** The Fabricator's inputs, wired or not: "Prism ✓ · Glyph ✗", on a bar of how many are wired. */
+/** The Fabricator's inputs, wired or not: "Screen ✓ · Circuit ✗", on a bar of how many are wired. */
 function inputsHtml(inputs: Inputs): string {
   const fed = inputs.filter((x) => x.fed).length;
   const parts = inputs.map((x) => `<span class="gi ${x.fed ? 'ok' : 'no'}" data-mat="${x.mat}">${matGlyph(x.mat, 13)}${esc(x.name)}${icon(x.fed ? 'check' : 'close', 12)}</span>`);
@@ -437,7 +437,7 @@ function goalHtml(g: Game, v: GoalView, rows: string, prog: string): string {
 }
 
 /**
- * The demo's last goal, done: what the card shows from the first Lens until the player has left the summary
+ * The demo's last goal, done: what the card shows from the first Phone until the player has left the summary
  * (Keep playing). Free play does not start behind the summary.
  */
 function endedHtml(g: Game): string {
@@ -452,7 +452,7 @@ function endedHtml(g: Game): string {
 
 /**
  * The demo has ended and the player has not gone on into free play yet (endingShown in hud-screens.ts): from the
- * first Lens until Keep playing (or Escape) on the summary, and behind the start screen of a save that has ended.
+ * first Phone until Keep playing (or Escape) on the summary, and behind the start screen of a save that has ended.
  * The card shows the demo's last goal done, with no Claim, whether or not the capstone was claimed: Keep playing
  * claims it. Under `?nosummary` there is no summary to leave: the card goes on as ever, Claim and all.
  */
@@ -510,7 +510,7 @@ function renderGoal(g: Game, force: boolean) {
     // A wait (what the goal asks for next has to be saved up for, or Flow has to be held): what there is to do
     // meanwhile is the line or the tip, and on a phone the hint folds behind a tap once the player has pressed the
     // board (hud.css, "phone seating"). Once it can be bought, the hint is what to do, and it is shown again.
-    // "Make your first Lens" folds it too once there is a Fabricator: its inputs row and its line say what the hint
+    // "Make your first Phone" folds it too once there is a Fabricator: its inputs row and its line say what the hint
     // says, wire by wire (with the hint open as well, the strip took 44.6% of a 360x740 stage).
     setClass(goalEl, 'wait', !!wait || saving(v.progress) || flowView || !!inputs?.length);
   } else setClass(goalEl, 'wait', false);
@@ -559,7 +559,7 @@ function renderOrder(g: Game, force: boolean) {
 // ---------- bottleneck chip ----------
 
 function nodeName(n: GNode): string {
-  if (n.type === 'well') return `${matName(n.material)} Well`;
+  if (n.type === 'well') return `${matName(n.material)} Drill`;
   return `${NODE_DEFS[n.type].name}${n.recipe && RECIPES[n.recipe] ? ` (${RECIPES[n.recipe].name})` : ''}`;
 }
 
@@ -631,7 +631,7 @@ function adviceNodes(g: Game, a: Advice | null | undefined): number[] {
 /**
  * Is the card already about this problem? It is when its hint or line names the node (goalFocus), or the tip on
  * offer or the line's next step is about the node or about where its trouble comes from (a starved machine's
- * supplier: "buy Speed on the Ember Well" says what "Refiner (Spark) needs more Ember" says).
+ * supplier: "buy Speed on the Ore Drill" says what "Refiner (Copper) needs more Ore" says).
  */
 function cardSays(g: Game, n: GNode, focus: number[]): boolean {
   const about = new Set<number>([n.id]);

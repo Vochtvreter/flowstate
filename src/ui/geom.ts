@@ -20,7 +20,7 @@ const tallest: Partial<Record<NodeType, number>> = {};
 
 /**
  * Height to keep clear for a card of this type. A machine's card grows when it is given a recipe
- * with more ports (an Assembler on its first wire, a Refiner switched to Ink), so the tallest it can
+ * with more ports (an Assembler on its first wire, a Refiner switched to Plastic), so the tallest it can
  * become is kept free from the start and it can never grow into the card below.
  */
 export function roomFor(type: NodeType, h: number): number {
@@ -236,7 +236,7 @@ export function bestWindow(boxes: Box[], must: Box[], area: Box, k: number): Vie
 
 // ---------- where a card may stand ----------
 
-/** Clear space kept between two cards, and between a card and a deposit with no Well on it. */
+/** Clear space kept between two cards, and between a card and a deposit with no Drill on it. */
 export const CARD_GAP = 16;
 /** Cards stay this far inside the edge of the plot. */
 export const PLOT_MARGIN = 20;
@@ -332,7 +332,7 @@ export interface SiteQuery {
   /** The point the player chose (board units): where the middle of the card is wanted. */
   at: Pt;
   card: Footprint;
-  /** The other cards, each as tall as it may become, and the deposits with no Well on them. */
+  /** The other cards, each as tall as it may become, and the deposits with no Drill on them. */
   cards: Box[];
   deposits: Box[];
   board: { w: number; h: number };
@@ -520,16 +520,16 @@ export function siteFor(spot: Pt, card: Footprint, other: Footprint, grid: numbe
   return { x: snap(spot.x + card.w / 2 - other.w / 2), y: snap(spot.y + card.h / 2 - other.h / 2) };
 }
 
-export interface Card { id: number; x: number; y: number; w: number; h: number; /** Height to keep clear for it (it may grow). */ room: number; /** A Well: it stays on its deposit. */ fixed: boolean }
+export interface Card { id: number; x: number; y: number; w: number; h: number; /** Height to keep clear for it (it may grow). */ room: number; /** A Drill: it stays on its deposit. */ fixed: boolean }
 
 /** True when two cards share any ground at all (touching edges do not count). */
 export const cardsOverlap = (a: Card, b: Card) => a.x < b.x + b.w && a.x + a.w > b.x && a.y < b.y + b.h && a.y + a.h > b.y;
 
 /**
  * Pull apart cards that rest on top of one another (a board from an old save, or one a script laid
- * out). Cards are taken in order: one that overlaps a card before it in the list, or a Well, has to move;
+ * out). Cards are taken in order: one that overlaps a card before it in the list, or a Drill, has to move;
  * every other card stays exactly where it is. Each card that has to move then goes to the nearest spot
- * clear of all the cards that stayed and of those already moved. Wells never move. Returns the new
+ * clear of all the cards that stayed and of those already moved. Drills never move. Returns the new
  * positions of the cards that moved; a board with no overlap comes back untouched.
  */
 export function separate(cards: Card[], deposits: Box[], board: { w: number; h: number }, grid: number): Map<number, Pt> {

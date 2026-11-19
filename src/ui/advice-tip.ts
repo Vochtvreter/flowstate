@@ -69,9 +69,9 @@ export const TIP = {
 
 const actOf = (a: Advice) => JSON.stringify([a.upgrade, a.all, a.wire, a.build, a.node, a.port, a.deposit, a.to, a.favour, a.research, a.cut, a.expand]);
 /**
- * Do these two ask for the same first move? The same action, or one that starts the same way: a Well on the same
- * deposit, the same machine built from the same port, the same wire, the same upgrade, the same cut. ("Place a Well on
- * the free Glint deposit, wired to a Lab" and "Place a Well on the free Glint deposit, then build a Lab from its port"
+ * Do these two ask for the same first move? The same action, or one that starts the same way: a Drill on the same
+ * deposit, the same machine built from the same port, the same wire, the same upgrade, the same cut. ("Place a Drill on
+ * the free Sand deposit, wired to a Lab" and "Place a Drill on the free Sand deposit, then build a Lab from its port"
  * are one voice: the second is not said as a tip while the first is the line.)
  */
 function sameMove(a: Advice, b: Advice): boolean {
@@ -110,7 +110,7 @@ let shownAct = '';
 /** The board when it was put there: to tell whether a change to the board was the tip being carried out. */
 let shownMark: Offered = { nextId: 0, level: 0, expansions: 0 };
 /**
- * A tip of two gestures ("place a Well on the free deposit, wired to the Lab") whose first has been done:
+ * A tip of two gestures ("place a Drill on the free deposit, wired to the Lab") whose first has been done:
  * the second (the wire), which Show me now shows. The row keeps its sentence. The adviser is quiet after
  * any change to the board, so it would not say the second half itself for 20 s.
  */
@@ -212,7 +212,7 @@ function leadText(a: Advice): string {
 
 /**
  * A tip's sentence and its price apart: the adviser writes the price into the sentence ("... buy Speed on
- * the Ember Well (50¢)."), and the row says it once, after the sentence.
+ * the Ore Drill (50¢)."), and the row says it once, after the sentence.
  */
 function priced(a: Advice): { text: string; price: string } {
   const text = sentence(a);

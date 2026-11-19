@@ -18,7 +18,7 @@ const saved = (g: Game) => {
   return o;
 };
 
-/** A one-Well line that is past the demo, with something queued and a little Data. */
+/** A one-Drill line that is past the demo, with something queued and a little Data. */
 function afterDemo(): Game {
   const g = fresh();
   g.techs = ['P1', 'R1'];
@@ -45,7 +45,7 @@ describe('time away (2.7 and section 7, bug 2)', () => {
 
   it('after the demo, pays half the live rate', () => {
     const g = afterDemo();
-    const rate = Math.pow(1.25, 3); // Market and Lab share the Well evenly
+    const rate = Math.pow(1.25, 3); // Market and Lab share the Drill evenly
     const before = { credits: g.credits, a: g.data.a, lifetime: g.lifetime };
     const gains = offlineGains(g, 3600);
     expect(gains.credits).toBeCloseTo(0.5 * (rate / 2) * 3600, -2);
@@ -116,7 +116,7 @@ describe('time away (2.7 and section 7, bug 2)', () => {
 });
 
 describe('the end of the demo (2.7)', () => {
-  it('the first Lens sets `ended` once, raises one event and records the time', () => {
+  it('the first Phone sets `ended` once, raises one event and records the time', () => {
     const g = rich();
     const m = market(g);
     const line = (deposit: number, y: number) => {
@@ -157,7 +157,7 @@ describe('the end of the demo (2.7)', () => {
     endDemo(g);
     expect(take(g, 'demo-end').length).toBe(0);
     expect(g.stats.firstLensAt).toBe(at);
-    // Claiming the Lens goal later does not end the demo a second time.
+    // Claiming the Phone goal later does not end the demo a second time.
     g.goal = { i: 21, ready: false };
     run(g, 0.1);
     expect(activeGoal(g)!.id).toBe('make-lens');
@@ -263,7 +263,7 @@ describe('loading saves', () => {
     expect(g.credits).toBeGreaterThan(321.5);
   });
 
-  it('an old save that already has a Lens is past the demo, without replaying the ending', () => {
+  it('an old save that already has a Phone is past the demo, without replaying the ending', () => {
     const raw = oldSave();
     (raw.made as Record<string, boolean>).lens = true;
     const g = deserialize(JSON.stringify(raw))!;
@@ -356,8 +356,8 @@ function midGame(): Game {
   const ink = line(3, 400);
   connect(g, ink.id, 1, placeNode(g, 'void', 700, 600)!.id);
   line(4, 540);
-  upgrade(g, g.nodes.find((n) => n.material === 'ember')!.id, 'speed'); // or the Spark Refiner is short of Ember and holds Flow back
-  for (let i = 0; i < 6; i++) upgrade(g, well(g).id, 'speed'); // the surplus Glint is sold over demand
+  upgrade(g, g.nodes.find((n) => n.material === 'ember')!.id, 'speed'); // or the Copper Refiner is short of Ore and holds Flow back
+  for (let i = 0; i < 6; i++) upgrade(g, well(g).id, 'speed'); // the surplus Sand is sold over demand
   connect(g, well(g).id, 0, m.id);
   g.flowOn = true;
   run(g, 40);
@@ -524,7 +524,7 @@ describe('damaged and old saves cannot poison the game', () => {
       delete raw.flowNear;
       return deserialize(JSON.stringify(raw))!;
     };
-    // 1. Saved in the wait for Ember Deposits with a tip on the card, and the card's own line ("study the Ink") not done.
+    // 1. Saved in the wait for Ore Deposits with a tip on the card, and the card's own line ("study the Plastic") not done.
     const g = rich();
     g.techs = ['P1', 'R1', 'P2'];
     g.credits = 300;
@@ -541,9 +541,9 @@ describe('damaged and old saves cannot poison the game', () => {
     g.goal = { i: GOALS.findIndex((x) => x.id === 'make-spark'), ready: false };
     run(g, 40);
     const pending = advice(g)!;
-    expect(pending.text.mouse).toBe('Place a Well on the free Glint deposit (13¢), wired to the Lab: 1 α each.');
+    expect(pending.text.mouse).toBe('Place a Drill on the free Sand deposit (13¢), wired to the Lab: 1 α each.');
     const step = lineAdvice(g)!;
-    expect(step.text.mouse).toBe('Wire the Ink Refiner\'s Ink port to the Lab: Ink is 3 α each in a Lab.');
+    expect(step.text.mouse).toBe('Wire the Refiner\'s Plastic port to the Lab: Plastic is 3 α each in a Lab.');
     const loaded = older(g);
     expect(loaded.edits).toEqual([]);
     run(loaded, 1);
@@ -552,13 +552,13 @@ describe('damaged and old saves cannot poison the game', () => {
     expect(again.text).toEqual(pending.text);
     expect(again.saves!).toBeGreaterThanOrEqual(15);
     // So is the card's own line for this goal, and its next step (which the tip never repeats).
-    expect(goalView(loaded)!.meanwhile).toEqual({ text: 'Drag from the Ink Refiner\'s Ink port to the Lab too: studied Ink is 3 α each.', done: false, step: 1, of: 2 });
+    expect(goalView(loaded)!.meanwhile).toEqual({ text: 'Drag from the Refiner\'s Plastic port to the Lab too: studied Plastic is 3 α each.', done: false, step: 1, of: 2 });
     const stepAgain = lineAdvice(loaded)!;
     expect(stepAgain.text).toEqual(step.text);
     expect(stepAgain.wire).toEqual(step.wire);
     expect(applyAdvice(loaded, stepAgain)).toBe(true);
-    // Done. (The card's second line, a Lab for a Glint Well that only sells, does not apply here: this board has
-    // no such Well. So the first stays on the card, ticked.)
+    // Done. (The card's second line, a Lab for a Sand Drill that only sells, does not apply here: this board has
+    // no such Drill. So the first stays on the card, ticked.)
     expect(goalView(loaded)!.meanwhile).toMatchObject({ done: true, step: 1, of: 2 });
     expect(lineAdvice(loaded)).toBeNull();
     expect(advice(loaded)).toBeNull(); // and now the adviser keeps quiet for a while, like in any game
@@ -571,7 +571,7 @@ describe('damaged and old saves cannot poison the game', () => {
     flow.flowHold = 0;
     flow.goal = { i: GOALS.findIndex((x) => x.id === 'hold-flow'), ready: false };
     const ember = flow.nodes.find((n) => n.material === 'ember')!;
-    const second = placeNode(flow, 'refiner', 400, 700, { recipe: 'spark' })!; // a second Spark Refiner on the one Ember Well: both go short
+    const second = placeNode(flow, 'refiner', 400, 700, { recipe: 'spark' })!; // a second Copper Refiner on the one Ore Drill: both go short
     connect(flow, ember.id, 0, second.id);
     connect(flow, second.id, 0, market(flow).id);
     run(flow, 60);
@@ -610,7 +610,7 @@ describe('damaged and old saves cannot poison the game', () => {
     finiteTotals(g);
   });
 
-  it('a board with no Well and no credits (possible in the old build) is given the price of one', () => {
+  it('a board with no Drill and no credits (possible in the old build) is given the price of one', () => {
     const raw = oldSave();
     raw.nodes = raw.nodes.filter((n) => n.type !== 'well');
     raw.credits = 0.4;
@@ -619,8 +619,8 @@ describe('damaged and old saves cannot poison the game', () => {
     const w = placeNode(g, 'well', 0, 0, { depositId: 1 });
     expect(w).not.toBeNull();
     expect(g.credits).toBe(0);
-    expect(deleteNode(g, w!.id)).toBe(false); // and from now on the last Well stays
-    // A board that has a Well is left alone, however poor.
+    expect(deleteNode(g, w!.id)).toBe(false); // and from now on the last Drill stays
+    // A board that has a Drill is left alone, however poor.
     const poor = deserialize(JSON.stringify({ ...oldSave(), credits: 0.4 }))!;
     expect(poor.credits).toBe(0.4);
   });

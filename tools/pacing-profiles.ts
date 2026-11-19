@@ -88,7 +88,7 @@ export const PROFILES: Record<string, Profile> = {
 
   /** Example: how much of the curve do the Data prices of the Processing spine carry? */
   'cheap-spine': {
-    describe: 'Assembly, Breeze Deposits and Fabrication at half their Data price.',
+    describe: 'Assembly, Quartz Deposits and Fabrication at half their Data price.',
     apply() {
       for (const id of ['P4', 'P5', 'P7']) {
         const c = TECHS[id].cost;

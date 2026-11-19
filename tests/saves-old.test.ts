@@ -30,13 +30,13 @@ describe('a save from the public version', () => {
     expect(refunded).toBeGreaterThan(0);
   });
 
-  it('a Well with Speed 10 bought there refunds what it cost there (it refunded ten times as much)', () => {
+  it('a Drill with Speed 10 bought there refunds what it cost there (it refunded ten times as much)', () => {
     clearHistory();
     const g = deserialize(PUBLIC_WELL_SPEED_10)!;
     const n = g.nodes.find((x) => x.id === PUBLIC_WELL_ID)!;
     const paid = JSON.parse(PUBLIC_WELL_SPEED_10).nodes.find((x: { id: number }) => x.id === PUBLIC_WELL_ID).paid;
     expect(n.lv.speed).toBe(10);
-    expect(paid).toBeGreaterThanOrEqual(PUBLIC_WELL_PAID); // the Well itself, and its ten levels
+    expect(paid).toBeGreaterThanOrEqual(PUBLIC_WELL_PAID); // the Drill itself, and its ten levels
     expect(n.legacyPaid).toBe(paid);
     const c0 = g.credits;
     deleteNode(g, n.id);
@@ -46,7 +46,7 @@ describe('a save from the public version', () => {
     clearHistory();
     const h = deserialize(PUBLIC_WELL_SPEED_10)!;
     h.credits = 1e6;
-    // (The first Well of that board: the second one is at the top level already.)
+    // (The first Drill of that board: the second one is at the top level already.)
     const m = h.nodes.find((x) => x.type === 'well' && x.id !== PUBLIC_WELL_ID)!;
     const was = m.legacyPaid!;
     const price = upgradeCost(m, 'speed');
@@ -62,7 +62,7 @@ describe('a save from the public version', () => {
     expect(refundOf(again, fresh)).toBe(fresh.paid);
   });
 
-  it('loads, and a player who does what the cards say plays it to the Lens: no goal stands for good', () => {
+  it('loads, and a player who does what the cards say plays it to the Phone: no goal stands for good', () => {
     clearHistory();
     const g = deserialize(PUBLIC_BOARD)!;
     const log: string[] = [];
@@ -96,7 +96,7 @@ describe('a save from the public version', () => {
 
 /**
  * The gestures of the hints a board from the public version still needs (the rest of its goals are met on
- * arrival): a Router toward the Lab, the board's expansion, Glyph into a
+ * arrival): a Router toward the Lab, the board's expansion, Circuit into a
  * Lab, Fabrication and the Fabricator, the Fabricator fed, and one press of Upgrade all. True if one was made.
  */
 function hint(g: Game): boolean {
@@ -163,7 +163,7 @@ const DAMAGE: Record<string, Mut> = {
   'wire tier 9 (no such pipe)': (s) => { s.wires[0].tier = 9; },
   'wire port 5 on a one-port machine': (s) => { const w = s.wires.find((x: { from: number }) => s.nodes.find((n: { id: number }) => n.id === x.from).type === 'refiner'); w.port = 5; },
   'two nodes with the same id': (s) => { s.nodes.push({ ...s.nodes.find((n: { type: string }) => n.type === 'refiner'), x: 900, y: 900 }); },
-  'two Wells on one deposit': (s) => { const w = s.nodes.find((n: { type: string }) => n.type === 'well'); s.nodes.push({ ...w, id: 998 }); },
+  'two Drills on one deposit': (s) => { const w = s.nodes.find((n: { type: string }) => n.type === 'well'); s.nodes.push({ ...w, id: 998 }); },
   'stats missing': (s) => { delete s.stats; },
   'goal.i a string': (s) => { s.goal = { i: '3', ready: false }; },
   'paused true and savedAt in the future': (s) => { s.paused = true; s.savedAt = Date.now() + 1e10; },

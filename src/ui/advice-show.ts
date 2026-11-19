@@ -103,7 +103,7 @@ export const offeredAt = (g: Game, a: Advice): Offered => ({ nextId: g.nextId, l
 
 /**
  * Has the player done what this tip says, on the board as it is now? 'done': all of it. 'half': a tip of two
- * gestures ("place a Well on the free deposit, wired to the Lab") whose first has been done; `built` is the
+ * gestures ("place a Drill on the free deposit, wired to the Lab") whose first has been done; `built` is the
  * node that now stands and still has to be wired to the tip's `to`. null: not (yet).
  */
 export function carriedOut(g: Game, a: Advice, o: Offered): { state: 'done' | 'half'; built?: number } | null {
@@ -400,14 +400,14 @@ const SHEET_IN = 320;
 //
 // The nodes the goal's hint or line is about (goalFocus in src/goals.ts) are brought into view, if any of them is off
 // screen or covered, at these moments: when a goal comes up; when what it is saving for is saved (the card turns
-// "Saved": the hint is what to do now, and at goal 21 the Prism Assembler it names could be half a screen away); and
+// "Saved": the hint is what to do now, and at goal 21 the Screen Assembler it names could be half a screen away); and
 // after the tech tree has closed. Through the board's frameNodes, which moves the camera as little as it can. Where
-// the goal names no node but a place (a Well on the Murk deposit: goalDeposit in src/goals.ts, or the line's deposit,
+// the goal names no node but a place (a Drill on the Oil deposit: goalDeposit in src/goals.ts, or the line's deposit,
 // lineSpot in src/advice.ts), that deposit is brought into view instead, with the board's frameBoxes; and right after
 // a research that has opened up the deposit the goal names, that deposit is what is brought in.
 //
 // Closing a sheet (the inspector, the build sheet) leaves the camera where it is: the player opened it on something,
-// and that is where they are looking (the camera glided away from the Ember Well the alert had shown).
+// and that is where they are looking (the camera glided away from the Ore Drill the alert had shown).
 // The one exception is a look that came due while the sheet was up: it was put off, and runs once the sheet has gone.
 //
 // Never while the player is in the middle of something on the board (a drag, a pinch, an armed port, a node being
@@ -436,7 +436,7 @@ let treeSeen = false;
 let focusDue = 0;
 /**
  * What the look is for: a goal that came up (the overview is no view of its ports); a goal that turned "Saved" (the
- * same, except that where the hint's own step is a Well on a deposit, that deposit comes first); a research that opened
+ * same, except that where the hint's own step is a Drill on a deposit, that deposit comes first); a research that opened
  * up the deposit the goal names ('deposit': that deposit, before the goal's nodes); or the tree that closed.
  */
 let focusFor: 'goal' | 'saved' | 'deposit' | 'tree' = 'goal';
@@ -558,7 +558,7 @@ function openDepositMats(g: Game): string {
 }
 
 /**
- * The free deposit the goal names for a Well, if any: the hint's own (goalDeposit: "Place a Well on the Murk deposit"),
+ * The free deposit the goal names for a Drill, if any: the hint's own (goalDeposit: "Place a Drill on the Oil deposit"),
  * else the one the card's line wants next (lineSpot). With `hintOnly`, the hint's or none.
  */
 function namedDeposit(g: Game, hintOnly = false): Deposit | null {
@@ -640,7 +640,7 @@ export function tendFocus(g: Game) {
   if (g.techs.length !== techsSeen || g.deposits.length !== depositsSeen) {
     const mats = openDepositMats(g);
     const researched = techsSeen >= 0 && g.techs.length !== techsSeen && g.deposits.length === depositsSeen;
-    // (Only when the research opened up the very deposit the goal names: one it does not name, say Breeze researched
+    // (Only when the research opened up the very deposit the goal names: one it does not name, say Quartz researched
     // early at goal 16, is no reason to move the camera, and a 'deposit' look would outrank the tree's own, which leaves
     // an overview the player chose alone.)
     const fresh = researched ? mats.split(',').filter((m) => m && !depositMats.split(',').includes(m)) : [];
@@ -669,7 +669,7 @@ export function tendFocus(g: Game) {
   focusDue = 0;
   const busy = radialOpen() ? 'the build menu is up' : gestureActive() ? 'a gesture' : armedPort() ? 'a port is armed' : ui.placing ? 'placing' : '';
   // What to bring in: the goal's nodes; where it names no node, the deposit it names. Straight after a research that
-  // opened up that deposit, the deposit first; and when the credits are saved for a Well the hint puts on a deposit,
+  // opened up that deposit, the deposit first; and when the credits are saved for a Drill the hint puts on a deposit,
   // that deposit first (the line's nodes, which the card points at while it waits, are not what the credits are for).
   const first = focusFor === 'deposit' ? namedDeposit(g) : focusFor === 'saved' ? namedDeposit(g, true) : null;
   const ids = first ? [] : goalFocus(g);

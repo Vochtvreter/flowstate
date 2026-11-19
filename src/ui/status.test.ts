@@ -13,7 +13,7 @@ const run = (g: Game, seconds: number) => {
   for (let i = 0; i < seconds * 20; i++) tick(g, 0.05);
 };
 
-/** The opening board: a Well and a Market, two nodes the alert could name (what it says is made up here). */
+/** The opening board: a Drill and a Market, two nodes the alert could name (what it says is made up here). */
 function twoOpenWells(): { g: Game; a: GNode; b: GNode } {
   clearHistory();
   const g = newGame();
@@ -85,11 +85,11 @@ describe('the alert names the node the goal is about first', () => {
     expect(alertPick(g, a.id, aOnly, [b.id])?.n.id).toBe(a.id);
   });
 
-  it('where the goal names no node, the card is about the kinds its hint names (goal 3: the new Well)', () => {
+  it('where the goal names no node, the card is about the kinds its hint names (goal 3: the new Drill)', () => {
     const { g, a, b } = twoOpenWells();
     g.goal = { i: GOALS.findIndex((x) => x.id === 'wire-all-wells'), ready: false };
     g.goalAt = { i: g.goal.i, t: g.time };
-    // "Drag from the new Well's port to the same Market": nothing is said about a Well or that Market at first.
+    // "Drag from the new Drill's port to the same Market": nothing is said about a Drill or that Market at first.
     expect(alertPick(g, -1, says, [])).toBeNull();
     g.goalAt = { i: g.goal.i, t: g.time - ALERT_QUIET - 1 };
     expect([a.id, b.id]).toContain(alertPick(g, -1, says, [])?.n.id);
@@ -97,7 +97,7 @@ describe('the alert names the node the goal is about first', () => {
 });
 
 describe('starved means starved', () => {
-  /** A Shard Refiner fed by the opening Glint Well; the simulation is not run: their states are set by hand. */
+  /** A Glass Refiner fed by the opening Sand Drill; the simulation is not run: their states are set by hand. */
   function refinerFedByWell(): { g: Game; well: GNode; ref: GNode } {
     clearHistory();
     const g = newGame();
@@ -168,7 +168,7 @@ describe('starved means starved', () => {
     const { g, well, ref } = refinerFedByWell();
     g.goalAt = { i: g.goal.i, t: g.time - ALERT_QUIET - 1 };
     ref.util = 0.8;
-    // Something else is in trouble (say, a Well with nowhere to send its output): not named while the card's own
+    // Something else is in trouble (say, a Drill with nowhere to send its output): not named while the card's own
     // machine is short; named once the card is about something that runs.
     const words = (n: GNode) => (n.id === well.id ? 'trouble' : null);
     expect(alertPick(g, -1, words, [ref.id])).toBeNull();
@@ -179,7 +179,7 @@ describe('starved means starved', () => {
   it('a machine downstream of one that is merely short is starved itself, not a victim', () => {
     const { g, ref } = refinerFedByWell();
     ref.util = 0.8;
-    // (Glyph takes Ink and Spark; here only its Spark matters, and the Refiner is said to make it.)
+    // (Circuit takes Plastic and Copper; here only its Copper matters, and the Refiner is said to make it.)
     const asm = placeNode(g, 'assembler', 900, 520, { recipe: 'glyph' })!;
     ref.recipe = 'spark';
     connect(g, ref.id, 0, asm.id);
@@ -200,7 +200,7 @@ describe('starved means starved', () => {
 });
 
 describe('the ending: the board is the victory picture', () => {
-  it('shows no trouble on any node between the first Lens and free play', () => {
+  it('shows no trouble on any node between the first Phone and free play', () => {
     clearHistory();
     const g = newGame();
     g.credits = 1e9;
@@ -209,7 +209,7 @@ describe('the ending: the board is the victory picture', () => {
     const glyph = placeNode(g, 'assembler', 300, 200, { recipe: 'glyph' })!;
     connect(g, glyph.id, 0, fab.id);
     run(g, 1);
-    // Starved of Glyph (as the simulation would have it after a first Lens): said, while the demo is still on.
+    // Starved of Circuit (as the simulation would have it after a first Phone): said, while the demo is still on.
     expect(fab.recipe).toBe('lens');
     fab.status = 'starved';
     fab.missing = 'glyph';
@@ -217,7 +217,7 @@ describe('the ending: the board is the victory picture', () => {
     fab.status = 'blocked';
     fab.blockedOn = 'lens';
     expect(diagnose(g, fab).problem).toBe('blocked');
-    // A machine that feeds it, starved too (the Mist Refiner at the victory frame).
+    // A machine that feeds it, starved too (the Silicon Refiner at the victory frame).
     glyph.status = 'starved';
     glyph.missing = 'spark';
     expect(diagnose(g, glyph).problem).toBe('starved');
@@ -234,7 +234,7 @@ describe('the ending: the board is the victory picture', () => {
 });
 
 describe('a blocked node: the way on', () => {
-  /** The opening Glint Well one Speed level up (1.25 a second), with everything researched that these boards need. */
+  /** The opening Sand Drill one Speed level up (1.25 a second), with everything researched that these boards need. */
   function fastWell(): { g: Game; well: GNode } {
     clearHistory();
     const g = newGame();
@@ -245,7 +245,7 @@ describe('a blocked node: the way on', () => {
     return { g, well };
   }
 
-  it('a Well that feeds a Lab studying as fast as it can: Speed on that Lab, and it works', () => {
+  it('a Drill that feeds a Lab studying as fast as it can: Speed on that Lab, and it works', () => {
     const { g, well } = fastWell();
     const lab = placeNode(g, 'lab', 500, 120)!;
     connect(g, well.id, 0, lab.id);
@@ -255,14 +255,14 @@ describe('a blocked node: the way on', () => {
     expect(dx.openPort).toBe(false);
     expect(dx.culprit).toBeNull();
     expect(wayOn(g, well, dx)).toEqual({ node: lab.id, speed: true, waits: null });
-    // The press the box offers: the Lab takes all the Well gives, and nothing is blocked any more.
+    // The press the box offers: the Lab takes all the Drill gives, and nothing is blocked any more.
     expect(upgrade(g, lab.id, 'speed')).toBe(true);
     run(g, 30);
     expect(diagnose(g, well).problem).toBeNull();
     expect(wayOn(g, well)).toBeNull();
   });
 
-  it('a Well that feeds a Refiner at full speed: Speed on that Refiner', () => {
+  it('a Drill that feeds a Refiner at full speed: Speed on that Refiner', () => {
     const { g, well } = fastWell();
     const ref = placeNode(g, 'refiner', 500, 120, { recipe: 'shard' })!;
     const market = g.nodes.find((n) => n.type === 'market')!;
@@ -276,7 +276,7 @@ describe('a blocked node: the way on', () => {
 
   it('a machine downstream that is in trouble itself stays the cause to jump to: nothing else is offered', () => {
     const { g, well } = fastWell();
-    // (A Refiner with nowhere to send its Shard fills up and stops.)
+    // (A Refiner with nowhere to send its Glass fills up and stops.)
     const ref = placeNode(g, 'refiner', 500, 120, { recipe: 'shard' })!;
     connect(g, well.id, 0, ref.id);
     run(g, 40);
@@ -305,7 +305,7 @@ describe('a blocked node: the way on', () => {
     connect(g, well.id, 0, router.id);
     connect(g, router.id, 0, lab.id);
     connect(g, router.id, 0, ref.id);
-    // (States set by hand, as elsewhere in this file: both take all they can, and the Well backs up.)
+    // (States set by hand, as elsewhere in this file: both take all they can, and the Drill backs up.)
     well.status = 'blocked';
     well.blockedOn = 'glint';
     lab.rate = 1;
@@ -348,7 +348,7 @@ describe('a blocked node: the way on', () => {
     run(g, 30);
     expect(wayOn(g, well)).toEqual({ node: lab.id, speed: true, waits: null });
     expect(upgrade(g, lab.id, 'speed')).toBe(true);
-    // The Well is still called blocked while its output drains; the Lab has not reached its new rate yet.
+    // The Drill is still called blocked while its output drains; the Lab has not reached its new rate yet.
     const said: string[] = [];
     for (let i = 0; i < 40 && diagnose(g, well).problem === 'blocked'; i++) {
       const on = wayOn(g, well)!;
@@ -397,7 +397,7 @@ describe('a blocked node: the way on', () => {
 });
 
 describe('"Upgrade all": what one press would buy', () => {
-  /** Four Wells at levels 0, 0, 1 and 2 (their next levels cost 50, 50, 80 and 128). */
+  /** Four Drills at levels 0, 0, 1 and 2 (their next levels cost 50, 50, 80 and 128). */
   function wells(credits: number): Game {
     clearHistory();
     const g = newGame();
@@ -436,7 +436,7 @@ describe('"Upgrade all": what one press would buy', () => {
     const top = g.nodes.filter((n) => n.type === 'well')[3];
     top.lv.speed = maxLevel(g, 'speed');
     expect(bulkPlan(g, 'well', 'speed')).toEqual({ count: 3, of: 3, cost: 180, total: 180 });
-    // (Efficiency is not a Well's track at all.)
+    // (Efficiency is not a Drill's track at all.)
     expect(bulkPlan(g, 'well', 'eff')).toEqual({ count: 0, of: 0, cost: 0, total: 0 });
   });
 });

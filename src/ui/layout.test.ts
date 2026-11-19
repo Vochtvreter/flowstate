@@ -48,7 +48,7 @@ function drawnBehind(input: TidyInput, moved?: Map<number, Pt>): number {
   }
   return hits;
 }
-/** A random factory: a column of Wells, and cards scattered over the plot, each fed by a Well or by a card before it. */
+/** A random factory: a column of Drills, and cards scattered over the plot, each fed by a Drill or by a card before it. */
 function factory(r: () => number): TidyInput {
   const nodes: TidyNode[] = [];
   const wells = 2 + Math.floor(r() * 4);
@@ -56,7 +56,7 @@ function factory(r: () => number): TidyInput {
   const count = 4 + Math.floor(r() * 14);
   for (let i = 0; i < count; i++) nodes.push(card(10 + i, 300 + Math.round(r() * 55) * 20, 40 + Math.round(r() * 30) * 20, false, r() < 0.2 ? 136 : 172, [60, 72, 92][Math.floor(r() * 3)]));
   const wires: TidyWire[] = [];
-  // Every card is fed by a Well or by a card before it; a few get a second feed.
+  // Every card is fed by a Drill or by a card before it; a few get a second feed.
   for (let i = 0; i < count; i++) {
     const feeds = 1 + (r() < 0.3 ? 1 : 0);
     for (let k = 0; k < feeds; k++) {
@@ -69,7 +69,7 @@ function factory(r: () => number): TidyInput {
 
 describe('boardStats: the board in numbers', () => {
   it('counts a pair of wires that cross, once', () => {
-    // Two Wells, two Markets, wired crosswise.
+    // Two Drills, two Markets, wired crosswise.
     const crossed = board([card(1, 100, 100, true), card(2, 100, 300, true), card(3, 500, 100), card(4, 500, 300)], [wire(1, 4), wire(2, 3)]);
     expect(boardStats(crossed).crossings).toBe(1);
     const straight = board(crossed.nodes, [wire(1, 3), wire(2, 4)]);
@@ -140,7 +140,7 @@ describe('boardStats: the board in numbers', () => {
 });
 
 describe('tidy', () => {
-  it('uncrosses two wires by moving the cards, not the Wells', () => {
+  it('uncrosses two wires by moving the cards, not the Drills', () => {
     const b = board([card(1, 100, 100, true), card(2, 100, 300, true), card(3, 500, 100), card(4, 500, 300)], [wire(1, 4), wire(2, 3)]);
     const r = after(b);
     expect(r.stats.crossings).toBe(0);
@@ -149,8 +149,8 @@ describe('tidy', () => {
     expect(r.stats.length).toBeLessThan(boardStats(b).length);
   });
 
-  it('brings a card that sits behind its Well round to the front of it', () => {
-    // The Market is to the left of the Well that feeds it: the wire has to loop back.
+  it('brings a card that sits behind its Drill round to the front of it', () => {
+    // The Market is to the left of the Drill that feeds it: the wire has to loop back.
     const b = board([card(1, 600, 300, true), card(2, 200, 300)], [wire(1, 2)]);
     expect(boardStats(b).backward).toBe(1);
     const r = after(b);
@@ -188,9 +188,9 @@ describe('tidy', () => {
     expect(r.moved.size).toBeGreaterThan(0);
   });
 
-  it('a Well that feeds a Refiner and a Market: the Refiner does not stay level with the Well, in the way of the wire to the Market', () => {
-    // As plain columns lay it out: the Refiner level with its Well and 68 px away, the Market in the next column.
-    // The wire from the Well to the Market leaves the same port level, and runs straight through the Refiner.
+  it('a Drill that feeds a Refiner and a Market: the Refiner does not stay level with the Drill, in the way of the wire to the Market', () => {
+    // As plain columns lay it out: the Refiner level with its Drill and 68 px away, the Market in the next column.
+    // The wire from the Drill to the Market leaves the same port level, and runs straight through the Refiner.
     const b = board(
       [card(1, 100, 120, true), card(2, 100, 260, true), card(3, 340, 120), card(4, 580, 220)],
       [wire(1, 3), wire(1, 4), wire(2, 4), wire(3, 4)],
@@ -204,9 +204,9 @@ describe('tidy', () => {
     expect(r.moved.has(1) || r.moved.has(2)).toBe(false);
   });
 
-  it('a Well in the middle of the plot whose wire crosses a card: the card it feeds, or the card in the way, moves', () => {
-    // Wells 1 and 2 on the left; Well 3 on a deposit further in, below. The Refiner it feeds (6) was put up
-    // and to the left of it, so its wire loops back across the Refiner of Well 2 (5), which stands between.
+  it('a Drill in the middle of the plot whose wire crosses a card: the card it feeds, or the card in the way, moves', () => {
+    // Drills 1 and 2 on the left; Drill 3 on a deposit further in, below. The Refiner it feeds (6) was put up
+    // and to the left of it, so its wire loops back across the Refiner of Drill 2 (5), which stands between.
     const b = board(
       [card(1, 100, 120, true), card(2, 100, 400, true), card(3, 380, 620, true), card(4, 340, 120), card(5, 340, 470, false, 172, 92), card(6, 340, 340), card(7, 820, 420)],
       [wire(1, 4), wire(2, 5), wire(3, 6), wire(4, 7), wire(5, 7), wire(6, 7)],
@@ -220,7 +220,7 @@ describe('tidy', () => {
   });
 
   it('does not call a board tidy while a wire runs behind a card, however short its wires are', () => {
-    // A Well, its Refiner and the Market in one row: no layout has less wire. But the wire from the Well to the
+    // A Drill, its Refiner and the Market in one row: no layout has less wire. But the wire from the Drill to the
     // Market runs behind the Refiner. Bringing it out costs wire, and is done all the same.
     const b = board([card(1, 100, 120, true), card(2, 340, 120), card(3, 580, 120)], [wire(1, 2), wire(1, 3), wire(2, 3)]);
     const s0 = boardStats(b);
@@ -234,8 +234,8 @@ describe('tidy', () => {
   });
 
   it('where no wire can come out from behind a card, never adds crossings or wire', () => {
-    // Two Wells, side by side, each wired to the Market beyond the other: nothing but the Market can move,
-    // and wherever it stands one wire crosses the other Well.
+    // Two Drills, side by side, each wired to the Market beyond the other: nothing but the Market can move,
+    // and wherever it stands one wire crosses the other Drill.
     const b = board([card(1, 100, 300, true), card(2, 340, 300, true), card(3, 900, 600)], [wire(1, 3), wire(2, 3)]);
     const s0 = boardStats(b);
     const r = after(b);
@@ -247,7 +247,7 @@ describe('tidy', () => {
     expect(r.moved.has(1) || r.moved.has(2)).toBe(false);
   });
 
-  it('on 30 random factories: no overlap, no Well moved, no wire left behind a card, and never worse than the board it was given', () => {
+  it('on 30 random factories: no overlap, no Drill moved, no wire left behind a card, and never worse than the board it was given', () => {
     const r = rng(5);
     let before = 0, afterC = 0, behind = 0;
     for (let n = 0; n < 30; n++) {
@@ -288,18 +288,18 @@ describe('tidy', () => {
     }
   }, 120000);
 
-  it('reads a real game: cards with their sizes, wires with their ports, and Wells that stay put', () => {
+  it('reads a real game: cards with their sizes, wires with their ports, and Drills that stay put', () => {
     const g = newGame();
     g.credits = 1e6;
     const well = g.nodes.find((n) => n.type === 'well')!;
-    // A second Market, behind the Well, with a wire that has to loop back to it.
+    // A second Market, behind the Drill, with a wire that has to loop back to it.
     const m2 = placeNode(g, 'market', 100, 400)!;
     connect(g, well.id, 0, m2.id);
     const input = tidyInput(g, GRID);
     expect(input.nodes).toHaveLength(g.nodes.length);
     expect(input.nodes.find((n) => n.id === well.id)!.fixed).toBe(true);
     expect(input.wires).toEqual([{ from: well.id, to: m2.id, ay: 36, by: 36 }]);
-    // Four deposits have no Well on them.
+    // Four deposits have no Drill on them.
     expect(input.deposits).toHaveLength(g.deposits.length - 1);
     const moved = tidy(input);
     expect(moved.has(well.id)).toBe(false);

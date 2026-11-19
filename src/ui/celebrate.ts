@@ -1,9 +1,9 @@
-// The big moments: first Shard, the Lab, first Spark, first Glyph, the first Flow State, first Prism
-// and the first Lens: one every three to four minutes of a first game.
-// Each gets a colour wash, a card in the middle of the screen, particles and a fanfare. Shard, Lab,
-// Glyph and Lens are each bigger than the one before; Spark and Prism are the Shard's size, each with
-// a motif of its own in its material's shape and colour. The Lens is also the end of the demo: the
-// moment it is made the factory takes a bow (a pulse runs along the wires from the Wells to the Lens,
+// The big moments: first Glass, the Lab, first Copper, first Circuit, the first Flow State, first Screen
+// and the first Phone: one every three to four minutes of a first game.
+// Each gets a colour wash, a card in the middle of the screen, particles and a fanfare. Glass, Lab,
+// Circuit and Phone are each bigger than the one before; Copper and Screen are the Glass's size, each with
+// a motif of its own in its material's shape and colour. The Phone is also the end of the demo: the
+// moment it is made the factory takes a bow (a pulse runs along the wires from the Drills to the Phone,
 // lighting each card it passes) and then its card comes up.
 //
 // A press anywhere sends a celebration on its way (the reward flies at once and the card leaves).
@@ -11,8 +11,8 @@
 // on a phone the board under the card would otherwise take it as a tap on a node or a wire and open
 // the inspector over half the screen. Everywhere else (the wash, the space around the card) ignores
 // the pointer, so a press there lands on the game underneath as well. Everything added to the page
-// is taken out again when it ends. The four that follow a claim are over in about 2.5 s; the Lens,
-// bow and all, stays until the summary screen opens 6.5 s after the Lens is made, and leaves with it.
+// is taken out again when it ends. The four that follow a claim are over in about 2.5 s; the Phone,
+// bow and all, stays until the summary screen opens 6.5 s after the Phone is made, and leaves with it.
 import { DATA_COLORS, MATERIALS, MatId, NODE_DEFS, NodeType, RULES, TECHS } from '../content';
 import { recipeOf } from '../economy';
 import { GOALS } from '../goals';
@@ -57,7 +57,7 @@ interface Spec {
   /** Runs when it ends, however it ends. */
   done?: () => void;
   /**
-   * The Lens at the end of the demo: no press or key sends it away (a press on the card itself still
+   * The Phone at the end of the demo: no press or key sends it away (a press on the card itself still
    * goes no further), and it leaves when the summary screen opens, as the summary fades in over it.
    */
   holds?: boolean;
@@ -72,7 +72,7 @@ const MIN_SHOWN_MS = 400;
 /** How far the middle of the glyph is above the middle of the card, in px, for each size of card. */
 const GLYPH_RISE: Record<CardKind, number> = { shard: 36, lab: 37, spark: 36, glyph: 41, flow: 36, prism: 36, lens: 47, note: 38 };
 const OUT_MS = 320;
-/** How long the dots hold still under the Lens card, which stays until the summary (see start). */
+/** How long the dots hold still under the Phone card, which stays until the summary (see start). */
 const LENS_HOLD_MS = 1500;
 
 let app: HTMLElement;
@@ -132,7 +132,7 @@ export function initCelebrate(hooks: { record: typeof record; payout: typeof pay
     e.preventDefault();
     e.stopPropagation();
   }, true);
-  // The summary screen is never shared with a celebration for long. The Lens card is waiting for it: it
+  // The summary screen is never shared with a celebration for long. The Phone card is waiting for it: it
   // leaves as the summary fades in over it (the two take about the same 0.3 s). Anything else still up
   // when the summary opens (a page that was held up: a background tab, a long frame) is taken down on
   // the spot.
@@ -209,7 +209,7 @@ function start(spec: Spec) {
   // A big card covers the middle of the board: the dots there hold still until it has gone, which saves
   // redrawing the whole board layer while the card, its wash and its sparks are on screen. Not under the
   // Flow State card, whose news is that everything is running flat out (it has no sparks and costs
-  // little). The Lens card stays for five seconds or more, until the summary: there they hold for its
+  // little). The Phone card stays for five seconds or more, until the summary: there they hold for its
   // opening only, as a factory standing still that long at its finest moment reads as one that has stopped.
   if (!small && spec.kind !== 'flow') {
     holdFlows(true);
@@ -256,7 +256,7 @@ function swallow(e: Event) {
 /**
  * How long the colour wash lasts, in ms: as long as the card for the short ones, but never more than
  * WASH_MAX. A wash is a large see-through layer whose opacity changes on every frame, and the browser
- * has to blend it over the board for as long as it does; the Lens card stays up for three seconds and
+ * has to blend it over the board for as long as it does; the Phone card stays up for three seconds and
  * more, and a wash that lasted with it cost a fifth of the frame rate under the CPU throttle. A flash
  * that fades in a second and a half says the same. (The Flow State wash breathes for the whole of its card:
  * that slow swell is the point of it, and its card is short.)
@@ -350,15 +350,15 @@ function later(ms: number, fn: () => void) {
 }
 
 /**
- * A big goal was claimed. (The Lens is usually celebrated before its goal is claimed, by celebrateEnd()
- * at the moment it is made; feel.ts only sends the Lens goal here when that did not happen this session.)
+ * A big goal was claimed. (The Phone is usually celebrated before its goal is claimed, by celebrateEnd()
+ * at the moment it is made; feel.ts only sends the Phone goal here when that did not happen this session.)
  */
 export function celebrateGoal(goalId: string, reward: GoalReward) {
   const line = openedText(reward);
   switch (goalId) {
     case 'sell-shard':
       return start({
-        kind: 'shard', title: 'First Shard', line, glyph: matGlyph('shard', 64), color: MATERIALS.shard.color,
+        kind: 'shard', title: 'First Glass', line, glyph: matGlyph('shard', 64), color: MATERIALS.shard.color,
         life: 1600, show: sparks(22, 1.5, 'hexagon'), reward, payAt: 640,
       });
     case 'feed-lab':
@@ -369,27 +369,27 @@ export function celebrateGoal(goalId: string, reward: GoalReward) {
     case 'make-spark':
       // (This goal also switches Orders on, and no toast says so: the line under the title does.)
       return start({
-        kind: 'spark', title: 'First Spark', line, glyph: matGlyph('spark', 64), color: MATERIALS.spark.color,
+        kind: 'spark', title: 'First Copper', line, glyph: matGlyph('spark', 64), color: MATERIALS.spark.color,
         life: 1750, show: ignite, reward, payAt: 760,
         // The order chip has just appeared beside the goal card: one ring closes on it as the card goes.
         leaving: reward.unlock === 'orders' ? () => leadTo('order', '#order', MATERIALS.spark.color) : undefined,
       });
     case 'make-prism':
       return start({
-        kind: 'prism', title: 'First Prism', line, glyph: matGlyph('prism', 64), color: MATERIALS.prism.color,
+        kind: 'prism', title: 'First Screen', line, glyph: matGlyph('prism', 64), color: MATERIALS.prism.color,
         life: 1950, show: refract, reward, payAt: 980,
       });
     case 'make-glyph':
       return start({
-        kind: 'glyph', title: 'First Glyph', line, glyph: matGlyph('glyph', 72), color: MATERIALS.glyph.color,
+        kind: 'glyph', title: 'First Circuit', line, glyph: matGlyph('glyph', 72), color: MATERIALS.glyph.color,
         life: 2200, show: converge, reward, payAt: 1150,
       });
     case 'make-lens':
-      // (A Lens made in an earlier session: no summary is on its way, so the card keeps its own time.)
+      // (A Phone made in an earlier session: no summary is on its way, so the card keeps its own time.)
       return lensCard(reduced() ? 4500 : 2600, false);
     default: {
       // A big goal this file has not met: celebrate it at the smallest size, with the goal's own words
-      // (the Shard's fanfare and sparks, in gold, under a star).
+      // (the Glass's fanfare and sparks, in gold, under a star).
       const goal = GOALS.find((x) => x.id === goalId);
       return start({
         kind: 'shard', title: goal?.title ?? 'Goal complete', line, glyph: '<span class="cel-star">★</span>', color: '#FFC857',
@@ -399,7 +399,7 @@ export function celebrateGoal(goalId: string, reward: GoalReward) {
   }
 }
 
-/** First Spark: it crackles twice beside the glyph, and then it strikes. Four-pointed sparks, in the Spark's red. */
+/** First Copper: it crackles twice beside the glyph, and then it strikes. Four-pointed sparks, in the Copper's red. */
 function ignite(at: Pt, spec: Spec) {
   [0, 70].forEach((ms, i) => later(ms, () => {
     const a = Math.random() * Math.PI * 2, d = 36 + Math.random() * 20;
@@ -413,11 +413,11 @@ function ignite(at: Pt, spec: Spec) {
   });
 }
 
-/** The colours a Prism splits light into, red to violet, each from a material of that colour. */
+/** The colours a Screen splits light into, red to violet, each from a material of that colour. */
 const SPECTRUM = ['spark', 'ember', 'glint', 'shard', 'breeze', 'ink', 'murk'] as const;
 
 /**
- * First Prism: a ray of white comes in from the left, and leaves on the right as a fan of seven colours. Diamonds, as Prism is on the wires.
+ * First Screen: a ray of white comes in from the left, and leaves on the right as a fan of seven colours. Diamonds, as Screen is on the wires.
  * (On the flat card of a short screen the words are to the right of the glyph: there the fan opens upward and downward instead, clear of them.)
  */
 function refract(at: Pt, spec: Spec) {
@@ -462,7 +462,7 @@ function leadTo(anchor: string, selector: string, color: string) {
   }, LEAD_MS + 60);
 }
 
-/** First Glyph: two streams, Ink from the left and Spark from the right, run into the glyph and set it off. */
+/** First Circuit: two streams, Plastic from the left and Copper from the right, run into the glyph and set it off. */
 function converge(at: Pt, spec: Spec) {
   const reach = Math.min(window.innerWidth * 0.46, 520);
   const left = { x: at.x - reach, y: at.y + 30 }, right = { x: at.x + reach, y: at.y - 30 };
@@ -493,7 +493,7 @@ function techLook(id: string): { glyph: string; color: string } {
   return { glyph: icon('tree', 46), color: DATA_COLORS.a };
 }
 
-/** What a tech opens up, in a line: "Murk Wells and Void unlocked", or its first new recipe when that is all it brings. */
+/** What a tech opens up, in a line: "Oil Drills and Dump unlocked", or its first new recipe when that is all it brings. */
 export function researchLine(id: string): string {
   const t = TECHS[id];
   if (!t) return '';
@@ -522,7 +522,7 @@ export function celebrateResearch(id: string) {
 export function celebrateFirstData() {
   const color = DATA_COLORS.b;
   start({
-    kind: 'note', kicker: 'New Data', title: 'First β', line: 'Tier 2 Data · spend it in the Tech tree',
+    kind: 'note', kicker: 'New Data', title: 'First β', line: 'Data from assembled parts · spend it in the Tech tree',
     glyph: `<span class="cel-sym">β</span>`, color, life: 1700, show: note, logAs: 'first-beta', cue: () => cueResearch('data'),
     leaving: () => leadTo('data-b', '[data-testid="data-b"]', color),
   });
@@ -546,21 +546,21 @@ export function celebrateFlow() {
 const RAINBOW = ['shard', 'ink', 'spark', 'mist', 'glyph', 'prism'] as const;
 
 /**
- * The Lens card made at the end of the demo stays until the summary screen opens (SUMMARY_DELAY after
- * the Lens is made) and leaves with it. Its own time runs out SUMMARY_GRACE later: the summary opening
+ * The Phone card made at the end of the demo stays until the summary screen opens (SUMMARY_DELAY after
+ * the Phone is made) and leaves with it. Its own time runs out SUMMARY_GRACE later: the summary opening
  * is what normally sends it, and the timer is for a page where no summary comes (`?nosummary`).
  */
 const SUMMARY_GRACE = 400;
-/** When the Lens was made (performance.now()), for the time left until the summary. */
+/** When the Phone was made (performance.now()), for the time left until the summary. */
 let endAt = 0;
 const untilSummary = () => Math.max(900, endAt + SUMMARY_DELAY * 1000 + SUMMARY_GRACE - performance.now());
 
 function lensCard(life: number, holds = true) {
   start({
-    kind: 'lens', title: 'First Lens', line: 'Demo complete · free play is open', glyph: matGlyph('lens', 80), color: MATERIALS.lens.color,
+    kind: 'lens', title: 'First Phone', line: 'Demo complete · free play is open', glyph: matGlyph('lens', 80), color: MATERIALS.lens.color,
     life, holds,
     show: (at) => {
-      // Three waves, each in the colours of what the factory makes on the way to a Lens.
+      // Three waves, each in the colours of what the factory makes on the way to a Phone.
       for (let wave = 0; wave < 3; wave++) {
         later(wave * 380, () => {
           RAINBOW.forEach((m, i) => {
@@ -579,7 +579,7 @@ function lensCard(life: number, holds = true) {
 
 // ---------- the bow ----------
 // On the board layer, in world space (so it stays on the wires if the view moves): every wire that
-// leads to the Lens lights from its source to its target, one row of the factory after another,
+// leads to the Phone lights from its source to its target, one row of the factory after another,
 // and each card gets an outline as the light reaches it.
 
 interface BowWire { pts: Float32Array; from: number; to: number; color: string }
@@ -588,9 +588,9 @@ interface BowNode { x: number; y: number; w: number; h: number; at: number; colo
 let bow: { t0: number; step: number; rows: number; wires: BowWire[]; nodes: BowNode[]; lens: BowNode | null; revealAt: number; revealed: boolean; fadeFrom: number; timers: number[] } | null = null;
 
 const BOW_SEGS = 18;
-/** The light may take this long (s) to run from the Wells to the Lens, however deep the factory is. */
+/** The light may take this long (s) to run from the Drills to the Phone, however deep the factory is. */
 const BOW_MAX = 2.6;
-/** After the light has reached the Lens the factory stays lit this long (ms), then fades over BOW_FADE. */
+/** After the light has reached the Phone the factory stays lit this long (ms), then fades over BOW_FADE. */
 const BOW_HOLD = 700;
 const BOW_FADE = 500;
 
@@ -606,7 +606,7 @@ function startBow() {
   const gr = graph(g);
   const lens = g.nodes.find((n) => n.recipe === RULES.capstone && n.cycles > 0) ?? g.nodes.find((n) => n.recipe === RULES.capstone);
   if (!lens) return lensCard(untilSummary());
-  // Everything upstream of the Lens, with its row: the longest way there from a node that nothing feeds.
+  // Everything upstream of the Phone, with its row: the longest way there from a node that nothing feeds.
   const depth = new Map<number, number>();
   const visiting = new Set<number>();
   const rowOf = (id: number): number => {
@@ -631,7 +631,7 @@ function startBow() {
     if (!n) continue;
     const { w, h } = nodeSize(n);
     const box = { x: n.x, y: n.y, w, h, at: d * step, color: nodeColor(n) };
-    // The Lens card itself stays dark until the light has arrived (see revealLens).
+    // The Phone card itself stays dark until the light has arrived (see revealLens).
     if (id === lens.id) lensBox = { ...box, at: Infinity };
     else nodes.push(box);
     for (const wire of gr.ins.get(id) ?? []) {
@@ -648,7 +648,7 @@ function startBow() {
   }
   // Bring the line into view if part of it is off screen, never zooming in: a line
   // that fits at the zoom the player has is slid into view at that zoom, as little as it takes (the board's
-  // frameNodes, the Wells first and the Lens last, so that the Lens is the one shown if they cannot all be). One that
+  // frameNodes, the Drills first and the Phone last, so that the Phone is the one shown if they cannot all be). One that
   // does not fit: on a phone, Fit, whose overview (every card an icon) is how a phone shows the whole factory;
   // elsewhere frameNodes again, which pulls back among the cards: Fit drops a large factory into the overview there
   // too, and turning every card into an icon at once was the longest frame of the whole moment.
@@ -691,7 +691,7 @@ function fitsNow(cards: { x: number; y: number; w: number; h: number }[]): boole
   return (x1 - x0) * k <= r.width - c.left - c.right - 12 && (y1 - y0) * k <= r.height - c.top - c.bottom - 12;
 }
 
-/** The light has reached the Lens (or the player pressed to skip ahead): flash its card and bring up the centre card. */
+/** The light has reached the Phone (or the player pressed to skip ahead): flash its card and bring up the centre card. */
 function revealLens() {
   const b = bow;
   if (!b || b.revealed) return;
@@ -809,8 +809,8 @@ const bowOverlay: Overlay = {
 };
 
 /**
- * The first Lens has just been made and the demo is complete: the factory takes its bow, then the
- * Lens card, which stays until the summary screen opens 6.5 s after this (SUMMARY_DELAY) and leaves
+ * The first Phone has just been made and the demo is complete: the factory takes its bow, then the
+ * Phone card, which stays until the summary screen opens 6.5 s after this (SUMMARY_DELAY) and leaves
  * as it fades in. Call in the frame the 'demo-end' event arrives: the summary counts from the same one.
  */
 export function celebrateEnd() {

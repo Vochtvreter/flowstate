@@ -9,7 +9,7 @@
 //  - The summary opens SUMMARY_DELAY seconds after the 'demo-end' event; the celebration plays in
 //    between. `?nosummary` keeps it shut (for benchmarks that build a finished factory). For its first
 //    SUMMARY_GUARD milliseconds it takes no press. Its "Keep playing" (or Escape) claims the capstone if it is
-//    still waiting and starts free play; from the first Lens until then, endingShown(g) holds.
+//    still waiting and starts free play; from the first Phone until then, endingShown(g) holds.
 import { MATERIALS, MatId, RULES, TECHS } from '../content';
 import { EndStats, demandShown, endStats, fmt, fmtTime, has, offlineCap } from '../economy';
 import { GOALS, activeGoal, claimGoal } from '../goals';
@@ -79,12 +79,12 @@ export const isStarted = () => started;
 let freePlayNow = false;
 /**
  * The demo has ended and the player has gone on into free play (Keep playing, or a save that already had).
- * Between the first Lens and that moment the board is the ending's picture (see status.ts). Under `?nosummary`
+ * Between the first Phone and that moment the board is the ending's picture (see status.ts). Under `?nosummary`
  * there is no summary to leave, so free play is there as soon as the demo ends.
  */
 export const freePlay = () => freePlayNow || (NO_SUMMARY && !!ui.g?.ended);
 /**
- * The ending is on show: from the first Lens until free play begins (Keep playing, or Escape, on the summary; a
+ * The ending is on show: from the first Phone until free play begins (Keep playing, or Escape, on the summary; a
  * save that had already left it; at once under `?nosummary`). Meanwhile the goal card shows the demo's last goal
  * done, with no Claim and no free-play goal behind it: "Keep playing" claims the capstone on the way out, whether
  * or not Claim was pressed before (hud.ts). The tree offers no Claim either (tech.ts).
@@ -177,8 +177,8 @@ export function initScreens(h: ScreenHooks) {
     }
     if (ev.kind !== 'demo-end') return;
     if (!NO_SUMMARY) summaryDue = performance.now() + SUMMARY_DELAY * 1000;
-    // The ending is the factory and its first Lens, framed whole: no inspector over it, nothing selected (a
-    // Fabricator left selected would show "Blocked: Lens output is full" behind the summary).
+    // The ending is the factory and its first Phone, framed whole: no inspector over it, nothing selected (a
+    // Fabricator left selected would show "Blocked: Phone output is full" behind the summary).
     if (ui.sel) select(null);
   });
   onFrame(() => {
@@ -220,7 +220,7 @@ export function showStart(hasSave: boolean) {
   // A newcomer is told how long this takes; someone coming back knows.
   startEl.innerHTML = `<div class="start-card">${logoMark(64, true)}
     <h1>Flowstate</h1>
-    <p>Wire up a supply line. Watch it flow.</p>
+    <p>Build a phone out of sand. Wire it up and watch it flow.</p>
     <button class="start-go" data-do="start" data-testid="start">${hasSave ? 'Continue' : 'Start'}</button>
     <p class="start-note" data-testid="start-note">${hasSave ? 'Best with sound' : 'About 20 minutes · best with sound'}</p>
     ${hasSave ? `<button class="start-new" data-do="new" data-testid="new-game">New game</button>` : ''}</div>`;
@@ -268,7 +268,7 @@ function begin(pressed = true) {
 
 // The card is small and sits at the foot of the screen (a bottom sheet on a phone, a side sheet on a phone
 // held sideways): the closing celebration has framed the whole factory by then, and it stays on show behind.
-// What it says: how long the first Lens took, four numbers, what comes next, and three ways on.
+// What it says: how long the first Phone took, four numbers, what comes next, and three ways on.
 
 function stat(key: string, value: string, label: string): string {
   return `<div class="sum-stat" data-stat="${key}"><b class="mono">${value}</b><span>${label}</span></div>`;
@@ -287,7 +287,7 @@ const sellingShare = (s: EndStats) => (s.totalEarned > 0 ? Math.round((s.fromSal
 
 /**
  * What free play is for: the material each goal after the capstone has the player make, in the chain's own
- * order (Clay, Coil, Dynamo, Paradox today). Read from the goal list, so a new free-play goal shows up here.
+ * order (Rubber, Cable, Laptop, Robot today). Read from the goal list, so a new free-play goal shows up here.
  */
 export function nextMaterials(): MatId[] {
   const out: MatId[] = [];
@@ -301,7 +301,7 @@ export function nextMaterials(): MatId[] {
 /** The result as two lines of plain text, for the clipboard: no link and nothing about the player. */
 export function resultText(g: Game): string {
   const s = endStats(g);
-  const lens = s.firstLensAt != null ? `first Lens in ${clockTime(s.firstLensAt)}` : 'demo complete';
+  const lens = s.firstLensAt != null ? `first Phone in ${clockTime(s.firstLensAt)}` : 'demo complete';
   return `Flowstate: ${lens}\n${s.nodesBuilt} things built · ${sellingShare(s)}% of income from sales`;
 }
 
@@ -310,7 +310,7 @@ let shownResult = '';
 
 /**
  * Real milliseconds after the summary opens during which it takes no press, from a pointer or a key. It comes up as
- * the First Lens card leaves, under a thumb or a pointer that may already be on its way to something else (a tap on
+ * the First Phone card leaves, under a thumb or a pointer that may already be on its way to something else (a tap on
  * the spot where Claim had been for twenty goals landed on Keep playing, and the summary went unseen).
  */
 export const SUMMARY_GUARD = 600;
@@ -433,7 +433,7 @@ function closeSummary() {
 
 /**
  * Close the summary for good. The capstone goal is claimed on the way out if it is still waiting (the card offered no
- * Claim from the first Lens on), and free play begins: the card shows its first goal at the next refresh.
+ * Claim from the first Phone on), and free play begins: the card shows its first goal at the next refresh.
  */
 function keepPlaying() {
   const g = ui.g;
@@ -534,7 +534,7 @@ let uprightDue = false;
 /**
  * A phone held sideways gives the board a strip a few cards high. A newcomer who starts that way is
  * told once that it plays better upright: one short line with a way to dismiss it. Not at the start, where it lay over
- * goal 1's Well and Market and the board slid under it: once goal 1 is claimed, and at the top of the
+ * goal 1's Drill and Market and the board slid under it: once goal 1 is claimed, and at the top of the
  * screen, in the top bar's free middle (between the credits and the gear), never over the board. It goes by itself
  * after a few seconds, or as soon as the phone is turned. (Under reduced motion, as everywhere, it only fades.)
  */

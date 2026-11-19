@@ -210,13 +210,13 @@ describe('wire rates are steady when a machine takes its inputs in gulps', () =>
     return out;
   }
 
-  it('a Refiner that is kept full takes two Glint every two seconds: its wire reads a flat 1.0/s, the leftover wire 0.25/s', () => {
+  it('a Refiner that is kept full takes two Sand every two seconds: its wire reads a flat 1.0/s, the leftover wire 0.25/s', () => {
     const g = rich();
-    upgrade(g, well(g).id, 'speed'); // 1.25 Glint/s, the Refiner takes 1
+    upgrade(g, well(g).id, 'speed'); // 1.25 Sand/s, the Refiner takes 1
     const r = placeNode(g, 'refiner', 400, 100)!;
     const feed = connect(g, well(g).id, 0, r.id)!;
     const sell = connect(g, well(g).id, 0, market(g).id)!;
-    const out = connect(g, r.id, 0, market(g).id)!; // one whole Shard every two seconds
+    const out = connect(g, r.id, 0, market(g).id)!; // one whole Glass every two seconds
     run(g, 30);
     const [toRefiner, toMarket, shard] = watch(g, 120, [feed.id, sell.id, out.id]);
     // The flow really does come in gulps: measured the old way these numbers swing by a quarter and more.
@@ -234,9 +234,9 @@ describe('wire rates are steady when a machine takes its inputs in gulps', () =>
     }
   });
 
-  it('a pattern of uneven gulps is exact too: Ink shared by an Assembler and the Market', () => {
-    // One Ink every 2 s; the Assembler takes one every 3 s, so it is handed Ink after 4 s, 2 s, 4 s, 2 s...
-    // and Spark (one every 2.5 s) after 2.5, 2.5, 2.5, 2.5 and 5 s.
+  it('a pattern of uneven gulps is exact too: Plastic shared by an Assembler and the Market', () => {
+    // One Plastic every 2 s; the Assembler takes one every 3 s, so it is handed Plastic after 4 s, 2 s, 4 s, 2 s...
+    // and Copper (one every 2.5 s) after 2.5, 2.5, 2.5, 2.5 and 5 s.
     const g = rich();
     const m = market(g);
     const ink = placeNode(g, 'refiner', 400, 400)!;
@@ -262,8 +262,8 @@ describe('wire rates are steady when a machine takes its inputs in gulps', () =>
   });
 
   it('a long round is exact too: with Efficiency a machine skips its inputs on every fifth or sixth craft', () => {
-    // The Glyph line again, with Efficiency on the Assembler and on the Ink Refiner: the Assembler now asks
-    // for Ink on four crafts out of five, and a round of the pattern on the Ink wire is eight gulps and 30 s.
+    // The Circuit line again, with Efficiency on the Assembler and on the Plastic Refiner: the Assembler now asks
+    // for Plastic on four crafts out of five, and a round of the pattern on the Plastic wire is eight gulps and 30 s.
     const g = rich();
     g.techs.push('U1');
     const m = market(g);
@@ -290,10 +290,10 @@ describe('wire rates are steady when a machine takes its inputs in gulps', () =>
   });
 
   it('a run of equal gulps and then an odd one is one round, not a pattern of one: a Router topping up a full Silo', () => {
-    // The Refiner takes two Glint from the Silo every 2 s; the Router refills that in six short gulps and a
+    // The Refiner takes two Sand from the Silo every 2 s; the Router refills that in six short gulps and a
     // longer one. Six equal gulps in a row used to be read as the whole pattern, 22% high, once every round.
     const g = rich();
-    for (let i = 0; i < 4; i++) upgrade(g, well(g).id, 'speed'); // 2.44 Glint/s
+    for (let i = 0; i < 4; i++) upgrade(g, well(g).id, 'speed'); // 2.44 Sand/s
     const router = placeNode(g, 'router', 300, 100)!;
     const silo = placeNode(g, 'silo', 450, 100)!;
     const r = placeNode(g, 'refiner', 600, 100, { recipe: 'shard' })!;
@@ -323,7 +323,7 @@ describe('wire rates are steady when a machine takes its inputs in gulps', () =>
     expect(wire(g, feed.id).rate).toBeGreaterThan(0.8); // already close after a few seconds
     run(g, 24);
     expect(wire(g, feed.id).rate).toBeCloseTo(1, 3);
-    // Two Speed levels on the Refiner: it can take 1.38/s now, so it gets all 1.25 the Well makes, steadily.
+    // Two Speed levels on the Refiner: it can take 1.38/s now, so it gets all 1.25 the Drill makes, steadily.
     upgrade(g, r.id, 'speed');
     upgrade(g, r.id, 'speed');
     run(g, 10);
@@ -331,7 +331,7 @@ describe('wire rates are steady when a machine takes its inputs in gulps', () =>
     expect(wire(g, out.id).rate).toBeGreaterThan(0.6); // it works through what its buffer held first, a little faster
     run(g, 30);
     expect(wire(g, out.id).rate).toBeCloseTo(0.625, 3);
-    // Cut the Shard wire: the Refiner fills up and stops taking Glint. The reading falls away instead of sticking.
+    // Cut the Glass wire: the Refiner fills up and stops taking Sand. The reading falls away instead of sticking.
     cutWire(g, out.id);
     run(g, 20);
     expect(wire(g, feed.id).rate).toBeLessThan(0.02);
@@ -339,7 +339,7 @@ describe('wire rates are steady when a machine takes its inputs in gulps', () =>
 
   it('steady flow is measured as before, and a wire at capacity still reads its capacity', () => {
     const g = rich();
-    for (let i = 0; i < 8; i++) upgrade(g, well(g).id, 'speed'); // 5.96 Glint/s into a Mk I wire
+    for (let i = 0; i < 8; i++) upgrade(g, well(g).id, 'speed'); // 5.96 Sand/s into a Mk I wire
     const direct = connect(g, well(g).id, 0, market(g).id)!;
     run(g, 20);
     expect(wire(g, direct.id).rate).toBeCloseTo(4, 3);

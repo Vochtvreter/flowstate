@@ -11,7 +11,7 @@
 //    the air. The goal card can carry two such buttons (a tip's, and the "while you wait" line's):
 //    the hand goes to whichever was last reported stale, and leaves only when that one goes.
 //  - Show me ("showme"). It acts the tip's suggestion out twice and leaves: a wire from a port to a
-//    node, a build from a port into empty space, a Well from the build bar onto a deposit, or a
+//    node, a build from a port into empty space, a Drill from the build bar onto a deposit, or a
 //    press on a control: in the inspector, in the tech tree, or on the board itself (Expand board,
 //    which it stays on while the camera moves).
 //
@@ -182,7 +182,7 @@ function wirePlan(g: Game, from: GNode, portIndex: number, to: GNode, source: So
   };
 }
 
-/** The goal's wire: the first Well that has nothing attached, to the Market. */
+/** The goal's wire: the first Drill that has nothing attached, to the Market. */
 function firstWirePlan(g: Game): Plan | null {
   const outs = graph(g).outs;
   const wells = g.nodes.filter((n) => n.type === 'well');
@@ -193,7 +193,7 @@ function firstWirePlan(g: Game): Plan | null {
 
 /**
  * Offsets from the port (world px) to the left side of "an empty spot" to try, nearest and most natural first: to
- * the right of the port, and when there is no room there (a Well on a new deposit sits against the edge of the
+ * the right of the port, and when there is no room there (a Drill on a new deposit sits against the edge of the
  * board) under or over its own card, then to the left of it.
  */
 const SPOTS: [number, number][] = [
@@ -398,7 +398,7 @@ function resolve(g: Game, a: Act): Plan | 'done' | null {
       if (blockedOnBoard(own)) return null;
       const b = world({ x: d.x + 86, y: d.y + 36 });
       const card = { x: d.x, y: d.y, w: 172, h: 72 };
-      // The Well is already in hand: only where to put it is shown.
+      // The Drill is already in hand: only where to put it is shown.
       if (own) return { kind: 'place', source: a.source, mode: 'tap2', a: null, b, wire: null, card, ghost: null, color: '#fff', loops: a.loops };
       const btn = controlAt(byTestId(`hot-${a.type}`));
       if (!btn) return null;

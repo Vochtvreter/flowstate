@@ -340,7 +340,7 @@ function tickBeta() {
 
 /** Everything the simulation raised this frame, together: a claim brings its unlocks with it, and they are one moment, not three. */
 function handleEvents(events: GameEvent[]) {
-  // The Lens being made is a big moment in its own right: the goal turning ready beside it needs no sound of its own.
+  // The Phone being made is a big moment in its own right: the goal turning ready beside it needs no sound of its own.
   const ended = events.some((e) => e.kind === 'demo-end');
   // The first surplus brings Market Lens with it ('tech', then 'surplus'): nobody pressed Research for
   // that one, so it gets no sparkle of its own.
@@ -356,10 +356,10 @@ function handleEvents(events: GameEvent[]) {
     switch (ev.kind) {
       case 'goal-claimed':
         if (ev.big && ev.goal === 'make-lens') {
-          // The Lens is celebrated at the moment it is made ('demo-end'), which always comes before its goal
+          // The Phone is celebrated at the moment it is made ('demo-end'), which always comes before its goal
           // can be claimed: in this batch, earlier in this session, or in a session before this save was
           // loaded. Claiming the goal afterwards (the summary's "Keep playing" does it for the player) is
-          // a small celebration, or nothing while the big one is still up. It is never a second Lens card.
+          // a small celebration, or nothing while the big one is still up. It is never a second Phone card.
           claimed = 'big';
           if (!ended && !celebrating()) smallCelebration('goal', anchorPt('goal') ?? centre(), ev.reward);
         } else if (ev.big) {

@@ -354,7 +354,7 @@ let hintAlt = false;
 /** The camera and the targets as they were when the line's place was last decided. */
 let placeKey = '';
 
-/** In stage pixels, the boxes of what the line asks for: free deposits for a Well, nodes for an armed wire. */
+/** In stage pixels, the boxes of what the line asks for: free deposits for a Drill, nodes for an armed wire. */
 function hintTargets(): Box[] {
   const g = ui.g;
   const { x, y, k } = ui.view;
@@ -405,7 +405,7 @@ function covered(b: Box, targets: Box[]): number {
 
 /**
  * Put the line where it hides none of what it asks the player to tap: its usual place, or its other one when
- * the usual one lies over a free deposit (placing a Well) or a node (a wire waiting for its end) and the other
+ * the usual one lies over a free deposit (placing a Drill) or a node (a wire waiting for its end) and the other
  * does not, or less. Decided again when the camera or the board has moved, not while a finger is moving it.
  */
 function placeHint(line: string, force = false) {
@@ -450,7 +450,7 @@ function hintLine(): string {
   const armed = armedPort();
   if (armed) return armed.mat ? `${verb} where the <b>${MATERIALS[armed.mat].name}</b> should go` : `${verb} where this wire should go`;
   const p = ui.placing;
-  if (p) return p.type === 'well' ? `${verb} a deposit to place the <b>Well</b>` : `${verb} the board to place the <b>${NODE_DEFS[p.type].name}</b>`;
+  if (p) return p.type === 'well' ? `${verb} a deposit to place the <b>Drill</b>` : `${verb} the board to place the <b>${NODE_DEFS[p.type].name}</b>`;
   return '';
 }
 

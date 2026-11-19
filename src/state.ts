@@ -90,7 +90,7 @@ export interface Deposit {
 
 /**
  * A change the player made to the board, as the adviser needs to remember it: when, and what kind of thing was
- * done to what kind of node ("upgrade:speed:Lab", "wire:Ink Refiner>Lab", "build:well:glint", "research:R2",
+ * done to what kind of node ("upgrade:speed:Lab", "wire:Plastic Refiner>Lab", "build:well:glint", "research:R2",
  * or plain "edit" for anything no tip ever asks for).
  */
 export interface Edit { at: number; what: string }
@@ -140,7 +140,7 @@ export interface Stats {
   ordersFilled: number;
   /** Times Flow State was reached. */
   flowStates: number;
-  /** Game time of the first Lens (the end of the demo), or null. */
+  /** Game time of the first Phone (the end of the demo), or null. */
   firstLensAt: number | null;
 }
 
@@ -166,7 +166,7 @@ export type GameEvent =
   | { kind: 'order-claimed'; text: string; order: Order; reward: Required<Reward> }
   /** Flow State reached (once per streak). `first` = the first time ever: a big celebration. */
   | { kind: 'flow-state'; text: string; first: boolean }
-  /** The first Lens was made: the demo is complete. Raised once per save. */
+  /** The first Phone was made: the demo is complete. Raised once per save. */
   | { kind: 'demo-end'; text: string }
   /**
    * A material has been selling over its demand for a few seconds, for the first time in this save
@@ -237,7 +237,7 @@ export interface Game {
   order: Order | null;
   /** Running seed of the order generator. */
   orderSeed: number;
-  /** The first Lens has been made. Set once. */
+  /** The first Phone has been made. Set once. */
   ended: boolean;
   /** Something has sold over its demand for a few seconds (RULES.demand.notice). Set once, with Market Lens and a 'surplus' event. */
   seenSurplus: boolean;
@@ -250,8 +250,8 @@ export interface Game {
    */
   edits?: Edit[];
   /**
-   * Game time of the last press of Upgrade all on Wells (src/actions.ts upgradeAll; a press on any other kind
-   * leaves it alone). "Upgrade all your Wells at once" is met by such a press made since the goal came up; `edits`
+   * Game time of the last press of Upgrade all on Drills (src/actions.ts upgradeAll; a press on any other kind
+   * leaves it alone). "Upgrade all your Drills at once" is met by such a press made since the goal came up; `edits`
    * cannot carry that, as it forgets anything older than a minute, and the Claim then went with the next undo or
    * reload. It is part of the undo step (Snapshot.bulkAt): undoing the press takes the goal's readiness back.
    */
@@ -262,9 +262,9 @@ export interface Game {
   tickAcc: { credits: number; data: Record<DataTier, number>; sold: Bag };
 }
 
-/** "Glint Well", "Ink Refiner", "Lab": what a node is called in a sentence. */
+/** "Sand Drill", "Plastic Refiner", "Lab": what a node is called in a sentence. */
 export function nodeNoun(n: GNode): string {
-  if (n.type === 'well') return `${n.material ? MATERIALS[n.material].name + ' ' : ''}Well`;
+  if (n.type === 'well') return `${n.material ? MATERIALS[n.material].name + ' ' : ''}Drill`;
   const r = n.recipe ? RECIPES[n.recipe] : null;
   return `${r ? r.name + ' ' : ''}${NODE_DEFS[n.type].name}`;
 }
@@ -300,7 +300,7 @@ export function makeWire(g: Game, from: number, port: number, to: number): Wire 
   };
 }
 
-/** Starting layout. The Market sits diagonally below-right of the first Well so both fit a phone screen (about 430 × 250). */
+/** Starting layout. The Market sits diagonally below-right of the first Drill so both fit a phone screen (about 430 × 250). */
 export const START = {
   wellDeposit: 1,
   market: { x: 360, y: 300 },
@@ -326,7 +326,7 @@ export function newGame(): Game {
     credits: 0, lifetime: 0,
     data: { a: 0, b: 0, g: 0 },
     techs: [], queue: [],
-    // The starting Well is already extracting Glint, so it is not announced as a new material.
+    // The starting Drill is already extracting Sand, so it is not announced as a new material.
     made: { glint: true }, sold: {}, soldRate: {},
     paused: false, time: 0, savedAt: Date.now(),
     creditRate: 0, dataRate: { a: 0, b: 0, g: 0 },
@@ -461,7 +461,7 @@ export function deserialize(json: string): Game | null {
       return out;
     });
     const byId = new Map(g.nodes.map((n) => [n.id, n]));
-    /** Output ports a node has: one per output of its recipe, one for a Well or a junction, none for a sink. */
+    /** Output ports a node has: one per output of its recipe, one for a Drill or a junction, none for a sink. */
     const portsOf = (n: GNode) => (n.type === 'market' || n.type === 'lab' || n.type === 'void' ? 0 : n.recipe ? RECIPES[n.recipe].outputs.length : 1);
     g.wires = (Array.isArray(raw.wires) ? raw.wires : []).filter((w: Partial<Wire> | null) => {
       if (!w || typeof w !== 'object' || typeof w.id !== 'number' || !isFinite(w.id) || seen.has(w.id)) return false;
@@ -525,7 +525,7 @@ export function deserialize(json: string): Game | null {
     g.flowNearLate = pos(raw.flowNearLate);
     g.orderSeed = num(raw.orderSeed, base.orderSeed) >>> 0;
     g.order = loadOrder(raw.order);
-    // A save from before the `ended` flag that already has a Lens is past the demo.
+    // A save from before the `ended` flag that already has a Phone is past the demo.
     g.ended = typeof raw.ended === 'boolean' ? raw.ended : !!g.made[RULES.capstone];
     g.seenSurplus = !!raw.seenSurplus;
     // Market Lens comes with the first sale over demand (src/sim.ts). A save that saw one before that rule gets it now.
@@ -538,7 +538,7 @@ export function deserialize(json: string): Game | null {
       .filter((e: Partial<Edit> | null) => !!e && typeof e.what === 'string' && typeof e.at === 'number' && isFinite(e.at) && e.at <= g.time)
       .map((e: Edit) => ({ at: e.at, what: e.what.slice(0, 80) }))
       .slice(-32);
-    // The build before this one let the last Well be deleted. A board with no Well and no money for one is stuck: pay for one.
+    // The build before this one let the last Drill be deleted. A board with no Drill and no money for one is stuck: pay for one.
     if (!g.nodes.some((n) => n.type === 'well')) g.credits = Math.max(g.credits, NODE_DEFS.well.base);
     return g;
   } catch {
@@ -611,8 +611,8 @@ export interface Snapshot {
   board?: Game['board'];
   deposits?: Deposit[];
   /**
-   * The last press of Upgrade all on Wells (Game.bulkAt), null for none: undoing the press takes back "Upgrade
-   * all your Wells at once" with it, which is met by that press alone (actions.ts unready).
+   * The last press of Upgrade all on Drills (Game.bulkAt), null for none: undoing the press takes back "Upgrade
+   * all your Drills at once" with it, which is met by that press alone (actions.ts unready).
    */
   bulkAt?: number | null;
 }

@@ -274,9 +274,9 @@ function share(
 }
 
 /**
- * Is this destination served before Markets, Labs and Voids on a plain port? (RULES.fanOut)
+ * Is this destination served before Markets, Labs and Dumps on a plain port? (RULES.fanOut)
  * Machines always are. A Router, Merger or Silo is when it leads on to a machine; one whose every path ends
- * at Markets, Labs, Voids or nowhere waits with them (unless RULES.fanOut.deadEndJunctionsLast is off).
+ * at Markets, Labs, Dumps or nowhere waits with them (unless RULES.fanOut.deadEndJunctionsLast is off).
  */
 function fedFirst(c: Graph, d: GNode): boolean {
   if (isMachine(d)) return true;
@@ -288,7 +288,7 @@ function fedFirst(c: Graph, d: GNode): boolean {
  * Split `avail` of material m across the wires of one output port. Returns the amount moved.
  *
  * A plain port (anything but a Router) feeds machines first, evenly, together with any Router, Merger or
- * Silo that leads on to a machine; Markets, Labs, Voids and the junctions that only lead to those share
+ * Silo that leads on to a machine; Markets, Labs, Dumps and the junctions that only lead to those share
  * whatever is left. A Router follows its mode; its Even mode is truly even.
  */
 function distribute(g: Game, c: Graph, src: GNode, wires: Wire[], m: MatId, avail: number): number {

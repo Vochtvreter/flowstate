@@ -185,7 +185,7 @@ const OV_ICON = [1, 1.5, 1.9, 2.4, 3.2, 4];
 /**
  * In the overview a card's ports are dots at its sides (style.css). Out at the furthest steps the icon is drawn
  * nearly as wide as the card, so the dots are pushed out from the sides by this much (board units), to stand clear
- * of it: for a full-width card and for a narrow one (a Router, a Void), at each step. The board sets these as
+ * of it: for a full-width card and for a narrow one (a Router, a Dump), at each step. The board sets these as
  * --opn and --opc, and finds the dots by the same numbers (`ovDot`).
  */
 const OV_PORT_OUT: [number, number][] = [[0, 0], [0, 0], [0, 0], [0, 9], [12, 30], [34, 52]];
@@ -624,7 +624,7 @@ function placePlotLabel() {
     if (hintsBox && g.goal.i < HINTS_UNTIL) covers.push(hintsBox);
   }
   // Past the stage's edges it cannot be read either: with the plot's corner off the side of the stage (as the camera
-  // stands in the Lens ending) it read "ard · 3 plots" there.
+  // stands in the Phone ending) it read "ard · 3 plots" there.
   covers.push({ x0: -1e6, y0: -1e6, x1: 0, y1: 1e6 }, { x0: r.width, y0: -1e6, x1: 1e6, y1: 1e6 }, { x0: -1e6, y0: -1e6, x1: 1e6, y1: 0 });
   const v = ui.view;
   const y0 = (big ? -11 : -9) * v.k + v.y, y1 = y0 + (big ? 22 : 17) * v.k;
@@ -893,7 +893,7 @@ function openView() {
   const named = (armed.length ? armed : goalFocus(g)).map((id) => nodeById(g, id)).filter((n): n is GNode => !!n);
   // On a phone (a game opened, or the phone turned) as much of the factory as can be read at once: at the
   // floor of the detailed tier, the stretch of it with the most cards on screen, the armed port among them; or,
-  // when the goal names no node but a place (a free deposit to put a Well on), with that place among them, and
+  // when the goal names no node but a place (a free deposit to put a Drill on), with that place among them, and
   // failing that the place itself, readable.
   if (env.phone && (!named.length || armed.length)) {
     const place = armed.length ? null : goalPlace(g);
@@ -916,7 +916,7 @@ function openView() {
   const d = wholeAtFloor(fitTarget(box, true));
   if (d) return go(d);
   // Too big for that, and the goal names no node, but a place (as Show me frames it, advice-show.ts): the free
-  // deposit the card's line wants a Well on, or the hint's own ("Place a Well on the Murk deposit"), at a
+  // deposit the card's line wants a Drill on, or the hint's own ("Place a Drill on the Oil deposit"), at a
   // readable zoom; or, where the card asks for the expansion, the plot's lower edge, under which the Expand
   // button stands, with the factory around it at the floor.
   const place = goalPlace(g);
@@ -931,7 +931,7 @@ function openView() {
 
 /**
  * The free deposit the goal names, as a world box with a little room round it: the one the card's line wants a
- * Well on, or the hint's own ("Place a Well on the Murk deposit"). Null when it names none.
+ * Drill on, or the hint's own ("Place a Drill on the Oil deposit"). Null when it names none.
  */
 function goalPlace(g: Game): Box | null {
   const spot = lineSpot(g);
@@ -2009,7 +2009,7 @@ let tidyBtn: HTMLButtonElement | null = null;
 /**
  * Lay the board out again so that wires are short, cross as little as possible, and nothing overlaps
  * (the layout itself is `tidy` in layout.ts, worked out in a Worker so that a big factory never holds the
- * page up). Wells stay on their deposits. The cards glide to their new places; the camera stays among the
+ * page up). Drills stay on their deposits. The cards glide to their new places; the camera stays among the
  * cards, where their text can be read, on the part of the factory the player was looking at; one undo puts
  * every card back. Returns false when there is nothing to tidy, true when the work has been started (the
  * answer comes back a moment later; "Already tidy." is said then if the board cannot be bettered).
@@ -2215,7 +2215,7 @@ function recipeText(r: Recipe): string {
 }
 
 function nodeTitle(n: GNode): string {
-  if (n.type === 'well' && n.material) return `${MATERIALS[n.material].name} Well`;
+  if (n.type === 'well' && n.material) return `${MATERIALS[n.material].name} Drill`;
   return NODE_DEFS[n.type].name;
 }
 
@@ -2427,7 +2427,7 @@ function nodeBoxes(skip?: number, grown = false): Box[] {
   return out;
 }
 
-/** Deposits with no Well on them, as boxes. */
+/** Deposits with no Drill on them, as boxes. */
 function depositBoxes(): Box[] {
   const g = ui.g;
   const used = new Set(g.nodes.map((n) => n.depositId));
@@ -2660,7 +2660,7 @@ function syncDeposits(g: Game) {
       const pop = at == null ? '' : `animation-delay:${Math.round(at - now)}ms;`;
       return `<div class="deposit${ok ? '' : ' locked'}${at == null ? '' : ' pop'}" data-dep="${d.id}" style="left:${d.x}px;top:${d.y}px;${pop}${ok ? `--c:${MATERIALS[d.mat].color}` : ''}">
         ${ok ? matGlyph(d.mat, 18) : icon('lock', 16)}
-        <div><div class="dn">${ok ? MATERIALS[d.mat].name + ' deposit' : 'Unknown deposit'}</div><div class="ds">${ok ? (big ? 'place a Well here' : 'empty · place a Well') : 'needs research'}</div></div>
+        <div><div class="dn">${ok ? MATERIALS[d.mat].name + ' deposit' : 'Unknown deposit'}</div><div class="ds">${ok ? (big ? 'place a Drill here' : 'empty · place a Drill') : 'needs research'}</div></div>
       </div>`;
     })
     .join('');
@@ -2814,11 +2814,11 @@ function updateNodes(g: Game) {
     }
     const dx = diagnose(g, n);
     let st: string = n.status;
-    // The ring and the border say what diagnose says: a node it finds nothing wrong with (the Lens-only
-    // Fabricator between the first Lens and free play, status.ts `resting`) is drawn as working, not amber or red.
+    // The ring and the border say what diagnose says: a node it finds nothing wrong with (the Phone-only
+    // Fabricator between the first Phone and free play, status.ts `resting`) is drawn as working, not amber or red.
     if (!dx.problem && (n.status === 'blocked' || n.status === 'starved')) st = 'working';
     let pill = '';
-    // Wells never get a pill: their ring colour says enough.
+    // Drills never get a pill: their ring colour says enough.
     if (n.type !== 'well') {
       if (dx.problem === 'blocked') pill = dx.victim ? '' : 'BLOCKED';
       else if (dx.problem === 'starved') pill = dx.victim ? '' : 'STARVED';
@@ -3114,7 +3114,7 @@ function clampToBoard(x: number, y: number, w: number, h: number): Pt {
 
 /**
  * Where a w×h card wanted at (x, y) may stand: the nearest spot on the grid that keeps clear of every
- * other card and of every deposit with no Well on it (the rule itself is `freeSpot` in geom.ts, where
+ * other card and of every deposit with no Drill on it (the rule itself is `freeSpot` in geom.ts, where
  * it is tested). `skip` is the node being moved, if any; `room` is the height to keep clear for it (see
  * roomFor). Null when the plot is full. (For a card the player moves by hand; one the game builds where the
  * player chose goes by `buildSpot`.)
@@ -3249,14 +3249,14 @@ function untangle(g: Game) {
 /** Size a node of this type and recipe will have once placed. */
 const sizeFor = (type: NodeType, recipe?: string | null) => nodeSize({ type, recipe: recipe ?? null } as GNode);
 
-/** The deposit with no Well on it under a world point, if any. */
+/** The deposit with no Drill on it under a world point, if any. */
 function depositAt(p: Pt) {
   const used = new Set(ui.g.nodes.map((n) => n.depositId));
   return ui.g.deposits.find((d) => !used.has(d.id) && p.x >= d.x && p.x <= d.x + 172 && p.y >= d.y && p.y <= d.y + 72) ?? null;
 }
 
 /**
- * A tap on an empty deposit: a Well is taken up for it (as from the build bar), its ghost already on that
+ * A tap on an empty deposit: a Drill is taken up for it (as from the build bar), its ghost already on that
  * deposit, so that one more tap there places it. A deposit not yet researched says what it needs. Returns
  * false when the tap was not on an empty deposit.
  */
@@ -3265,7 +3265,7 @@ function tapDeposit(p: Pt): boolean {
   const d = depositAt(p);
   if (!d) return false;
   if (!matUnlocked(g, d.mat)) {
-    toast(isTouch() ? 'Research this deposit first (tap <b>Tech</b>), then put a Well on it.' : 'Research this deposit in the <b>Tech tree</b> first, then put a Well on it.', 'info');
+    toast(isTouch() ? 'Research this deposit first (tap <b>Tech</b>), then put a Drill on it.' : 'Research this deposit in the <b>Tech tree</b> first, then put a Drill on it.', 'info');
     return true;
   }
   if (ui.sel) select(null);
@@ -3302,7 +3302,7 @@ function updateGhost() {
     const d = nearestDeposit(mouse);
     if (d) {
       pos = { x: d.x, y: d.y };
-      label = `${MATERIALS[d.mat].name} Well`;
+      label = `${MATERIALS[d.mat].name} Drill`;
       onDeposit = true;
     } else {
       pos = clampToBoard(mouse.x - w / 2, mouse.y - h / 2, w, h);
@@ -3349,7 +3349,7 @@ let capSize: { w: number; h: number } | null = null;
 let capCovers: { at: number; boxes: Box[] } | null = null;
 
 /**
- * Put the words of the card in hand ("Breeze Well · 31¢ · tap to place") beside its ghost, on the stage: the same
+ * Put the words of the card in hand ("Quartz Drill · 31¢ · tap to place") beside its ghost, on the stage: the same
  * size at every zoom (drawn at the board's scale they were 3 px tall in the overview), under the ghost when that
  * is clear of the goal card, the build bar and the floating controls, else above it, else as near as is clear.
  */
@@ -3407,9 +3407,9 @@ export function startPlacing(type: NodeType, recipe?: string | null, deposit?: n
 }
 
 /**
- * A Well has been taken up: the free deposits it can stand on are brought into view (as little as the
+ * A Drill has been taken up: the free deposits it can stand on are brought into view (as little as the
  * camera can move; nothing moves when they are all in view already), and a finger's ghost starts on the
- * one that matters most: the deposit tapped, else one whose material has no Well yet, nearest first.
+ * one that matters most: the deposit tapped, else one whose material has no Drill yet, nearest first.
  */
 function showDeposits(tapped?: number) {
   const g = ui.g;
@@ -3428,7 +3428,7 @@ function showDeposits(tapped?: number) {
   if (env.touch || tapped != null) mouse = { x: best.x + 86, y: best.y + 36 };
 }
 
-/** The first goal that needs the inspector ("Upgrade a Well"). */
+/** The first goal that needs the inspector ("Upgrade a Drill"). */
 const INSPECT_FROM = GOALS.findIndex((x) => x.id === 'upgrade-well');
 
 /** A stage this wide (with the inspector's room counted in) has space for the inspector beside the board. */
@@ -3792,7 +3792,7 @@ function reachable(n: GNode, covers: Box[], v: View = viewAhead()): boolean {
 /**
  * The far end the card names for a wire from this port, if any: the node "Show me" acted this wire out to, the far
  * end of the line's next wire, or, when the goal is about this port's node (goalFocus), the first other node it is
- * about that the wire can go to ("Wire the Well to the Market", "...wire it to the Market").
+ * about that the wire can go to ("Wire the Drill to the Market", "...wire it to the Market").
  */
 function namedEnd(g: Game, from: number, port: number): GNode | null {
   const end = (id: number | undefined) => {
@@ -3998,8 +3998,8 @@ function mouseHit(t: HTMLElement, p: Pt): Hit {
  * under the finger, a wire within reach (unless the finger is right beside a port and the wire is a
  * long one), the nearest output port within reach, a card the finger just missed.
  *
- * (The port's reach comes before the near miss of a card: a tap a little to the right of a Well's
- * port is a tap for the port, not for the Well.)
+ * (The port's reach comes before the near miss of a card: a tap a little to the right of a Drill's
+ * port is a tap for the port, not for the Drill.)
  *
  * Only the first of those starts a wire when the finger drags. The gaps between cards are where
  * a thumb goes to pan, and they are full of wires and within reach of ports: a drag that starts
@@ -4385,9 +4385,9 @@ function steer(cx: number, cy: number, hovering = false) {
         break;
       }
       if (n.type === 'well') {
-        // A Well stays on its deposit. Under a finger the drag pans the board instead, so that a
-        // swipe that happens to start on a Well still goes somewhere; so does a mouse in the overview,
-        // where a drag that let go would otherwise count as a click on the Well and take the camera in to it.
+        // A Drill stays on its deposit. Under a finger the drag pans the board instead, so that a
+        // swipe that happens to start on a Drill still goes somewhere; so does a mouse in the overview,
+        // where a drag that let go would otherwise count as a click on the Drill and take the camera in to it.
         if (drag.slop >= TOUCH_SLOP || over) drag = { kind: 'pan', sx: cx, sy: cy, vx: ui.view.x, vy: ui.view.y, moved: true, slop: 0, place: false };
         break;
       }
@@ -4658,7 +4658,7 @@ function onUp(e: PointerEvent) {
       } else if (Math.hypot(p.x - d.b.x, p.y - d.b.y) > 36) {
         const opts = d.mat ? produceOptions(g, d.mat) : [];
         // (Said to a finger without naming the gesture: there, wires are made by tapping.)
-        if (!opts.length) toast(d.mat ? `Nothing you have unlocked makes ${MATERIALS[d.mat].name}. Wire a Well to it.` : isTouch() ? 'Start from an output port instead' : 'Drag from an output port instead', 'bad');
+        if (!opts.length) toast(d.mat ? `Nothing you have unlocked makes ${MATERIALS[d.mat].name}. Wire a Drill to it.` : isTouch() ? 'Start from an output port instead' : 'Drag from an output port instead', 'bad');
         else {
           endDrag();
           openRadial({ at: p, dir: 'produce', from: 0, port: 0, to: d.to, mat: d.mat, a: d.b, opts });
@@ -4705,7 +4705,7 @@ function onUp(e: PointerEvent) {
 function wantedType(g: Game, from?: number): NodeType | null {
   const step = lineAdvice(g);
   // The line's next build counts from the port it names (its node); from any other port the goal's own words do
-  // (at goal 15 the line's "a Lab from the new Well's port" must not put Lab first on the Ink port the goal names).
+  // (at goal 15 the line's "a Lab from the new Drill's port" must not put Lab first on the Plastic port the goal names).
   if (step?.build && step.build in NODE_DEFS && (step.node == null || step.node === from)) return step.build as NodeType;
   const goal = activeGoal(g);
   if (!goal || g.goal.ready) return null;
@@ -4713,8 +4713,8 @@ function wantedType(g: Game, from?: number): NodeType | null {
   for (const t of Object.keys(NODE_DEFS) as NodeType[]) names.set(NODE_DEFS[t].name.toLowerCase(), t);
   const said = /\b(?:pick|build(?:\s+(?:a|an|another))?)\s+([A-Za-z]+)/gi;
   // (A goal that keeps no account of what it buys goes by its words alone, until a node of that kind stands:
-  // once the Void of "Give the Silt somewhere to go" is built, what is left is selling the Ink, and a menu
-  // opened from the Ink port must not offer a Void first.)
+  // once the Dump of "Give the Tar somewhere to go" is built, what is left is selling the Plastic, and a menu
+  // opened from the Plastic port must not offer a Dump first.)
   const buying = goal.step ? goal.step(g) : undefined;
   const named = buying === undefined ? null : buying === null ? '' : 'tech' in buying ? buying.thenWhat ?? '' : buying.what ?? '';
   for (const m of goal.hint.mouse.matchAll(said)) {
@@ -4766,7 +4766,7 @@ function consumeOptions(g: Game, mats: MatId[]): RadialOpt[] {
   sink('router', 'split');
   sink('silo', 'store');
   // One thing still to research is shown locked, as a promise; not a machine already on offer for another
-  // recipe (a Fabricator that makes Lens beside a locked Fabricator would read as two of the same).
+  // recipe (a Fabricator that makes Phone beside a locked Fabricator would read as two of the same).
   const locked = recipes.find((r) => !recipeUnlocked(g, r) && !opts.some((o) => o.type === r.machine));
   if (locked && opts.length < 8) {
     opts.push({ type: locked.machine, recipe: locked.id, label: `${NODE_DEFS[locked.machine].name} → ${locked.name}`, sub: '', cost: 0, locked: locked.tech, glyph: matGlyph(locked.outputs[0][0], 24) });

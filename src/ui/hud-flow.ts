@@ -54,13 +54,13 @@ export function initFlowRing() {
   });
 }
 
-/** Said while no Well or machine counts toward Flow (see countsForFlow in flow.ts). */
-const NONE_YET = 'Flow counts a Well or machine once it has been wired up for a little while';
+/** Said while no Drill or machine counts toward Flow (see countsForFlow in flow.ts). */
+const NONE_YET = 'Flow counts a Drill or machine once it has been wired up for a little while';
 
 const producerName = (g: Game, id: number) => {
   const n = g.nodes.find((x) => x.id === id);
   if (!n) return '';
-  if (n.type === 'well') return `${n.material ? MATERIALS[n.material].name + ' ' : ''}Well`;
+  if (n.type === 'well') return `${n.material ? MATERIALS[n.material].name + ' ' : ''}Drill`;
   return `${NODE_DEFS[n.type].name}${n.recipe && RECIPES[n.recipe] ? ` (${RECIPES[n.recipe].name})` : ''}`;
 };
 
@@ -95,8 +95,8 @@ export function updateFlowRing(g: Game) {
   const worst = f.flowing < f.producers ? worstProducer(g) : null;
   const jump = worst ? ` ${isTouch() ? 'Tap' : 'Click'} to jump to the ${producerName(g, worst.id)} holding it back.` : '';
   const label = f.producers
-    ? `Flow ${v}%: ${f.flowing} of ${f.producers} Wells and machines are running flat out, so every sale pays +${bonus}%.${jump}`
-    : `Flow ${v}%: the share of your Wells and machines running flat out. ${NONE_YET}.`;
+    ? `Flow ${v}%: ${f.flowing} of ${f.producers} Drills and machines are running flat out, so every sale pays +${bonus}%.${jump}`
+    : `Flow ${v}%: the share of your Drills and machines running flat out. ${NONE_YET}.`;
   setAttr(btn, 'title', label);
   setAttr(btn, 'aria-label', label);
   setAttr(pct, 'title', label);

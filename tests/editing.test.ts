@@ -89,8 +89,8 @@ describe('refunds are the buy-back price plus upgrades (2.7)', () => {
   });
 });
 
-describe('the last Well cannot be deleted (2.7)', () => {
-  it('refuses with a toast, and allows it again once there is another Well', () => {
+describe('the last Drill cannot be deleted (2.7)', () => {
+  it('refuses with a toast, and allows it again once there is another Drill', () => {
     const g = fresh();
     const only = well(g);
     expect(canDelete(g, only)).toBe(false);
@@ -124,7 +124,7 @@ describe('splice (section 7, bug 5)', () => {
     expect(branch).toMatchObject({ from: well(g).id, port: 0, tier: 0 });
     run(g, 30);
     expect(r.util).toBeGreaterThan(0.9); // the machine is still fed first
-    // Labs and Voids branch the same way.
+    // Labs and Dumps branch the same way.
     const lab = placeNode(g, 'lab', 300, 600)!;
     const v = placeNode(g, 'void', 600, 600)!;
     expect(splice(g, w.id, lab.id)).toBe(true);
@@ -155,7 +155,7 @@ describe('splice (section 7, bug 5)', () => {
     expect(g.credits).toBe(afterBuy + 20);
   });
 
-  it('refuses Wells and nodes that are already wired, and undoes in one step', () => {
+  it('refuses Drills and nodes that are already wired, and undoes in one step', () => {
     const g = rich();
     const w = connect(g, well(g).id, 0, market(g).id)!;
     const w2 = placeNode(g, 'well', 0, 0, { depositId: 2 })!;
@@ -221,7 +221,7 @@ describe('undo guards (section 7, bugs 1 and 6)', () => {
 });
 
 describe('Favour: the one-press Router preset', () => {
-  /** A Well feeding a Router that leads to a Lab and to the Market, still in Even mode. */
+  /** A Drill feeding a Router that leads to a Lab and to the Market, still in Even mode. */
   function routed() {
     const g = rich();
     const router = placeNode(g, 'router', 400, 100)!;

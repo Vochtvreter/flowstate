@@ -62,7 +62,7 @@ export interface Signals {
    * The player pressed "Show me" on a tip, and the interface has already selected and framed what it is
    * about. Whoever can point should now act the suggestion out. At most one of these is set:
    *  - `wire`: connect `from`'s output port `port` (0 when absent) to `to`;
-   *  - `build`: build a `type`, either from `from`'s output port `port` into empty space, or (a Well) on
+   *  - `build`: build a `type`, either from `from`'s output port `port` into empty space, or (a Drill) on
    *    deposit `deposit` from the build bar;
    *  - `press`: press the control with this `data-testid` (an upgrade button, Favour, Research, Cut wire).
    */

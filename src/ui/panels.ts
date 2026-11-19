@@ -170,7 +170,7 @@ function inspectorAction(a: string, args: string[], openTech: (id?: string) => v
       toast(c ? `Upgraded ${c} ${NODE_DEFS[n.type].name}${c > 1 ? 's' : ''}` : 'Not enough credits', c ? 'good' : 'bad');
     } else if (a === 'del') {
       const refund = refundOf(g, n);
-      // A refusal (the last Well) raises its own toast and leaves the node selected.
+      // A refusal (the last Drill) raises its own toast and leaves the node selected.
       if (!deleteNode(g, n.id)) return;
       select(null);
       if (refund > 0) toast(`Refunded <b>${fmt(refund)}¢</b>`, 'good');
@@ -337,9 +337,9 @@ function techInSight(g: Game, t: Tech | undefined): boolean {
 }
 
 const DATA_ABOUT: Record<DataTier, string> = {
-  a: 'α Data: Labs make it from raw and Tier 1 items. Spend it in the Tech tree.',
-  b: 'β Data: Labs make it from Tier 2 items such as Glyph. Spend it in the Tech tree.',
-  g: 'γ Data: Labs make it from Tier 3 items such as Lens. Spend it in the Tech tree.',
+  a: 'α Data: Labs make it from raw and refined materials. Spend it in the Tech tree.',
+  b: 'β Data: Labs make it from assembled parts such as the Circuit. Spend it in the Tech tree.',
+  g: 'γ Data: Labs make it from finished products such as the Phone. Spend it in the Tech tree.',
 };
 
 /** The three Data chips share one wrapper, so a narrow bar can stack them as one block (see style.css). */
@@ -606,7 +606,7 @@ function renderHot(force: boolean) {
 }
 
 /**
- * On a phone the build bar scrolls sideways once it holds more than fits (Market, Lab and Void went off its
+ * On a phone the build bar scrolls sideways once it holds more than fits (Market, Lab and Dump went off its
  * right edge unseen). It says so: `more-r` while there is more to the right, `more-l` to the left
  * (phone.css fades that edge and shows the chevron button that moves the bar that way: pageButton). Looked at when
  * its slots change, when it scrolls and when the window does.
@@ -638,7 +638,7 @@ const PAGE_DEAF = 600;
  * Move the phone's build bar on (1) or back (-1) by a page: the first slot that the chevron lay over comes to stand
  * clear, just inside the chevron at the other edge. With reduced motion the bar jumps there. For PAGE_DEAF ms after,
  * the slots take no press: a chevron that has done its work goes away, and a second tap aimed at it would land on
- * the slot that stands where it was (the Void, which is free).
+ * the slot that stands where it was (the Dump, which is free).
  */
 function hotPage(dir: 1 | -1) {
   const view = hotEl.getBoundingClientRect();
@@ -884,7 +884,7 @@ function routerSection(g: Game, n: GNode): string {
   ];
   // A mode that still has to be researched is offered (locked, leading to the tree) only once that research
   // is in sight: it can be done now, and the player has met the kind of Data it costs. Priority Routing can be
-  // researched from the moment the Router arrives, but it costs β, and β does not exist until the first Glyph.
+  // researched from the moment the Router arrives, but it costs β, and β does not exist until the first Circuit.
   const seg = modes.filter((m) => has(g, m.tech) || techInSight(g, TECHS[m.tech ?? ''])).map((m) => has(g, m.tech)
     ? `<button data-act="mode:${m.id}" class="${n.mode === m.id ? 'on' : ''}" data-testid="mode-${m.id}">${m.name}</button>`
     : `<button data-act="tech:${m.tech}" class="lockedseg" data-testid="mode-${m.id}-locked">${icon('lock', 11)}${m.name}</button>`).join('');
@@ -930,9 +930,9 @@ function labSection(g: Game, n: GNode): string {
   }).join('');
   // What each tier of item gives, as far as the player has got: β and γ are named once Tier 2 and Tier 3
   // items can be made (or that kind of Data has been in hand), not before.
-  let kinds = 'Raw and Tier 1 items give α.';
-  if (has(g, 'P4') || everHad(g, 'b')) kinds += ' Tier 2 items give β.';
-  if (has(g, 'P7') || everHad(g, 'g')) kinds += ' Tier 3 items give γ.';
+  let kinds = 'Raw and refined materials give α.';
+  if (has(g, 'P4') || everHad(g, 'b')) kinds += ' Assembled parts give β.';
+  if (has(g, 'P7') || everHad(g, 'g')) kinds += ' Finished products give γ.';
   return `<div class="sec flow"><span class="lbl">Studying</span>${rows || '<div class="note">Wire any item into the Lab.</div>'}
     <div class="row sm"><span>Throughput</span><span class="mono"><b>${fmtRate(n.rate)}</b> / ${fmtRate(labRate(g, n))} /s</span></div>
     <div class="bar"><span style="width:${pct(n.rate / labRate(g, n))}%;background:#C4A1FF"></span></div>
@@ -941,7 +941,7 @@ function labSection(g: Game, n: GNode): string {
 
 function nodeInspector(g: Game, n: GNode): string {
   const def = NODE_DEFS[n.type];
-  const title = n.type === 'well' && n.material ? `${MATERIALS[n.material].name} Well` : def.name;
+  const title = n.type === 'well' && n.material ? `${MATERIALS[n.material].name} Drill` : def.name;
   let body = statusBlock(g, n);
   if (isMachine(n)) body += recipeSection(g, n) + flowSection(g, n);
   else if (n.type === 'well') body += `<div class="sec flow"><span class="lbl">Flow</span><div class="row sm"><span>Extracting</span><span class="mono"><b>${fmtRate(n.rate)}</b> / ${fmtRate(wellRate(n))} /s</span></div><div class="bar"><span style="width:${pct(n.rate / wellRate(n))}%;background:${MATERIALS[n.material!].color}"></span></div></div>`;
@@ -953,7 +953,7 @@ function nodeInspector(g: Game, n: GNode): string {
     body += `<div class="sec flow"><span class="lbl">Stored</span>${stored.map((m) => `<div><div class="row sm"><span>${matGlyph(m, 12)} ${MATERIALS[m].name}</span><span class="mono"><b>${Math.round(n.inb[m] ?? 0)}</b> / ${passCap(n)}</span></div><div class="bar"><span style="width:${pct((n.inb[m] ?? 0) / passCap(n))}%;background:${MATERIALS[m].color}"></span></div></div>`).join('') || '<div class="note">Empty.</div>'}
       <div class="note">Holds up to ${passCap(n)} of each material.</div></div>`;
   }
-  // (A Void or a Merger has nothing more to show: what it does is said once, under its name.)
+  // (A Dump or a Merger has nothing more to show: what it does is said once, under its name.)
   body += upgradeSection(g, n);
   const refund = refundOf(g, n);
   const fixed = n.type === 'well';
@@ -1126,7 +1126,7 @@ function renderMini() {
   }
   const view = boardRect();
   // A node is drawn in the colour the board's ring has: a starved or blocked one that diagnose finds no problem with (a
-  // machine merely short of an input; any machine between the first Lens and free play, status.ts) as working.
+  // machine merely short of an input; any machine between the first Phone and free play, status.ts) as working.
   const states = g.nodes.map((n) => ((n.status === 'starved' || n.status === 'blocked') && !diagnose(g, n).problem ? 'working' : n.status));
   let key = `${g.board.w}x${g.board.h}|${Math.round(view.width)}x${Math.round(view.height)}`;
   g.nodes.forEach((n, i) => (key += `|${n.x},${n.y},${states[i][0]}`));

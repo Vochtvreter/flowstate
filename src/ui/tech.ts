@@ -65,7 +65,7 @@ const metSeen = new WeakMap<Game, Partial<Record<DataTier, boolean>>>();
 
 /**
  * Has the player met this kind of Data: had some, made some, or owned a tech priced in it? Before β exists
- * (the first Glyph studied), a price in β means nothing, so nothing priced in it is shown (see techTiles).
+ * (the first Circuit studied), a price in β means nothing, so nothing priced in it is shown (see techTiles).
  */
 export function metData(g: Game, k: DataTier): boolean {
   let seen = metSeen.get(g);
@@ -154,7 +154,7 @@ export function setCardWait(fn: (g: Game) => CardWait | null) {
 
 /** What the goal on the card is saving Data for, and how much of each kind it needs. */
 export interface GoalSaving {
-  /** The tech its next step names; null for a goal that counts Data itself ("Study Glyph for β"). */
+  /** The tech its next step names; null for a goal that counts Data itself ("Study Circuit for β"). */
   tech: Tech | null;
   need: Partial<Record<DataTier, number>>;
   /** Credits the same step needs straight after the research (the machine it asks for next); 0 or absent: none. */
@@ -234,7 +234,7 @@ function creditsIn(g: Game, s: GoalSaving): number {
 export function goalDelay(g: Game, t: Tech): { tiers: DataTier[]; seconds: number; saving: GoalSaving } | null {
   const s = goalSaving(g);
   if (!s || s.tech?.id === t.id) return null;
-  // The card's own line asks for it (Lab Speed, then Deep Analysis, on "Make your first Mist"): no warning against the card.
+  // The card's own line asks for it (Lab Speed, then Deep Analysis, on "Make your first Silicon"): no warning against the card.
   if (lineAdvice(g)?.research === t.id) return null;
   const tiers = TIERS.filter((k) => (t.cost[k] ?? 0) > 0 && (s.need[k] ?? 0) > 0 && g.data[k] - (t.cost[k] ?? 0) < (s.need[k] ?? 0) - 1e-9);
   if (!tiers.length) return null;
@@ -249,7 +249,7 @@ export function goalDelay(g: Game, t: Tech): { tiers: DataTier[]; seconds: numbe
   return seconds > 0.5 || seconds === Infinity ? { tiers, seconds, saving: s } : null;
 }
 
-/** "Spends α you are saving for Ember Deposits: about 1 min later." */
+/** "Spends α you are saving for Ore Deposits: about 1 min later." */
 export function delayText(d: NonNullable<ReturnType<typeof goalDelay>>): string {
   const what = listText(d.tiers.map((k) => DATA_NAMES[k]));
   const target = d.saving.tech ? `you are saving for ${d.saving.tech.name}` : 'your goal is counting';
@@ -310,8 +310,8 @@ function groupTiles(tiles: Tile[], want: string | null): { branch: (typeof BRANC
 /** How to start earning a kind of Data, for a tech that waits on one nothing is making yet. */
 const HOW: Record<DataTier, string> = {
   a: 'Wire any item into a Lab to make α.',
-  b: 'Labs make β from Tier 2 items such as Glyph.',
-  g: 'Labs make γ from Tier 3 items such as Lens.',
+  b: 'Labs make β from assembled parts such as the Circuit.',
+  g: 'Labs make γ from finished products such as the Phone.',
 };
 
 const dataHtml = (k: DataTier, n: number) => `<b class="mono" style="color:${DATA_COLORS[k]}">${fmtInt(n)}${DATA_NAMES[k]}</b>`;
@@ -320,7 +320,7 @@ const costHtml = (t: Tech) => TIERS.filter((k) => t.cost[k]).map((k) => dataHtml
 /** "A", "A and B", "A, B and C". */
 const listText = (names: string[]) => (names.length <= 1 ? names.join('') : `${names.slice(0, -1).join(', ')} and ${names[names.length - 1]}`);
 
-/** "Research Murk Deposits first". A requirement that is a goal reward is earned, not researched. */
+/** "Research Oil Deposits first". A requirement that is a goal reward is earned, not researched. */
 function needsText(x: Tile): string {
   if (!x.needs.length) return 'Not available yet';
   return `${x.needs.every((n) => !n.auto) ? 'Research' : 'Earn'} ${listText(x.needs.map((n) => n.name))} first`;
@@ -544,7 +544,7 @@ export function initTech(el: HTMLElement) {
   // drawn at once, in step with the HUD, not at the next half-second refresh.
   onGame((ev) => {
     if (ui.techOpen && (ev.kind === 'goal-ready' || ev.kind === 'goal-claimed')) renderTech(true);
-    // The first Lens ends the demo: its celebration and the summary play on the board, not behind the tree.
+    // The first Phone ends the demo: its celebration and the summary play on the board, not behind the tree.
     if (ev.kind === 'demo-end' && ui.techOpen) closeTech();
   });
   onNewGame(() => {

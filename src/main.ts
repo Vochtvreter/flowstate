@@ -293,7 +293,7 @@ function onKey(e: KeyboardEvent) {
       const n = nodeById(g, ui.sel.id);
       if (n) {
         const refund = refundOf(g, n);
-        // A refusal (the last Well) raises its own toast, and the node stays selected.
+        // A refusal (the last Drill) raises its own toast, and the node stays selected.
         if (!deleteNode(g, n.id)) return renderPanels();
         if (refund > 0) toast(`Refunded <b>${fmt(refund)}¢</b>`, 'good');
       }

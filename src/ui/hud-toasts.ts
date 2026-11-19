@@ -3,7 +3,7 @@
 // A toast is for what nothing else on screen says at that moment. So there is none for:
 //  - a goal turning ready or being claimed (the goal card; the celebration);
 //  - a material made for the first time while its own goal is on the card (the card turns to "Done", and the
-//    big ones get a celebration card when claimed): Shard, Ink, Spark, Glyph, Mist, Prism, Lens and the rest;
+//    big ones get a celebration card when claimed): Glass, Plastic, Copper, Circuit, Silicon, Screen, Phone and the rest;
 //  - a tech that came with a goal (the reward chip named it, the celebration says "… unlocked");
 //  - Orders and the Flow meter switching on (the celebration card and the next goal card say so, and the
 //    order chip and the ring appear);
@@ -20,12 +20,12 @@ import { esc, icon, matGlyph } from './icons';
 import { env } from './phone-env';
 import { onBeat, toast, ui } from './ui';
 
-/** The goal whose card is about making (or first selling) this material: "Make your first Spark" for Spark. -1 when there is none. */
+/** The goal whose card is about making (or first selling) this material: "Make your first Copper" for Copper. -1 when there is none. */
 const goalAbout = (m: MatId) => GOALS.findIndex((x) => x.id === (m === 'shard' ? 'sell-shard' : `make-${m}`));
 
 /**
  * Is the goal card saying this right now? The material's own goal is the one on the card (it has just turned
- * to "Done"), or, for Shard, the card is still on its way there: "Build a Refiner", then "Sell your first Shard".
+ * to "Done"), or, for Glass, the card is still on its way there: "Build a Refiner", then "Sell your first Glass".
  */
 function cardSays(m: MatId): boolean {
   const i = goalAbout(m);
@@ -49,7 +49,7 @@ export function setResearchCard(fn: () => string | null) {
 export function toastFor(ev: GameEvent) {
   switch (ev.kind) {
     case 'milestone':
-      // A by-product nobody wants (Silt) is not an achievement: no toast for junk.
+      // A by-product nobody wants (Tar) is not an achievement: no toast for junk.
       if (MATERIALS[ev.mat].value < RULES.orders.junkValue) break;
       // The goal card is about exactly this and has just turned to "Done": it needs no echo.
       if (cardSays(ev.mat)) break;

@@ -55,7 +55,7 @@ describe('tech tree: what is shown', () => {
     g.techs = ['P1', 'R1'];
     const p3 = byId(g, 'P3')!;
     expect(p3.veiled).toBe(true);
-    expect(p3.needs.map((t) => t.name)).toEqual(['Murk Deposits']);
+    expect(p3.needs.map((t) => t.name)).toEqual(['Oil Deposits']);
   });
 
   it('nothing beyond a goal reward shows until the goal has paid it out', () => {
@@ -65,7 +65,7 @@ describe('tech tree: what is shown', () => {
     for (const id of ['L3', 'L4', 'L2', 'S1', 'C2']) expect(byId(g, id)).toBeUndefined();
     g.techs.push('L1', 'C1');
     for (const id of ['L3', 'L4', 'L2', 'S1', 'C2']) expect(byId(g, id)?.veiled).toBe(false);
-    // Bulk Upgrade is itself a goal reward ("Assemble your first Prism"): it says so, and Auto-balance behind it stays out.
+    // Bulk Upgrade is itself a goal reward ("Assemble your first Screen"): it says so, and Auto-balance behind it stays out.
     expect(byId(g, 'S1')?.state).toBe('goal');
     expect(byId(g, 'S3')).toBeUndefined();
     // Once that goal has paid it out, Auto-balance is one step ahead: it still needs Priority Routing.
@@ -78,7 +78,7 @@ describe('tech tree: what is shown', () => {
     const g = newGame();
     g.techs = ['P1', 'R1', 'P2', 'P3', 'P4'];
     meetAll(g);
-    // Dynamo needs Reclamation (researchable) and Fabrication (a silhouette behind Breeze Deposits).
+    // Laptop needs Reclamation (researchable) and Fabrication (a silhouette behind Quartz Deposits).
     expect(byId(g, 'P7')?.veiled).toBe(true);
     expect(byId(g, 'P8')).toBeUndefined();
     g.techs.push('P5');
@@ -147,18 +147,18 @@ describe('tech tree: the tech the goal asks for', () => {
   };
 
   it('reads it from the goal wording', () => {
-    expect(goalTech(at('Research Murk Deposits'))).toBe('P2');
-    expect(goalTech(at('Make your first Spark'))).toBe('P3');
-    expect(goalTech(at('Assemble your first Glyph'))).toBe('P4');
-    expect(goalTech(at('Make your first Mist'))).toBe('P5');
+    expect(goalTech(at('Research Oil Deposits'))).toBe('P2');
+    expect(goalTech(at('Make your first Copper'))).toBe('P3');
+    expect(goalTech(at('Assemble your first Circuit'))).toBe('P4');
+    expect(goalTech(at('Make your first Silicon'))).toBe('P5');
     expect(goalTech(at('Build a Fabricator'))).toBe('P7');
   });
 
   it('is nothing once the tech is owned, the goal is ready, or the goal names no tech', () => {
-    const g = at('Research Murk Deposits');
+    const g = at('Research Oil Deposits');
     g.techs = ['P1', 'R1', 'P2'];
     expect(goalTech(g)).toBeNull();
-    const h = at('Make your first Spark');
+    const h = at('Make your first Copper');
     h.goal.ready = true;
     expect(goalTech(h)).toBeNull();
     expect(goalTech(at('Expand the board'))).toBeNull();
@@ -206,7 +206,7 @@ describe('build bar: the one locked slot on show', () => {
   });
 
   it('a goal that names the research brings the silhouette even when the research is a step away', () => {
-    // "Build a Fabricator: Research Fabrication, then..." with Breeze Deposits (its requirement) not owned.
+    // "Build a Fabricator: Research Fabrication, then..." with Quartz Deposits (its requirement) not owned.
     const g = at('build-fabricator', ['P1', 'R1', 'P2', 'P3', 'L1', 'P4']);
     expect(techAvailable(g, TECHS.P7)).toBe(false);
     expect(slot(g)).toBe('fabricator:Fabrication');
@@ -262,7 +262,7 @@ describe('tech tree: nothing priced in a kind of Data the player has not met', (
 });
 
 describe('tech tree: the goal\'s wait', () => {
-  // Goal 11, "Make your first Spark": saving 195α for Ember Deposits.
+  // Goal 11, "Make your first Copper": saving 195α for Ore Deposits.
   const at11 = (a: number, rate = 0.75) => {
     const g = newGame();
     g.goal = { i: GOALS.findIndex((x) => x.id === 'make-spark'), ready: false };
@@ -282,22 +282,22 @@ describe('tech tree: the goal\'s wait', () => {
     expect(goalSaving(g)).toBeNull();
   });
 
-  it('Lab Speed at goal 11 spends α Ember needs: it says by how much, and the badge leaves it out', () => {
+  it('Lab Speed at goal 11 spends α Ore needs: it says by how much, and the badge leaves it out', () => {
     const g = at11(78);
     const d = goalDelay(g, TECHS.R2)!;
-    // 50α at 0.75α/s: Ember's 195α comes about 67 s later.
+    // 50α at 0.75α/s: Ore's 195α comes about 67 s later.
     expect(d.tiers).toEqual(['a']);
     expect(d.seconds).toBeCloseTo(50 / 0.75, 3);
-    expect(delayText(d)).toBe('Spends α you are saving for Ember Deposits: about 1 min later.');
+    expect(delayText(d)).toBe('Spends α you are saving for Ore Deposits: about 1 min later.');
     expect(byId(g, 'R2')).toMatchObject({ state: 'rdy', slows: true });
     expect(readyCount(g)).toBe(0);
-    // With Ember's price in hand and 50α to spare, it takes nothing from the goal.
+    // With Ore's price in hand and 50α to spare, it takes nothing from the goal.
     const rich = at11(265 + 1);
     expect(goalDelay(rich, TECHS.R2)).toBeNull();
-    expect(readyCount(rich)).toBe(2); // Ember Deposits itself, and Lab Speed
+    expect(readyCount(rich)).toBe(2); // Ore Deposits itself, and Lab Speed
     // Nothing coming in: it says so without a time.
     const dry = at11(78, 0);
-    expect(delayText(goalDelay(dry, TECHS.R2)!)).toBe('Spends α you are saving for Ember Deposits.');
+    expect(delayText(goalDelay(dry, TECHS.R2)!)).toBe('Spends α you are saving for Ore Deposits.');
   });
 
   it('the goal\'s own tech never warns about itself; a goal that saves credits warns about nothing', () => {
@@ -310,7 +310,7 @@ describe('tech tree: the goal\'s wait', () => {
     expect(goalDelay(g, TECHS.L3)).toBeNull();
   });
 
-  it('a goal counting β ("Study Glyph for β"): Priority Routing would take from that count', () => {
+  it('a goal counting β ("Study Circuit for β"): Priority Routing would take from that count', () => {
     const g = newGame();
     g.goal = { i: GOALS.findIndex((x) => x.id === 'study-glyph'), ready: false };
     g.techs = ['P1', 'R1', 'P2', 'P3', 'L1', 'P4'];
