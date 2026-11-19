@@ -10,7 +10,7 @@ import { Meanwhile, activeGoal, goalView, meanwhileOf } from '../goals';
 import { graph } from '../sim';
 import { Game, GameEvent, GoalReward } from '../state';
 import {
-  audioState, buzz, cueAfford, cueClaim, cueConnect, cueError, cueExpand, cueExpandPops, cueFlowIn, cueLineDone, cuePayout, cuePlace,
+  audioState, buzz, cueAfford, cueClaim, cueConnect, cueError, cueExpand, cueExpandPops, cueFlowIn, cueLevel, cueLineDone, cuePayout, cuePlace,
   cueReady, cueSales, cueStart, cueSurplus, cueTip, freshenSales, initAudio, isMuted, onMuteChange, renderCue, renderPeak, renderSales,
   resetAudio, saleLevel, saleStep, setDrone, setMuted,
 } from './audio';
@@ -789,6 +789,11 @@ export function initFeel() {
   onSignal('sale', onSale);
   onSignal('connect', onConnect);
   onSignal('place', onPlace);
+  // A card came level with what it is wired to (board.ts): a soft click, and a tick under the finger.
+  onSignal('level', () => {
+    cueLevel();
+    buzz('level', 6);
+  });
   // (The hotbar button's own pulse is in phone.css; this is the bell that goes with it.)
   onSignal('afford', () => cueAfford());
   // The goal card's tip: a soft cue when one appears (audio.ts lets one through every 20 s), the hand

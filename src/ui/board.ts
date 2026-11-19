@@ -28,9 +28,10 @@ import {
   Beacon, Flow, floater, flowPoint, fly, frameFx, invalidateFx, makeFlow, setBeacons, setFlowPath, setFlows,
 } from './fx';
 import {
-  Box, Card, Footprint, Port, Pt, View, ZOOM, bestWindow, bezierAt, boxClear, boxUnion, buildSite, centreView, clearPoint, dockSpot, fadeColor, fitBox,
-  fitZoom, fitsAt, frameBox, freeSpot as nearestSpot, heldRate, inPorts, matColor, nodeSize, outPorts, pathD, pinchView, roomFor, segmentsCross, separate,
-  siteFor, wholeGain, wireEnds,
+  Box, Card, Footprint, LEVEL_REACH, LevelCard, LevelEnd, LevelWire, Port, Pt, View, ZOOM, bestWindow, bezierAt, boxClear, boxUnion, buildSite, centreView,
+  clearPoint, dockSpot, fadeColor, fitBox, fitZoom, fitsAt, frameBox, freeSpot as nearestSpot, heldRate, inPorts, levelCards, levelY, matColor, nodeSize, outPorts,
+  pathD, pinchView, roomFor,
+  segmentsCross, separate, siteFor, spotFree, wholeGain, wireEnds,
 } from './geom';
 import { isStarted, screenOpen } from './hud-screens';
 import { isTouch, pressWord, withKey } from './hud-words';
@@ -204,7 +205,9 @@ type Drag =
   | { kind: 'pan'; sx: number; sy: number; vx: number; vy: number; moved: boolean; slop: number; place: boolean;
       /** A finger came down near (not on) this output port: if it turns out to be a tap, the port is armed. */
       near?: { id: number; port: number } }
-  | { kind: 'node'; id: number; ox: number; oy: number; x0: number; y0: number; moved: boolean; sx: number; sy: number; slop: number }
+  | { kind: 'node'; id: number; ox: number; oy: number; x0: number; y0: number; moved: boolean; sx: number; sy: number; slop: number;
+      /** The wires of the card that run dead straight where it is held now (see `levelWith`); none: it stands on the grid. */
+      level?: number[] }
   | WireDrag
   | { kind: 'wireIn'; to: number; mat: MatId | null; b: Pt; p: Pt; target: number | null; tp: Pt; blend: number; armed: boolean; sx: number; sy: number; slop: number }
   | { kind: 'wirePress'; wireId: number; sx: number; sy: number; slop: number; touch: boolean }
@@ -2055,6 +2058,10 @@ let layoutWorker: Worker | null | undefined;
 
 function askTidy(job: TidyJob) {
   const input = tidyInput(job.g, GRID);
+  // A card that was brought level stands a few pixels off the grid. The layout is shown the grid line it stands by, so
+  // that a board it has tidied is one it leaves alone: shown the levelled heights, it found a card to move at every
+  // second press. (The levelling is done again afterwards, and comes out where it was: see tidyAnswer.)
+  for (const n of input.nodes) if (!n.fixed) n.y = snap(n.y);
   if (layoutWorker === undefined) {
     layoutWorker = null;
     if (typeof Worker === 'function') {
@@ -2101,10 +2108,18 @@ function tidyAnswer(id: number, moves: Map<number, Pt>) {
   // A drag that began while the answer was on its way is let go first.
   settleGesture();
   cancelGesture();
-  const from = new Map<number, Pt>();
-  for (const [nid] of moves) {
+  // Then the cards come level: each goes up or down by a few pixels to where the wire that feeds it runs dead
+  // straight (`levelCards` in geom.ts). A board the layout leaves alone is still brought level.
+  // (A card the layout leaves where the grid line is, and that stood level beside it, is not a move.)
+  for (const [nid, to] of [...moves]) {
     const n = nodeById(g, nid);
-    if (n && n.type !== 'well') from.set(nid, { x: n.x, y: n.y });
+    if (n && to.x === n.x && to.y === snap(n.y)) moves.delete(nid);
+  }
+  for (const [nid, y] of leveled(g, moves)) moves.set(nid, { x: moves.get(nid)?.x ?? nodeById(g, nid)!.x, y });
+  const from = new Map<number, Pt>();
+  for (const [nid, to] of moves) {
+    const n = nodeById(g, nid);
+    if (n && n.type !== 'well' && (n.x !== to.x || n.y !== to.y)) from.set(nid, { x: n.x, y: n.y });
   }
   if (!from.size) {
     toast('Already tidy.', 'info');
@@ -2174,6 +2189,22 @@ function tidyAnswer(id: number, moves: Map<number, Pt>) {
   fitBack = fitAt = null;
   moveView(t.x, t.y, t.k, true, TIDY_MS);
   toast(`Tidied. <b>${isTouch() ? 'Undo' : 'Ctrl Z'}</b> puts it back.`, 'good');
+}
+
+/** The heights at which the cards come level once they stand where the layout puts them (`moves`; a card it leaves, where it is). */
+function leveled(g: Game, moves: Map<number, Pt>): Map<number, number> {
+  const cards: LevelCard[] = g.nodes.map((n) => {
+    const { w, h } = nodeSize(n);
+    const to = n.type === 'well' ? null : moves.get(n.id);
+    return { id: n.id, x: to?.x ?? n.x, y: to?.y ?? n.y, w, h, room: roomFor(n.type, h), fixed: n.type === 'well' };
+  });
+  const wires: LevelWire[] = [];
+  for (const w of g.wires) {
+    const e = wireEnds(g, w);
+    const a = nodeById(g, w.from), b = nodeById(g, w.to);
+    if (e && a && b) wires.push({ id: w.id, from: w.from, to: w.to, a: e.a.y - a.y, b: e.b.y - b.y });
+  }
+  return levelCards(cards, wires, depositBoxes(), g.board);
 }
 
 /** The Tidy buttons say they are working while the layout is worked out. */
@@ -4429,6 +4460,10 @@ function steer(cx: number, cy: number, hovering = false) {
       }
       const { w, h } = nodeSize(n);
       const pos = clampToBoard(p.x - drag.ox, p.y - drag.oy, w, h);
+      // Within reach of the height at which one of its wires would run straight, the card comes level with it.
+      const level = levelWith(g, n, p.y - drag.oy, h);
+      if (level) pos.y = level.y;
+      markLevel(drag, level?.wires ?? []);
       if (pos.x !== n.x || pos.y !== n.y) {
         n.x = pos.x;
         n.y = pos.y;
@@ -4533,7 +4568,10 @@ function edgeScroll(dt: number) {
 }
 
 function endDrag() {
-  if (drag?.kind === 'node') nodeEls.get(drag.id)?.el.classList.remove('dragging');
+  if (drag?.kind === 'node') {
+    nodeEls.get(drag.id)?.el.classList.remove('dragging');
+    markLevel(drag, []);
+  }
   drag = null;
   boardEl.classList.remove('wiring');
   appEl?.classList.remove('carrying');
@@ -4542,6 +4580,47 @@ function endDrag() {
   knifeLine.classList.remove('on');
   // Marks put up for a dragged wire come down; those of an armed port stay.
   if (markedFor && !tapWire) clearMarks();
+}
+
+// ----- a card comes level with what it is wired to -----
+
+/**
+ * Where the card being dragged should stand so that one of its wires runs dead straight, if the pointer has it within
+ * reach of such a height (`levelY` in geom.ts, where the rule is tested): for each of its wires, how far down the
+ * card its own port is and how high the port at the other end stands. The reach is in screen pixels, so that it is the
+ * same pull under the hand at every zoom.
+ */
+function levelWith(g: Game, n: GNode, y: number, h: number): { y: number; wires: number[] } | null {
+  const gr = graph(g);
+  const ends: LevelEnd[] = [];
+  const add = (w: Wire) => {
+    const e = wireEnds(g, w);
+    if (!e) return;
+    const mine = w.from === n.id ? e.a : e.b, theirs = w.from === n.id ? e.b : e.a;
+    ends.push({ wire: w.id, own: mine.y - n.y, other: theirs.y });
+  };
+  for (const w of gr.ins.get(n.id) ?? []) add(w);
+  for (const port of gr.outs.get(n.id) ?? []) if (port) for (const w of port) add(w);
+  if (!ends.length) return null;
+  return levelY(y, ends, 20, g.board.h - h - 20, LEVEL_REACH / Math.max(0.5, ui.view.k));
+}
+
+/** Light the wires that run level while the card is held there, and say so once as each comes level (a click: feel.ts). */
+function markLevel(d: Extract<Drag, { kind: 'node' }>, wires: number[]) {
+  const was = d.level ?? [];
+  if (was.length === wires.length && was.every((id, i) => id === wires[i])) return;
+  for (const id of was) if (!wires.includes(id)) wireEls.get(id)?.g.classList.remove('level');
+  let fresh: number | null = null;
+  for (const id of wires) {
+    if (was.includes(id)) continue;
+    wireEls.get(id)?.g.classList.add('level');
+    fresh ??= id;
+  }
+  d.level = wires;
+  if (fresh != null) {
+    const refs = wireEls.get(fresh);
+    if (refs) signal('level', { at: toClient({ x: (refs.a.x + refs.b.x) / 2, y: (refs.a.y + refs.b.y) / 2 }) });
+  }
 }
 
 /** Give up on the gesture in progress. A node that was being moved goes back to where it started. */
@@ -4575,7 +4654,10 @@ function dropNode(d: Extract<Drag, { kind: 'node' }>) {
     // Let go on top of another card (or too close to one), it goes to the nearest free spot; with
     // nowhere free at all, back to where it came from.
     const let_go = { x: n.x, y: n.y };
-    const spot = freeSpot(n.x, n.y, w, h, n.id, roomFor(n.type, h)) ?? { x: d.x0, y: d.y0 };
+    // (Held level with a port it is wired to, it stays there, off the grid by a few pixels, when that spot is free.)
+    const room = roomFor(n.type, h);
+    const level = d.level?.length && spotFree(n.x, n.y, w, room, nodeBoxes(n.id, true).concat(depositBoxes())) ? { x: n.x, y: n.y } : null;
+    const spot = level ?? freeSpot(n.x, n.y, w, h, n.id, room) ?? { x: d.x0, y: d.y0 };
     // The node goes back to where it started for a moment, so that the undo step is taken now
     // (at press time it would also roll back anything else done during the drag) and shows only
     // this node moving. Move and splice are one step: a single undo puts the node back.
@@ -4591,6 +4673,8 @@ function dropNode(d: Extract<Drag, { kind: 'node' }>) {
     } else g.rev++;
     // It is eased there from where it was let go, not jumped.
     settleFrom(n.id, let_go.x - spot.x, let_go.y - spot.y, 180);
+    // Left level: the wires that run straight now say so once more as the card is let go.
+    if (level) for (const id of d.level ?? []) { const refs = wireEls.get(id); if (refs) oneShot(refs.g, 'leveled', 520); }
   }
   const again = ui.sel?.kind === 'node' && ui.sel.id === d.id;
   select({ kind: 'node', id: d.id });

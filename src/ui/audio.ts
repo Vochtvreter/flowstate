@@ -524,6 +524,17 @@ function sPlace(g: Graph, t: number) {
   tone(g, 'triangle', THUMP_TICK, t, 0.05, 0.001, 0.028);
 }
 
+function sLevel(g: Graph, t: number) {
+  tone(g, 'triangle', 1174.66, t, 0.045, 0.002, 0.06);
+  tone(g, 'sine', 587.33, t, 0.05, 0.003, 0.085);
+}
+
+/** A card came level with what it is wired to (a wire runs dead straight): a small, soft click, an octave apart. */
+export function cueLevel() {
+  const g = admit('level', 90);
+  if (g) sLevel(g, soon(g));
+}
+
 /** Something was bought or placed: a low thump, with a small tick on top of it. */
 export function cuePlace() {
   const g = admit('place', 80);

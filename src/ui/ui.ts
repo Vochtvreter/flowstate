@@ -80,6 +80,8 @@ export interface Signals {
     build?: { type: NodeType; from?: number; port?: number; deposit?: number };
     press?: string;
   };
+  /** A card being moved came level with a port it is wired to: one of its wires now runs dead straight. `at` is the middle of that wire. */
+  level: { at: { x: number; y: number } };
   /**
    * The board has just been expanded: a new plot is on the board and the camera is about to glide out to
    * show it. `deposits` are the deposits it revealed, in the order they pop in, `stagger` milliseconds apart.

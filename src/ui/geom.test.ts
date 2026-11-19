@@ -1,7 +1,9 @@
 import { describe, expect, it } from 'vitest';
 import {
   BUILD_AIR, BUILD_REACH, Box, CARD_GAP, Card, Footprint, MORE_REACH, PLOT_MARGIN, PORT_OUT, SiteQuery, WIRE_REACH, bestWindow, boxClear, buildSite, cardsOverlap,
-  clearPoint, dockSpot, fadeColor, fitBox, fitsAt, frameBox, freeSpot, heldRate, pinchView, samples, separate, siteFor, spotFree, wholeGain,
+  LEVEL_REACH, LEVEL_TOL, LevelCard, LevelWire, clearPoint, dockSpot, fadeColor, fitBox, fitsAt, frameBox, freeSpot, heldRate, levelCards, levelY, pinchView, samples,
+  separate, siteFor, spotFree,
+  wholeGain,
 } from './geom';
 
 const free = (k: number) => k;
@@ -723,5 +725,150 @@ describe('bestWindow: the stretch of a big factory with the most cards on screen
       const n = boxes.filter((b) => shows(v, b)).length;
       for (let x = -1800; x < 400; x += 25) for (let y = -900; y < 700; y += 25) expect(boxes.filter((b) => shows({ x, y, k }, b)).length).toBeLessThanOrEqual(n);
     }
+  });
+});
+
+describe('levelY: a dragged card comes level with a port it is wired to, so the wire runs straight', () => {
+  // A Drill at y 120 has its port 36 px down, at 156. An Assembler is 92 px tall with its two inputs 30.67 and 61.33 px down.
+  const DRILL = 156;
+  const top = { wire: 1, own: 92 / 3, other: DRILL };
+  const low = { wire: 2, own: (92 * 2) / 3, other: 420 };
+
+  it('on the grid the two ports are never level; within reach, the card stands a few pixels off it and they are', () => {
+    // On the grid at 120 the Assembler's first input stands at 150.67, the Drill's port at 156.
+    expect(120 + top.own).not.toBeCloseTo(DRILL, 0);
+    const at = levelY(120, [top], 20, 600)!;
+    expect(at).toEqual({ y: 125, wires: [1] });
+    expect(Math.abs(at.y + top.own - DRILL)).toBeLessThanOrEqual(LEVEL_TOL);
+    // A whole pixel, so the card's text is drawn sharp.
+    expect(Number.isInteger(at.y)).toBe(true);
+  });
+
+  it('out of reach it is left to the grid', () => {
+    expect(levelY(125 - LEVEL_REACH - 1, [top], 20, 600)).toBeNull();
+    expect(levelY(125 + LEVEL_REACH + 1, [top], 20, 600)).toBeNull();
+    expect(levelY(125 + LEVEL_REACH - 1, [top], 20, 600)).toEqual({ y: 125, wires: [1] });
+    expect(levelY(300, [], 20, 600)).toBeNull();
+  });
+
+  it('of two wires it comes level with the nearer; where both are level at one height, both are named', () => {
+    // The second input is level at 420 - 61.33 = 358.67.
+    expect(levelY(355, [top, low], 20, 600)).toEqual({ y: 359, wires: [2] });
+    expect(levelY(128, [top, low], 20, 600)).toEqual({ y: 125, wires: [1] });
+    // Two cards of one shape in a row: in and out are level at the same height.
+    const a = { wire: 7, own: 36, other: 156 }, b = { wire: 8, own: 36, other: 156 };
+    expect(levelY(118, [a, b], 20, 600)).toEqual({ y: 120, wires: [7, 8] });
+  });
+
+  it('never outside the plot: a height past its edge is not taken', () => {
+    expect(levelY(22, [{ wire: 1, own: 36, other: 50 }], 20, 600)).toBeNull();
+    expect(levelY(598, [{ wire: 1, own: 36, other: 640 }], 20, 600)).toBeNull();
+    expect(levelY(596, [{ wire: 1, own: 36, other: 636 }], 20, 600)).toEqual({ y: 600, wires: [1] });
+  });
+
+  it('the reach can be widened for a camera that is zoomed out', () => {
+    expect(levelY(110, [top], 20, 600)).toBeNull();
+    expect(levelY(110, [top], 20, 600, LEVEL_REACH / 0.5)).toEqual({ y: 125, wires: [1] });
+  });
+});
+
+describe('levelCards: after Tidy, each card comes level with the wire that feeds it', () => {
+  const BOARD = { w: 1240, h: 760 };
+  const drill = (id: number, y: number): LevelCard => ({ id, x: 100, y, w: 172, h: 72, room: 72, fixed: true });
+  const small = (id: number, x: number, y: number): LevelCard => ({ id, x, y, w: 136, h: 60, room: 60, fixed: false });
+  const full = (id: number, x: number, y: number): LevelCard => ({ id, x, y, w: 172, h: 72, room: 112, fixed: false });
+  /** A wire between two cards with one port each: 36 px down a full card, 30 down a small one. */
+  const wire = (id: number, from: LevelCard, to: LevelCard): LevelWire => ({ id, from: from.id, to: to.id, a: from.h / 2, b: to.h / 2 });
+
+  it('a small card on the grid beside a Drill goes 6 px down, and its wire is straight; the Drill never moves', () => {
+    const d = drill(1, 120), r = small(2, 400, 120);
+    const moves = levelCards([d, r], [wire(9, d, r)], [], BOARD);
+    expect([...moves]).toEqual([[2, 126]]);
+    expect(126 + 30).toBe(120 + 36);
+  });
+
+  it('a row comes level from its start: the card after the small one follows it', () => {
+    const d = drill(1, 120), r = small(2, 400, 120), v = small(3, 640, 120);
+    const moves = levelCards([v, r, d], [wire(8, r, v), wire(9, d, r)], [], BOARD);
+    expect(moves.get(2)).toBe(126);
+    expect(moves.get(3)).toBe(126);
+  });
+
+  it('cards of one shape in a row are level on the grid already: nothing moves', () => {
+    const d = drill(1, 120), m = full(2, 400, 120);
+    expect(levelCards([d, m], [wire(9, d, m)], [], BOARD).size).toBe(0);
+  });
+
+  it('a card that nothing feeds comes level with the card it feeds', () => {
+    const src = small(2, 300, 200), to = full(3, 600, 200);
+    // (Level at 206: its port, 30 down, then stands at 236 with the other's, 36 down from 200.)
+    expect([...levelCards([src, to], [wire(9, src, to)], [], BOARD)]).toEqual([[2, 206]]);
+  });
+
+  it('out of reach, or too close to another card or a free deposit, it stays on the grid', () => {
+    const d = drill(1, 120);
+    const far = small(2, 400, 160);
+    expect(levelCards([d, far], [wire(9, d, far)], [], BOARD).size).toBe(0);
+    // A card 20 px under where it stands: 6 px down would leave 14, less than a card's gap.
+    const r = small(2, 400, 120), under = small(3, 400, 200);
+    expect(CARD_GAP).toBe(16);
+    expect(levelCards([d, r, under], [wire(9, d, r)], [], BOARD).has(2)).toBe(false);
+    const deposit: Box = { x0: 380, y0: 200, x1: 552, y1: 272 };
+    expect(levelCards([d, r], [wire(9, d, r)], [deposit], BOARD).has(2)).toBe(false);
+    // With room, it moves.
+    expect(levelCards([d, r, small(3, 400, 220)], [wire(9, d, r)], [], BOARD).get(2)).toBe(126);
+  });
+
+  it('never puts a wire behind a card it does not end at', () => {
+    // Drill, then far to the right a small card; between them a card whose top edge the level wire would graze.
+    const d = drill(1, 120), r = small(2, 700, 120);
+    const mid: LevelCard = { id: 3, x: 400, y: 158, w: 172, h: 72, room: 72, fixed: false };
+    const w = wire(9, d, r);
+    // As it stands the wire rises from 156 to 150 and clears the middle card (top at 158); level, it would too (156).
+    expect(levelCards([d, r, mid], [w], [], BOARD).get(2)).toBe(126);
+    // With the middle card's top at 155 the wire still clears it as it stands (it is at 154.5 there and rising), and
+    // level, at 156, it would pass behind it: the small card stays.
+    const up = { ...mid, y: 155 };
+    expect(levelCards([d, r, up], [w], [], BOARD).has(2)).toBe(false);
+  });
+
+  it('on 200 random boards: nothing fixed moves, no card moves more than the reach, and none ends within a gap of another', () => {
+    let seed = 7;
+    const rnd = () => ((seed = (seed * 1103515245 + 12345) & 0x7fffffff) / 0x7fffffff);
+    let moved = 0;
+    for (let round = 0; round < 200; round++) {
+      const cards: LevelCard[] = [];
+      for (let i = 0; i < 9; i++) {
+        const c: LevelCard = i < 3 ? drill(i + 1, 120 + i * 140) : rnd() < 0.5 ? small(i + 1, 0, 0) : full(i + 1, 0, 0);
+        if (i >= 3) {
+          for (let tries = 0; tries < 40; tries++) {
+            c.x = 300 + 20 * Math.floor(rnd() * 40);
+            c.y = 20 + 20 * Math.floor(rnd() * 30);
+            if (spotFree(c.x, c.y, c.w, c.room, cards.map((o) => ({ x0: o.x, y0: o.y, x1: o.x + o.w, y1: o.y + o.room })))) break;
+            c.x = -1;
+          }
+          if (c.x < 0) continue;
+        }
+        cards.push(c);
+      }
+      const wires: LevelWire[] = [];
+      for (let i = 3; i < cards.length; i++) wires.push(wire(100 + i, cards[Math.floor(rnd() * i)], cards[i]));
+      const moves = levelCards(cards, wires, [], BOARD);
+      moved += moves.size;
+      for (const [id, y] of moves) {
+        const c = cards.find((x) => x.id === id)!;
+        expect(c.fixed).toBe(false);
+        expect(Math.abs(y - c.y)).toBeLessThanOrEqual(LEVEL_REACH + 1);
+        expect(y).toBeGreaterThanOrEqual(PLOT_MARGIN);
+        expect(y + c.h).toBeLessThanOrEqual(BOARD.h - PLOT_MARGIN);
+      }
+      const after = cards.map((c) => ({ ...c, y: moves.get(c.id) ?? c.y }));
+      for (const a of after) for (const b of after) {
+        if (a.id >= b.id) continue;
+        const clear = a.x >= b.x + b.w + CARD_GAP || b.x >= a.x + a.w + CARD_GAP || a.y >= b.y + b.room + CARD_GAP || b.y >= a.y + a.room + CARD_GAP;
+        expect(clear, `cards ${a.id} and ${b.id} in round ${round}`).toBe(true);
+      }
+    }
+    expect(moved).toBeGreaterThan(20);
   });
 });

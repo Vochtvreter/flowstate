@@ -182,6 +182,12 @@ g.wire:hover .base { stroke-opacity: 0.6; }
 g.wire.new .base { animation: wire-in 0.15s ease-out; stroke-dasharray: none; }
 g.wire.new .glow { animation: wire-glow 0.25s ease-out; }
 @keyframes wire-in { from { stroke-width: 11px; stroke-opacity: 0.95; } }
+/* A wire of the card being moved that runs dead straight where the card is held (board.ts, markLevel): it lights up,
+   so the hand knows it has found the place. */
+g.wire.level .base { stroke-opacity: 0.95; }
+g.wire.level .glow { stroke-opacity: 0.42; }
+g.wire.leveled .glow { animation: wire-leveled 0.5s ease-out; }
+@keyframes wire-leveled { from { stroke-opacity: 0.6; } }
 @keyframes wire-glow { from { stroke-opacity: 0.5; } }
 #temp-wire { fill: none; stroke-width: 3px; stroke-dasharray: 2 8; stroke-linecap: round; stroke-opacity: 0.9; }
 #temp-wire.snap { stroke-dasharray: none; stroke-width: 4px; stroke-opacity: 1; }
@@ -391,7 +397,7 @@ html[data-input='touch'] #hints { display: none; }
   .node .ring { transition: none; }
   .deposit.pop { animation: none; }
   /* Nothing on the board grows, swells or slides in: a new card or wire is simply there. */
-  .node.pop, g.wire.new .base, g.wire.new .glow { animation: none; }
+  .node.pop, g.wire.new .base, g.wire.new .glow, g.wire.leveled .glow { animation: none; }
   .node .txt, #board.ov .node .txt, .slot { transition: none; }
   /* Asked for, the Expand button wears a steady ring instead of a pulse. */
   #expand.call { animation: none; box-shadow: 0 0 0 3px rgba(255, 200, 87, 0.55); }
