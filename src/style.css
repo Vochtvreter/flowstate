@@ -186,10 +186,15 @@ g.wire.new .glow { animation: wire-glow 0.25s ease-out; }
 .node[data-st='starved']:not(.sel) { border-color: #6a2a31; }
 /* Drills stay calm: a blocked Drill changes its ring colour and nothing else. */
 .node.t-well[data-st='blocked']:not(.sel):not(.target) { border-color: var(--border); }
-.pill { position: absolute; top: -9px; right: 10px; font-size: 9.5px; font-weight: 700; letter-spacing: 0.03em; padding: 2px 8px; border-radius: 999px; line-height: 14px; background: #1e2638; color: #c9d3e8; border: 1px solid #34405c; }
+/* The label on a card in trouble says what is wrong in plain words ("Needs more Copper", "Tar has no exit": status.ts,
+   pillFor), so it is set as words are, not as a code. `limit` is the machine another one is waiting on: it works, and
+   cannot keep up. */
+.pill { position: absolute; top: -10px; right: 8px; max-width: calc(100% - 4px); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 10.5px; font-weight: 600; padding: 2px 8px; border-radius: 999px; line-height: 14px; background: #1e2638; color: #c9d3e8; border: 1px solid #34405c; }
 .pill:empty { display: none; }
 .pill[data-kind='blocked'] { background: #33270c; color: #fcd34d; border-color: #5a4718; }
 .pill[data-kind='starved'] { background: #3a1518; color: #fca5a5; border-color: #6a2a31; }
+.pill[data-kind='limit'] { background: #14233f; color: #a9c2ff; border-color: #3b5491; }
+.node:has(> .pill[data-kind='limit']):not(.sel) { border-color: #3b5491; }
 /* Ports are centred with a margin, not a transform, and an open port's pulse is drawn on the
    effects canvas (fx.ts beacons): nothing here animates. */
 .port { position: absolute; width: 14px; height: 14px; margin-top: -7px; border-radius: 50%; border: 2px solid var(--canvas); box-shadow: 0 0 0 1px rgba(255, 255, 255, 0.1); cursor: crosshair; }
@@ -411,6 +416,8 @@ html[data-input='touch'] #zoom .zl { height: 44px; }
 .statusbox { border-radius: 12px; padding: 12px; border: 1px solid #34405c; background: #151c2d; }
 .statusbox.starved { background: #24131a; border-color: #5a2630; }
 .statusbox.blocked { background: #241d0f; border-color: #5a4718; }
+.statusbox.limit { background: #131d33; border-color: #3b5491; }
+.statusbox.limit .st-title { color: #a9c2ff; }
 .st-title { display: flex; align-items: center; gap: 8px; font-size: 13px; font-weight: 700; }
 .statusbox.starved .st-title { color: #fca5a5; }
 .statusbox.blocked .st-title { color: #fcd34d; }

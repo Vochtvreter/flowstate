@@ -38,7 +38,7 @@ import { esc, icon, matGlyph, matShape, nodeIcon } from './icons';
 import { tidy, tidyInput } from './layout';
 import { shortNum } from './panels';
 import { env } from './phone-env';
-import { diagnose } from './status';
+import { diagnose, pillFor } from './status';
 import { delegate, onGame, onPress, onSignal, select, signal, toast, touch, ui } from './ui';
 
 let boardEl: HTMLElement;
@@ -2227,9 +2227,11 @@ function nodeSub(n: GNode): string {
     case 'well': return `Lv ${n.lv.speed} · deposit`;
     case 'refiner': case 'assembler': case 'fabricator': {
       const r = recipeOf(n);
-      // In the larger type this line has less room, so there it only says what comes out.
+      // In the larger type this line has less room, so there it only says what comes out. So does a recipe too long
+      // for the line: cut short it lost its last word, which is the one that matters ("Plastic + Copper →…").
       const max = big ? SUB_CHARS - 2 : SUB_CHARS;
-      const text = !r ? 'no recipe' : big ? `makes ${r.outputs.map(([m]) => MATERIALS[m].name).join(' + ')}` : recipeText(r);
+      const whole = r ? recipeText(r) : '';
+      const text = !r ? 'no recipe' : big || whole.length > max ? `makes ${r.outputs.map(([m]) => MATERIALS[m].name).join(' + ')}` : whole;
       return text.length > max ? text.slice(0, max - 1).trimEnd() + '…' : text;
     }
     case 'router': return `${n.mode} split`;
@@ -2817,13 +2819,10 @@ function updateNodes(g: Game) {
     // The ring and the border say what diagnose says: a node it finds nothing wrong with (the Phone-only
     // Fabricator between the first Phone and free play, status.ts `resting`) is drawn as working, not amber or red.
     if (!dx.problem && (n.status === 'blocked' || n.status === 'starved')) st = 'working';
-    let pill = '';
-    // Drills never get a pill: their ring colour says enough.
-    if (n.type !== 'well') {
-      if (dx.problem === 'blocked') pill = dx.victim ? '' : 'BLOCKED';
-      else if (dx.problem === 'starved') pill = dx.victim ? '' : 'STARVED';
-      else if (dx.problem === 'idle') pill = 'IDLE';
-    }
+    // What the card says is wrong, in plain words with the material by name (status.ts, pillFor): "Needs more Copper",
+    // "Tar has no exit", and on the machine that holds another back, "Can't keep up".
+    const label = pillFor(g, n, dx);
+    const pill = label.text;
     if (dx.problem && dx.victim) st = 'victim';
     if (st !== refs.cSt) {
       refs.cSt = st;
@@ -2832,7 +2831,7 @@ function updateNodes(g: Game) {
     if (pill !== refs.cPill) {
       refs.cPill = pill;
       refs.pill.textContent = pill;
-      refs.pill.dataset.kind = pill.toLowerCase();
+      refs.pill.dataset.kind = label.kind;
     }
   }
 }

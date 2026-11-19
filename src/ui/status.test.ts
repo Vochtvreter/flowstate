@@ -7,7 +7,7 @@ import { labRate, maxLevel, upgradeCost } from '../economy';
 import { GOALS } from '../goals';
 import { tick } from '../sim';
 import { Game, GNode, newGame } from '../state';
-import { ALERT_QUIET, alertPick, bulkPlan, diagnose, starvedShort, wayOn } from './status';
+import { ALERT_QUIET, alertPick, bulkPlan, diagnose, limits, pillFor, starvedShort, wayOn } from './status';
 
 const run = (g: Game, seconds: number) => {
   for (let i = 0; i < seconds * 20; i++) tick(g, 0.05);
@@ -438,5 +438,116 @@ describe('"Upgrade all": what one press would buy', () => {
     expect(bulkPlan(g, 'well', 'speed')).toEqual({ count: 3, of: 3, cost: 180, total: 180 });
     // (Efficiency is not a Drill's track at all.)
     expect(bulkPlan(g, 'well', 'eff')).toEqual({ count: 0, of: 0, cost: 0, total: 0 });
+  });
+});
+
+describe('a card in trouble says what is wrong in plain words, and the machine that holds another back says so', () => {
+  /** A board to build on: every tech and no worry about credits. */
+  function open(): Game {
+    clearHistory();
+    const g = newGame();
+    g.credits = 1e9;
+    g.techs = ['P1', 'R1', 'P2', 'P3', 'P4', 'L1'];
+    return g;
+  }
+  const drill = (g: Game) => g.nodes.find((n) => n.type === 'well')!;
+  const market = (g: Game) => g.nodes.find((n) => n.type === 'market')!;
+
+  it('the opening board: the Drill\'s Sand has no exit, and the Market has nothing to say', () => {
+    const g = open();
+    run(g, 12);
+    expect(pillFor(g, drill(g))).toEqual({ kind: 'blocked', text: 'Sand has no exit' });
+    expect(pillFor(g, market(g))).toEqual({ kind: '', text: '' });
+    // Wired, it has nothing to say either.
+    connect(g, drill(g).id, 0, market(g).id);
+    run(g, 12);
+    expect(pillFor(g, drill(g))).toEqual({ kind: '', text: '' });
+  });
+
+  it('an output with no wire is named by its material: on a machine with two, the one that is stuck', () => {
+    const g = open();
+    const oil = placeNode(g, 'well', 0, 0, { depositId: 3 })!;
+    const refiner = placeNode(g, 'refiner', 400, 400)!;
+    connect(g, oil.id, 0, refiner.id);
+    connect(g, refiner.id, 0, market(g).id);
+    run(g, 40);
+    expect(refiner.recipe).toBe('ink');
+    expect(pillFor(g, refiner)).toEqual({ kind: 'blocked', text: 'Tar has no exit' });
+    // (The Drill behind it only suffers from that: its ring turns amber, and the cause carries the words.)
+    expect(pillFor(g, oil).text).toBe('');
+  });
+
+  it('wired and still full: "Backed up" on a machine, nothing on a Drill', () => {
+    const g = open();
+    const second = placeNode(g, 'well', 0, 0, { depositId: 2 })!;
+    const refiner = placeNode(g, 'refiner', 400, 120)!;
+    const lab = placeNode(g, 'lab', 700, 260)!;
+    connect(g, drill(g).id, 0, refiner.id);
+    // A Lab studies one item a second: a Drill of its own fills it, and the Glass has to wait.
+    connect(g, second.id, 0, lab.id);
+    for (let i = 0; i < 4; i++) upgrade(g, second.id, 'speed');
+    run(g, 20);
+    connect(g, refiner.id, 0, lab.id);
+    run(g, 60);
+    expect(diagnose(g, refiner)).toMatchObject({ problem: 'blocked', openPort: false, victim: false });
+    expect(pillFor(g, refiner)).toEqual({ kind: 'blocked', text: 'Backed up' });
+    expect(diagnose(g, second).problem).toBe('blocked');
+    expect(pillFor(g, second)).toEqual({ kind: '', text: '' });
+  });
+
+  it('an input nothing brings: "Needs Copper"; a machine with nothing wired in: "No input"', () => {
+    const g = open();
+    const oil = placeNode(g, 'well', 0, 0, { depositId: 3 })!;
+    const plastic = placeNode(g, 'refiner', 400, 400)!;
+    connect(g, oil.id, 0, plastic.id);
+    connect(g, plastic.id, 1, placeNode(g, 'void', 600, 600)!.id);
+    const assembler = placeNode(g, 'assembler', 700, 400)!;
+    expect(pillFor(g, assembler)).toEqual({ kind: 'idle', text: 'No input' });
+    connect(g, plastic.id, 0, assembler.id);
+    connect(g, assembler.id, 0, market(g).id);
+    run(g, 40);
+    expect(assembler.recipe).toBe('glyph');
+    expect(pillFor(g, assembler)).toEqual({ kind: 'starved', text: 'Needs Copper' });
+    expect(limits(g).size).toBe(0);
+  });
+
+  it('two Refiners on one Drill: each "Needs more Sand", and the Drill, flat out and green, "Can\u2019t keep up"', () => {
+    const g = open();
+    const a = placeNode(g, 'refiner', 400, 100)!;
+    const b = placeNode(g, 'refiner', 400, 240)!;
+    for (const r of [a, b]) {
+      connect(g, drill(g).id, 0, r.id);
+      connect(g, r.id, 0, market(g).id);
+    }
+    run(g, 60);
+    for (const r of [a, b]) expect(pillFor(g, r)).toEqual({ kind: 'starved', text: 'Needs more Sand' });
+    expect(drill(g).status).toBe('working');
+    expect(diagnose(g, drill(g)).problem).toBeNull();
+    expect([...limits(g)]).toEqual([drill(g).id]);
+    expect(pillFor(g, drill(g))).toEqual({ kind: 'limit', text: 'Can\u2019t keep up' });
+    // More Speed on the Drill, and nobody is waiting on it any more.
+    for (let i = 0; i < 4; i++) upgrade(g, drill(g).id, 'speed');
+    run(g, 60);
+    expect(limits(g).size).toBe(0);
+    expect(pillFor(g, drill(g)).text).toBe('');
+    for (const r of [a, b]) expect(pillFor(g, r).text).toBe('');
+  });
+
+  it('no label is the simulation\'s word for it, and none is longer than a card is wide', () => {
+    const g = open();
+    const seen = new Set<string>();
+    const oil = placeNode(g, 'well', 0, 0, { depositId: 3 })!;
+    const plastic = placeNode(g, 'refiner', 400, 400)!;
+    connect(g, oil.id, 0, plastic.id);
+    for (let t = 0; t < 40; t++) {
+      run(g, 1);
+      for (const n of g.nodes) seen.add(pillFor(g, n).text);
+    }
+    seen.delete('');
+    expect(seen.size).toBeGreaterThan(0);
+    for (const text of seen) {
+      expect(text).not.toMatch(/blocked|starved|idle/i);
+      expect(text.length).toBeLessThanOrEqual(20);
+    }
   });
 });

@@ -279,7 +279,7 @@ html[data-input='touch'] #app:not(.phone) #thumb-slot.alt { top: auto; bottom: 1
 #board.big .ns { font-size: 12px; line-height: 15px; }
 #board.big.lean .ns { display: none; }
 #board.big .nr { font-family: Inter, system-ui, sans-serif; font-variant-numeric: tabular-nums; font-size: 15px; line-height: 19px; letter-spacing: -0.01em; }
-#board.big .pill { font-size: 15px; line-height: 18px; top: -13px; padding: 2px 9px; }
+#board.big .pill { font-size: 14px; line-height: 18px; top: -13px; right: 4px; padding: 2px 8px; }
 #board.big .chip i { font-size: 15px; line-height: 19px; padding: 2px 9px; }
 #board.big .port-label { font-size: 15px; line-height: 18px; margin-top: -9px; }
 #board.big .deposit { padding: 0 10px 0 12px; gap: 8px; }

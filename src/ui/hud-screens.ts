@@ -178,7 +178,7 @@ export function initScreens(h: ScreenHooks) {
     if (ev.kind !== 'demo-end') return;
     if (!NO_SUMMARY) summaryDue = performance.now() + SUMMARY_DELAY * 1000;
     // The ending is the factory and its first Phone, framed whole: no inspector over it, nothing selected (a
-    // Fabricator left selected would show "Blocked: Phone output is full" behind the summary).
+    // Fabricator left selected would show "Phone has no exit" behind the summary).
     if (ui.sel) select(null);
   });
   onFrame(() => {

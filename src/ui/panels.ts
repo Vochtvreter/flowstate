@@ -16,7 +16,7 @@ import {
 } from '../economy';
 import { activeGoal } from '../goals';
 import { graph, isMachine, passCap } from '../sim';
-import { Game, GNode, RouterMode, Wire } from '../state';
+import { Game, GNode, RouterMode, Wire , nodeNoun } from '../state';
 import { isMuted, setMuted } from './audio';
 import { boardRect, jumpTo, startPlacing, fitView, zoomBy } from './board';
 import { marked, pressedMark, tendMark } from './advice-show';
@@ -28,7 +28,7 @@ import { logoMark } from './hud-screens';
 import { PressWord, isTouch, withKey } from './hud-words';
 import { esc, icon, matGlyph, nodeIcon } from './icons';
 import { env } from './phone-env';
-import { bulkPlan, diagnose, matName, starvedShort, victoryQuiet, wayOn } from './status';
+import { bulkPlan, diagnose, limits, matName, starvedShort, victoryQuiet, wayOn } from './status';
 import { metData, pricedInMet, readyCount, setCardWait, teasedSlot } from './tech';
 import { delegate, onPress, select, signal, toast, touch, ui } from './ui';
 
@@ -746,20 +746,39 @@ function shortNote(g: Game, n: GNode): string {
   return `<div class="sec"><div class="shortbox" data-testid="shortfall"><p>${icon('warn', 14)}<span>Receiving <span class="mono">${fmtRate(got)}</span> of <span class="mono">${fmtRate(need)}</span> ${matName(mat)}/s</span></p>${up ? `<div class="st-actions">${up}</div>` : ''}</div></div>`;
 }
 
+/**
+ * A Drill or machine that works flat out while one it feeds goes short (its card says "Can't keep up": status.ts,
+ * limits): its inspector says who is waiting and for what, and offers the two ways on, more Speed here or another one.
+ */
+function limitNote(g: Game, n: GNode): string {
+  if (!limits(g).has(n.id)) return '';
+  const taker = g.nodes.find((x) => {
+    const d = diagnose(g, x);
+    return d.problem === 'starved' && !d.victim && d.culprit === n.id;
+  });
+  if (!taker) return '';
+  const mat = matName(diagnose(g, taker).mat);
+  const can = trackAvailable(g, n, 'speed') && n.lv.speed < maxLevel(g, 'speed') && !justRaised(g, n.id);
+  const speed = can ? buyBtn(`upgsrc:${n.id}`, upgradeCost(n, 'speed'), g.credits, 'Speed · ', 'upg-self') : '';
+  return `<div class="sec"><div class="statusbox limit" data-testid="limit-box"><div class="st-title">${icon('warn', 16)}Can’t keep up</div>
+    <p>The ${nodeNoun(taker)} wants more ${mat} than this gives. Make it faster, or build another ${NODE_DEFS[n.type].name}.</p>
+    <div class="st-actions">${speed}<button class="ghostbtn" data-act="jump:${taker.id}" data-testid="show-taker">Show who waits</button></div></div></div>`;
+}
+
 function statusBlock(g: Game, n: GNode): string {
   const dx = diagnose(g, n);
-  if (!dx.problem) return shortNote(g, n);
+  if (!dx.problem) return limitNote(g, n) || shortNote(g, n);
   const r = recipeOf(n);
   let title = '';
   let body = '';
   let cls = dx.problem;
   let actions = '';
   if (dx.problem === 'idle') {
-    title = n.recipe ? 'Idle: nothing connected' : 'Idle: no recipe';
+    title = n.recipe ? 'Nothing is coming in' : 'Nothing to make yet';
     body = n.recipe ? (isTouch() ? 'Tap a source\'s port, then tap this machine.' : 'Drag a wire from a source into this machine.') : 'Connect an input and the recipe is picked for you, or choose one below.';
   } else if (dx.problem === 'starved' && r) {
     const { got, need } = intake(g, n, dx.mat);
-    title = `Starved: not enough ${matName(dx.mat)}`;
+    title = `Not enough ${matName(dx.mat)}`;
     if (dx.culprit == null) body = `Nothing connected supplies ${matName(dx.mat)}.`;
     else {
       body = `Receiving <span class="mono">${fmtRate(got)}</span> of <span class="mono">${fmtRate(need)}</span> ${matName(dx.mat)}/s.`;
@@ -767,8 +786,8 @@ function statusBlock(g: Game, n: GNode): string {
       actions += `<button class="ghostbtn" data-act="jump:${dx.culprit}">Jump to source</button>`;
     }
   } else if (dx.problem === 'blocked') {
-    title = `Blocked: ${matName(dx.mat)} output is full`;
-    if (dx.openPort) body = `${matName(dx.mat)} has nowhere to go. ${isTouch() ? 'Tap its port, then tap an empty spot' : 'Drag from its port into empty space'} to send it somewhere.`;
+    title = dx.openPort ? `${matName(dx.mat)} has no exit` : `${matName(dx.mat)} is backed up`;
+    if (dx.openPort) body = `It is full of ${matName(dx.mat)} and has stopped: nothing is wired to that port. ${isTouch() ? 'Tap the port, then tap an empty spot' : 'Drag from the port into empty space'} to send it somewhere.`;
     else {
       // What is full downstream, named, with the way on in one press where there is one: Speed on the Lab or machine
       // that takes no more (the same button a starved machine has for its source), and Show to go there.

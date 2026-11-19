@@ -145,6 +145,68 @@ export function diagnose(g: Game, n: GNode): Diagnosis {
 
 export const matName = (m: MatId | null) => (m ? MATERIALS[m].name : 'input');
 
+// ---------- what a card says is wrong, in plain words ----------
+// A card in trouble used to be labelled BLOCKED, STARVED or IDLE: the simulation's words, which a newcomer has to be
+// taught. It now says what a person would say, with the material by name: "Needs Copper", "Tar has no exit",
+// "Backed up", "No input". And the machine a starved one is waiting on, when that machine runs flat out and is simply
+// not fast enough, says so itself: "Can't keep up". It was drawn in healthy green while the machine it feeds stood
+// red, and the fix (more Speed, a second one) is at the green one.
+
+/** What kind of label a card carries: a problem of its own (the old three), or `limit`: it holds another machine back. */
+export type PillKind = '' | 'blocked' | 'starved' | 'idle' | 'limit';
+export interface Pill { kind: PillKind; text: string }
+const NO_PILL: Pill = { kind: '', text: '' };
+
+/** From this share of its time at work a Drill or machine counts as running flat out: more can only come from Speed, or from another one. */
+const FLAT_OUT = 0.9;
+
+/**
+ * The Drills and machines that hold another machine back: each is what a machine in trouble for want of an input is
+ * waiting on (diagnose's culprit), is not in trouble itself, and works flat out. Worked out once for a moment of the
+ * game and kept beside it.
+ */
+const limitsAt = new WeakMap<Game, { time: number; rev: number; ids: Set<number> }>();
+export function limits(g: Game): Set<number> {
+  const kept = limitsAt.get(g);
+  if (kept && kept.time === g.time && kept.rev === g.rev) return kept.ids;
+  const ids = new Set<number>();
+  if (!victoryQuiet(g)) {
+    const byId = graph(g).byId;
+    for (const n of g.nodes) {
+      if (n.status !== 'starved' || !isMachine(n)) continue;
+      const dx = diagnose(g, n);
+      if (dx.problem !== 'starved' || dx.victim || dx.culprit == null) continue;
+      const s = byId.get(dx.culprit);
+      if (s && s.status === 'working' && s.util >= FLAT_OUT && !(s.grace > 0)) ids.add(s.id);
+    }
+  }
+  limitsAt.set(g, { time: g.time, rev: g.rev, ids });
+  return ids;
+}
+
+/**
+ * The label on a card: what is wrong with it, said as a person would say it. Nothing for a node that works, or that
+ * only suffers from trouble elsewhere (its ring turns amber: the cause carries the words).
+ *  - an output with no wire: "Tar has no exit" (a Drill too: its Sand has nowhere to go);
+ *  - an output that is wired and still full: "Backed up" (not on a Drill, which stays calm: a Drill that feeds a Lab
+ *    is often ahead of it, and the board would be full of labels);
+ *  - an input that runs short: "Needs more Copper", or "Needs Copper" when nothing wired in brings any;
+ *  - no recipe, or nothing wired in: "No input";
+ *  - it works flat out and a machine it feeds still goes short: "Can't keep up".
+ */
+export function pillFor(g: Game, n: GNode, dx: Diagnosis = diagnose(g, n)): Pill {
+  if (dx.problem && !dx.victim) {
+    if (dx.problem === 'blocked') {
+      if (dx.openPort) return { kind: 'blocked', text: `${matName(dx.mat)} has no exit` };
+      return n.type === 'well' ? NO_PILL : { kind: 'blocked', text: 'Backed up' };
+    }
+    if (dx.problem === 'starved') return { kind: 'starved', text: `Needs ${dx.culprit == null ? '' : 'more '}${matName(dx.mat)}` };
+    if (dx.problem === 'idle') return { kind: 'idle', text: 'No input' };
+  }
+  if (!dx.problem && limits(g).has(n.id)) return { kind: 'limit', text: 'Can\u2019t keep up' };
+  return NO_PILL;
+}
+
 // ---------- a blocked node: the way on ----------
 // A starved machine's box offers Speed on its source in one press. A blocked node whose output is wired had nothing
 // to offer unless a machine further down was in trouble itself: a Drill feeding a Lab that studies as fast as it can
