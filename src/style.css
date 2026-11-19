@@ -249,7 +249,7 @@ g.wire.leveled .glow { animation: wire-leveled 0.5s ease-out; }
 .pill[data-kind='blocked'] { background: #33270c; color: #fcd34d; border-color: #5a4718; }
 .pill[data-kind='starved'] { background: #3a1518; color: #fca5a5; border-color: #6a2a31; }
 .pill[data-kind='limit'] { background: #14233f; color: #a9c2ff; border-color: #3b5491; }
-.node:has(> .pill[data-kind='limit']):not(.sel) { border-color: #3b5491; }
+.node.limit:not(.sel) { border-color: #3b5491; }
 /* Ports are centred with a margin, not a transform, and an open port's pulse is drawn on the
    effects canvas (fx.ts beacons): nothing here animates. */
 .port { position: absolute; width: 14px; height: 14px; margin-top: -7px; border-radius: 50%; border: 2px solid var(--canvas); box-shadow: 0 0 0 1px rgba(255, 255, 255, 0.1); cursor: crosshair; }

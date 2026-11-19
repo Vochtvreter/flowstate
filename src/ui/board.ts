@@ -2895,6 +2895,8 @@ function updateNodes(g: Game) {
       refs.cPill = pill;
       refs.pill.textContent = pill;
       refs.pill.dataset.kind = label.kind;
+      // (A class on the card for the stylesheet, which would otherwise need a has() selector on every card.)
+      setClass(refs.el, 'limit', label.kind === 'limit');
     }
   }
 }
