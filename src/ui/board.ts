@@ -42,6 +42,7 @@ import { tidy, tidyInput } from './layout';
 import { shortNum } from './panels';
 import { env } from './phone-env';
 import { diagnose, pillFor } from './status';
+import { buzz } from './audio';
 import { WIRES_CARDS, revealOf, slotShown } from './reveal';
 import { traceOf } from '../flows';
 import { delegate, onGame, onPress, onSignal, select, setWireStyle, signal, toast, touch, ui } from './ui';
@@ -152,6 +153,18 @@ const PORT_EDGE = 30;
 const WIRE_LONG = 100;
 /** Half the width of the band along a wire that selects it (28 px in all). */
 const WIRE_REACH = 16;
+/**
+ * A finger moves a card only after holding it this long: the card lifts (it grows a little, with a buzz) and then
+ * goes with the finger. A swipe that begins on a card before that moves the board. On a phone a busy board is mostly
+ * cards, and a finger that set out to look round it kept carrying one off instead.
+ */
+const HOLD_MS = 200;
+/**
+ * A finger drags a wire out of a port only when it came down this close to the port's centre (its dot, drawn 28 px
+ * for a finger, and a little round it). Further off, within PORT_NEAR, a tap still arms the port, and a swipe
+ * moves the board: a swipe that began beside a port used to draw a wire, and made one where it happened to end.
+ */
+const PORT_DRAG = 16;
 /** A finger this close to a pin on a wire means the pin (a 36 px target; it comes before the wire it is on). */
 const PIN_REACH = 22;
 /** ...and a mouse pointer on the wire, this close. */
@@ -216,6 +229,8 @@ type Drag =
       /** A finger came down near (not on) this output port: if it turns out to be a tap, the port is armed. */
       near?: { id: number; port: number } }
   | { kind: 'node'; id: number; ox: number; oy: number; x0: number; y0: number; moved: boolean; sx: number; sy: number; slop: number;
+      /** Under a finger the card has to be held before it moves (`HOLD_MS`): false until it has been. A mouse's is lifted at once. */
+      lifted: boolean;
       /** The wires of the card that run dead straight where it is held now (see `levelWith`); none: it stands on the grid. */
       level?: number[];
       /** The card is one of a block (see `block`): the others that move with it, and where each stood when the drag began. */
@@ -2252,15 +2267,16 @@ const WIRES_ICON = {
 };
 
 /**
- * Is the wire style on offer? With the rest of cable management (reveal.ts), and at any time for a player whose
- * board is squared already: the style is kept between games, and there must be a way back from it.
+ * Is the wire style on offer? With the rest of cable management (reveal.ts), and at any time for a player who has
+ * chosen curved wires over the squared ones a board starts with: the style is kept between games, and there must
+ * be a way back from it.
  */
-export const wiresShown = (): boolean => revealOf(ui.g).wires || ui.wireStyle !== 'curved';
+export const wiresShown = (): boolean => revealOf(ui.g).wires || ui.wireStyle !== 'squared';
 
 /** Switch between curved and squared wires. */
 export function toggleWires() {
   setWireStyle(ui.wireStyle === 'curved' ? 'squared' : 'curved');
-  toast(ui.wireStyle === 'squared' ? 'Wires run <b>squared</b>: right angles, side by side.' : 'Wires run <b>curved</b>.', 'info', 2200);
+  toast(ui.wireStyle === 'squared' ? 'Wires run <b>squared</b>: right angles, round the cards.' : 'Wires run <b>curved</b>, straight from port to port.', 'info', 2200);
 }
 
 /** The Wires button, beside Tidy in the zoom cluster and shown when Tidy is: it draws the style the board is in, and a press changes it. */
@@ -2973,11 +2989,12 @@ function syncUi() {
 
 // ---------- per-frame + slow updates ----------
 
-function rateLine(g: Game, n: GNode, rate: number, util: number): string {
+function rateLine(g: Game, n: GNode, rate: number): string {
   switch (n.type) {
     case 'well': return `${fmtRate(rate)}/s`;
     case 'refiner': case 'assembler': case 'fabricator':
-      return n.recipe ? `${fmtRate(rate)}/s · ${Math.round(util * 100)}%` : 'wire something in';
+      // (How hard it is working is the ring round its picture, and a number in its inspector: not said twice.)
+      return n.recipe ? `${fmtRate(rate)}/s` : 'wire something in';
     case 'silo': return `${Math.round(bagTotal(n.inb))} stored`;
     case 'market': return `${fmtRate(rate)}/s sold`;
     case 'lab': return `${fmtRate(rate)} / ${fmtRate(labRate(g, n))} /s`;
@@ -3028,7 +3045,7 @@ function updateNodes(g: Game) {
     refs.vUtil = settle(refs.vUtil, was, refs.sUtil, 0.02, 0.01);
     // In the overview no text shows, so it is left alone (and caught up on the way back in).
     if (!over || refs.cRate === '') {
-      const rate = rateLine(g, n, refs.vRate, refs.vUtil);
+      const rate = rateLine(g, n, refs.vRate);
       if (rate !== refs.cRate) {
         refs.cRate = rate;
         refs.rate.textContent = rate;
@@ -3095,7 +3112,8 @@ function updateWires(g: Game) {
     const was = refs.sRate;
     refs.sRate = flowing === refs.cFlowing ? ease(was, w.rate, Math.max(0.15, was * 0.4)) : w.rate;
     refs.vRate = settle(refs.vRate, was, refs.sRate, Math.max(0.012, refs.sRate * 0.025), 0.01);
-    const width = 2 + Math.min(5, refs.vRate * 1.1);
+    // (Never under 3 px: zoomed out on a phone that is a little over 2 on the glass, and still a line.)
+    const width = 3 + Math.min(4, refs.vRate * 1.1);
     if (Math.abs(width - refs.cWidth) > 0.3) {
       refs.cWidth = width;
       refs.base.style.strokeWidth = width.toFixed(1) + 'px';
@@ -4382,6 +4400,9 @@ function cardNear(p: Pt, max: number): GNode | null {
   return best;
 }
 
+/** The wait before a card under a finger lifts (see HOLD_MS). */
+let liftTimer = 0;
+
 function startWire(from: number, port: number, cx: number, cy: number, p: Pt, touchy: boolean): boolean {
   const g = ui.g;
   const n = nodeById(g, from);
@@ -4523,6 +4544,13 @@ function onDown(e: PointerEvent) {
   }
   const hit = touchy ? touchHit(p) : mouseHit(t, p);
   if (hit?.kind === 'out') {
+    // (A finger that came down beside the port's dot, not on it: a tap arms the port, a swipe moves the board.)
+    const src = touchy ? nodeById(g, hit.id) : null;
+    const a = src && outPorts(g, src)[hit.port];
+    if (a && Math.hypot(p.x - a.x, p.y - a.y) * ui.view.k > PORT_DRAG) {
+      drag = { kind: 'pan', sx: e.clientX, sy: e.clientY, vx: ui.view.x, vy: ui.view.y, moved: false, slop: PAN_SLOP, place: false, near: { id: hit.id, port: hit.port } };
+      return;
+    }
     startWire(hit.id, hit.port, e.clientX, e.clientY, p, touchy);
     return;
   }
@@ -4541,10 +4569,21 @@ function onDown(e: PointerEvent) {
     const n = nodeById(g, hit.id);
     if (!n) return;
     // Only the old position is remembered here; the undo step is built when the node is dropped.
-    drag = {
+    const held = drag = {
       kind: 'node', id: hit.id, ox: p.x - n.x, oy: p.y - n.y, x0: n.x, y0: n.y, moved: false,
-      sx: e.clientX, sy: e.clientY, slop: touchy ? TOUCH_SLOP : MOUSE_SLOP,
+      sx: e.clientX, sy: e.clientY, slop: touchy ? TOUCH_SLOP : MOUSE_SLOP, lifted: !touchy,
     };
+    // Under a finger the card lifts once it has been held (not a Drill, which stays on its deposit; not in the
+    // overview or while a port waits for its target, where a drag on a card moves the board whatever).
+    if (touchy && n.type !== 'well' && !over && !tapWire) {
+      clearTimeout(liftTimer);
+      liftTimer = window.setTimeout(() => {
+        if (drag !== held || held.moved) return;
+        held.lifted = true;
+        nodeEls.get(held.id)?.el.classList.add('lift');
+        buzz('lift', 8);
+      }, HOLD_MS);
+    }
     // One of a block: the rest go where it goes.
     if (block.size > 1 && block.has(n.id) && n.type !== 'well') {
       drag.others = [...block].filter((id) => id !== n.id).map((id) => nodeById(g, id)).filter((m): m is GNode => !!m && m.type !== 'well').map((m) => ({ id: m.id, x0: m.x, y0: m.y }));
@@ -4634,6 +4673,12 @@ function steer(cx: number, cy: number, hovering = false) {
       // A finger that drags across a card while a port waits for its target, or out in the overview where
       // cards are small icons close together, moves the board, not the card.
       if (drag.slop >= TOUCH_SLOP && (tapWire || over)) {
+        drag = { kind: 'pan', sx: cx, sy: cy, vx: ui.view.x, vy: ui.view.y, moved: true, slop: 0, place: false };
+        break;
+      }
+      // A finger that swipes across a card it has not held moves the board (see HOLD_MS).
+      if (!drag.lifted) {
+        clearTimeout(liftTimer);
         drag = { kind: 'pan', sx: cx, sy: cy, vx: ui.view.x, vy: ui.view.y, moved: true, slop: 0, place: false };
         break;
       }
@@ -4770,8 +4815,9 @@ function edgeScroll(dt: number) {
 }
 
 function endDrag() {
+  clearTimeout(liftTimer);
   if (drag?.kind === 'node') {
-    nodeEls.get(drag.id)?.el.classList.remove('dragging');
+    nodeEls.get(drag.id)?.el.classList.remove('dragging', 'lift');
     markLevel(drag, []);
   }
   drag = null;

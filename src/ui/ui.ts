@@ -34,7 +34,7 @@ export const ui: UIState = {
   recipeMenu: false,
   menuOpen: false,
   trace: null,
-  wireStyle: 'curved',
+  wireStyle: 'squared',
   uiRev: 0,
 };
 
@@ -56,9 +56,9 @@ const WIRE_KEY = 'flowstate-wires';
 /** Read the wire style the player chose in this browser. */
 export function loadWireStyle() {
   try {
-    ui.wireStyle = localStorage.getItem(WIRE_KEY) === 'squared' ? 'squared' : 'curved';
+    ui.wireStyle = localStorage.getItem(WIRE_KEY) === 'curved' ? 'curved' : 'squared';
   } catch {
-    /* storage unavailable: curved it is */
+    /* storage unavailable: squared it is */
   }
 }
 
