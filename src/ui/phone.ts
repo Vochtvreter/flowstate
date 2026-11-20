@@ -354,7 +354,7 @@ let hintAlt = false;
 /** The camera and the targets as they were when the line's place was last decided. */
 let placeKey = '';
 
-/** In stage pixels, the boxes of what the line asks for: free deposits for a Well, nodes for an armed wire. */
+/** In stage pixels, the boxes of what the line asks for: free deposits for a Drill, nodes for an armed wire. */
 function hintTargets(): Box[] {
   const g = ui.g;
   const { x, y, k } = ui.view;
@@ -405,7 +405,7 @@ function covered(b: Box, targets: Box[]): number {
 
 /**
  * Put the line where it hides none of what it asks the player to tap: its usual place, or its other one when
- * the usual one lies over a free deposit (placing a Well) or a node (a wire waiting for its end) and the other
+ * the usual one lies over a free deposit (placing a Drill) or a node (a wire waiting for its end) and the other
  * does not, or less. Decided again when the camera or the board has moved, not while a finger is moving it.
  */
 function placeHint(line: string, force = false) {
@@ -450,7 +450,7 @@ function hintLine(): string {
   const armed = armedPort();
   if (armed) return armed.mat ? `${verb} where the <b>${MATERIALS[armed.mat].name}</b> should go` : `${verb} where this wire should go`;
   const p = ui.placing;
-  if (p) return p.type === 'well' ? `${verb} a deposit to place the <b>Well</b>` : `${verb} the board to place the <b>${NODE_DEFS[p.type].name}</b>`;
+  if (p) return p.type === 'well' ? `${verb} a deposit to place the <b>Drill</b>` : `${verb} the board to place the <b>${NODE_DEFS[p.type].name}</b>`;
   return '';
 }
 
@@ -491,9 +491,12 @@ function sync() {
   hintNow = line;
   // Where the goal card folds its hint away, a new goal starts with the hint open.
   if (g.goal.i !== hintGoal) {
+    // (A game that is taken up again where it was left starts with the card folded: its title is enough to go on
+    // with, and the board is what the player came back to. A new game starts with its first goal open.)
+    const resumed = hintGoal === -1 && g.goal.i > 0;
     hintGoal = g.goal.i;
     hintH = 0;
-    setHintOpen(true);
+    setHintOpen(!resumed);
   }
   // A sheet that opens folds it away too, as the tap on the board that opens one does: a sheet opened from the alert's
   // Show or the Flow ring was left a sliver on a short phone while the hint stood open above it.
@@ -506,7 +509,9 @@ function sync() {
   // always on a phone held sideways, and upright while the strip with the hint in it would pass 45%
   // of the stage. (Judged with the hint counted in, folded or not, so the answer cannot flip-flop.)
   const withHint = c.top + (fold && !hintOpen ? hintH : 0);
-  fold = env.phone && (!!shortLandscape?.matches || (stageH > 0 && withHint > stageH * STRIP_SHARE));
+  // (A phone's card is always folded to one row until it is asked for: the board is what the screen is for.)
+  fold = env.phone;
+  void withHint;
   if (setClass(app, 'fold', fold)) sizeRev++;
   // How tall the strip is decides how tall a sheet may be (see phone.css), so that comes first.
   let moved = setStyle(app, '--strip-h', c.top + 'px');
@@ -591,6 +596,11 @@ export function initPhone() {
   // The goal card folds its hint away on a phone held sideways: a tap on the card (not on a button
   // in it) opens and closes it, and a press on the board closes it, since the board is what is short.
   goalEl?.addEventListener('click', (e) => {
+    if (!env.phone || (e.target as HTMLElement).closest('button')) return;
+    setHintOpen(!hintOpen);
+  });
+  // (The order beside it is folded with it, to its count: a tap on it opens both.)
+  orderEl?.addEventListener('click', (e) => {
     if (!env.phone || (e.target as HTMLElement).closest('button')) return;
     setHintOpen(!hintOpen);
   });

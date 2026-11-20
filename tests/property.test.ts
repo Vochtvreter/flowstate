@@ -70,8 +70,8 @@ function checkBoard(g: Game, where: string) {
     }
   }
   const wells = g.nodes.filter((n) => n.type === 'well');
-  must(wells.length >= 1, () => `${where}: no Well left`);
-  must(new Set(wells.map((n) => n.depositId)).size === wells.length, () => `${where}: two Wells on one deposit`);
+  must(wells.length >= 1, () => `${where}: no Drill left`);
+  must(new Set(wells.map((n) => n.depositId)).size === wells.length, () => `${where}: two Drills on one deposit`);
   const seen = new Set<string>();
   const byId = new Map(g.nodes.map((n) => [n.id, n]));
   for (const w of g.wires) {

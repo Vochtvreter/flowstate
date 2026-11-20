@@ -6,14 +6,14 @@ import { GOALS, MAIN_GOALS, goalView } from '../goals';
 import { Game, newGame } from '../state';
 import { awayLine, awayText, clockTime, nextMaterials, resultText } from './hud-screens';
 
-describe('the ending: from the first Lens to free play', () => {
-  /** A fresh copy of the screens module (its state: free play begun or not) and of ui.ts, with a game whose Lens is made. */
+describe('the ending: from the first Phone to free play', () => {
+  /** A fresh copy of the screens module (its state: free play begun or not) and of ui.ts, with a game whose Phone is made. */
   async function lensMade(): Promise<{ g: Game; screens: typeof import('./hud-screens'); ui: typeof import('./ui') }> {
     vi.resetModules();
     const screens = await import('./hud-screens');
     const ui = await import('./ui');
     const g = newGame();
-    // "Make your first Lens", met: the Lens has just been made (sim.ts endDemo), and nobody has pressed Claim.
+    // "Make your first Phone", met: the Phone has just been made (sim.ts endDemo), and nobody has pressed Claim.
     g.goal = { i: MAIN_GOALS - 1, ready: true };
     g.ended = true;
     ui.ui.g = g;
@@ -23,7 +23,7 @@ describe('the ending: from the first Lens to free play', () => {
   it('Keep playing with no Claim before it: the capstone is claimed and free play shows at once', async () => {
     const { g, screens } = await lensMade();
     expect(GOALS[g.goal.i].reward.unlock).toBe('end');
-    // From the Lens on, the card shows the ending (no Claim: Keep playing claims), and the board is quiet.
+    // From the Phone on, the card shows the ending (no Claim: Keep playing claims), and the board is quiet.
     expect(screens.endingShown(g)).toBe(true);
     expect(screens.freePlay()).toBe(false);
     screens.screensApi.keepPlaying();
@@ -49,7 +49,7 @@ describe('the ending: from the first Lens to free play', () => {
     expect(goalView(g)?.goal.free).toBe(true);
   });
 
-  it('is not shown before the Lens', async () => {
+  it('is not shown before the Phone', async () => {
     const { g, screens } = await lensMade();
     g.ended = false;
     expect(screens.endingShown(g)).toBe(false);
@@ -57,7 +57,7 @@ describe('the ending: from the first Lens to free play', () => {
   });
 });
 
-describe('summary: the time to the first Lens', () => {
+describe('summary: the time to the first Phone', () => {
   it('reads as minutes and seconds, with hours only when there are any', () => {
     expect(clockTime(0)).toBe('0:00');
     expect(clockTime(59.9)).toBe('0:59');
@@ -70,14 +70,14 @@ describe('summary: the time to the first Lens', () => {
 describe('summary: what comes next', () => {
   it('is what the free-play goals have the player make, in their order', () => {
     const next = nextMaterials();
-    expect(next.map((m) => MATERIALS[m].name)).toEqual(['Clay', 'Coil', 'Dynamo', 'Paradox']);
+    expect(next.map((m) => MATERIALS[m].name)).toEqual(['Rubber', 'Cable', 'Laptop', 'Robot']);
     // One per free-play goal: a goal added to the chain shows up in the row without a change here.
     expect(next).toHaveLength(GOALS.filter((x) => x.free).length);
   });
 });
 
 describe('summary: Copy result', () => {
-  it('is two lines of plain text: the time to the Lens, things built, the share of income from sales', () => {
+  it('is two lines of plain text: the time to the Phone, things built, the share of income from sales', () => {
     const g = newGame();
     g.ended = true;
     g.stats.firstLensAt = 1182.4;
@@ -86,12 +86,12 @@ describe('summary: Copy result', () => {
     g.stats.fromOrders = 100;
     g.stats.fromGoals = 70;
     const text = resultText(g);
-    expect(text.split('\n')).toEqual(['Flowstate: first Lens in 19:42', '31 things built · 83% of income from sales']);
+    expect(text.split('\n')).toEqual(['Flowstate: first Phone in 19:42', '31 things built · 83% of income from sales']);
     // No link, nothing about the player, no markup.
     expect(text).not.toMatch(/https?:|www\.|<|@/);
   });
 
-  it('still reads sensibly for a save that has no Lens time', () => {
+  it('still reads sensibly for a save that has no Phone time', () => {
     const g = newGame();
     expect(resultText(g).split('\n')).toEqual(['Flowstate: demo complete', '0 things built · 0% of income from sales']);
   });

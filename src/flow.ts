@@ -1,8 +1,8 @@
-// Flow: the share of Wells and machines running flat out. DOM-free. Numbers are in RULES.flow (src/content.ts).
+// Flow: the share of Drills and machines running flat out. DOM-free. Numbers are in RULES.flow (src/content.ts).
 //
-// - Producers are Wells and machines older than RULES.flow.minAge whose output can reach a Market or a Lab
+// - Producers are Drills and machines older than RULES.flow.minAge whose output can reach a Market or a Lab
 //   along some path of wires, so building never lowers Flow and a line that makes nothing anyone uses
-//   (six Wells into a Void) is not a line. Changing a machine's recipe makes it "new" again.
+//   (six Drills into a Dump) is not a line. Changing a machine's recipe makes it "new" again.
 //   Cutting a weak producer off still hides it, at the price of everything it made.
 // - A producer is flowing when its utilisation (n.util, not n.status) is at least RULES.flow.flowing.
 // - g.flow is the flowing share smoothed over a few seconds. Once g.flowOn is set (a goal reward),
@@ -17,12 +17,12 @@ const F = RULES.flow;
 
 export const isProducer = (n: GNode) => n.type === 'well' || isMachine(n);
 
-/** Does this node count toward Flow right now? A Well or machine, old enough, whose output can end up sold or studied. */
+/** Does this node count toward Flow right now? A Drill or machine, old enough, whose output can end up sold or studied. */
 export const countsForFlow = (g: Game, n: GNode) => isProducer(n) && g.time - n.born >= F.minAge && reachesUse(g, n);
 
 export const isFlowing = (n: GNode) => n.util >= F.flowing;
 
-/** The Wells and machines that count toward Flow right now. */
+/** The Drills and machines that count toward Flow right now. */
 export function flowProducers(g: Game): GNode[] {
   return g.nodes.filter((n) => countsForFlow(g, n));
 }
@@ -110,7 +110,7 @@ export function updateFlow(g: Game, dt: number) {
     if (before < F.stateSeconds && g.flowStreak >= F.stateSeconds) {
       const first = g.stats.flowStates === 0;
       g.stats.flowStates++;
-      g.events.push({ kind: 'flow-state', first, text: 'Flow State: every Well and machine is running flat out.' });
+      g.events.push({ kind: 'flow-state', first, text: 'Flow State: every Drill and machine is running flat out.' });
     }
     if (g.flowStreak > g.flowBest) g.flowBest = g.flowStreak;
   } else g.flowStreak = 0;

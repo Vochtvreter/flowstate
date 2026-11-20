@@ -112,6 +112,58 @@ div.hb.locked:hover { background: transparent; border-color: #2a3550; }
 .deposit .ds { font-size: 10.5px; color: var(--muted); }
 .deposit.locked { color: #5d6880; }
 .deposit.locked .dn { color: #8c97ad; }
+/* Before the Lab a locked deposit has no words: an outline and a lock, more to come (reveal.ts). */
+.deposit.locked.quiet { justify-content: center; border-color: #1a2236; background: none; color: #3d4860; }
+/* ---------- the Flows panel (ui/flows.ts) ----------
+   One row a material: its picture and name, a word when it is short or has no exit, how much is made, a bar of where
+   it goes and a line that says the same in numbers. The row is a button (it traces the material on the board); a row
+   in trouble has a second, small one that goes to the machine to look at. */
+.t-flows svg { color: #9db8ff; }
+.techbtn.t-flows.on { border-color: var(--sel); background: #16213d; }
+.techbtn.t-flows.warn { border-color: #5a4718; }
+.techbtn .badge.warn { background: #fbbf24; color: #2a1c00; }
+.fl-rows { display: flex; flex-direction: column; }
+.flrow { position: relative; display: flex; align-items: stretch; border-bottom: 1px solid var(--line); }
+.flrow.on { background: color-mix(in srgb, var(--c) 9%, transparent); box-shadow: inset 3px 0 0 var(--c); }
+.fl-main { flex: 1; min-width: 0; display: flex; align-items: flex-start; gap: 11px; padding: 11px 14px 11px 16px; border: 0; background: none; text-align: left; }
+.fl-main:hover { background: rgba(255, 255, 255, 0.03); }
+.fl-ico { flex: none; width: 30px; height: 30px; display: grid; place-items: center; border-radius: 9px; background: color-mix(in srgb, var(--c) 12%, #121929); border: 1px solid color-mix(in srgb, var(--c) 30%, #27324a); }
+.fl-body { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 5px; }
+.fl-top { display: flex; align-items: center; gap: 7px; min-height: 18px; }
+.fl-name { font-size: 13px; font-weight: 600; color: var(--text); }
+.fl-rate { margin-left: auto; font-size: 12.5px; color: var(--text); }
+.fl-rate small { font-size: 10.5px; color: var(--muted); }
+.fl-tag { font-size: 10px; font-weight: 700; line-height: 15px; padding: 0 7px; border-radius: 999px; border: 1px solid #34405c; color: #c9d3e8; white-space: nowrap; }
+.fl-tag.short { background: #3a1518; color: #fca5a5; border-color: #6a2a31; }
+.fl-tag.stuck { background: #33270c; color: #fcd34d; border-color: #5a4718; }
+.fl-tag.spare { background: #14233f; color: #a9c2ff; border-color: #3b5491; }
+.fl-bar { display: flex; height: 7px; border-radius: 4px; overflow: hidden; background: #1a2236; }
+.fl-bar i { display: block; height: 100%; min-width: 2px; }
+.fl-bar i + i { box-shadow: inset 1px 0 0 #0e1320; }
+.fl-bar .miss, .fl-key .miss { background: repeating-linear-gradient(135deg, rgba(248, 113, 113, 0.9) 0 3px, rgba(248, 113, 113, 0.25) 3px 6px); }
+.fl-note { font-size: 11px; line-height: 15px; color: var(--muted); }
+.fl-note b { font-weight: 600; color: #d3dbec; }
+.fl-note i { font-style: normal; margin: 0 5px; color: #55617c; }
+.flrow.short .fl-note, .flrow.stuck .fl-note { color: #d8c9a8; }
+.fl-go { flex: none; align-self: center; margin-right: 12px; height: 28px; padding: 0 11px; border-radius: 8px; border: 1px solid var(--border); background: #121929; font-size: 11.5px; font-weight: 600; color: var(--text); }
+.fl-go:hover { border-color: var(--sel); }
+html[data-input='touch'] .fl-go { height: 40px; padding: 0 14px; }
+.fl-key { display: flex; flex-wrap: wrap; gap: 4px 12px; padding: 12px 16px 16px; font-size: 10.5px; color: var(--muted); }
+.fl-key span { display: inline-flex; align-items: center; gap: 5px; white-space: nowrap; }
+.fl-key i { width: 9px; height: 9px; border-radius: 2px; }
+/* A card that is one of a block (board.ts: Shift and a click, or a double click for a whole line): ringed, as the
+   selected card is, so that what will move together is seen before it moves. */
+.node.blk:not(.sel) { border-color: var(--sel); box-shadow: 0 0 0 2px rgba(122, 162, 255, 0.32), 0 8px 22px rgba(0, 0, 0, 0.4); }
+/* While a material is traced, what has nothing to do with it stands back. */
+.node.untraced { opacity: 0.26; }
+#board.tracing .deposit { opacity: 0.4; }
+
+/* ---------- start simple ----------
+   What has no use yet is not on screen yet: reveal.ts says when each part comes, panels.ts sets these classes. */
+#app.no-zoom #zoom, #app.no-mini #mini, #app.no-plot #plot-label { display: none; }
+#app.no-mini:not(.phone) #zoom { bottom: 16px; }
+/* (On a phone the floating buttons keep their places: the row beside them is measured.) */
+#app.no-zoom #fabs [data-act='fab-fit'], #app.no-undo #fabs [data-act='fab-undo'] { visibility: hidden; }
 #board.placing .deposit:not(.locked) { border-style: solid; background: color-mix(in srgb, var(--c) 12%, transparent); }
 
 /* wires */
@@ -124,15 +176,30 @@ g.wire .base { stroke: currentColor; stroke-opacity: 0.34; }
 g.wire .glow { stroke: currentColor; stroke-opacity: 0.1; }
 g.wire.sat .glow { stroke-opacity: 0.2; }
 g.wire.sat .base { stroke-opacity: 0.5; }
-g.wire.stalled .base { stroke-dasharray: 5 7; stroke-opacity: 0.55; }
+/* A wire that carries nothing is drawn in grey, not in its material's colour: dashed in Copper's red it read as an
+   alarm, and it is only idle. */
+g.wire.stalled .base { stroke: #7f8aa3; stroke-dasharray: 5 7; stroke-opacity: 0.5; }
 g.wire.stalled:not(.new) .base { stroke-width: 2px !important; }
 g.wire.stalled .glow { stroke-opacity: 0; }
 g.wire.sel .glow { stroke-opacity: 0.35; stroke: var(--sel); }
+/* A pin: a point the player set for the wire to run through (board.ts). A small ring in the wire's colour, quiet
+   until the pointer is on the wire or the wire is selected; it can be dragged. Not drawn in the overview. */
+g.wire .pin { fill: #0c1220; stroke: currentColor; stroke-width: 2px; stroke-opacity: 0.6; pointer-events: all; cursor: grab; }
+g.wire:hover .pin { stroke-opacity: 1; }
+g.wire.sel .pin { stroke: var(--sel); stroke-opacity: 1; fill: #16203a; }
+g.wire.dim .pin { stroke-opacity: 0.2; }
+#board.ov g.wire .pin { display: none; }
 g.wire:hover .base { stroke-opacity: 0.6; }
 /* A wire that has just been connected swells for a moment. */
 g.wire.new .base { animation: wire-in 0.15s ease-out; stroke-dasharray: none; }
 g.wire.new .glow { animation: wire-glow 0.25s ease-out; }
 @keyframes wire-in { from { stroke-width: 11px; stroke-opacity: 0.95; } }
+/* A wire of the card being moved that runs dead straight where the card is held (board.ts, markLevel): it lights up,
+   so the hand knows it has found the place. */
+g.wire.level .base { stroke-opacity: 0.95; }
+g.wire.level .glow { stroke-opacity: 0.42; }
+g.wire.leveled .glow { animation: wire-leveled 0.5s ease-out; }
+@keyframes wire-leveled { from { stroke-opacity: 0.6; } }
 @keyframes wire-glow { from { stroke-opacity: 0.5; } }
 #temp-wire { fill: none; stroke-width: 3px; stroke-dasharray: 2 8; stroke-linecap: round; stroke-opacity: 0.9; }
 #temp-wire.snap { stroke-dasharray: none; stroke-width: 4px; stroke-opacity: 1; }
@@ -164,7 +231,9 @@ g.wire.new .glow { animation: wire-glow 0.25s ease-out; }
 /* No overflow clipping on card text: each clipped box is a separate piece for the compositor to
    track, and a text change inside one forces it to re-plan every layer. Long lines are cut in
    script instead (see nodeSub in board.ts). */
-.nt { font-size: 13px; font-weight: 600; line-height: 16px; white-space: nowrap; }
+.nt { font-size: 13px; font-weight: 600; line-height: 16px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+/* A machine's kind, after what it makes: "Glass Refiner". */
+.nt .nk { font-size: 10.5px; font-weight: 500; color: var(--muted); }
 .ns { font-size: 10.5px; line-height: 14px; color: var(--muted); white-space: nowrap; }
 .nr { font-size: 11px; line-height: 15px; color: #c9d3e8; white-space: nowrap; }
 .ring { position: relative; width: 40px; height: 40px; flex: none; }
@@ -178,18 +247,24 @@ g.wire.new .glow { animation: wire-glow 0.25s ease-out; }
 /* The arc starts at twelve o'clock through a dash offset rather than a rotation, and it steps
    rather than glides: a transition here repaints the whole board layer on every frame it runs. */
 .val { fill: none; stroke-width: 3; stroke-linecap: round; stroke: var(--ok); stroke-dasharray: 0 100; stroke-dashoffset: 25; }
-.node[data-st='blocked'] .val, .node[data-st='victim'] .val { stroke: var(--warn); }
+.node[data-st='blocked'] .val, .node[data-st='victim'] .val, .node[data-st='short'] .val { stroke: var(--warn); }
 .node[data-st='starved'] .val { stroke: var(--bad); }
 .node[data-st='idle'] .val { stroke: var(--idle); }
 .node[data-st='idle'] { border-style: dashed; }
 .node[data-st='blocked']:not(.sel) { border-color: #5a4718; }
 .node[data-st='starved']:not(.sel) { border-color: #6a2a31; }
-/* Wells stay calm: a blocked Well changes its ring colour and nothing else. */
+/* Drills stay calm: a blocked Drill changes its ring colour and nothing else. */
 .node.t-well[data-st='blocked']:not(.sel):not(.target) { border-color: var(--border); }
-.pill { position: absolute; top: -9px; right: 10px; font-size: 9.5px; font-weight: 700; letter-spacing: 0.03em; padding: 2px 8px; border-radius: 999px; line-height: 14px; background: #1e2638; color: #c9d3e8; border: 1px solid #34405c; }
+/* The label on a card in trouble says what is wrong in plain words ("Needs more Copper", "Tar has no exit": status.ts,
+   pillFor), so it is set as words are, not as a code. `limit` is the machine another one is waiting on: it works, and
+   cannot keep up. */
+.pill { position: absolute; top: -10px; right: 8px; max-width: calc(100% - 4px); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 10.5px; font-weight: 600; padding: 2px 8px; border-radius: 999px; line-height: 14px; background: #1e2638; color: #c9d3e8; border: 1px solid #34405c; }
 .pill:empty { display: none; }
 .pill[data-kind='blocked'] { background: #33270c; color: #fcd34d; border-color: #5a4718; }
 .pill[data-kind='starved'] { background: #3a1518; color: #fca5a5; border-color: #6a2a31; }
+.pill[data-kind='short'] { background: #2a2210; color: #f5d27a; border-color: #4f4018; }
+.pill[data-kind='limit'] { background: #14233f; color: #a9c2ff; border-color: #3b5491; }
+.node.limit:not(.sel) { border-color: #3b5491; }
 /* Ports are centred with a margin, not a transform, and an open port's pulse is drawn on the
    effects canvas (fx.ts beacons): nothing here animates. */
 .port { position: absolute; width: 14px; height: 14px; margin-top: -7px; border-radius: 50%; border: 2px solid var(--canvas); box-shadow: 0 0 0 1px rgba(255, 255, 255, 0.1); cursor: crosshair; }
@@ -297,7 +372,7 @@ html:not([data-input='touch']) #board.ov .port:hover { --pk: 1.3; }
 /* With no pill to read, a card's state is its colour: a starved or blocked card's whole ring (not only the
    part its use fills) and its tile's edge take the state's colour. */
 #board.ov .node[data-st='starved'] .trk { stroke: var(--bad); stroke-opacity: 0.75; }
-#board.ov .node[data-st='blocked'] .trk, #board.ov .node[data-st='victim'] .trk { stroke: var(--warn); stroke-opacity: 0.75; }
+#board.ov .node[data-st='blocked'] .trk, #board.ov .node[data-st='victim'] .trk, #board.ov .node[data-st='short'] .trk { stroke: var(--warn); stroke-opacity: 0.75; }
 #board.ov .node[data-st='starved']:not(.sel) { border-color: var(--bad); }
 #board.ov .node[data-st='blocked']:not(.sel):not(.t-well), #board.ov .node[data-st='victim']:not(.sel):not(.t-well) { border-color: var(--warn); }
 #board.ov .node { cursor: zoom-in; }
@@ -320,8 +395,13 @@ html:not([data-input='touch']) #board.ov .port:hover { --pk: 1.3; }
    far end from Fit): it grows to the left by the button's width, and stays the width of the minimap without it.
    While the layout is being worked out the button says so. */
 #zoom [data-testid='tidy'][aria-busy='true'] { opacity: 0.55; cursor: progress; }
-#zoom:has([data-testid='tidy']:not([hidden])) { width: 196px; }
-html[data-input='touch'] #zoom:has([data-testid='tidy']:not([hidden])) { width: 244px; }
+#zoom:has([data-testid='tidy']:not([hidden])), #zoom:has([data-testid='wires']:not([hidden])) { width: 196px; }
+html[data-input='touch'] #zoom:has([data-testid='tidy']:not([hidden])), html[data-input='touch'] #zoom:has([data-testid='wires']:not([hidden])) { width: 244px; }
+/* ...and a sixth, Wires (how the wires are drawn: curved or squared), which comes with Tidy and stands beside it. */
+#zoom:has([data-testid='tidy']:not([hidden])):has([data-testid='wires']:not([hidden])) { width: 232px; }
+html[data-input='touch'] #zoom:has([data-testid='tidy']:not([hidden])):has([data-testid='wires']:not([hidden])) { width: 292px; }
+#zoom [data-testid='wires'] svg { fill: none; stroke: currentColor; stroke-width: 2; stroke-linecap: round; stroke-linejoin: round; }
+#zoom [data-testid='wires'][data-style='squared'] { color: var(--sel); border-color: var(--sel); }
 
 /* With the inspector open the stage is narrow (under 1200 px whenever the window is under 1596 px): the
    minimap goes, and the zoom buttons drop into its corner, so that less of the board lies under them. */
@@ -331,13 +411,12 @@ html[data-input='touch'] #zoom:has([data-testid='tidy']:not([hidden])) { width: 
 }
 
 /* Keys mean nothing to a finger: the hint row is for mouse and keyboard. */
-html[data-input='touch'] #hints { display: none; }
 
 @media (prefers-reduced-motion: reduce) {
   .node .ring { transition: none; }
   .deposit.pop { animation: none; }
   /* Nothing on the board grows, swells or slides in: a new card or wire is simply there. */
-  .node.pop, g.wire.new .base, g.wire.new .glow { animation: none; }
+  .node.pop, g.wire.new .base, g.wire.new .glow, g.wire.leveled .glow { animation: none; }
   .node .txt, #board.ov .node .txt, .slot { transition: none; }
   /* Asked for, the Expand button wears a steady ring instead of a pulse. */
   #expand.call { animation: none; box-shadow: 0 0 0 3px rgba(255, 200, 87, 0.55); }
@@ -372,7 +451,6 @@ html[data-input='touch'] .slot .key { display: none; }
 .toast.bad { border-color: #5a2630; background: #24131a; }
 .toast.out { opacity: 0; transition: opacity 0.3s; }
 @keyframes pop { from { transform: translateY(8px); opacity: 0; } }
-#hints { position: absolute; left: 16px; bottom: 16px; display: flex; gap: 14px; font-size: 11px; color: var(--muted); pointer-events: none; }
 /* (board.ts hides the row with the `hidden` attribute once goal 5 is claimed, and before that whenever a card lies under it.) */
 #zoom { position: absolute; right: 16px; bottom: 132px; width: 160px; display: flex; gap: 4px; align-items: center; }
 #zoom .ibtn { width: 32px; height: 32px; }
@@ -411,6 +489,8 @@ html[data-input='touch'] #zoom .zl { height: 44px; }
 .statusbox { border-radius: 12px; padding: 12px; border: 1px solid #34405c; background: #151c2d; }
 .statusbox.starved { background: #24131a; border-color: #5a2630; }
 .statusbox.blocked { background: #241d0f; border-color: #5a4718; }
+.statusbox.limit { background: #131d33; border-color: #3b5491; }
+.statusbox.limit .st-title { color: #a9c2ff; }
 .st-title { display: flex; align-items: center; gap: 8px; font-size: 13px; font-weight: 700; }
 .statusbox.starved .st-title { color: #fca5a5; }
 .statusbox.blocked .st-title { color: #fcd34d; }
@@ -418,6 +498,8 @@ html[data-input='touch'] #zoom .zl { height: 44px; }
 .st-actions { display: flex; gap: 8px; margin-top: 10px; flex-wrap: wrap; }
 .ghostbtn { height: 30px; padding: 0 10px; border-radius: 8px; border: 1px solid #3a4a70; background: transparent; font-size: 12px; font-weight: 600; }
 .ghostbtn:hover { background: #1a2338; }
+.ghostbtn:disabled { opacity: 0.45; cursor: default; }
+.ghostbtn:disabled:hover { background: transparent; }
 .ghostbtn.dashed { border-style: dashed; color: #c9d3e8; }
 .recipelist { display: flex; flex-direction: column; gap: 4px; }
 .recipelist button { display: flex; align-items: center; gap: 8px; height: 34px; padding: 0 10px; border-radius: 9px; border: 1px solid var(--border); background: #121929; font-size: 12px; text-align: left; }
@@ -470,7 +552,6 @@ html[data-input='touch'] #zoom .zl { height: 44px; }
 #modal button { height: 44px; padding: 0 28px; border-radius: 10px; border: 0; background: var(--sel); color: #0b1430; font-size: 14px; font-weight: 700; }
 
 @media (max-width: 900px) {
-  #hints { display: none; }
   .logo span { display: none; }
   .logo { width: auto; }
   /* A narrow bar: the Data chips become one block with a line for each kind, set as large as the

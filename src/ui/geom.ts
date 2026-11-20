@@ -20,7 +20,7 @@ const tallest: Partial<Record<NodeType, number>> = {};
 
 /**
  * Height to keep clear for a card of this type. A machine's card grows when it is given a recipe
- * with more ports (an Assembler on its first wire, a Refiner switched to Ink), so the tallest it can
+ * with more ports (an Assembler on its first wire, a Refiner switched to Plastic), so the tallest it can
  * become is kept free from the start and it can never grow into the card below.
  */
 export function roomFor(type: NodeType, h: number): number {
@@ -116,6 +116,119 @@ export function distToPolyline(p: Pt, pts: Pt[]): number {
 }
 
 export const matColor = (m: MatId | null) => (m ? MATERIALS[m].color : '#8C97AD');
+
+// ---------- a card comes level with what it is wired to ----------
+// Cards stand on a grid, and their ports do not: a card with one port has it 36 px down, one with two has them 31 and
+// 61 px down, a small card 30. So a wire between two cards of different shapes never ran dead straight, however
+// carefully they were set in a row. While a card is dragged it now comes level: within LEVEL_REACH of the height at
+// which one of its wires would run straight, it stands at that height (off the grid, by a few pixels) and the wire is
+// a straight line. Across, it keeps to the grid.
+
+/** A card dragged within this many board pixels of level with a port it is wired to comes level with it. */
+export const LEVEL_REACH = 9;
+
+/**
+ * A card that comes level may stand this close to another card or a free deposit: half the usual gap. On the grid
+ * line beside it there is the whole gap, and the level height is at most 9 px from that line; held to the whole gap,
+ * a card that had lit its wire sprang back to the grid when it was let go.
+ */
+export const LEVEL_GAP = 8;
+
+/** One end of a wire of the card being dragged: its own port's height below the card's top, and the height of the port at the other end. */
+export interface LevelEnd { wire: number; own: number; other: number }
+
+/**
+ * Where a dragged card's top should stand so that one of its wires runs straight, if `y` (where the pointer has it)
+ * is within `reach` of such a height: the nearest one, as a whole number of pixels, with every wire that is level
+ * there. null when none is near enough, or the height would put the card outside `lo`..`hi`.
+ */
+export function levelY(y: number, ends: LevelEnd[], lo: number, hi: number, reach = LEVEL_REACH): { y: number; wires: number[] } | null {
+  let best: number | null = null;
+  let off = Infinity;
+  for (const e of ends) {
+    const at = e.other - e.own;
+    const d = Math.abs(at - y);
+    if (d <= reach && d < off && at >= lo - 0.5 && at <= hi + 0.5) {
+      best = at;
+      off = d;
+    }
+  }
+  if (best == null) return null;
+  const top = Math.max(lo, Math.min(hi, Math.round(best)));
+  const wires = ends.filter((e) => Math.abs(e.other - e.own - top) <= LEVEL_TOL).map((e) => e.wire);
+  return wires.length ? { y: top, wires } : null;
+}
+
+/** Two ports this close in height are level: the card stands on a whole pixel, the port a third of one off it. */
+export const LEVEL_TOL = 0.75;
+
+/**
+ * How far Tidy moves a card up or down to bring it level: under half a step of the grid, so that every card stays by
+ * the grid line the layout gave it (and the layout, asked again, is shown that line: board.ts, askTidy). That
+ * straightens only the wires the layout had nearly level (on two boards played by the card, 2 of 22 and 4 of 34;
+ * three times the reach gave one more): the layout does not set cards in rows, and this pass does not make it. A row
+ * is made by hand, where the dragged card comes level by itself (`levelY`).
+ */
+export const TIDY_REACH = LEVEL_REACH;
+
+/** A card as the levelling pass sees it. `room`: the height to keep clear for it; `fixed`: a Drill, which stays on its deposit. */
+export interface LevelCard { id: number; x: number; y: number; w: number; h: number; room: number; fixed: boolean }
+/** A wire as the levelling pass sees it: its two cards, and how far down each card its port is. */
+export interface LevelWire { id: number; from: number; to: number; a: number; b: number }
+
+/**
+ * After a layout (Tidy), bring the cards level: each card that may move goes up or down by at most `reach` to where
+ * the wire that feeds it runs dead straight (a card nothing feeds: the wire it feeds). From left to right, so a row
+ * comes level from its start. A card stays where it is when the new height would bring it within CARD_GAP of another
+ * card or a free deposit, take it out of the plot, or put one of its wires behind a card it does not end at (the
+ * layout has just made sure none is). Returns the new height of each card that moves.
+ */
+export function levelCards(
+  cards: LevelCard[], wires: LevelWire[], deposits: Box[], board: { w: number; h: number }, reach = TIDY_REACH,
+): Map<number, number> {
+  const at = new Map(cards.map((c) => [c.id, { ...c }]));
+  const out = new Map<number, number>();
+  const boxOf = (c: LevelCard): Box => ({ x0: c.x, y0: c.y, x1: c.x + c.w, y1: c.y + c.room });
+  /** The two ends of a wire as the cards stand now. */
+  const ends = (w: LevelWire): [Pt, Pt] | null => {
+    const f = at.get(w.from), t = at.get(w.to);
+    return f && t ? [{ x: f.x + f.w, y: f.y + w.a }, { x: t.x, y: t.y + w.b }] : null;
+  };
+  /** Does this wire pass behind a card it does not end at? */
+  const behind = (w: LevelWire): boolean => {
+    const e = ends(w);
+    if (!e) return false;
+    const pts = samples(e[0], e[1], 24);
+    for (const c of at.values()) {
+      if (c.id === w.from || c.id === w.to) continue;
+      for (const p of pts) if (p.x > c.x && p.x < c.x + c.w && p.y > c.y && p.y < c.y + c.h) return true;
+    }
+    return false;
+  };
+  for (const c of [...at.values()].sort((p, q) => p.x - q.x || p.y - q.y)) {
+    if (c.fixed) continue;
+    const mine = wires.filter((w) => w.from === c.id || w.to === c.id);
+    const fed = mine.filter((w) => w.to === c.id);
+    const list: LevelEnd[] = [];
+    for (const w of fed.length ? fed : mine) {
+      const other = at.get(w.to === c.id ? w.from : w.to);
+      if (other) list.push(w.to === c.id ? { wire: w.id, own: w.b, other: other.y + w.a } : { wire: w.id, own: w.a, other: other.y + w.b });
+    }
+    const level = levelY(c.y, list, PLOT_MARGIN, board.h - c.h - PLOT_MARGIN, reach);
+    if (!level || level.y === c.y) continue;
+    const avoid = deposits.concat([...at.values()].filter((o) => o.id !== c.id).map(boxOf));
+    if (!spotFree(c.x, level.y, c.w, c.room, avoid)) continue;
+    const was = c.y;
+    const clean = mine.filter((w) => !behind(w));
+    c.y = level.y;
+    if (clean.some(behind)) {
+      c.y = was;
+      continue;
+    }
+    out.set(c.id, level.y);
+  }
+  return out;
+}
 
 // ---------- camera ----------
 
@@ -236,7 +349,7 @@ export function bestWindow(boxes: Box[], must: Box[], area: Box, k: number): Vie
 
 // ---------- where a card may stand ----------
 
-/** Clear space kept between two cards, and between a card and a deposit with no Well on it. */
+/** Clear space kept between two cards, and between a card and a deposit with no Drill on it. */
 export const CARD_GAP = 16;
 /** Cards stay this far inside the edge of the plot. */
 export const PLOT_MARGIN = 20;
@@ -332,7 +445,7 @@ export interface SiteQuery {
   /** The point the player chose (board units): where the middle of the card is wanted. */
   at: Pt;
   card: Footprint;
-  /** The other cards, each as tall as it may become, and the deposits with no Well on them. */
+  /** The other cards, each as tall as it may become, and the deposits with no Drill on them. */
   cards: Box[];
   deposits: Box[];
   board: { w: number; h: number };
@@ -520,16 +633,16 @@ export function siteFor(spot: Pt, card: Footprint, other: Footprint, grid: numbe
   return { x: snap(spot.x + card.w / 2 - other.w / 2), y: snap(spot.y + card.h / 2 - other.h / 2) };
 }
 
-export interface Card { id: number; x: number; y: number; w: number; h: number; /** Height to keep clear for it (it may grow). */ room: number; /** A Well: it stays on its deposit. */ fixed: boolean }
+export interface Card { id: number; x: number; y: number; w: number; h: number; /** Height to keep clear for it (it may grow). */ room: number; /** A Drill: it stays on its deposit. */ fixed: boolean }
 
 /** True when two cards share any ground at all (touching edges do not count). */
 export const cardsOverlap = (a: Card, b: Card) => a.x < b.x + b.w && a.x + a.w > b.x && a.y < b.y + b.h && a.y + a.h > b.y;
 
 /**
  * Pull apart cards that rest on top of one another (a board from an old save, or one a script laid
- * out). Cards are taken in order: one that overlaps a card before it in the list, or a Well, has to move;
+ * out). Cards are taken in order: one that overlaps a card before it in the list, or a Drill, has to move;
  * every other card stays exactly where it is. Each card that has to move then goes to the nearest spot
- * clear of all the cards that stayed and of those already moved. Wells never move. Returns the new
+ * clear of all the cards that stayed and of those already moved. Drills never move. Returns the new
  * positions of the cards that moved; a board with no overlap comes back untouched.
  */
 export function separate(cards: Card[], deposits: Box[], board: { w: number; h: number }, grid: number): Map<number, Pt> {

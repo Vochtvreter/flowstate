@@ -14,23 +14,26 @@
 // factory fits the screen. Fit goes there when the factory is too big for the floor.
 import { DATA_COLORS, DATA_NAMES, DataTier, MATERIALS, MatId, NODE_DEFS, NodeType, PIPES, RECIPES, Recipe, TECHS } from '../content';
 import {
-  act, canConnect, connect, cutWires, expandBoard, freeDeposits, materialsAt, nodeById, placeNode, recipesFor, splice,
+  act, canConnect, connect, cutWires, dropPins, expandBoard, freeDeposits, materialsAt, nodeById, placeNode, recipesFor, setPins, splice,
 } from '../actions';
 import {
   expansionCost, fmt, fmtRate, labRate, matUnlocked, nodeCost, nodeUnlocked, recipeOf, recipeUnlocked,
 } from '../economy';
 import { bagTotal, graph, isMachine, isSink, outPortCount } from '../sim';
+import { lineFrom } from '../graph';
+import { CardBox, WireIn, drawWire, routeAll } from './wires';
 import { lineAdvice, lineSpot } from '../advice';
 import { GOALS, activeGoal, goalDeposit, goalFocus } from '../goals';
-import { GRID, Game, GNode, Wire, snap } from '../state';
+import { GRID, Game, GNode, MAX_PINS, PIN_GRID, Wire, cleanPins, snap } from '../state';
 import { anchorPt, cachedRect, el, invalidateLayout, setAttr, setClass, setHTML, setHidden, setStyle, setText, svgEl } from './dom';
 import {
-  Beacon, Flow, floater, flowPoint, fly, frameFx, invalidateFx, makeFlow, setBeacons, setFlowPath, setFlows,
+  Beacon, FLOW_SEGS, Flow, floater, flowPoint, fly, frameFx, invalidateFx, makeFlow, setBeacons, setFlowPts, setFlows,
 } from './fx';
 import {
-  Box, Card, Footprint, Port, Pt, View, ZOOM, bestWindow, bezierAt, boxClear, boxUnion, buildSite, centreView, clearPoint, dockSpot, fadeColor, fitBox,
-  fitZoom, fitsAt, frameBox, freeSpot as nearestSpot, heldRate, inPorts, matColor, nodeSize, outPorts, pathD, pinchView, roomFor, segmentsCross, separate,
-  siteFor, wholeGain, wireEnds,
+  Box, CARD_GAP, Card, Footprint, LEVEL_GAP, LEVEL_REACH, LevelCard, LevelEnd, LevelWire, Port, Pt, View, ZOOM, bestWindow, boxClear, boxUnion, buildSite, centreView,
+  clearPoint, dockSpot, fadeColor, fitBox, fitZoom, fitsAt, frameBox, freeSpot as nearestSpot, heldRate, inPorts, levelCards, levelY, matColor, nodeSize, outPorts,
+  pinchView, roomFor,
+  segmentsCross, separate, siteFor, spotFree, wholeGain, wireEnds,
 } from './geom';
 import { isStarted, screenOpen } from './hud-screens';
 import { isTouch, pressWord, withKey } from './hud-words';
@@ -38,8 +41,11 @@ import { esc, icon, matGlyph, matShape, nodeIcon } from './icons';
 import { tidy, tidyInput } from './layout';
 import { shortNum } from './panels';
 import { env } from './phone-env';
-import { diagnose } from './status';
-import { delegate, onGame, onPress, onSignal, select, signal, toast, touch, ui } from './ui';
+import { diagnose, pillFor } from './status';
+import { buzz } from './audio';
+import { WIRES_CARDS, revealOf, slotShown } from './reveal';
+import { traceOf } from '../flows';
+import { delegate, onGame, onPress, onSignal, select, setWireStyle, signal, toast, touch, ui } from './ui';
 
 let boardEl: HTMLElement;
 let worldEl: HTMLElement;
@@ -77,6 +83,8 @@ interface NodeRefs {
 interface WireRefs {
   g: SVGGElement; hit: SVGPathElement; glow: SVGPathElement; base: SVGPathElement; chip: HTMLElement; chipText: HTMLElement;
   a: Pt; b: Pt; flow: Flow;
+  /** The path it is drawn with now (see `routeWires`), and the handles of its pins, one a pin. */
+  d: string; pins: SVGCircleElement[];
   chipX: number; chipY: number; chipHw: number;
   /** No place on the wire where its chip would not cover a card. */
   chipOff: boolean;
@@ -132,9 +140,9 @@ const TAP_SNAP_PX = 20;
 
 // Touch. All distances are screen pixels, whatever the zoom.
 /** A finger this close to a port's centre means the port, even when it is on the card (a 44 px target). */
-const PORT_NEAR = 22;
+const PORT_NEAR = 26;
 /** Input ports get a little less, so that the left edge of a card still selects and drags it. */
-const PORT_IN_NEAR = 18;
+const PORT_IN_NEAR = 22;
 /** Off the cards, the nearest output port within this distance is taken. */
 const PORT_REACH = 44;
 /**
@@ -144,7 +152,25 @@ const PORT_REACH = 44;
 const PORT_EDGE = 30;
 const WIRE_LONG = 100;
 /** Half the width of the band along a wire that selects it (28 px in all). */
-const WIRE_REACH = 14;
+const WIRE_REACH = 16;
+/**
+ * A finger moves a card only after holding it this long: the card lifts (it grows a little, with a buzz) and then
+ * goes with the finger. A swipe that begins on a card before that moves the board. On a phone a busy board is mostly
+ * cards, and a finger that set out to look round it kept carrying one off instead.
+ */
+const HOLD_MS = 200;
+/**
+ * A finger drags a wire out of a port only when it came down this close to the port's centre (its dot, drawn 28 px
+ * for a finger, and a little round it). Further off, within PORT_NEAR, a tap still arms the port, and a swipe
+ * moves the board: a swipe that began beside a port used to draw a wire, and made one where it happened to end.
+ */
+const PORT_DRAG = 16;
+/** A finger this close to a pin on a wire means the pin (a 36 px target; it comes before the wire it is on). */
+const PIN_REACH = 22;
+/** ...and a mouse pointer on the wire, this close. */
+const PIN_MOUSE = 10;
+/** A pin set from the inspector is brought into view with this much board round it (board pixels). */
+const PIN_ROOM = 60;
 /** A finger that just misses a card, by no more than this, still means the card (when nothing else is nearer). */
 const CARD_NEAR = 10;
 /** How far a finger may wander and still be a tap, and how far it must go before a node or a wire follows it. */
@@ -185,7 +211,7 @@ const OV_ICON = [1, 1.5, 1.9, 2.4, 3.2, 4];
 /**
  * In the overview a card's ports are dots at its sides (style.css). Out at the furthest steps the icon is drawn
  * nearly as wide as the card, so the dots are pushed out from the sides by this much (board units), to stand clear
- * of it: for a full-width card and for a narrow one (a Router, a Void), at each step. The board sets these as
+ * of it: for a full-width card and for a narrow one (a Router, a Dump), at each step. The board sets these as
  * --opn and --opc, and finds the dots by the same numbers (`ovDot`).
  */
 const OV_PORT_OUT: [number, number][] = [[0, 0], [0, 0], [0, 0], [0, 9], [12, 30], [34, 52]];
@@ -202,7 +228,17 @@ type Drag =
   | { kind: 'pan'; sx: number; sy: number; vx: number; vy: number; moved: boolean; slop: number; place: boolean;
       /** A finger came down near (not on) this output port: if it turns out to be a tap, the port is armed. */
       near?: { id: number; port: number } }
-  | { kind: 'node'; id: number; ox: number; oy: number; x0: number; y0: number; moved: boolean; sx: number; sy: number; slop: number }
+  | { kind: 'node'; id: number; ox: number; oy: number; x0: number; y0: number; moved: boolean; sx: number; sy: number; slop: number;
+      /** Under a finger the card has to be held before it moves (`HOLD_MS`): false until it has been. A mouse's is lifted at once. */
+      lifted: boolean;
+      /** The wires of the card that run dead straight where it is held now (see `levelWith`); none: it stands on the grid. */
+      level?: number[];
+      /** The card is one of a block (see `block`): the others that move with it, and where each stood when the drag began. */
+      others?: { id: number; x0: number; y0: number }[];
+      /** ...and the pins of the wires that run inside the block, which go with it, as they were then. */
+      pins0?: Map<number, Pt[]> }
+  /** A pin of a wire being moved: which one, and the wire's pins as they were when it was pressed. */
+  | { kind: 'pin'; wire: number; index: number; was: Pt[]; moved: boolean; sx: number; sy: number; slop: number }
   | WireDrag
   | { kind: 'wireIn'; to: number; mat: MatId | null; b: Pt; p: Pt; target: number | null; tp: Pt; blend: number; armed: boolean; sx: number; sy: number; slop: number }
   | { kind: 'wirePress'; wireId: number; sx: number; sy: number; slop: number; touch: boolean }
@@ -344,7 +380,6 @@ function applyView() {
     if (over !== wasOver) updateGhost();
     else placeGhostCap();
   }
-  if (hintsBox && ui.g.goal.i < HINTS_UNTIL) syncHints(ui.g, false);
   // The camera has left the place the player's own Fit took it to (and is not on its way there): Fit has nothing left
   // to return to, and fits again. Back in among the cards, the zoom to come back in to is forgotten too.
   if (fitBack && fitAt && !(glide && glide === fitGlide) && !sameView(ui.view, fitAt)) fitBack = fitAt = null;
@@ -544,7 +579,7 @@ function fabBoxes(gap = FAB_CLEAR): Box[] {
 
 /**
  * Everything that lies over the board where a card cannot be seen or reached, in stage pixels: the strip
- * (the goal card with the order and the alert), an open sheet, the corner controls, the key hints, the
+ * (the goal card with the order and the alert), an open sheet, the corner controls, the
  * "tap where…" line, and on a phone the floating buttons (with room around them) and a Claim button
  * seated in the thumb row. Reads layout: for moments when the camera may move, not for every frame. `fabGap`: the
  * room kept round the floating buttons. `line`: false leaves the "tap where…" line out (it goes the moment a card
@@ -566,7 +601,6 @@ function coverBoxes(fabGap = FAB_CLEAR, line = true): Box[] {
     if (s) out.push({ x0: s.x0, y0: -1e6, x1: s.x1, y1: s.bottom });
     const c = env.corner();
     if (c) out.push({ x0: c.x0, y0: c.y0, x1: 1e6, y1: 1e6 });
-    push(stageBoxOf(hintsEl));
   }
   if (line) push(stageBoxOf(document.getElementById('tap-hint'), 4));
   return out;
@@ -621,10 +655,9 @@ function placePlotLabel() {
     const st = env.strip(), c = env.corner();
     if (st) covers.push({ x0: st.x0, y0: -1e6, x1: st.x1, y1: st.bottom });
     if (c) covers.push({ x0: c.x0, y0: c.y0, x1: 1e6, y1: 1e6 });
-    if (hintsBox && g.goal.i < HINTS_UNTIL) covers.push(hintsBox);
   }
   // Past the stage's edges it cannot be read either: with the plot's corner off the side of the stage (as the camera
-  // stands in the Lens ending) it read "ard · 3 plots" there.
+  // stands in the Phone ending) it read "ard · 3 plots" there.
   covers.push({ x0: -1e6, y0: -1e6, x1: 0, y1: 1e6 }, { x0: r.width, y0: -1e6, x1: 1e6, y1: 1e6 }, { x0: -1e6, y0: -1e6, x1: 1e6, y1: 0 });
   const v = ui.view;
   const y0 = (big ? -11 : -9) * v.k + v.y, y1 = y0 + (big ? 22 : 17) * v.k;
@@ -893,7 +926,7 @@ function openView() {
   const named = (armed.length ? armed : goalFocus(g)).map((id) => nodeById(g, id)).filter((n): n is GNode => !!n);
   // On a phone (a game opened, or the phone turned) as much of the factory as can be read at once: at the
   // floor of the detailed tier, the stretch of it with the most cards on screen, the armed port among them; or,
-  // when the goal names no node but a place (a free deposit to put a Well on), with that place among them, and
+  // when the goal names no node but a place (a free deposit to put a Drill on), with that place among them, and
   // failing that the place itself, readable.
   if (env.phone && (!named.length || armed.length)) {
     const place = armed.length ? null : goalPlace(g);
@@ -910,13 +943,11 @@ function openView() {
   }
   if (env.phone) return go(fitTarget(box, true));
   // Wider than the room under the strip, but whole on the stage at the floor with no card cut or under the
-  // strip, the corner controls or the key hints (a big factory on a wide screen): it opens there, readable.
-  // (The hint row is put away first if the goal is past it.)
-  syncHints(g);
+  // strip or the corner controls (a big factory on a wide screen): it opens there, readable.
   const d = wholeAtFloor(fitTarget(box, true));
   if (d) return go(d);
   // Too big for that, and the goal names no node, but a place (as Show me frames it, advice-show.ts): the free
-  // deposit the card's line wants a Well on, or the hint's own ("Place a Well on the Murk deposit"), at a
+  // deposit the card's line wants a Drill on, or the hint's own ("Place a Drill on the Oil deposit"), at a
   // readable zoom; or, where the card asks for the expansion, the plot's lower edge, under which the Expand
   // button stands, with the factory around it at the floor.
   const place = goalPlace(g);
@@ -931,7 +962,7 @@ function openView() {
 
 /**
  * The free deposit the goal names, as a world box with a little room round it: the one the card's line wants a
- * Well on, or the hint's own ("Place a Well on the Murk deposit"). Null when it names none.
+ * Drill on, or the hint's own ("Place a Drill on the Oil deposit"). Null when it names none.
  */
 function goalPlace(g: Game): Box | null {
   const spot = lineSpot(g);
@@ -1120,7 +1151,7 @@ function framePlan(boxes: Box[], readable: boolean, opts: { least?: number; hint
     }
     if (c) blocks.push({ x0: c.x0 - STRIP_GAP, y0: c.y0 - STRIP_GAP, x1: Infinity, y1: Infinity });
     if (s) blocks.push({ x0: s.x0 - STRIP_GAP, y0: -Infinity, x1: s.x1 + STRIP_GAP, y1: s.bottom + STRIP_GAP });
-    for (const e of [hintsEl, document.getElementById('tap-hint')]) {
+    for (const e of [document.getElementById('tap-hint')]) {
       const b = stageBoxOf(e, 6);
       if (b) blocks.push(b);
     }
@@ -1314,7 +1345,6 @@ function stageResized() {
 //
 // The element is a child of the board, not of the world, and is placed by a transform in stage pixels.
 
-let hintsEl: HTMLElement | null = null;
 let fabsEl: HTMLElement | null = null;
 let toastsEl: HTMLElement | null = null;
 /** The time-away card ("While you were away", hud-screens.ts): up while it has the class `open`. */
@@ -1408,7 +1438,7 @@ const ex = {
 const EXPAND_GOAL = GOALS.findIndex((x) => x.id === 'expand');
 
 /**
- * Whether the button is on the board at all: from the goal "Expand the board" on (or once the board has been
+ * Whether the button is on the board at all: from the goal "Open up more land" on (or once the board has been
  * expanded, in free play, or when a "while you wait" line asks for it). Before that it would only be one more
  * thing beside the first instructions, and a tap meant for an empty spot could buy a plot.
  */
@@ -1424,7 +1454,7 @@ function expandShown(g: Game): boolean {
 const expandQuiet = () => !!tapWire || !!ui.placing || !!radial || (!!drag && (drag.kind === 'wire' || drag.kind === 'wireIn'));
 
 /**
- * The goal card is asking for the expansion: the goal is "Expand the board", or the next step of the
+ * The goal card is asking for the expansion: the goal is "Open up more land", or the next step of the
  * goal's "while you wait" line is to expand (which the line only asks for when it can be paid for).
  */
 function expandAsked(g: Game): boolean {
@@ -1437,7 +1467,7 @@ function expandAsked(g: Game): boolean {
 /** What the button's surroundings depend on that can be read without reading layout: when it changes, they are measured again. */
 function expandKey(g: Game): string {
   const c = env.cover(), s = env.strip(), k = env.corner();
-  return `${c.top}|${c.right}|${c.bottom}|${c.row}|${s ? `${s.x0},${s.x1},${s.bottom}` : ''}|${k ? `${k.x0},${k.y0}` : ''}|${ui.uiRev}|${g.goal.i}${g.goal.ready ? 'r' : ''}|${toastsEl?.childElementCount ?? 0}|${hintsEl?.hidden ? 1 : 0}|${tidyBtn && !tidyBtn.hidden ? 1 : 0}`;
+  return `${c.top}|${c.right}|${c.bottom}|${c.row}|${s ? `${s.x0},${s.x1},${s.bottom}` : ''}|${k ? `${k.x0},${k.y0}` : ''}|${ui.uiRev}|${g.goal.i}${g.goal.ready ? 'r' : ''}|${toastsEl?.childElementCount ?? 0}|${tidyBtn && !tidyBtn.hidden ? 1 : 0}`;
 }
 
 /** What stands on the stage that the button must keep clear of. Reads layout: only when something may have changed. */
@@ -1502,7 +1532,6 @@ function measureExpand() {
       }
     }
     if (cx < Infinity) out.push({ x0: cx, y0: cy, x1: 1e6, y1: 1e6 });
-    add(hintsEl);
     // (For a finger on a wide screen the "tap where..." line shows under the strip.)
     add(document.getElementById('tap-hint'));
     // Toasts are not in the list: outside the phone layout they step up above the button themselves (hud-toasts.ts).
@@ -1523,7 +1552,7 @@ function watchStage() {
     ex.stale = true;
     placeExpand();
   });
-  for (const id of ['hud-strip', 'toasts', 'fabs', 'hints', 'zoom']) {
+  for (const id of ['hud-strip', 'toasts', 'fabs', 'zoom']) {
     if (watched.has(id)) continue;
     const e = document.getElementById(id);
     if (!e) continue;
@@ -1835,13 +1864,13 @@ export function initBoard(root: HTMLElement) {
   tempEnd = boardEl.querySelector('#temp-end')!;
   knifeLine = boardEl.querySelector('#knife')!;
   appEl = boardEl.closest<HTMLElement>('#app');
-  hintsEl = document.getElementById('hints');
   toastsEl = document.getElementById('toasts');
   modalEl = document.getElementById('modal');
   buildEl = el(`<div id="build-sheet" role="dialog" aria-label="Build menu"></div>`);
   (boardEl.parentElement ?? boardEl).appendChild(buildEl);
 
   boardEl.addEventListener('pointerdown', onDown);
+  boardEl.addEventListener('dblclick', onDouble);
   boardEl.addEventListener('pointermove', onMove);
   boardEl.addEventListener('pointerup', onUp);
   boardEl.addEventListener('pointercancel', onCancel);
@@ -2002,14 +2031,14 @@ function expand(ev?: Event) {
 
 /** How long the cards take to glide to their new places, in ms. */
 const TIDY_MS = 400;
-/** Tidy is offered once there is this much on the board to tidy. */
-const TIDY_FROM = 6;
+/** Tidy is offered once there is this much on the board to tidy (and with it, the Wires button). */
+const TIDY_FROM = WIRES_CARDS;
 let tidyBtn: HTMLButtonElement | null = null;
 
 /**
  * Lay the board out again so that wires are short, cross as little as possible, and nothing overlaps
  * (the layout itself is `tidy` in layout.ts, worked out in a Worker so that a big factory never holds the
- * page up). Wells stay on their deposits. The cards glide to their new places; the camera stays among the
+ * page up). Drills stay on their deposits. The cards glide to their new places; the camera stays among the
  * cards, where their text can be read, on the part of the factory the player was looking at; one undo puts
  * every card back. Returns false when there is nothing to tidy, true when the work has been started (the
  * answer comes back a moment later; "Already tidy." is said then if the board cannot be bettered).
@@ -2053,6 +2082,10 @@ let layoutWorker: Worker | null | undefined;
 
 function askTidy(job: TidyJob) {
   const input = tidyInput(job.g, GRID);
+  // A card that was brought level stands a few pixels off the grid. The layout is shown the grid line it stands by, so
+  // that a board it has tidied is one it leaves alone: shown the levelled heights, it found a card to move at every
+  // second press. (The levelling is done again afterwards, and comes out where it was: see tidyAnswer.)
+  for (const n of input.nodes) if (!n.fixed) n.y = snap(n.y);
   if (layoutWorker === undefined) {
     layoutWorker = null;
     if (typeof Worker === 'function') {
@@ -2099,10 +2132,18 @@ function tidyAnswer(id: number, moves: Map<number, Pt>) {
   // A drag that began while the answer was on its way is let go first.
   settleGesture();
   cancelGesture();
-  const from = new Map<number, Pt>();
-  for (const [nid] of moves) {
+  // Then the cards come level: each goes up or down by a few pixels to where the wire that feeds it runs dead
+  // straight (`levelCards` in geom.ts). A board the layout leaves alone is still brought level.
+  // (A card the layout leaves where the grid line is, and that stood level beside it, is not a move.)
+  for (const [nid, to] of [...moves]) {
     const n = nodeById(g, nid);
-    if (n && n.type !== 'well') from.set(nid, { x: n.x, y: n.y });
+    if (n && to.x === n.x && to.y === snap(n.y)) moves.delete(nid);
+  }
+  for (const [nid, y] of leveled(g, moves)) moves.set(nid, { x: moves.get(nid)?.x ?? nodeById(g, nid)!.x, y });
+  const from = new Map<number, Pt>();
+  for (const [nid, to] of moves) {
+    const n = nodeById(g, nid);
+    if (n && n.type !== 'well' && (n.x !== to.x || n.y !== to.y)) from.set(nid, { x: n.x, y: n.y });
   }
   if (!from.size) {
     toast('Already tidy.', 'info');
@@ -2115,6 +2156,8 @@ function tidyAnswer(id: number, moves: Map<number, Pt>) {
       n.x = to.x;
       n.y = to.y;
     }
+    // (The cards the pins were set round have moved: the wires start again without them. The same undo step.)
+    dropPins(g);
     return 0;
   });
   for (const [nid, was] of from) {
@@ -2174,6 +2217,22 @@ function tidyAnswer(id: number, moves: Map<number, Pt>) {
   toast(`Tidied. <b>${isTouch() ? 'Undo' : 'Ctrl Z'}</b> puts it back.`, 'good');
 }
 
+/** The heights at which the cards come level once they stand where the layout puts them (`moves`; a card it leaves, where it is). */
+function leveled(g: Game, moves: Map<number, Pt>): Map<number, number> {
+  const cards: LevelCard[] = g.nodes.map((n) => {
+    const { w, h } = nodeSize(n);
+    const to = n.type === 'well' ? null : moves.get(n.id);
+    return { id: n.id, x: to?.x ?? n.x, y: to?.y ?? n.y, w, h, room: roomFor(n.type, h), fixed: n.type === 'well' };
+  });
+  const wires: LevelWire[] = [];
+  for (const w of g.wires) {
+    const e = wireEnds(g, w);
+    const a = nodeById(g, w.from), b = nodeById(g, w.to);
+    if (e && a && b) wires.push({ id: w.id, from: w.from, to: w.to, a: e.a.y - a.y, b: e.b.y - b.y });
+  }
+  return levelCards(cards, wires, depositBoxes(), g.board);
+}
+
 /** The Tidy buttons say they are working while the layout is worked out. */
 function setTidyBusy(on: boolean) {
   for (const b of [tidyBtn, fabsEl?.querySelector('[data-testid="fab-tidy"]')]) if (b) setAttr(b, 'aria-busy', on ? 'true' : null);
@@ -2196,15 +2255,119 @@ function syncTidyControl() {
   const label = withKey('Tidy the board', 'T');
   setAttr(tidyBtn, 'aria-label', label);
   setAttr(tidyBtn, 'title', label);
+  syncWiresControl();
 }
 
-/** T tidies, wherever the board's other keys work (main.ts has those): not in a text field, the tech tree or a full-screen card. */
+// ----- cable management: the wire style, and pins -----
+
+let wiresBtn: HTMLButtonElement | null = null;
+const WIRES_ICON = {
+  curved: `<svg class="ic" viewBox="0 0 24 24" width="14" height="14" aria-hidden="true"><path d="M3 6c9 0 9 12 18 12"/></svg>`,
+  squared: `<svg class="ic" viewBox="0 0 24 24" width="14" height="14" aria-hidden="true"><path d="M3 6h7a2 2 0 0 1 2 2v8a2 2 0 0 0 2 2h7"/></svg>`,
+};
+
+/**
+ * Is the wire style on offer? With the rest of cable management (reveal.ts), and at any time for a player who has
+ * chosen curved wires over the squared ones a board starts with: the style is kept between games, and there must
+ * be a way back from it.
+ */
+export const wiresShown = (): boolean => revealOf(ui.g).wires || ui.wireStyle !== 'squared';
+
+/** Switch between curved and squared wires. */
+export function toggleWires() {
+  setWireStyle(ui.wireStyle === 'curved' ? 'squared' : 'curved');
+  toast(ui.wireStyle === 'squared' ? 'Wires run <b>squared</b>: right angles, round the cards.' : 'Wires run <b>curved</b>, straight from port to port.', 'info', 2200);
+}
+
+/** The Wires button, beside Tidy in the zoom cluster and shown when Tidy is: it draws the style the board is in, and a press changes it. */
+function syncWiresControl() {
+  if (!wiresBtn) {
+    const zoom = document.getElementById('zoom');
+    if (!zoom || !zoom.firstElementChild || !tidyBtn) return;
+    wiresBtn = el<HTMLButtonElement>(`<button class="ibtn" data-testid="wires"></button>`);
+    zoom.insertBefore(wiresBtn, tidyBtn);
+    onPress(wiresBtn, toggleWires);
+  }
+  setHidden(wiresBtn, !wiresShown());
+  if (wiresBtn.dataset.style !== ui.wireStyle) {
+    wiresBtn.dataset.style = ui.wireStyle;
+    setHTML(wiresBtn, WIRES_ICON[ui.wireStyle]);
+  }
+  const label = withKey(`Wires: ${ui.wireStyle}. Press for ${ui.wireStyle === 'curved' ? 'squared' : 'curved'}`, 'W');
+  setAttr(wiresBtn, 'aria-label', label);
+  setAttr(wiresBtn, 'title', label);
+}
+
+/** How far along a wire's line (board pixels from its start) the point of it nearest to `p` lies. */
+function alongWire(f: Flow, p: Pt): number {
+  let best = Infinity, at = 0;
+  const pts = f.pts;
+  for (let i = 0; i + 3 < pts.length; i += 2) {
+    const ax = pts[i], ay = pts[i + 1];
+    const dx = pts[i + 2] - ax, dy = pts[i + 3] - ay;
+    const len = dx * dx + dy * dy || 1;
+    const t = Math.max(0, Math.min(1, ((p.x - ax) * dx + (p.y - ay) * dy) / len));
+    const d = Math.hypot(p.x - (ax + t * dx), p.y - (ay + t * dy));
+    if (d < best) {
+      best = d;
+      at = f.cum[i / 2] + t * (f.cum[i / 2 + 1] - f.cum[i / 2]);
+    }
+  }
+  return at;
+}
+
+/**
+ * Put a pin on a wire: at `at` (a double click there), or with none given in the middle of its longest stretch
+ * between pins (the inspector's button, a finger's way). The pin takes its place among the wire's others by how far
+ * along the wire it is. One undo step; the wire is selected, so the pin can be seen and dragged. False when the
+ * wire holds all the pins it can.
+ */
+export function pinWire(id: number, at?: Pt): boolean {
+  const g = ui.g;
+  const w = g.wires.find((x) => x.id === id);
+  const refs = wireEls.get(id);
+  if (!w || !refs) return false;
+  const pins = (w.pins ?? []).map((q) => ({ x: q.x, y: q.y }));
+  if (pins.length >= MAX_PINS) {
+    toast(`A wire holds ${MAX_PINS} pins at most.`, 'info');
+    return false;
+  }
+  const f = refs.flow;
+  const where = pins.map((q) => alongWire(f, q));
+  let p = at;
+  if (!p) {
+    const stops = [0, ...where, f.len].sort((x, y) => x - y);
+    let from = 0, gap = -1;
+    for (let i = 0; i + 1 < stops.length; i++) if (stops[i + 1] - stops[i] > gap) { gap = stops[i + 1] - stops[i]; from = stops[i]; }
+    p = flowPoint(f, from + gap / 2);
+  }
+  const s = alongWire(f, p);
+  let i = 0;
+  while (i < pins.length && where[i] < s) i++;
+  pins.splice(i, 0, { x: p.x, y: p.y });
+  const ok = setPins(g, id, pins);
+  select({ kind: 'wire', id });
+  // (Set from the inspector, the pin may be off the screen or under a phone's sheet: the camera brings it, with
+  // room round it for a finger, to where it can be seen and dragged.)
+  if (ok && !at) frameBoxes([{ x0: p.x - PIN_ROOM, y0: p.y - PIN_ROOM, x1: p.x + PIN_ROOM, y1: p.y + PIN_ROOM }]);
+  return ok;
+}
+
+/** Take a wire's pins off, all of them. One undo step. */
+export const unpinWire = (id: number): boolean => setPins(ui.g, id, []);
+
+/**
+ * T tidies and W changes how the wires are drawn, wherever the board's other keys work (main.ts has those): not in a
+ * text field, the tech tree or a full-screen card, and not before their buttons are there.
+ */
 function onTidyKey(e: KeyboardEvent) {
-  if (e.key.toLowerCase() !== 't' || e.ctrlKey || e.metaKey || e.altKey || e.repeat) return;
+  const key = e.key.toLowerCase();
+  if ((key !== 't' && key !== 'w') || e.ctrlKey || e.metaKey || e.altKey || e.repeat) return;
   const t = e.target as HTMLElement | null;
   if (t && (t.tagName === 'INPUT' || t.tagName === 'TEXTAREA')) return;
-  if (screenOpen() || ui.techOpen || !ui.g || ui.g.nodes.length < TIDY_FROM) return;
-  tidyBoard();
+  if (screenOpen() || ui.techOpen || !ui.g) return;
+  if (key === 't' && ui.g.nodes.length >= TIDY_FROM) tidyBoard();
+  if (key === 'w' && wiresShown()) toggleWires();
 }
 
 // ---------- structure: nodes ----------
@@ -2214,9 +2377,17 @@ function recipeText(r: Recipe): string {
   return `${side(r.inputs)} → ${side(r.outputs)}`;
 }
 
+/**
+ * A card's title, as HTML. A Drill is "Sand Drill". A machine is titled by what it makes, with its kind after it in
+ * small type: "Glass Refiner", "Circuit Assembler" (every one read "Refiner" or "Assembler", and where the second
+ * line is dropped, on a phone and when zoomed out, two of them differed only by a small picture). The kind is what
+ * gives way where the two do not fit.
+ */
 function nodeTitle(n: GNode): string {
-  if (n.type === 'well' && n.material) return `${MATERIALS[n.material].name} Well`;
-  return NODE_DEFS[n.type].name;
+  if (n.type === 'well' && n.material) return `${esc(MATERIALS[n.material].name)} Drill`;
+  const kind = NODE_DEFS[n.type].name;
+  const r = isMachine(n) ? recipeOf(n) : null;
+  return r ? `${esc(MATERIALS[r.outputs[0][0]].name)} <span class="nk">${kind}</span>` : kind;
 }
 
 /** Longest second line that fits a full-width card. Cut here rather than with CSS: see `.ns` in the stylesheet. */
@@ -2227,9 +2398,11 @@ function nodeSub(n: GNode): string {
     case 'well': return `Lv ${n.lv.speed} · deposit`;
     case 'refiner': case 'assembler': case 'fabricator': {
       const r = recipeOf(n);
-      // In the larger type this line has less room, so there it only says what comes out.
+      // In the larger type this line has less room, so there it only says what comes out. So does a recipe too long
+      // for the line: cut short it lost its last word, which is the one that matters ("Plastic + Copper →…").
       const max = big ? SUB_CHARS - 2 : SUB_CHARS;
-      const text = !r ? 'no recipe' : big ? `makes ${r.outputs.map(([m]) => MATERIALS[m].name).join(' + ')}` : recipeText(r);
+      const whole = r ? recipeText(r) : '';
+      const text = !r ? 'makes nothing yet' : big || whole.length > max ? `makes ${r.outputs.map(([m]) => MATERIALS[m].name).join(' + ')}` : whole;
       return text.length > max ? text.slice(0, max - 1).trimEnd() + '…' : text;
     }
     case 'router': return `${n.mode} split`;
@@ -2262,14 +2435,16 @@ function buildNode(n: GNode, w: number, h: number, ins: Port[], outs: Port[], si
   const hasRing = n.type === 'well' || isMachine(n);
   const compact = w < 160;
   const sub = nodeSub(n);
+  // The card wears the colour of what it makes (a Market the coin's, a Lab the Data's): the board reads by colour.
+  const tint = n.type === 'market' ? '#FFC857' : n.type === 'lab' ? '#C4A1FF' : outs[0]?.mat ? matColor(outs[0].mat) : '#8C97AD';
   const e = el(`
     <div class="node t-${n.type}${compact ? ' compact' : ''}" data-id="${n.id}" data-testid="node-${n.type}"
-         style="left:${n.x}px;top:${n.y}px;width:${w}px;height:${h}px">
+         style="left:${n.x}px;top:${n.y}px;width:${w}px;height:${h}px;--c:${tint}">
       <div class="ring${hasRing ? '' : ' flat'}">
         ${hasRing ? `<svg viewBox="0 0 40 40" width="40" height="40"><circle cx="20" cy="20" r="17" class="trk"/><circle cx="20" cy="20" r="17" class="val" pathLength="100"/></svg>` : ''}
         <div class="glyph">${nodeGlyph(n)}</div>
       </div>
-      <div class="txt"><div class="nt">${esc(nodeTitle(n))}</div><div class="ns">${esc(sub)}</div><div class="nr mono"></div></div>
+      <div class="txt"><div class="nt">${nodeTitle(n)}</div><div class="ns">${esc(sub)}</div><div class="nr mono"></div></div>
       <span class="pill"></span>
     </div>`);
   for (const p of ins) {
@@ -2347,15 +2522,67 @@ function syncNodes(g: Game, fresh: boolean) {
 
 // ---------- structure: wires ----------
 
-function setWirePath(refs: WireRefs, a: Pt, b: Pt) {
-  const d = pathD(a, b);
-  refs.hit.setAttribute('d', d);
-  refs.glow.setAttribute('d', d);
-  refs.base.setAttribute('d', d);
-  refs.a = { x: a.x, y: a.y };
-  refs.b = { x: b.x, y: b.y };
-  setFlowPath(refs.flow, (t) => bezierAt(a, b, t));
+// How every wire runs is worked out for the whole board at once (wires.ts): curved or squared as the player has
+// chosen, through the pins a wire has, and squared wires in lanes beside each other. Whatever moves a card, makes or
+// cuts a wire, moves a pin or changes the style ends here, and only a wire whose line has changed is drawn again.
+
+/** The style the wires were last drawn in. */
+let drawnStyle = '';
+
+function routeWires(g: Game) {
+  const list: WireIn[] = [];
+  for (const w of g.wires) {
+    if (!wireEls.has(w.id)) continue;
+    const ends = drawnEnds(g, w);
+    if (ends) list.push({ id: w.id, from: w.from, to: w.to, a: ends.a, b: ends.b, pins: w.pins });
+  }
+  // (Squared wires choose their way round the cards: curved ones do not look.)
+  const cards: CardBox[] = [];
+  if (ui.wireStyle === 'squared') {
+    for (const n of g.nodes) {
+      const { w, h } = nodeSize(n);
+      const m = settling.get(n.id);
+      const x = n.x + (m?.ox ?? 0), y = n.y + (m?.oy ?? 0);
+      cards.push({ id: n.id, x0: x, y0: y, x1: x + w, y1: y + h });
+    }
+  }
+  drawnStyle = ui.wireStyle;
+  const drawn = routeAll(list, cards, ui.wireStyle, FLOW_SEGS);
+  const byId = new Map(g.wires.map((w) => [w.id, w]));
+  for (const w of list) {
+    const refs = wireEls.get(w.id)!;
+    const line = drawn.get(w.id);
+    if (!line) continue;
+    if (line.d !== refs.d) {
+      refs.d = line.d;
+      refs.hit.setAttribute('d', line.d);
+      refs.glow.setAttribute('d', line.d);
+      refs.base.setAttribute('d', line.d);
+      setFlowPts(refs.flow, line.pts);
+    }
+    refs.a = { x: w.a.x, y: w.a.y };
+    refs.b = { x: w.b.x, y: w.b.y };
+    syncPins(refs, byId.get(w.id)?.pins ?? []);
+  }
 }
+
+/** A wire's pins as handles on it: as many small discs as it has pins, each where its pin is. */
+function syncPins(refs: WireRefs, pins: Pt[]) {
+  while (refs.pins.length > pins.length) refs.pins.pop()!.remove();
+  while (refs.pins.length < pins.length) {
+    const c = svgEl('circle', { class: 'pin', r: '5', 'data-pin': String(refs.pins.length) }) as SVGCircleElement;
+    refs.g.appendChild(c);
+    refs.pins.push(c);
+  }
+  pins.forEach((q, k) => {
+    const c = refs.pins[k];
+    if (c.getAttribute('cx') !== String(q.x)) c.setAttribute('cx', String(q.x));
+    if (c.getAttribute('cy') !== String(q.y)) c.setAttribute('cy', String(q.y));
+  });
+}
+
+/** For effects that run along a wire: its line as it is drawn, as x, y pairs from start to end. null for a wire that is not on the board. */
+export const wireLine = (id: number): Float32Array | null => wireEls.get(id)?.flow.pts ?? null;
 
 function buildWire(w: Wire, a: Pt, b: Pt, fresh: boolean): WireRefs {
   const grp = svgEl('g', { class: 'wire stalled', 'data-id': String(w.id) });
@@ -2367,7 +2594,7 @@ function buildWire(w: Wire, a: Pt, b: Pt, fresh: boolean): WireRefs {
   // never alters the compositor's property trees.
   const chip = el(`<span class="chip stalled"><i class="mono"></i></span>`);
   const refs: WireRefs = {
-    g: grp, hit, glow, base, chip, chipText: chip.firstElementChild as HTMLElement, a, b,
+    g: grp, hit, glow, base, chip, chipText: chip.firstElementChild as HTMLElement, a, b, d: '', pins: [],
     // A wire that is there when the board loads starts full of dots; one the player just made starts empty.
     flow: makeFlow(fresh),
     chipX: NaN, chipY: NaN, chipHw: 24, chipOff: false, on: false, shown: false, dim: false,
@@ -2375,7 +2602,6 @@ function buildWire(w: Wire, a: Pt, b: Pt, fresh: boolean): WireRefs {
     cColor: '', cWidth: -9, cFlowing: false, cSat: false, cChip: '', dChip: '',
     sRate: -1, vRate: -1,
   };
-  setWirePath(refs, a, b);
   return refs;
 }
 
@@ -2394,8 +2620,6 @@ function syncWires(g: Game, fresh: boolean) {
       wireEls.set(w.id, made);
       if (!fresh) oneShot(made.g, 'new', 260);
       changed = true;
-    } else if (refs.a.x !== ends.a.x || refs.a.y !== ends.a.y || refs.b.x !== ends.b.x || refs.b.y !== ends.b.y) {
-      setWirePath(refs, ends.a, ends.b);
     }
   }
   if (wireEls.size !== seen.size) {
@@ -2407,6 +2631,7 @@ function syncWires(g: Game, fresh: boolean) {
       changed = true;
     }
   }
+  routeWires(g);
   if (changed) pushFlows();
 }
 
@@ -2427,7 +2652,7 @@ function nodeBoxes(skip?: number, grown = false): Box[] {
   return out;
 }
 
-/** Deposits with no Well on them, as boxes. */
+/** Deposits with no Drill on them, as boxes. */
 function depositBoxes(): Box[] {
   const g = ui.g;
   const used = new Set(g.nodes.map((n) => n.depositId));
@@ -2450,14 +2675,16 @@ const chipScale = () => (big ? 1.42 : 1);
  * Whether a wire's rate chip is on show. The cards already say what each node makes, so a chip is only
  * worth its place when it answers a question the player is asking or should be:
  *  - the wire belongs to the selection (it is selected, or runs to or from the selected node);
- *  - it is a problem wire: nothing flows on it (0/s), or it is full (MAX);
+ *  - it is full (MAX). (A wire that carries nothing has no chip: it is a thin grey line, and that says it.)
  *  - it was made in the last three seconds;
  *  - the mouse is resting on it or on a node at either end.
  * Never in the overview, where nothing is read. The same on every screen.
  */
 function chipWanted(w: Wire, refs: WireRefs, now: number): boolean {
   if (over || refs.chipOff) return false;
-  return refs.on || refs.cFlowing === false || refs.cSat === true || now < refs.fresh
+  // (While the Flows panel traces a material, the wires that carry it say how much: the rest keep quiet.)
+  if (traced) return traced.wires.has(w.id);
+  return refs.on || refs.cSat === true || now < refs.fresh
     || hoverWire === w.id || (hoverNode != null && (hoverNode === w.from || hoverNode === w.to));
 }
 
@@ -2486,7 +2713,7 @@ function syncChips(): boolean {
   for (const w of ui.g.wires) {
     const refs = wireEls.get(w.id);
     if (!refs) continue;
-    const on = !!sel && (sel.kind === 'wire' ? sel.id === w.id : sel.id === w.from || sel.id === w.to);
+    const on = !!sel && sel.kind !== 'flows' && (sel.kind === 'wire' ? sel.id === w.id : sel.id === w.from || sel.id === w.to);
     if (on !== refs.on) {
       refs.on = on;
       refs.chip.classList.toggle('on', on);
@@ -2500,12 +2727,14 @@ function syncChips(): boolean {
       refs.chip.classList.toggle('show', show);
       chips = true;
     }
-    // A wire that was just made is never faint, whatever is selected.
-    const dim = !!sel && !on && !fresh;
+    // A wire that was just made is never faint, whatever is selected. While a material is traced (the Flows panel),
+    // the wires that carry it are the ones that stand out.
+    const dim = traced ? !traced.wires.has(w.id) : !!sel && sel.kind !== 'flows' && !on && !fresh;
     if (dim !== refs.dim) {
       refs.dim = dim;
       refs.g.classList.toggle('dim', dim);
       refs.flow.color = dim ? faded(refs.cColor) : refs.cColor;
+      refs.flow.plain = dim;
       dims = true;
     }
   }
@@ -2632,35 +2861,26 @@ function layoutWires() {
   invalidateFx();
 }
 
-/** After a node moved: redo the wires attached to it, then chips and occlusion for all. */
-function relayoutNode(n: GNode) {
-  const g = ui.g;
-  const gr = graph(g);
-  const fix = (w: Wire) => {
-    const refs = wireEls.get(w.id);
-    const ends = drawnEnds(g, w);
-    if (refs && ends) setWirePath(refs, ends.a, ends.b);
-  };
-  for (const w of gr.ins.get(n.id) ?? []) fix(w);
-  for (const port of gr.outs.get(n.id) ?? []) if (port) for (const w of port) fix(w);
-  layoutWires();
-}
-
 // ---------- structure: the rest ----------
 
 function syncDeposits(g: Game) {
   const used = new Set(g.nodes.map((n) => n.depositId));
   const now = performance.now();
+  const words = revealOf(g).depositWords;
+  // (Until the Drill has its slot in the build bar, a free deposit does not ask for one.)
+  const canDrill = slotShown(g, 'well');
   const html = g.deposits
     .filter((d) => !used.has(d.id))
     .map((d) => {
       const ok = matUnlocked(g, d.mat);
+      // Until there is a Lab, "needs research" means nothing: a locked deposit is an outline with a lock (reveal.ts).
+      if (!ok && !words) return `<div class="deposit locked quiet" data-dep="${d.id}" style="left:${d.x}px;top:${d.y}px">${icon('lock', 16)}</div>`;
       // A deposit an expansion has just revealed pops in at its turn (see `expand`).
       const at = popping.get(d.id);
       const pop = at == null ? '' : `animation-delay:${Math.round(at - now)}ms;`;
       return `<div class="deposit${ok ? '' : ' locked'}${at == null ? '' : ' pop'}" data-dep="${d.id}" style="left:${d.x}px;top:${d.y}px;${pop}${ok ? `--c:${MATERIALS[d.mat].color}` : ''}">
         ${ok ? matGlyph(d.mat, 18) : icon('lock', 16)}
-        <div><div class="dn">${ok ? MATERIALS[d.mat].name + ' deposit' : 'Unknown deposit'}</div><div class="ds">${ok ? (big ? 'place a Well here' : 'empty · place a Well') : 'needs research'}</div></div>
+        <div><div class="dn">${ok ? MATERIALS[d.mat].name + ' deposit' : 'Unknown deposit'}</div><div class="ds">${ok ? (!canDrill ? 'empty' : big ? 'place a Drill here' : 'empty · place a Drill') : 'needs research'}</div></div>
       </div>`;
     })
     .join('');
@@ -2683,6 +2903,7 @@ function syncStructure() {
     nodeEls.clear();
     wireEls.clear();
     selNodeId = selWireId = targetId = null;
+    block.clear();
     flashQueue.length = 0;
     hoverNode = hoverWire = null;
     settling.clear();
@@ -2705,6 +2926,8 @@ function syncStructure() {
   }
   syncDeposits(g);
   syncNodes(g, fresh);
+  syncTrace(true);
+  syncBlock();
   syncWires(g, fresh);
   syncChips();
   layoutWires();
@@ -2717,8 +2940,35 @@ function syncStructure() {
   updateSlow();
 }
 
+// ----- tracing a material (the Flows panel) -----
+// A press on a row of the Flows panel traces that material: what makes it, what uses it and the wires that carry it
+// stay as they are, and everything else stands back (`untraced` on a card, the faint drawing of a wire that is not the
+// selection's). The trace is ui.trace; what it covers is worked out again when the board changes.
+
+/** What the trace covers right now; null while nothing is traced. */
+let traced: { nodes: Set<number>; wires: Set<number> } | null = null;
+let traceKey = '';
+
+/** Bring the cards in line with the trace. `fresh`: the cards may have been rebuilt, so every one is looked at. */
+function syncTrace(fresh = false) {
+  const m = ui.trace;
+  const key = m ? `${m}|${ui.g.rev}` : '';
+  if (key === traceKey && !fresh) return;
+  traceKey = key;
+  traced = m ? traceOf(ui.g, m) : null;
+  for (const [id, refs] of nodeEls) setClass(refs.el, 'untraced', !!traced && !traced.nodes.has(id));
+  setClass(boardEl, 'tracing', !!traced);
+}
+
 /** Selection, wire target and placing mode are classes on elements that already exist. */
 function syncUi() {
+  syncTrace();
+  // (The player has switched how wires are drawn: every one of them is drawn again.)
+  if (drawnStyle && drawnStyle !== ui.wireStyle) {
+    routeWires(ui.g);
+    layoutWires();
+    syncWiresControl();
+  }
   const sel = ui.sel;
   const node = sel?.kind === 'node' ? sel.id : null;
   const wire = sel?.kind === 'wire' ? sel.id : null;
@@ -2739,11 +2989,12 @@ function syncUi() {
 
 // ---------- per-frame + slow updates ----------
 
-function rateLine(g: Game, n: GNode, rate: number, util: number): string {
+function rateLine(g: Game, n: GNode, rate: number): string {
   switch (n.type) {
     case 'well': return `${fmtRate(rate)}/s`;
     case 'refiner': case 'assembler': case 'fabricator':
-      return n.recipe ? `${fmtRate(rate)}/s · ${Math.round(util * 100)}%` : 'pick a recipe';
+      // (How hard it is working is the ring round its picture, and a number in its inspector: not said twice.)
+      return n.recipe ? `${fmtRate(rate)}/s` : 'wire something in';
     case 'silo': return `${Math.round(bagTotal(n.inb))} stored`;
     case 'market': return `${fmtRate(rate)}/s sold`;
     case 'lab': return `${fmtRate(rate)} / ${fmtRate(labRate(g, n))} /s`;
@@ -2794,7 +3045,7 @@ function updateNodes(g: Game) {
     refs.vUtil = settle(refs.vUtil, was, refs.sUtil, 0.02, 0.01);
     // In the overview no text shows, so it is left alone (and caught up on the way back in).
     if (!over || refs.cRate === '') {
-      const rate = rateLine(g, n, refs.vRate, refs.vUtil);
+      const rate = rateLine(g, n, refs.vRate);
       if (rate !== refs.cRate) {
         refs.cRate = rate;
         refs.rate.textContent = rate;
@@ -2814,17 +3065,16 @@ function updateNodes(g: Game) {
     }
     const dx = diagnose(g, n);
     let st: string = n.status;
-    // The ring and the border say what diagnose says: a node it finds nothing wrong with (the Lens-only
-    // Fabricator between the first Lens and free play, status.ts `resting`) is drawn as working, not amber or red.
+    // The ring and the border say what diagnose says: a node it finds nothing wrong with (the Phone-only
+    // Fabricator between the first Phone and free play, status.ts `resting`) is drawn as working, not amber or red.
     if (!dx.problem && (n.status === 'blocked' || n.status === 'starved')) st = 'working';
-    let pill = '';
-    // Wells never get a pill: their ring colour says enough.
-    if (n.type !== 'well') {
-      if (dx.problem === 'blocked') pill = dx.victim ? '' : 'BLOCKED';
-      else if (dx.problem === 'starved') pill = dx.victim ? '' : 'STARVED';
-      else if (dx.problem === 'idle') pill = 'IDLE';
-    }
+    // What the card says is wrong, in plain words with the material by name (status.ts, pillFor): "Needs more Copper",
+    // "Tar has no exit", and on the machine that holds another back, "Can't keep up".
+    const label = pillFor(g, n, dx);
+    const pill = label.text;
     if (dx.problem && dx.victim) st = 'victim';
+    // (Short of an input, and at work most of its time: no problem, an amber ring and a quiet word.)
+    else if (label.kind === 'short') st = 'short';
     if (st !== refs.cSt) {
       refs.cSt = st;
       refs.el.dataset.st = st;
@@ -2832,7 +3082,9 @@ function updateNodes(g: Game) {
     if (pill !== refs.cPill) {
       refs.cPill = pill;
       refs.pill.textContent = pill;
-      refs.pill.dataset.kind = pill.toLowerCase();
+      refs.pill.dataset.kind = label.kind;
+      // (A class on the card for the stylesheet, which would otherwise need a has() selector on every card.)
+      setClass(refs.el, 'limit', label.kind === 'limit');
     }
   }
 }
@@ -2853,13 +3105,15 @@ function updateWires(g: Game) {
       refs.cColor = color;
       refs.g.style.color = color;
       refs.flow.color = refs.dim ? faded(color) : color;
+      refs.flow.plain = refs.dim;
       refs.flow.shape = matShape(mat);
       recolored = true;
     }
     const was = refs.sRate;
     refs.sRate = flowing === refs.cFlowing ? ease(was, w.rate, Math.max(0.15, was * 0.4)) : w.rate;
     refs.vRate = settle(refs.vRate, was, refs.sRate, Math.max(0.012, refs.sRate * 0.025), 0.01);
-    const width = 2 + Math.min(5, refs.vRate * 1.1);
+    // (Never under 3 px: zoomed out on a phone that is a little over 2 on the glass, and still a line.)
+    const width = 3 + Math.min(4, refs.vRate * 1.1);
     if (Math.abs(width - refs.cWidth) > 0.3) {
       refs.cWidth = width;
       refs.base.style.strokeWidth = width.toFixed(1) + 'px';
@@ -2910,7 +3164,6 @@ export function updateSlow(part?: 'nodes' | 'wires') {
     expandEl.innerHTML = `${icon('plus', 20)}<span><b>Expand<em> board</em> <i class="mono">${fmt(cost)}¢</i></b><small>New plot · reveals deposits</small></span>`;
   }
   setClass(expandEl, 'ok', g.credits >= cost);
-  syncHints(g);
   // Whether the goal card is sending the player to it: looked at twice a second at most.
   const now = performance.now();
   if (now - ex.askedAt > 500) {
@@ -2941,31 +3194,6 @@ export function updateSlow(part?: 'nodes' | 'wires') {
       }
     }
   }
-}
-
-/** The key hints are for the first steps: from this goal on (goal 5 claimed) they are gone. */
-const HINTS_UNTIL = GOALS.findIndex((x) => x.id === 'sell-shard') + 1;
-/** Where the hint row stands on the stage, as last measured while it showed. */
-let hintsBox: Box | null = null;
-
-/** The key-hint row shows for the first five goals, and never over a card. */
-function syncHints(g: Game, measure = true) {
-  if (!hintsEl) return;
-  if (g.goal.i >= HINTS_UNTIL || env.phone) {
-    if (setHidden(hintsEl, true)) ex.stale = true;
-    return;
-  }
-  // (Measured on the slow beat only: while the camera moves, the last measurement is used.)
-  if (measure && !hintsEl.hidden) hintsBox = stageBoxOf(hintsEl, 6) ?? hintsBox;
-  let under = false;
-  if (hintsBox) {
-    const { x: vx, y: vy, k } = ui.view;
-    under = g.nodes.some((n) => {
-      const b = cardBox(n);
-      return b.x0 * k + vx < hintsBox!.x1 && b.x1 * k + vx > hintsBox!.x0 && b.y0 * k + vy < hintsBox!.y1 && b.y1 * k + vy > hintsBox!.y0;
-    });
-  }
-  if (setHidden(hintsEl, under)) ex.stale = true;
 }
 
 /** When the wheel last turned (performance.now). */
@@ -3114,7 +3342,7 @@ function clampToBoard(x: number, y: number, w: number, h: number): Pt {
 
 /**
  * Where a w×h card wanted at (x, y) may stand: the nearest spot on the grid that keeps clear of every
- * other card and of every deposit with no Well on it (the rule itself is `freeSpot` in geom.ts, where
+ * other card and of every deposit with no Drill on it (the rule itself is `freeSpot` in geom.ts, where
  * it is tested). `skip` is the node being moved, if any; `room` is the height to keep clear for it (see
  * roomFor). Null when the plot is full. (For a card the player moves by hand; one the game builds where the
  * player chose goes by `buildSpot`.)
@@ -3217,12 +3445,7 @@ function stepSettle(dt: number) {
       done = true;
     } else refs.el.style.transform = `translate(${m.ox.toFixed(1)}px, ${m.oy.toFixed(1)}px)`;
   }
-  for (const w of g.wires) {
-    if (!done && !settling.has(w.from) && !settling.has(w.to)) continue;
-    const refs = wireEls.get(w.id);
-    const ends = drawnEnds(g, w);
-    if (refs && ends && (refs.a.x !== ends.a.x || refs.a.y !== ends.a.y || refs.b.x !== ends.b.x || refs.b.y !== ends.b.y)) setWirePath(refs, ends.a, ends.b);
-  }
+  routeWires(g);
   // Chips and what the dots must keep off are put right once everything has come to rest.
   if (!settling.size) layoutWires();
   else invalidateFx();
@@ -3249,14 +3472,14 @@ function untangle(g: Game) {
 /** Size a node of this type and recipe will have once placed. */
 const sizeFor = (type: NodeType, recipe?: string | null) => nodeSize({ type, recipe: recipe ?? null } as GNode);
 
-/** The deposit with no Well on it under a world point, if any. */
+/** The deposit with no Drill on it under a world point, if any. */
 function depositAt(p: Pt) {
   const used = new Set(ui.g.nodes.map((n) => n.depositId));
   return ui.g.deposits.find((d) => !used.has(d.id) && p.x >= d.x && p.x <= d.x + 172 && p.y >= d.y && p.y <= d.y + 72) ?? null;
 }
 
 /**
- * A tap on an empty deposit: a Well is taken up for it (as from the build bar), its ghost already on that
+ * A tap on an empty deposit: a Drill is taken up for it (as from the build bar), its ghost already on that
  * deposit, so that one more tap there places it. A deposit not yet researched says what it needs. Returns
  * false when the tap was not on an empty deposit.
  */
@@ -3265,7 +3488,9 @@ function tapDeposit(p: Pt): boolean {
   const d = depositAt(p);
   if (!d) return false;
   if (!matUnlocked(g, d.mat)) {
-    toast(isTouch() ? 'Research this deposit first (tap <b>Tech</b>), then put a Well on it.' : 'Research this deposit in the <b>Tech tree</b> first, then put a Well on it.', 'info');
+    // (Before the Lab there is no research to send anyone to: the deposit is simply not open yet.)
+    if (!revealOf(g).depositWords) toast('This deposit is not open yet. It comes later.', 'info');
+    else toast(isTouch() ? 'Research this deposit first (tap <b>Tech</b>), then put a Drill on it.' : 'Research this deposit in the <b>Tech tree</b> first, then put a Drill on it.', 'info');
     return true;
   }
   if (ui.sel) select(null);
@@ -3302,7 +3527,7 @@ function updateGhost() {
     const d = nearestDeposit(mouse);
     if (d) {
       pos = { x: d.x, y: d.y };
-      label = `${MATERIALS[d.mat].name} Well`;
+      label = `${MATERIALS[d.mat].name} Drill`;
       onDeposit = true;
     } else {
       pos = clampToBoard(mouse.x - w / 2, mouse.y - h / 2, w, h);
@@ -3349,7 +3574,7 @@ let capSize: { w: number; h: number } | null = null;
 let capCovers: { at: number; boxes: Box[] } | null = null;
 
 /**
- * Put the words of the card in hand ("Breeze Well · 31¢ · tap to place") beside its ghost, on the stage: the same
+ * Put the words of the card in hand ("Quartz Drill · 31¢ · tap to place") beside its ghost, on the stage: the same
  * size at every zoom (drawn at the board's scale they were 3 px tall in the overview), under the ghost when that
  * is clear of the goal card, the build bar and the floating controls, else above it, else as near as is clear.
  */
@@ -3407,9 +3632,9 @@ export function startPlacing(type: NodeType, recipe?: string | null, deposit?: n
 }
 
 /**
- * A Well has been taken up: the free deposits it can stand on are brought into view (as little as the
+ * A Drill has been taken up: the free deposits it can stand on are brought into view (as little as the
  * camera can move; nothing moves when they are all in view already), and a finger's ghost starts on the
- * one that matters most: the deposit tapped, else one whose material has no Well yet, nearest first.
+ * one that matters most: the deposit tapped, else one whose material has no Drill yet, nearest first.
  */
 function showDeposits(tapped?: number) {
   const g = ui.g;
@@ -3428,7 +3653,7 @@ function showDeposits(tapped?: number) {
   if (env.touch || tapped != null) mouse = { x: best.x + 86, y: best.y + 36 };
 }
 
-/** The first goal that needs the inspector ("Upgrade a Well"). */
+/** The first goal that needs the inspector ("Speed up a Drill"). */
 const INSPECT_FROM = GOALS.findIndex((x) => x.id === 'upgrade-well');
 
 /** A stage this wide (with the inspector's room counted in) has space for the inspector beside the board. */
@@ -3615,7 +3840,7 @@ function drawTemp(d: Extract<Drag, { kind: 'wire' | 'wireIn' }>, dt: number) {
   const free = { x: d.p.x + (d.tp.x - d.p.x) * d.blend, y: d.p.y + (d.tp.y - d.p.y) * d.blend };
   const from = d.kind === 'wire' ? d.a : free;
   const to = d.kind === 'wire' ? free : d.b;
-  const path = pathD(from, to);
+  const path = drawWire(from, to, ui.wireStyle, 8).d;
   const key = path + goal;
   if (key === tempD) return;
   tempD = key;
@@ -3792,7 +4017,7 @@ function reachable(n: GNode, covers: Box[], v: View = viewAhead()): boolean {
 /**
  * The far end the card names for a wire from this port, if any: the node "Show me" acted this wire out to, the far
  * end of the line's next wire, or, when the goal is about this port's node (goalFocus), the first other node it is
- * about that the wire can go to ("Wire the Well to the Market", "...wire it to the Market").
+ * about that the wire can go to ("Sell your Sand", "...wire it to the Market").
  */
 function namedEnd(g: Game, from: number, port: number): GNode | null {
   const end = (id: number | undefined) => {
@@ -3963,6 +4188,8 @@ type Hit =
   | { kind: 'in'; id: number; port: number; mat: MatId | null }
   | { kind: 'node'; id: number }
   | { kind: 'wire'; id: number }
+  /** A pin of a wire (`id` is the wire's). */
+  | { kind: 'pin'; id: number; index: number }
   | null;
 
 /**
@@ -3987,8 +4214,31 @@ function mouseHit(t: HTMLElement, p: Pt): Hit {
   // (A free deposit lies above the wires that cross it, and with a port armed a click on a wire is a click on the
   // board under it, as for a finger: see `touchHit`.)
   const wireEl = (t as Element).closest?.('g.wire') as SVGGElement | null;
+  const pinEl = (t as Element).closest?.('circle.pin') as SVGCircleElement | null;
+  if (wireEl && pinEl && !tapWire) return { kind: 'pin', id: Number(wireEl.dataset.id), index: Number(pinEl.dataset.pin) };
+  // (A pin is a small thing to hit: a pointer on the wire and this close to one of its pins means the pin.)
+  if (wireEl && !tapWire) {
+    const pin = pinNear(p, PIN_MOUSE / ui.view.k);
+    if (pin && pin.kind === 'pin' && pin.id === Number(wireEl.dataset.id)) return pin;
+  }
   if (wireEl && !tapWire && !depositAt(p)) return { kind: 'wire', id: Number(wireEl.dataset.id) };
   return null;
+}
+
+/** A pin within a finger's reach of a point (board pixels), the nearest. */
+function pinNear(p: Pt, reach: number): Hit {
+  let best: Hit = null;
+  let least = reach;
+  for (const w of ui.g.wires) {
+    (w.pins ?? []).forEach((q, index) => {
+      const d = Math.hypot(q.x - p.x, q.y - p.y);
+      if (d <= least) {
+        least = d;
+        best = { kind: 'pin', id: w.id, index };
+      }
+    });
+  }
+  return best;
 }
 
 /**
@@ -3998,8 +4248,8 @@ function mouseHit(t: HTMLElement, p: Pt): Hit {
  * under the finger, a wire within reach (unless the finger is right beside a port and the wire is a
  * long one), the nearest output port within reach, a card the finger just missed.
  *
- * (The port's reach comes before the near miss of a card: a tap a little to the right of a Well's
- * port is a tap for the port, not for the Well.)
+ * (The port's reach comes before the near miss of a card: a tap a little to the right of a Drill's
+ * port is a tap for the port, not for the Drill.)
  *
  * Only the first of those starts a wire when the finger drags. The gaps between cards are where
  * a thumb goes to pan, and they are full of wires and within reach of ports: a drag that starts
@@ -4048,6 +4298,9 @@ function touchHit(p: Pt): Hit {
   // would otherwise have nowhere left to be tapped (and so could never be cut). Right beside the
   // port, though, a tap is for the port: a long wire can be tapped further along. With a port armed a
   // wire is not something to tap at all: a tap on one is a tap on the board under it (see `tapEmpty`).
+  // (A pin on a wire comes before the wire it is on: it is the smaller thing, and the one that can be moved.)
+  const pin = tapWire ? null : pinNear(p, PIN_REACH / k);
+  if (pin) return pin;
   const w = tapWire ? null : wireNear(p, WIRE_REACH / k);
   if (w && !(out && dOut <= PORT_EDGE && (wireEls.get(w.id)?.flow.len ?? 0) * k >= WIRE_LONG)) return { kind: 'wire', id: w.id };
   if (out && dOut <= PORT_REACH) return { kind: 'reach', ...out };
@@ -4146,6 +4399,9 @@ function cardNear(p: Pt, max: number): GNode | null {
   }
   return best;
 }
+
+/** The wait before a card under a finger lifts (see HOLD_MS). */
+let liftTimer = 0;
 
 function startWire(from: number, port: number, cx: number, cy: number, p: Pt, touchy: boolean): boolean {
   const g = ui.g;
@@ -4277,11 +4533,24 @@ function onDown(e: PointerEvent) {
     return;
   }
   if (e.shiftKey) {
+    // Shift on a card puts it in the block of cards that move together, or takes it out; anywhere else it cuts.
+    const on = touchy || over ? null : mouseHit(t, p);
+    if (on?.kind === 'node') {
+      toggleBlock(on.id);
+      return;
+    }
     drag = { kind: 'knife', a: p, b: p };
     return;
   }
   const hit = touchy ? touchHit(p) : mouseHit(t, p);
   if (hit?.kind === 'out') {
+    // (A finger that came down beside the port's dot, not on it: a tap arms the port, a swipe moves the board.)
+    const src = touchy ? nodeById(g, hit.id) : null;
+    const a = src && outPorts(g, src)[hit.port];
+    if (a && Math.hypot(p.x - a.x, p.y - a.y) * ui.view.k > PORT_DRAG) {
+      drag = { kind: 'pan', sx: e.clientX, sy: e.clientY, vx: ui.view.x, vy: ui.view.y, moved: false, slop: PAN_SLOP, place: false, near: { id: hit.id, port: hit.port } };
+      return;
+    }
     startWire(hit.id, hit.port, e.clientX, e.clientY, p, touchy);
     return;
   }
@@ -4300,10 +4569,33 @@ function onDown(e: PointerEvent) {
     const n = nodeById(g, hit.id);
     if (!n) return;
     // Only the old position is remembered here; the undo step is built when the node is dropped.
-    drag = {
+    const held = drag = {
       kind: 'node', id: hit.id, ox: p.x - n.x, oy: p.y - n.y, x0: n.x, y0: n.y, moved: false,
-      sx: e.clientX, sy: e.clientY, slop: touchy ? TOUCH_SLOP : MOUSE_SLOP,
+      sx: e.clientX, sy: e.clientY, slop: touchy ? TOUCH_SLOP : MOUSE_SLOP, lifted: !touchy,
     };
+    // Under a finger the card lifts once it has been held (not a Drill, which stays on its deposit; not in the
+    // overview or while a port waits for its target, where a drag on a card moves the board whatever).
+    if (touchy && n.type !== 'well' && !over && !tapWire) {
+      clearTimeout(liftTimer);
+      liftTimer = window.setTimeout(() => {
+        if (drag !== held || held.moved) return;
+        held.lifted = true;
+        nodeEls.get(held.id)?.el.classList.add('lift');
+        buzz('lift', 8);
+      }, HOLD_MS);
+    }
+    // One of a block: the rest go where it goes.
+    if (block.size > 1 && block.has(n.id) && n.type !== 'well') {
+      drag.others = [...block].filter((id) => id !== n.id).map((id) => nodeById(g, id)).filter((m): m is GNode => !!m && m.type !== 'well').map((m) => ({ id: m.id, x0: m.x, y0: m.y }));
+      const inside = new Set([n.id, ...drag.others.map((o) => o.id)]);
+      drag.pins0 = new Map(g.wires.filter((w) => w.pins?.length && inside.has(w.from) && inside.has(w.to)).map((w) => [w.id, w.pins!.map((q) => ({ x: q.x, y: q.y }))]));
+    }
+    return;
+  }
+  if (hit?.kind === 'pin') {
+    const w = g.wires.find((x) => x.id === hit.id);
+    if (!w?.pins?.[hit.index]) return;
+    drag = { kind: 'pin', wire: hit.id, index: hit.index, was: w.pins.map((q) => ({ x: q.x, y: q.y })), moved: false, sx: e.clientX, sy: e.clientY, slop: touchy ? TOUCH_SLOP : MOUSE_SLOP };
     return;
   }
   if (hit?.kind === 'wire') {
@@ -4384,10 +4676,16 @@ function steer(cx: number, cy: number, hovering = false) {
         drag = { kind: 'pan', sx: cx, sy: cy, vx: ui.view.x, vy: ui.view.y, moved: true, slop: 0, place: false };
         break;
       }
+      // A finger that swipes across a card it has not held moves the board (see HOLD_MS).
+      if (!drag.lifted) {
+        clearTimeout(liftTimer);
+        drag = { kind: 'pan', sx: cx, sy: cy, vx: ui.view.x, vy: ui.view.y, moved: true, slop: 0, place: false };
+        break;
+      }
       if (n.type === 'well') {
-        // A Well stays on its deposit. Under a finger the drag pans the board instead, so that a
-        // swipe that happens to start on a Well still goes somewhere; so does a mouse in the overview,
-        // where a drag that let go would otherwise count as a click on the Well and take the camera in to it.
+        // A Drill stays on its deposit. Under a finger the drag pans the board instead, so that a
+        // swipe that happens to start on a Drill still goes somewhere; so does a mouse in the overview,
+        // where a drag that let go would otherwise count as a click on the Drill and take the camera in to it.
         if (drag.slop >= TOUCH_SLOP || over) drag = { kind: 'pan', sx: cx, sy: cy, vx: ui.view.x, vy: ui.view.y, moved: true, slop: 0, place: false };
         break;
       }
@@ -4398,18 +4696,33 @@ function steer(cx: number, cy: number, hovering = false) {
       }
       const { w, h } = nodeSize(n);
       const pos = clampToBoard(p.x - drag.ox, p.y - drag.oy, w, h);
-      if (pos.x !== n.x || pos.y !== n.y) {
-        n.x = pos.x;
-        n.y = pos.y;
-        const refs = nodeEls.get(n.id);
-        if (refs) {
-          refs.el.style.left = n.x + 'px';
-          refs.el.style.top = n.y + 'px';
-          refs.x = n.x;
-          refs.y = n.y;
-          refs.el.classList.add('dragging');
-        }
-        relayoutNode(n);
+      // Within reach of the height at which one of its wires would run straight, the card comes level with it.
+      const level = levelWith(g, n, pos.x, p.y - drag.oy, w, h);
+      if (level) pos.y = level.y;
+      markLevel(drag, level?.wires ?? []);
+      if (drag.others?.length) {
+        // A block: every card goes as far as this one, and no further than the plot lets all of them go.
+        const by = blockStep(g, drag, pos.x - n.x, pos.y - n.y);
+        if (by.x || by.y) carry(g, [n.id, ...drag.others.map((o) => o.id)], by.x, by.y);
+        break;
+      }
+      if (pos.x !== n.x || pos.y !== n.y) carry(g, [n.id], pos.x - n.x, pos.y - n.y);
+      break;
+    }
+    case 'pin': {
+      const d = drag;
+      if (!d.moved && Math.hypot(cx - d.sx, cy - d.sy) < d.slop) break;
+      const pin = g.wires.find((x) => x.id === d.wire)?.pins?.[d.index];
+      if (!pin) break;
+      d.moved = true;
+      // A pin stands on its own grid, half the cards', inside the plot.
+      const x = Math.max(0, Math.min(g.board.w, Math.round(p.x / PIN_GRID) * PIN_GRID));
+      const y = Math.max(0, Math.min(g.board.h, Math.round(p.y / PIN_GRID) * PIN_GRID));
+      if (pin.x !== x || pin.y !== y) {
+        pin.x = x;
+        pin.y = y;
+        routeWires(g);
+        layoutWires();
       }
       break;
     }
@@ -4502,7 +4815,11 @@ function edgeScroll(dt: number) {
 }
 
 function endDrag() {
-  if (drag?.kind === 'node') nodeEls.get(drag.id)?.el.classList.remove('dragging');
+  clearTimeout(liftTimer);
+  if (drag?.kind === 'node') {
+    nodeEls.get(drag.id)?.el.classList.remove('dragging', 'lift');
+    markLevel(drag, []);
+  }
   drag = null;
   boardEl.classList.remove('wiring');
   appEl?.classList.remove('carrying');
@@ -4513,20 +4830,272 @@ function endDrag() {
   if (markedFor && !tapWire) clearMarks();
 }
 
+// ----- a card comes level with what it is wired to -----
+
+/**
+ * Where the card being dragged should stand so that one of its wires runs dead straight, if the pointer has it within
+ * reach of such a height (`levelY` in geom.ts, where the rule is tested): for each of its wires, how far down the
+ * card its own port is and how high the port at the other end stands. The reach is in screen pixels, so that it is the
+ * same pull under the hand at every zoom. Null too where the card could not stay at that height (another card or a
+ * free deposit within LEVEL_GAP).
+ */
+function levelWith(g: Game, n: GNode, x: number, y: number, w: number, h: number): { y: number; wires: number[] } | null {
+  const gr = graph(g);
+  const ends: LevelEnd[] = [];
+  const add = (w: Wire) => {
+    const e = wireEnds(g, w);
+    if (!e) return;
+    const mine = w.from === n.id ? e.a : e.b, theirs = w.from === n.id ? e.b : e.a;
+    ends.push({ wire: w.id, own: mine.y - n.y, other: theirs.y });
+  };
+  for (const w of gr.ins.get(n.id) ?? []) add(w);
+  for (const port of gr.outs.get(n.id) ?? []) if (port) for (const w of port) add(w);
+  if (!ends.length) return null;
+  const level = levelY(y, ends, 20, g.board.h - h - 20, LEVEL_REACH / Math.max(0.5, ui.view.k));
+  // Only where the card may stay when it is let go (dropNode asks the same): a wire that lights up is a promise.
+  if (!level || !spotFree(x, level.y, w, roomFor(n.type, h), nodeBoxes(n.id, true).concat(depositBoxes()), LEVEL_GAP)) return null;
+  return level;
+}
+
+/** Light the wires that run level while the card is held there, and say so once as each comes level (a click: feel.ts). */
+function markLevel(d: Extract<Drag, { kind: 'node' }>, wires: number[]) {
+  const was = d.level ?? [];
+  if (was.length === wires.length && was.every((id, i) => id === wires[i])) return;
+  for (const id of was) if (!wires.includes(id)) wireEls.get(id)?.g.classList.remove('level');
+  let fresh: number | null = null;
+  for (const id of wires) {
+    if (was.includes(id)) continue;
+    wireEls.get(id)?.g.classList.add('level');
+    fresh ??= id;
+  }
+  d.level = wires;
+  if (fresh != null) {
+    const refs = wireEls.get(fresh);
+    if (refs) signal('level', { at: toClient({ x: (refs.a.x + refs.b.x) / 2, y: (refs.a.y + refs.b.y) / 2 }) });
+  }
+}
+
 /** Give up on the gesture in progress. A node that was being moved goes back to where it started. */
 function abortDrag() {
-  if (drag?.kind === 'node' && drag.moved) {
-    const n = nodeById(ui.g, drag.id);
-    const refs = nodeEls.get(drag.id);
-    if (n && refs) {
-      n.x = refs.x = drag.x0;
-      n.y = refs.y = drag.y0;
-      refs.el.style.left = n.x + 'px';
-      refs.el.style.top = n.y + 'px';
-      relayoutNode(n);
-    }
+  if (drag?.kind === 'node' && drag.moved) putBack(ui.g, drag);
+  if (drag?.kind === 'pin' && drag.moved) {
+    const d = drag;
+    const w = ui.g.wires.find((x) => x.id === d.wire);
+    if (w) w.pins = d.was.map((q) => ({ x: q.x, y: q.y }));
+    routeWires(ui.g);
+    layoutWires();
   }
   endDrag();
+}
+
+/** Draw cards where they stand in the game: their elements, then the wires at them, then chips and the dots' cover once. */
+function redraw(g: Game, ids: number[], dragging = false) {
+  const gr = graph(g);
+  for (const id of ids) {
+    const n = gr.byId.get(id);
+    const refs = nodeEls.get(id);
+    if (!n || !refs) continue;
+    refs.el.style.left = n.x + 'px';
+    refs.el.style.top = n.y + 'px';
+    refs.x = n.x;
+    refs.y = n.y;
+    if (dragging) refs.el.classList.add('dragging');
+  }
+  routeWires(g);
+  layoutWires();
+}
+
+/** Move cards that are being dragged by a step, and draw them there. */
+function carry(g: Game, ids: number[], dx: number, dy: number) {
+  for (const id of ids) {
+    const n = nodeById(g, id);
+    if (!n) continue;
+    n.x += dx;
+    n.y += dy;
+  }
+  // (A wire that runs from one card of a block to another takes its pins with it.)
+  if (ids.length > 1) {
+    const inside = new Set(ids);
+    for (const w of g.wires) {
+      if (!w.pins || !inside.has(w.from) || !inside.has(w.to)) continue;
+      for (const q of w.pins) {
+        q.x += dx;
+        q.y += dy;
+      }
+    }
+  }
+  redraw(g, ids, true);
+}
+
+/** Put the card being dragged, and the rest of its block, back where the drag found them. */
+function putBack(g: Game, d: Extract<Drag, { kind: 'node' }>) {
+  const ids: number[] = [];
+  for (const o of [{ id: d.id, x0: d.x0, y0: d.y0 }, ...(d.others ?? [])]) {
+    const n = nodeById(g, o.id);
+    if (!n) continue;
+    n.x = o.x0;
+    n.y = o.y0;
+    ids.push(o.id);
+  }
+  for (const [wid, was] of d.pins0 ?? []) {
+    const w = g.wires.find((x) => x.id === wid);
+    if (w) w.pins = was.map((q) => ({ x: q.x, y: q.y }));
+  }
+  redraw(g, ids);
+}
+
+// ----- several cards as one block -----
+// Setting a line in a row meant one drag a card. Cards can be put in a block: Shift and a click on a card adds it (or
+// takes it out), and a double click on a card takes its whole line (lineFrom in src/graph.ts). A block is drawn
+// ringed, and a drag on any card of it moves them all, keeping their places among themselves: the card under the
+// pointer comes level as it does alone, the block stays inside the plot, and it is let go only where every card of it
+// is clear of the cards that are not in it; otherwise it goes back. One undo step. A click on a card or on the empty
+// board, or Escape, lets the block go. A Drill is never part of one. (With a mouse: a finger has no Shift.)
+
+/** The cards that move together. */
+const block = new Set<number>();
+let blockTold = false;
+
+function syncBlock() {
+  if (block.size) {
+    const byId = graph(ui.g).byId;
+    for (const id of block) if (byId.get(id)?.type === 'well' || !byId.has(id)) block.delete(id);
+  }
+  for (const [id, refs] of nodeEls) setClass(refs.el, 'blk', block.has(id));
+}
+
+function clearBlock() {
+  if (!block.size) return;
+  block.clear();
+  syncBlock();
+}
+
+function setBlock(ids: number[]) {
+  block.clear();
+  for (const id of ids) block.add(id);
+  // (A block has no inspector: the panel would stand over the cards being arranged.)
+  if (ui.sel) select(null);
+  syncBlock();
+  if (block.size > 1 && !blockTold) {
+    blockTold = true;
+    toast(`<b>${block.size} cards</b> move together now: drag any one of them. <b>Esc</b> lets them go.`, 'info', 5200);
+  }
+}
+
+/** Shift and a click on a card: into the block, or out of it. The card that was selected comes along as the first. */
+function toggleBlock(id: number) {
+  const g = ui.g;
+  const n = nodeById(g, id);
+  if (!n) return;
+  if (n.type === 'well') {
+    toast('A Drill stays on its deposit: it cannot be moved with the others.', 'info');
+    return;
+  }
+  const ids = new Set(block);
+  if (!ids.size && ui.sel?.kind === 'node' && ui.sel.id !== id && nodeById(g, ui.sel.id)?.type !== 'well') ids.add(ui.sel.id);
+  if (ids.has(id)) ids.delete(id);
+  else ids.add(id);
+  setBlock([...ids]);
+}
+
+/** A double click on a card takes its whole line as the block (not in the overview, where a click goes in to the card). */
+function onDouble(e: MouseEvent) {
+  if (over || ui.placing || radial || tapWire) return;
+  // (The board holds the pointer while it is down, so the event names the board: what lies under the pointer is asked for.)
+  const under = document.elementFromPoint(e.clientX, e.clientY) as HTMLElement | null;
+  const at = toWorld(e.clientX, e.clientY);
+  const hit = under ? mouseHit(under, at) : null;
+  // On a pin: that pin comes off. On a wire: a pin goes on, there.
+  if (hit?.kind === 'pin') {
+    const w = ui.g.wires.find((x) => x.id === hit.id);
+    if (w) setPins(ui.g, w.id, (w.pins ?? []).filter((_, k) => k !== hit.index));
+    return;
+  }
+  if (hit?.kind === 'wire') {
+    if (revealOf(ui.g).wires) pinWire(hit.id, at);
+    return;
+  }
+  if (hit?.kind !== 'node') return;
+  const line = lineFrom(ui.g, hit.id);
+  if (line.length > 1) setBlock(line);
+}
+
+/** How far a block can go of the step its dragged card wants to take: no card of it past the plot's margin. */
+function blockStep(g: Game, d: Extract<Drag, { kind: 'node' }>, dx: number, dy: number): Pt {
+  const b = g.board;
+  let x0 = -Infinity, x1 = Infinity, y0 = -Infinity, y1 = Infinity;
+  for (const id of [d.id, ...(d.others ?? []).map((o) => o.id)]) {
+    const n = nodeById(g, id);
+    if (!n) continue;
+    const { w, h } = nodeSize(n);
+    x0 = Math.max(x0, 20 - n.x);
+    x1 = Math.min(x1, b.w - w - 20 - n.x);
+    y0 = Math.max(y0, 20 - n.y);
+    y1 = Math.min(y1, b.h - h - 20 - n.y);
+  }
+  return { x: Math.max(x0, Math.min(x1, dx)), y: Math.max(y0, Math.min(y1, dy)) };
+}
+
+/**
+ * Let a block go: where every card of it keeps clear of the cards that are not in it and of the free deposits, it
+ * stays, as one undo step; otherwise all of it goes back to where the drag found it.
+ */
+function dropBlock(d: Extract<Drag, { kind: 'node' }>) {
+  const g = ui.g;
+  const all = [{ id: d.id, x0: d.x0, y0: d.y0 }, ...(d.others ?? [])];
+  const ids = new Set(all.map((o) => o.id));
+  const avoid = depositBoxes();
+  for (const n of g.nodes) {
+    if (ids.has(n.id)) continue;
+    const { w, h } = nodeSize(n);
+    avoid.push({ x0: n.x, y0: n.y, x1: n.x + w, y1: n.y + roomFor(n.type, h) });
+  }
+  const lead = nodeById(g, d.id);
+  const moved = !!lead && (lead.x !== d.x0 || lead.y !== d.y0);
+  // (Off the grid, level with a wire or beside a card that is: half the gap will do, as for one card. geom.ts)
+  const onGrid = !!lead && (lead.x - d.x0) % GRID === 0 && (lead.y - d.y0) % GRID === 0;
+  const fits = all.every((o) => {
+    const n = nodeById(g, o.id);
+    if (!n) return true;
+    const { w, h } = nodeSize(n);
+    return spotFree(n.x, n.y, w, roomFor(n.type, h), avoid, onGrid ? CARD_GAP : LEVEL_GAP);
+  });
+  for (const id of ids) nodeEls.get(id)?.el.classList.remove('dragging');
+  if (!moved) return;
+  if (!fits) {
+    putBack(g, d);
+    toast('No room for all of them there.', 'bad');
+    return;
+  }
+  const to = new Map<number, Pt>();
+  for (const o of all) {
+    const n = nodeById(g, o.id);
+    if (!n) continue;
+    to.set(o.id, { x: n.x, y: n.y });
+    n.x = o.x0;
+    n.y = o.y0;
+  }
+  // (The pins that came along: where they are now is kept, and they too go back for the moment the step is taken.)
+  const pinsTo = new Map<number, Pt[]>();
+  for (const [wid, was] of d.pins0 ?? []) {
+    const w = g.wires.find((x) => x.id === wid);
+    if (!w) continue;
+    pinsTo.set(wid, cleanPins(w.pins, g.board));
+    w.pins = was.map((q) => ({ x: q.x, y: q.y }));
+  }
+  act(g, () => {
+    for (const [id, at] of to) {
+      const n = nodeById(g, id)!;
+      n.x = at.x;
+      n.y = at.y;
+    }
+    for (const [wid, pins] of pinsTo) {
+      const w = g.wires.find((x) => x.id === wid);
+      if (w && pins.length) w.pins = pins;
+    }
+    return 0;
+  });
+  if (d.level?.length) for (const id of d.level) { const refs = wireEls.get(id); if (refs) oneShot(refs.g, 'leveled', 520); }
 }
 
 /** Finish moving a node: settle it on a free spot and record one undo step for the move. */
@@ -4536,6 +5105,11 @@ function dropNode(d: Extract<Drag, { kind: 'node' }>) {
   nodeEls.get(d.id)?.el.classList.remove('dragging');
   appEl?.classList.remove('carrying');
   if (!n) return; // deleted while it was being dragged: nothing to record
+  if (d.others?.length) {
+    // One of a block. Moved, the block is let go together and stays a block; only pressed, the card is a card again.
+    if (d.moved) return dropBlock(d);
+    clearBlock();
+  } else if (block.size) clearBlock();
   if (d.moved) {
     const { w, h } = nodeSize(n);
     // Dropping a loose node on a wire splices it in.
@@ -4544,7 +5118,10 @@ function dropNode(d: Extract<Drag, { kind: 'node' }>) {
     // Let go on top of another card (or too close to one), it goes to the nearest free spot; with
     // nowhere free at all, back to where it came from.
     const let_go = { x: n.x, y: n.y };
-    const spot = freeSpot(n.x, n.y, w, h, n.id, roomFor(n.type, h)) ?? { x: d.x0, y: d.y0 };
+    // (Held level with a port it is wired to, it stays there, off the grid by a few pixels, when that spot is free.)
+    const room = roomFor(n.type, h);
+    const level = d.level?.length && spotFree(n.x, n.y, w, room, nodeBoxes(n.id, true).concat(depositBoxes()), LEVEL_GAP) ? { x: n.x, y: n.y } : null;
+    const spot = level ?? freeSpot(n.x, n.y, w, h, n.id, room) ?? { x: d.x0, y: d.y0 };
     // The node goes back to where it started for a moment, so that the undo step is taken now
     // (at press time it would also roll back anything else done during the drag) and shows only
     // this node moving. Move and splice are one step: a single undo puts the node back.
@@ -4560,6 +5137,8 @@ function dropNode(d: Extract<Drag, { kind: 'node' }>) {
     } else g.rev++;
     // It is eased there from where it was let go, not jumped.
     settleFrom(n.id, let_go.x - spot.x, let_go.y - spot.y, 180);
+    // Left level: the wires that run straight now say so once more as the card is let go.
+    if (level) for (const id of d.level ?? []) { const refs = wireEls.get(id); if (refs) oneShot(refs.g, 'leveled', 520); }
   }
   const again = ui.sel?.kind === 'node' && ui.sel.id === d.id;
   select({ kind: 'node', id: d.id });
@@ -4604,7 +5183,10 @@ function onUp(e: PointerEvent) {
       } else if (tapDeposit(p)) {
         endDrag();
         return;
-      } else if (ui.sel) select(null);
+      } else {
+        if (ui.sel) select(null);
+        clearBlock();
+      }
       break;
     case 'node':
       if (!d.moved && tapWire) tapNode(d.id);
@@ -4616,6 +5198,20 @@ function onUp(e: PointerEvent) {
       if (tapWire) disarm();
       select({ kind: 'wire', id: d.wireId });
       break;
+    case 'pin': {
+      // Let go: the wire's pins go back for a moment to what they were, so that the move is one undo step taken now.
+      const w = g.wires.find((x) => x.id === d.wire);
+      if (w && d.moved) {
+        const to = (w.pins ?? []).map((q) => ({ x: q.x, y: q.y }));
+        w.pins = d.was.map((q) => ({ x: q.x, y: q.y }));
+        if (!setPins(g, w.id, to)) {
+          routeWires(g);
+          layoutWires();
+        }
+      }
+      select({ kind: 'wire', id: d.wire });
+      break;
+    }
     case 'wire': {
       if (!d.armed) {
         // A tap on a port arms it; a tap on the armed port lets it go again.
@@ -4658,7 +5254,7 @@ function onUp(e: PointerEvent) {
       } else if (Math.hypot(p.x - d.b.x, p.y - d.b.y) > 36) {
         const opts = d.mat ? produceOptions(g, d.mat) : [];
         // (Said to a finger without naming the gesture: there, wires are made by tapping.)
-        if (!opts.length) toast(d.mat ? `Nothing you have unlocked makes ${MATERIALS[d.mat].name}. Wire a Well to it.` : isTouch() ? 'Start from an output port instead' : 'Drag from an output port instead', 'bad');
+        if (!opts.length) toast(d.mat ? `Nothing you have unlocked makes ${MATERIALS[d.mat].name}. Wire a Drill to it.` : isTouch() ? 'Start from an output port instead' : 'Drag from an output port instead', 'bad');
         else {
           endDrag();
           openRadial({ at: p, dir: 'produce', from: 0, port: 0, to: d.to, mat: d.mat, a: d.b, opts });
@@ -4705,7 +5301,7 @@ function onUp(e: PointerEvent) {
 function wantedType(g: Game, from?: number): NodeType | null {
   const step = lineAdvice(g);
   // The line's next build counts from the port it names (its node); from any other port the goal's own words do
-  // (at goal 15 the line's "a Lab from the new Well's port" must not put Lab first on the Ink port the goal names).
+  // (at goal 15 the line's "a Lab from the new Drill's port" must not put Lab first on the Plastic port the goal names).
   if (step?.build && step.build in NODE_DEFS && (step.node == null || step.node === from)) return step.build as NodeType;
   const goal = activeGoal(g);
   if (!goal || g.goal.ready) return null;
@@ -4713,8 +5309,8 @@ function wantedType(g: Game, from?: number): NodeType | null {
   for (const t of Object.keys(NODE_DEFS) as NodeType[]) names.set(NODE_DEFS[t].name.toLowerCase(), t);
   const said = /\b(?:pick|build(?:\s+(?:a|an|another))?)\s+([A-Za-z]+)/gi;
   // (A goal that keeps no account of what it buys goes by its words alone, until a node of that kind stands:
-  // once the Void of "Give the Silt somewhere to go" is built, what is left is selling the Ink, and a menu
-  // opened from the Ink port must not offer a Void first.)
+  // once the Dump of "Give the Tar somewhere to go" is built, what is left is selling the Plastic, and a menu
+  // opened from the Plastic port must not offer a Dump first.)
   const buying = goal.step ? goal.step(g) : undefined;
   const named = buying === undefined ? null : buying === null ? '' : 'tech' in buying ? buying.thenWhat ?? '' : buying.what ?? '';
   for (const m of goal.hint.mouse.matchAll(said)) {
@@ -4766,7 +5362,7 @@ function consumeOptions(g: Game, mats: MatId[]): RadialOpt[] {
   sink('router', 'split');
   sink('silo', 'store');
   // One thing still to research is shown locked, as a promise; not a machine already on offer for another
-  // recipe (a Fabricator that makes Lens beside a locked Fabricator would read as two of the same).
+  // recipe (a Fabricator that makes Phone beside a locked Fabricator would read as two of the same).
   const locked = recipes.find((r) => !recipeUnlocked(g, r) && !opts.some((o) => o.type === r.machine));
   if (locked && opts.length < 8) {
     opts.push({ type: locked.machine, recipe: locked.id, label: `${NODE_DEFS[locked.machine].name} → ${locked.name}`, sub: '', cost: 0, locked: locked.tech, glyph: matGlyph(locked.outputs[0][0], 24) });
@@ -4987,7 +5583,7 @@ function drawSite() {
     setStyle(siteEl, 'width', w + 'px');
     setStyle(siteEl, 'height', h + 'px');
     setHTML(siteEl, `${nodeIcon(o.type, 20)}<span>${esc(NODE_DEFS[o.type].name)}</span>`);
-    tempPath.setAttribute('d', r.dir === 'consume' ? pathD(r.a, end) : pathD(end, r.a));
+    tempPath.setAttribute('d', (r.dir === 'consume' ? drawWire(r.a, end, ui.wireStyle, 8) : drawWire(end, r.a, ui.wireStyle, 8)).d);
     tempPath.style.stroke = color;
     tempPath.classList.remove('snap');
     tempPath.classList.add('on');
@@ -5303,7 +5899,12 @@ export function pickRadial(i: number) {
  */
 export function cancelGesture(): boolean {
   const d = drag;
-  const busy = !!d && (d.kind === 'wire' || d.kind === 'wireIn' || d.kind === 'knife' || (d.kind === 'node' && d.moved));
+  const busy = !!d && (d.kind === 'wire' || d.kind === 'wireIn' || d.kind === 'knife' || ((d.kind === 'node' || d.kind === 'pin') && d.moved));
+  // (With nothing else under way, Escape lets a block of cards go.)
+  if (!radial && !busy && !tapWire && block.size) {
+    clearBlock();
+    return true;
+  }
   if (!radial && !busy && !tapWire) return false;
   if (radial) closeRadial();
   if (busy) abortDrag();

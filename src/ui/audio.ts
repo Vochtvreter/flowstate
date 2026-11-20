@@ -524,6 +524,17 @@ function sPlace(g: Graph, t: number) {
   tone(g, 'triangle', THUMP_TICK, t, 0.05, 0.001, 0.028);
 }
 
+function sLevel(g: Graph, t: number) {
+  tone(g, 'triangle', 1174.66, t, 0.045, 0.002, 0.06);
+  tone(g, 'sine', 587.33, t, 0.05, 0.003, 0.085);
+}
+
+/** A card came level with what it is wired to (a wire runs dead straight): a small, soft click, an octave apart. */
+export function cueLevel() {
+  const g = admit('level', 90);
+  if (g) sLevel(g, soon(g));
+}
+
 /** Something was bought or placed: a low thump, with a small tick on top of it. */
 export function cuePlace() {
   const g = admit('place', 80);
@@ -756,7 +767,7 @@ function sFanfare(g: Graph, t: number, kind: Fanfare) {
       break;
     case 'lens':
       // The biggest: a low thump, a wide major ninth, bells running up it twice, and a shimmer of air.
-      // About 2.9 s: it starts with the Lens card and has to be over before the summary screen opens.
+      // About 2.9 s: it starts with the Phone card and has to be over before the summary screen opens.
       tone(g, 'sine', 110, t, 0.24, 0.008, 0.6, { to: 41 });
       pad(g, [48, 55, 60, 64, 67, 71, 74], t, 0.05, 0.06, 2.5);
       [84, 88, 91, 96].forEach((n, i) => bell(g, hz(n), t + 0.1 + i * 0.105, 0.07, 0.9));
@@ -768,9 +779,9 @@ function sFanfare(g: Graph, t: number, kind: Fanfare) {
 }
 
 /**
- * The big moments, in three sizes: small (first Shard, the Lab a little longer, then the first Spark
- * and the first Prism, each with a shape of its own), medium (first Glyph: two lines, one falling and
- * one rising, that meet on one note and open into a chord), and large (the first Lens; see also
+ * The big moments, in three sizes: small (first Glass, the Lab a little longer, then the first Copper
+ * and the first Screen, each with a shape of its own), medium (first Circuit: two lines, one falling and
+ * one rising, that meet on one note and open into a chord), and large (the first Phone; see also
  * cueBowNote, which plays while the factory lights up before it).
  * The first Flow State is not a fanfare at all but a slow swell.
  */
@@ -779,7 +790,7 @@ export function cueFanfare(kind: Fanfare) {
   if (g) sFanfare(g, soon(g, 0.01), kind);
 }
 
-/** Notes for the factory's bow before the Lens fanfare: C major pentatonic, climbing. */
+/** Notes for the factory's bow before the Phone fanfare: C major pentatonic, climbing. */
 const BOW = [60, 62, 64, 67, 69, 72, 74, 76, 79, 81, 84];
 
 function sBowNote(g: Graph, t: number, i: number, n: number) {
@@ -980,7 +991,7 @@ const offlineCtx = (seconds: number, rate = 44100) => {
 
 /**
  * Render a pile-up on an offline copy of the signal path and measure what comes out.
- *  - 'celebration': the worst that play can produce. One fanfare (`fanfare`, the Lens by default) at
+ *  - 'celebration': the worst that play can produce. One fanfare (`fanfare`, the Phone by default) at
  *    the same instant as a second's sales, a claim with its payout of ten coins, a goal turning ready,
  *    a wire, a purchase, a refusal, a tip, the afford bell, the Start cue, a line ticked, the surplus
  *    cue, an expansion with four deposits, and the Flow State hum at full level. The rate limiter lets

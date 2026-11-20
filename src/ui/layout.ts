@@ -1,6 +1,6 @@
 // Tidy: lay a board out again so that no wire runs behind a card it does not end at, wires are short
 // and cross as little as possible, and no two cards stand on top of one another. Pure and deterministic:
-// cards, wires and the plot in, positions out. Wells stay on their deposits; everything else may move.
+// cards, wires and the plot in, positions out. Drills stay on their deposits; everything else may move.
 //
 // How it works. A layout is scored by what the player sees: the length of every wire as it is drawn
 // (a wire that has to run backwards loops, and is long), plus a charge for every pair of wires that
@@ -31,10 +31,10 @@
 // Why a wire used to stay behind a card, and what is tried now. A card wants to be level with the ports
 // at the other ends of its wires, and those spots are always tried. They are not enough: a port that
 // feeds two cards cannot have the near one level with it, 68 px away, without every other wire from
-// that port running straight through it; and a Well in the middle of the plot cannot step aside for a
+// that port running straight through it; and a Drill in the middle of the plot cannot step aside for a
 // wire. So a card that is in a wire's way, or whose own wire runs behind something, is also tried on
 // every free row of the columns it could stand in: the card in the way moves a row, or the wire's far
-// end comes to the row of its Well. And where no single card can cure it (round a Market that ten wires
+// end comes to the row of its Drill. And where no single card can cure it (round a Market that ten wires
 // meet at, every free spot is in some other wire's way), the cards round it are shaken: moved a few at
 // a time, a step that makes things worse taken now and then, until they have got past each other.
 import { Game } from '../state';
@@ -46,7 +46,7 @@ export interface TidyWire { from: number; to: number; ay: number; by: number }
 export interface TidyInput {
   nodes: TidyNode[];
   wires: TidyWire[];
-  /** Deposits with no Well on them: cards keep clear of these too. */
+  /** Deposits with no Drill on them: cards keep clear of these too. */
   deposits: Box[];
   board: { w: number; h: number };
   grid: number;
@@ -572,7 +572,7 @@ function nearFree(x: number, y: number, grid: number, free: (px: number, py: num
   return best;
 }
 
-/** How far along the line each card is: Wells are 0, and every other card is one further than the furthest thing that feeds it. */
+/** How far along the line each card is: Drills are 0, and every other card is one further than the furthest thing that feeds it. */
 function depths(n: number, fixed: boolean[], wf: Int32Array, wt: Int32Array): Int32Array {
   const d = new Int32Array(n).fill(-1);
   for (let i = 0; i < n; i++) if (fixed[i]) d[i] = 0;
@@ -751,7 +751,7 @@ function repair(L: Layout, cols: number[], budget: number) {
 }
 
 /**
- * A fresh layout: Wells where they are; every other card, in the order of the line, in the first
+ * A fresh layout: Drills where they are; every other card, in the order of the line, in the first
  * column to the right of what feeds it (or the one after), on the free row where its wires cost the
  * least: short, clear of the cards already down, crossing as few of the wires already drawn as it can.
  * Where the cards stood before plays no part. Cards with no wire at all stay where they are.
@@ -833,7 +833,7 @@ function fresh(L: Layout, depth: Int32Array, loose: number[]) {
     for (const { i } of row) place(i);
     at = end;
   }
-  // Cards no Well leads to: those that feed something already down first, so that the rest can follow them.
+  // Cards no Drill leads to: those that feed something already down first, so that the rest can follow them.
   const rest = loose.filter((i) => depth[i] <= 0);
   for (let round = 0; round < 2; round++) {
     for (const i of rest) {
@@ -869,14 +869,14 @@ function freshLevel(L: Layout, depth: Int32Array, loose: number[], cols: number[
     const row = order.slice(at, end).map((i) => ({ i, y: level(i) ?? L.y[i] })).sort((a, b) => a.y - b.y || nodes[a.i].id - nodes[b.i].id);
     for (const { i, y } of row) {
       let x = cols[Math.min(depth[i], cols.length - 1)];
-      // (A Well further right than that column: to the right of it.)
+      // (A Drill further right than that column: to the right of it.)
       for (const w of L.touch[i]) if (L.wt[w] === i && L.on[L.wf[w]]) x = Math.max(x, Math.round((L.x[L.wf[w]] + nodes[L.wf[w]].w + SPAN) / input.grid) * input.grid);
       const p = nearFree(x, y, input.grid, (px, py) => L.clear(i, px, py, i)) ?? { x: L.x[i], y: L.y[i] };
       L.put(i, p.x, p.y);
     }
     at = end;
   }
-  // Cards no Well leads to: to the left of what they feed, level with it; with nothing to go by, where they stood.
+  // Cards no Drill leads to: to the left of what they feed, level with it; with nothing to go by, where they stood.
   for (let round = 0; round < 2; round++) {
     for (const i of loose) {
       if (L.on[i]) continue;
@@ -1034,7 +1034,7 @@ const MARGIN = 0.04;
 
 /**
  * Tidy a board. Returns the new place of every card that should move (none when the board cannot be
- * bettered). The result never has two cards overlapping, never moves a Well, and never has more wires
+ * bettered). The result never has two cards overlapping, never moves a Drill, and never has more wires
  * behind cards than the board it was given; nor more wire crossings or more wire, unless a wire came
  * out from behind a card for it (all of this once any overlapping cards on that board have been
  * pulled apart).
@@ -1122,7 +1122,7 @@ export function tidy(input: TidyInput): Map<number, Pt> {
   for (let i = 0; i < nodes.length; i++) {
     if (nodes[i].fixed || !base.touch[i].length) continue;
     loose.push(i);
-    // A card on one wire (a Lab beside its Well, a Void) is no part of the puzzle: it is put down afterwards, beside what it is wired to.
+    // A card on one wire (a Lab beside its Drill, a Dump) is no part of the puzzle: it is put down afterwards, beside what it is wired to.
     const w = base.touch[i][0];
     const other = wf[w] === i ? wt[w] : wf[w];
     if (base.touch[i].length === 1 && other !== i && (nodes[other].fixed || base.touch[other].length > 1)) leaves.push(i);

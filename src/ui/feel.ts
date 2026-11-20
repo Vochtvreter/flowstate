@@ -10,16 +10,17 @@ import { Meanwhile, activeGoal, goalView, meanwhileOf } from '../goals';
 import { graph } from '../sim';
 import { Game, GameEvent, GoalReward } from '../state';
 import {
-  audioState, buzz, cueAfford, cueClaim, cueConnect, cueError, cueExpand, cueExpandPops, cueFlowIn, cueLineDone, cuePayout, cuePlace,
+  audioState, buzz, cueAfford, cueClaim, cueConnect, cueError, cueExpand, cueExpandPops, cueFlowIn, cueLevel, cueLineDone, cuePayout, cuePlace,
   cueReady, cueSales, cueStart, cueSurplus, cueTip, freshenSales, initAudio, isMuted, onMuteChange, renderCue, renderPeak, renderSales,
   resetAudio, saleLevel, saleStep, setDrone, setMuted,
 } from './audio';
-import { boardRect, toClient } from './board';
+import { boardRect, toClient, wireLine } from './board';
 import { celebrateEnd, celebrateFirstData, celebrateFlow, celebrateGoal, celebrateResearch, cancelCelebrations, celebrating, initCelebrate } from './celebrate';
 import { anchorPt, el, setAttr, setClass, setHTML } from './dom';
 import { FlyOpts, Overlay, addOverlay, burst, clearParticles, fly, pop, ring, setMood, textWidth } from './fx';
 import { Pt, bezierAt, matColor, nodeSize, outPorts, wireEnds } from './geom';
 import { actOut, handState, initHand, tipSignal } from './hand';
+import { lineAt } from './wires';
 import { setResearchCard } from './hud-toasts';
 import { addTopItem, renderPanels } from './panels';
 import { onBeat, onFrame, onGame, onNewGame, onPress, onSignal, signal, ui } from './ui';
@@ -340,7 +341,7 @@ function tickBeta() {
 
 /** Everything the simulation raised this frame, together: a claim brings its unlocks with it, and they are one moment, not three. */
 function handleEvents(events: GameEvent[]) {
-  // The Lens being made is a big moment in its own right: the goal turning ready beside it needs no sound of its own.
+  // The Phone being made is a big moment in its own right: the goal turning ready beside it needs no sound of its own.
   const ended = events.some((e) => e.kind === 'demo-end');
   // The first surplus brings Market Lens with it ('tech', then 'surplus'): nobody pressed Research for
   // that one, so it gets no sparkle of its own.
@@ -356,10 +357,10 @@ function handleEvents(events: GameEvent[]) {
     switch (ev.kind) {
       case 'goal-claimed':
         if (ev.big && ev.goal === 'make-lens') {
-          // The Lens is celebrated at the moment it is made ('demo-end'), which always comes before its goal
+          // The Phone is celebrated at the moment it is made ('demo-end'), which always comes before its goal
           // can be claimed: in this batch, earlier in this session, or in a session before this save was
           // loaded. Claiming the goal afterwards (the summary's "Keep playing" does it for the player) is
-          // a small celebration, or nothing while the big one is still up. It is never a second Lens card.
+          // a small celebration, or nothing while the big one is still up. It is never a second Phone card.
           claimed = 'big';
           if (!ended && !celebrating()) smallCelebration('goal', anchorPt('goal') ?? centre(), ev.reward);
         } else if (ev.big) {
@@ -468,7 +469,7 @@ function onSale(d: { id: number; amount: number }) {
 
 // A streak of light that runs along a wire the moment it is connected, from the source to the
 // target, and ends in a burst there. Drawn in world space so it stays on the wire.
-interface Racer { a: Pt; b: Pt; color: string; t: number }
+interface Racer { a: Pt; b: Pt; color: string; t: number; wire: number }
 const racers: Racer[] = [];
 const RACE = 0.26;
 
@@ -489,9 +490,12 @@ const racerOverlay: Overlay = {
       }
       const head = u * u * (3 - 2 * u);
       const tail = Math.max(0, head - 0.3);
+      // (Along the wire as the board draws it, curved or squared, round its pins; the plain curve until it is drawn.)
+      const line = wireLine(r.wire);
       c.beginPath();
       for (let s = 0; s <= 8; s++) {
-        const p = toClient(bezierAt(r.a, r.b, tail + ((head - tail) * s) / 8));
+        const at = tail + ((head - tail) * s) / 8;
+        const p = toClient(line ? lineAt(line, at) : bezierAt(r.a, r.b, at));
         if (s) c.lineTo(p.x, p.y);
         else c.moveTo(p.x, p.y);
       }
@@ -517,7 +521,7 @@ function onConnect(d: { from: number; to: number; at: Pt }) {
   for (let i = g.wires.length - 1; i >= 0 && !wire; i--) if (g.wires[i].from === d.from && g.wires[i].to === d.to) wire = g.wires[i];
   const ends = wire && wireEnds(g, wire);
   const color = matColor(wire ? materialsAt(g, wire.from, wire.port)[0] ?? null : null);
-  if (ends) racers.push({ a: ends.a, b: ends.b, color, t: 0 });
+  if (ends && wire) racers.push({ a: ends.a, b: ends.b, color, t: 0, wire: wire.id });
   else {
     burst(d.at, color, 9);
     ring(d.at, '#ffffff');
@@ -789,6 +793,11 @@ export function initFeel() {
   onSignal('sale', onSale);
   onSignal('connect', onConnect);
   onSignal('place', onPlace);
+  // A card came level with what it is wired to (board.ts): a soft click, and a tick under the finger.
+  onSignal('level', () => {
+    cueLevel();
+    buzz('level', 6);
+  });
   // (The hotbar button's own pulse is in phone.css; this is the bell that goes with it.)
   onSignal('afford', () => cueAfford());
   // The goal card's tip: a soft cue when one appears (audio.ts lets one through every 20 s), the hand

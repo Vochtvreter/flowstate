@@ -55,6 +55,12 @@ export interface Wire {
   paid: number;
   weight: number;
   filter: MatId | null;
+  /**
+   * Pins: points on the board the player has set this wire to run by, in order from its start (at most MAX_PINS). They
+   * are how the wire is drawn and nothing else (src/ui/wires.ts): no rule reads them, and a wire carries the same
+   * with them or without. Absent on a wire that has none.
+   */
+  pins?: { x: number; y: number }[];
   // --- runtime ---
   /** Items per second, smoothed. Steady and exact when the wire carries its items in regular gulps (measureWire in src/sim.ts). */
   rate: number;
@@ -90,7 +96,7 @@ export interface Deposit {
 
 /**
  * A change the player made to the board, as the adviser needs to remember it: when, and what kind of thing was
- * done to what kind of node ("upgrade:speed:Lab", "wire:Ink Refiner>Lab", "build:well:glint", "research:R2",
+ * done to what kind of node ("upgrade:speed:Lab", "wire:Plastic Refiner>Lab", "build:well:glint", "research:R2",
  * or plain "edit" for anything no tip ever asks for).
  */
 export interface Edit { at: number; what: string }
@@ -140,7 +146,7 @@ export interface Stats {
   ordersFilled: number;
   /** Times Flow State was reached. */
   flowStates: number;
-  /** Game time of the first Lens (the end of the demo), or null. */
+  /** Game time of the first Phone (the end of the demo), or null. */
   firstLensAt: number | null;
 }
 
@@ -166,7 +172,7 @@ export type GameEvent =
   | { kind: 'order-claimed'; text: string; order: Order; reward: Required<Reward> }
   /** Flow State reached (once per streak). `first` = the first time ever: a big celebration. */
   | { kind: 'flow-state'; text: string; first: boolean }
-  /** The first Lens was made: the demo is complete. Raised once per save. */
+  /** The first Phone was made: the demo is complete. Raised once per save. */
   | { kind: 'demo-end'; text: string }
   /**
    * A material has been selling over its demand for a few seconds, for the first time in this save
@@ -237,7 +243,7 @@ export interface Game {
   order: Order | null;
   /** Running seed of the order generator. */
   orderSeed: number;
-  /** The first Lens has been made. Set once. */
+  /** The first Phone has been made. Set once. */
   ended: boolean;
   /** Something has sold over its demand for a few seconds (RULES.demand.notice). Set once, with Market Lens and a 'surplus' event. */
   seenSurplus: boolean;
@@ -250,8 +256,8 @@ export interface Game {
    */
   edits?: Edit[];
   /**
-   * Game time of the last press of Upgrade all on Wells (src/actions.ts upgradeAll; a press on any other kind
-   * leaves it alone). "Upgrade all your Wells at once" is met by such a press made since the goal came up; `edits`
+   * Game time of the last press of Upgrade all on Drills (src/actions.ts upgradeAll; a press on any other kind
+   * leaves it alone). "Speed up every Drill at once" is met by such a press made since the goal came up; `edits`
    * cannot carry that, as it forgets anything older than a minute, and the Claim then went with the next undo or
    * reload. It is part of the undo step (Snapshot.bulkAt): undoing the press takes the goal's readiness back.
    */
@@ -262,9 +268,9 @@ export interface Game {
   tickAcc: { credits: number; data: Record<DataTier, number>; sold: Bag };
 }
 
-/** "Glint Well", "Ink Refiner", "Lab": what a node is called in a sentence. */
+/** "Sand Drill", "Plastic Refiner", "Lab": what a node is called in a sentence. */
 export function nodeNoun(n: GNode): string {
-  if (n.type === 'well') return `${n.material ? MATERIALS[n.material].name + ' ' : ''}Well`;
+  if (n.type === 'well') return `${n.material ? MATERIALS[n.material].name + ' ' : ''}Drill`;
   const r = n.recipe ? RECIPES[n.recipe] : null;
   return `${r ? r.name + ' ' : ''}${NODE_DEFS[n.type].name}`;
 }
@@ -280,6 +286,26 @@ export function noteEdit(g: Game, what: string) {
 
 export const GRID = 20;
 export const snap = (v: number) => Math.round(v / GRID) * GRID;
+
+/** A wire can carry this many pins, and a pin stands on a grid of this many pixels (half the cards' own). */
+export const MAX_PINS = 4;
+export const PIN_GRID = 10;
+
+/** Pins as they may be kept: whole points on the pin grid inside the plot, no two in a row the same, MAX_PINS at most. Anything else in the list is dropped. */
+export function cleanPins(pins: unknown, board: { w: number; h: number }): { x: number; y: number }[] {
+  const out: { x: number; y: number }[] = [];
+  if (!Array.isArray(pins)) return out;
+  for (const p of pins) {
+    if (out.length >= MAX_PINS) break;
+    if (!p || typeof p !== 'object' || typeof p.x !== 'number' || typeof p.y !== 'number' || !isFinite(p.x) || !isFinite(p.y)) continue;
+    const x = Math.max(0, Math.min(board.w, Math.round(p.x / PIN_GRID) * PIN_GRID));
+    const y = Math.max(0, Math.min(board.h, Math.round(p.y / PIN_GRID) * PIN_GRID));
+    const last = out[out.length - 1];
+    if (last && last.x === x && last.y === y) continue;
+    out.push({ x, y });
+  }
+  return out;
+}
 
 export function makeNode(g: Game, type: NodeType, x: number, y: number): GNode {
   return {
@@ -300,7 +326,7 @@ export function makeWire(g: Game, from: number, port: number, to: number): Wire 
   };
 }
 
-/** Starting layout. The Market sits diagonally below-right of the first Well so both fit a phone screen (about 430 × 250). */
+/** Starting layout. The Market sits diagonally below-right of the first Drill so both fit a phone screen (about 430 × 250). */
 export const START = {
   wellDeposit: 1,
   market: { x: 360, y: 300 },
@@ -326,7 +352,7 @@ export function newGame(): Game {
     credits: 0, lifetime: 0,
     data: { a: 0, b: 0, g: 0 },
     techs: [], queue: [],
-    // The starting Well is already extracting Glint, so it is not announced as a new material.
+    // The starting Drill is already extracting Sand, so it is not announced as a new material.
     made: { glint: true }, sold: {}, soldRate: {},
     paused: false, time: 0, savedAt: Date.now(),
     creditRate: 0, dataRate: { a: 0, b: 0, g: 0 },
@@ -344,6 +370,9 @@ export function newGame(): Game {
   const well = makeNode(g, 'well', dep.x, dep.y);
   well.material = dep.mat;
   well.depositId = dep.id;
+  // The first thing the first goal is about is that this Drill's Sand has nowhere to go: its card says so as soon as
+  // it is full (2 s), before the guiding hand comes (5 s), not after the six seconds a machine just built is given.
+  well.grace = 2;
   const market = makeNode(g, 'market', START.market.x, START.market.y);
   g.nodes.push(well, market);
   return g;
@@ -461,7 +490,7 @@ export function deserialize(json: string): Game | null {
       return out;
     });
     const byId = new Map(g.nodes.map((n) => [n.id, n]));
-    /** Output ports a node has: one per output of its recipe, one for a Well or a junction, none for a sink. */
+    /** Output ports a node has: one per output of its recipe, one for a Drill or a junction, none for a sink. */
     const portsOf = (n: GNode) => (n.type === 'market' || n.type === 'lab' || n.type === 'void' ? 0 : n.recipe ? RECIPES[n.recipe].outputs.length : 1);
     g.wires = (Array.isArray(raw.wires) ? raw.wires : []).filter((w: Partial<Wire> | null) => {
       if (!w || typeof w !== 'object' || typeof w.id !== 'number' || !isFinite(w.id) || seen.has(w.id)) return false;
@@ -471,13 +500,20 @@ export function deserialize(json: string): Game | null {
       if (port < 0 || port >= Math.max(1, portsOf(from))) return false;
       seen.add(w.id);
       return true;
-    }).map((w: Wire): Wire => ({
-      ...w, port: Math.floor(num(w.port, 0)),
-      // A pipe tier this version does not have is the best one it has.
-      tier: Math.min(PIPES.length - 1, Math.floor(pos(w.tier))), paid: pos(w.paid), weight: Math.min(99, Math.floor(pos(w.weight, 1))),
-      filter: w.filter && MATERIALS[w.filter] ? w.filter : null, mat: w.mat && MATERIALS[w.mat] ? w.mat : null,
-      mixed: !!w.mixed, budget: num(w.budget, 0), flow: num(w.flow, 0),
-    }));
+    }).map((w: Wire): Wire => {
+      const out: Wire = {
+        ...w, port: Math.floor(num(w.port, 0)),
+        // A pipe tier this version does not have is the best one it has.
+        tier: Math.min(PIPES.length - 1, Math.floor(pos(w.tier))), paid: pos(w.paid), weight: Math.min(99, Math.floor(pos(w.weight, 1))),
+        filter: w.filter && MATERIALS[w.filter] ? w.filter : null, mat: w.mat && MATERIALS[w.mat] ? w.mat : null,
+        mixed: !!w.mixed, budget: num(w.budget, 0), flow: num(w.flow, 0),
+      };
+      // Pins are only how the wire is drawn: whatever of them makes sense is kept, and the rest dropped.
+      const pins = cleanPins(w.pins, g.board);
+      if (pins.length) out.pins = pins;
+      else delete out.pins;
+      return out;
+    });
     // Ids are handed out from nextId: never one that is already in use.
     let top = 0;
     for (const x of [...g.nodes, ...g.wires, ...g.deposits]) top = Math.max(top, x.id);
@@ -525,7 +561,7 @@ export function deserialize(json: string): Game | null {
     g.flowNearLate = pos(raw.flowNearLate);
     g.orderSeed = num(raw.orderSeed, base.orderSeed) >>> 0;
     g.order = loadOrder(raw.order);
-    // A save from before the `ended` flag that already has a Lens is past the demo.
+    // A save from before the `ended` flag that already has a Phone is past the demo.
     g.ended = typeof raw.ended === 'boolean' ? raw.ended : !!g.made[RULES.capstone];
     g.seenSurplus = !!raw.seenSurplus;
     // Market Lens comes with the first sale over demand (src/sim.ts). A save that saw one before that rule gets it now.
@@ -538,7 +574,7 @@ export function deserialize(json: string): Game | null {
       .filter((e: Partial<Edit> | null) => !!e && typeof e.what === 'string' && typeof e.at === 'number' && isFinite(e.at) && e.at <= g.time)
       .map((e: Edit) => ({ at: e.at, what: e.what.slice(0, 80) }))
       .slice(-32);
-    // The build before this one let the last Well be deleted. A board with no Well and no money for one is stuck: pay for one.
+    // The build before this one let the last Drill be deleted. A board with no Drill and no money for one is stuck: pay for one.
     if (!g.nodes.some((n) => n.type === 'well')) g.credits = Math.max(g.credits, NODE_DEFS.well.base);
     return g;
   } catch {
@@ -606,13 +642,13 @@ export const isLookahead = (g: Game) => lookaheads.has(g);
 
 export interface Snapshot {
   nodes: Pick<GNode, 'id' | 'type' | 'x' | 'y' | 'recipe' | 'material' | 'depositId' | 'lv' | 'paid' | 'legacyPaid' | 'mode' | 'born'>[];
-  wires: Pick<Wire, 'id' | 'from' | 'port' | 'to' | 'tier' | 'paid' | 'weight' | 'filter'>[];
+  wires: Pick<Wire, 'id' | 'from' | 'port' | 'to' | 'tier' | 'paid' | 'weight' | 'filter' | 'pins'>[];
   /** The board's size and its deposits: an expansion is undone with the rest (actions.ts expandBoard). */
   board?: Game['board'];
   deposits?: Deposit[];
   /**
-   * The last press of Upgrade all on Wells (Game.bulkAt), null for none: undoing the press takes back "Upgrade
-   * all your Wells at once" with it, which is met by that press alone (actions.ts unready).
+   * The last press of Upgrade all on Drills (Game.bulkAt), null for none: undoing the press takes back "Upgrade
+   * all your Drills at once" with it, which is met by that press alone (actions.ts unready).
    */
   bulkAt?: number | null;
 }
@@ -625,6 +661,7 @@ export function snapshot(g: Game): Snapshot {
     })),
     wires: g.wires.map((w) => ({
       id: w.id, from: w.from, port: w.port, to: w.to, tier: w.tier, paid: w.paid, weight: w.weight, filter: w.filter,
+      ...(w.pins?.length ? { pins: w.pins.map((p) => ({ x: p.x, y: p.y })) } : {}),
     })),
     board: { ...g.board },
     deposits: g.deposits.map((d) => ({ ...d })),
@@ -682,7 +719,11 @@ export function restore(g: Game, s: Snapshot) {
     const prev = oldW.get(sw.id);
     const fresh = makeWire(g, sw.from, sw.port, sw.to);
     g.nextId--;
-    return { ...(prev ?? fresh), ...sw };
+    const w: Wire = { ...(prev ?? fresh), ...sw };
+    // (A wire's pins are as the snapshot has them: none, where it has none.)
+    if (sw.pins?.length) w.pins = sw.pins.map((p) => ({ x: p.x, y: p.y }));
+    else delete w.pins;
+    return w;
   });
   if (s.board) g.board = { ...s.board };
   if (s.deposits) g.deposits = s.deposits.map((d) => ({ ...d }));

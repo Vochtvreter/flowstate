@@ -6,7 +6,7 @@ import {
   recipeOf, recipeUnlocked, trackAvailable, upgradeCost, upgradeValue,
 } from './economy';
 import { graph, isMachine, isPass, isSink, outPortCount } from './sim';
-import { Game, GNode, RouterMode, Snapshot, Wire, isLookahead, makeNode, makeWire, nodeNoun, noteEdit, restore, shelve, snap, snapshot } from './state';
+import { Game, GNode, RouterMode, Snapshot, Wire, cleanPins, isLookahead, makeNode, makeWire, nodeNoun, noteEdit, restore, shelve, snap, snapshot } from './state';
 
 export { claimGoal } from './goals';
 export { materialsAt, pickRecipe, recipesFor } from './economy';
@@ -106,7 +106,7 @@ export function undo(g: Game): boolean {
 
 /**
  * A goal waiting for its Claim whose condition an undo has just taken away is not ready any more: the reward
- * is for what is on the board. (Goals counted by events, a Lens made or seconds of Flow held, keep theirs.)
+ * is for what is on the board. (Goals counted by events, a Phone made or seconds of Flow held, keep theirs.)
  */
 function unready(g: Game) {
   const goal = GOALS[g.goal.i];
@@ -142,7 +142,7 @@ export function freeDeposits(g: Game) {
   return g.deposits.filter((d) => !used.has(d.id) && matUnlocked(g, d.mat));
 }
 
-/** The last Well can never be deleted: with no Well and no credits the save would be stuck. */
+/** The last Drill can never be deleted: with no Drill and no credits the save would be stuck. */
 export function canDelete(g: Game, n: GNode): boolean {
   return n.type !== 'well' || nodeCount(g, 'well') > 1;
 }
@@ -209,7 +209,7 @@ export function deleteNode(g: Game, id: number): boolean {
   const n = nodeById(g, id);
   if (!n) return false;
   if (!canDelete(g, n)) {
-    g.events.push({ kind: 'toast', text: 'You need at least one Well' });
+    g.events.push({ kind: 'toast', text: 'You need at least one Drill' });
     return false;
   }
   const ok = act(g, () => {
@@ -250,7 +250,7 @@ export function upgradeAll(g: Game, type: NodeType, track: Track): number {
   });
   if (count) {
     noteEdit(g, upgradeAllNote(type, track));
-    // "Upgrade all your Wells at once" (goal 20) counts a press that raised Wells, and no other kind. The time is
+    // "Speed up every Drill at once" (goal 20) counts a press that raised Drills, and no other kind. The time is
     // part of the undo step (state.ts snapshot), so an undo of the press takes the goal's readiness back with it.
     if (type === 'well') g.bulkAt = g.time;
   }
@@ -302,6 +302,34 @@ export function setWeight(g: Game, wireId: number, weight: number): boolean {
     noteEdit(g, 'edit');
     return 0;
   });
+}
+
+/**
+ * Set the pins a wire runs by (src/ui/wires.ts), or with an empty list take them all off. Only how the wire is
+ * drawn: no rule reads a pin. One undo step; false when the wire is not there or nothing would change.
+ */
+export function setPins(g: Game, wireId: number, pins: { x: number; y: number }[]): boolean {
+  const w = g.wires.find((x) => x.id === wireId);
+  if (!w) return false;
+  const next = cleanPins(pins, g.board);
+  const was = w.pins ?? [];
+  if (next.length === was.length && next.every((p, i) => p.x === was[i].x && p.y === was[i].y)) return false;
+  return act(g, () => {
+    if (next.length) w.pins = next;
+    else delete w.pins;
+    return 0;
+  });
+}
+
+/** Take every pin off every wire, as part of a step that is already being taken (Tidy: the cards the pins were set round have moved). Returns how many wires had some. */
+export function dropPins(g: Game): number {
+  let n = 0;
+  for (const w of g.wires) {
+    if (!w.pins?.length) continue;
+    delete w.pins;
+    n++;
+  }
+  return n;
 }
 
 export function setFilter(g: Game, wireId: number, filter: MatId | null): boolean {
@@ -487,7 +515,7 @@ export function upgradeSaturatedWires(g: Game): number {
 
 /**
  * Drop an existing, unconnected node onto a wire.
- * A Market, Lab or Void becomes a branch: the wire stays and a new one runs from the same port to the sink.
+ * A Market, Lab or Dump becomes a branch: the wire stays and a new one runs from the same port to the sink.
  * Anything else is inserted into the wire; both halves keep the wire's tier and share what was paid for it.
  */
 export function splice(g: Game, wireId: number, nodeId: number): boolean {

@@ -77,7 +77,7 @@
  * For these players the report also counts the tips: how many came on offer, how many were followed, and the
  * smallest and the median saving the followed ones promised.
  *
- * "Nothing to do" (Bot.nothing, the NOTHING TO DO table): up to the first Lens, the time in which the player's
+ * "Nothing to do" (Bot.nothing, the NOTHING TO DO table): up to the first Phone, the time in which the player's
  * hands are free, the goal is not ready to claim, no order is, and the card's line has no step that can be done
  * now (lineAdvice is null). A tip on offer does not count as something to do: the card is what has to carry
  * the wait. A line the player leaves alone (--skipLine) still counts as something to do, so compare that
@@ -282,16 +282,16 @@ export const TARGETS = {
     /** An action available at least this often in the first two minutes. */
     earlyIdleMax: 10,
     glyph: [360, 480] as [number, number],
-    /** 14:00–18:00 (the first Lens for the card players came down to 17:30–21:00: the pacing rule, at `cardonly` below). */
+    /** 14:00–18:00 (the first Phone for the card players came down to 17:30–21:00: the pacing rule, at `cardonly` below). */
     lens: [840, 1080] as [number, number],
     /** No more than this long on "Build a Fabricator". */
     fabricatorMax: 300,
-    /** No dead stretch over 60 s before 10:00, none over 120 s before the first Lens. */
+    /** No dead stretch over 60 s before 10:00, none over 120 s before the first Phone. */
     deadBefore10: 60,
     deadBeforeLens: 120,
-    /** Content after the Lens (through Paradox) must last at least this long... */
+    /** Content after the Phone (through Robot) must last at least this long... */
     contentUntil: 1440,
-    /** ...and the Paradox, the last free-play goal, comes within half an hour. */
+    /** ...and the Robot, the last free-play goal, comes within half an hour. */
     paradoxBy: 1800,
   },
   newcomer: {
@@ -309,10 +309,10 @@ export const TARGETS = {
   },
   /**
    * The newcomer who never follows a tip: the cards and their "while you wait" lines alone. The pacing rule is
-   * set for this player: where a later first Lens would cost waits with nothing to do in them, the waits are
-   * kept short. So the first Lens between 17:30 and 21:00, with something to do in it: no stretch of nothing to
+   * set for this player: where a later first Phone would cost waits with nothing to do in them, the waits are
+   * kept short. So the first Phone between 17:30 and 21:00, with something to do in it: no stretch of nothing to
    * do (Bot.nothing) over a minute, no goal with more than 75 s of nothing to do in all,
-   * nothing to do for no more than 30% of the time to the first Lens, and nothing sold over its demand before it
+   * nothing to do for no more than 30% of the time to the first Phone, and nothing sold over its demand before it
    * (the first surplus is a moment of free play).
    */
   cardonly: {
@@ -334,7 +334,7 @@ export const TARGETS = {
     /** No goal-path tech may cost more than this many seconds of the player's Data income at the time. */
     dataWall: 180,
   },
-  /** Share of all credits earned before the first Lens that comes from sales and orders. */
+  /** Share of all credits earned before the first Phone that comes from sales and orders. */
   earnedShare: 0.65,
   /** A first or second Speed level pays for itself within this window where the input exists. */
   payback: [60, 180] as [number, number],
@@ -453,13 +453,13 @@ export class Bot {
   orderLog: { t: number; text: string }[] = [];
   orderTimes: number[] = [];
   flowStates: number[] = [];
-  /** Credit sources at the moment of the first Lens. */
+  /** Credit sources at the moment of the first Phone. */
   statsAtEnd: Stats | null = null;
   /** Data earned so far from every source (Labs, orders, goals), sampled once a second. */
   earned: Record<DataTier, number> = { a: 0, b: 0, g: 0 };
   earnedLog: Record<DataTier, number[]> = { a: [0], b: [0], g: [0] };
   firstDataAt: Partial<Record<DataTier, number>> = {};
-  /** Presses of an Upgrade button so far: one node, "Upgrade all", a wire. `beforeLens` is their sum at the first Lens. */
+  /** Presses of an Upgrade button so far: one node, "Upgrade all", a wire. `beforeLens` is their sum at the first Phone. */
   presses = { single: 0, bulk: 0, wire: 0 };
   pressesAtLens: { single: number; bulk: number; wire: number } | null = null;
   // --- the newcomer's records ---
@@ -487,7 +487,7 @@ export class Bot {
   /**
    * "Nothing to do": seconds in which the player's hands are free, the goal is not ready, no order is ready to
    * claim, and no step of the card's "while you wait" line can be done right now (lineAdvice(g) is null, which it
-   * is when the line is done, does not apply, or its step cannot be paid for yet). Up to the first Lens: in all,
+   * is when the line is done, does not apply, or its step cannot be paid for yet). Up to the first Phone: in all,
    * per goal (by index), and every stretch.
    */
   nothing = { total: 0, perGoal: {} as Record<number, number>, stretches: [] as { from: number; to: number; goal: number }[] };
@@ -575,7 +575,7 @@ export class Bot {
 
   /**
    * The Data the player is short of right now: what the goal card shows them saving up
-   * ("Research Breeze Deposits: 400 / 900 α"), plus
+   * ("Research Quartz Deposits: 400 / 900 α"), plus
    *  - mainline: whatever the next tech of the Processing branch still lacks;
    *  - greedy: whatever any tech they could research now still lacks.
    * Data that is only wanted for techs further off is "for later": the Labs keep what they are getting,
@@ -688,7 +688,7 @@ export class Bot {
   }
 
   name(n: GNode): string {
-    if (n.type === 'well') return `${n.material ? MATERIALS[n.material].name : ''} Well`;
+    if (n.type === 'well') return `${n.material ? MATERIALS[n.material].name : ''} Drill`;
     return `${NODE_DEFS[n.type].name}${n.recipe ? ` (${RECIPES[n.recipe].name})` : ''}`;
   }
 
@@ -742,7 +742,7 @@ export class Bot {
     };
     const saturated = (w: Wire) => w.rate >= pipeCap(w.tier) * 0.95;
     const short = this.shortTiers();
-    // The Silt lesson: once the goal card has explained the Void, a byproduct port gets one straight away.
+    // The Tar lesson: once the goal card has explained the Dump, a byproduct port gets one straight away.
     const knowsVoid = g.goal.i > goalIndex('silt-exit') || goal?.id === 'silt-exit';
 
     // --- G1: output ports with no wire at all ---
@@ -769,10 +769,10 @@ export class Bot {
           continue;
         }
         if (isJunk(m)) {
-          // A byproduct is ignored until it visibly blocks the machine, or until the goal card has taught the Void.
+          // A byproduct is ignored until it visibly blocks the machine, or until the goal card has taught the Dump.
           if (!knowsVoid && !(amber && this.problem(n) === 'blocked' && n.blockedOn === m)) continue;
           const type: NodeType = has(g, NODE_DEFS.void.tech) ? 'void' : 'market';
-          if (type === 'void') W.push({ cls: 'fix', kind: 'build', cost: 0, settle: [n.id], label: `dump ${MATERIALS[m].name} from ${this.name(n)} into a Void`, run: () => !!this.buildFrom(p, 'void') });
+          if (type === 'void') W.push({ cls: 'fix', kind: 'build', cost: 0, settle: [n.id], label: `dump ${MATERIALS[m].name} from ${this.name(n)} into a Dump`, run: () => !!this.buildFrom(p, 'void') });
           else if (market) W.push({ cls: 'fix', kind: 'wire', cost: 0, settle: [n.id], label: `wire ${MATERIALS[m].name} → Market`, run: () => !!connect(g, n.id, p.port, market.id) });
           continue;
         }
@@ -895,12 +895,12 @@ export class Bot {
       }
     }
 
-    // --- G6: free deposits get a Well; G7: no free deposit, expand the board ---
+    // --- G6: free deposits get a Drill; G7: no free deposit, expand the board ---
     const free = freeDeposits(g);
     for (const d of free) {
       W.push({
         cls: 'new', kind: 'build', cost: nodeCost(g, 'well'), novel: !g.nodes.some((x) => x.type === 'well' && x.material === d.mat),
-        label: `place ${MATERIALS[d.mat].name} Well`,
+        label: `place ${MATERIALS[d.mat].name} Drill`,
         run: () => {
           const n = placeNode(g, 'well', d.x, d.y, { depositId: d.id });
           if (n) this.noteNode('well');
@@ -1025,7 +1025,7 @@ export class Bot {
     }
     if (goal?.id === 'bulk-upgrade') {
       const n = g.nodes.find((x) => x.type === 'well' && x.lv.speed < maxLevel(g, 'speed'));
-      if (n) W.push({ cls: 'new', kind: 'upgrade', bulk: true, cost: upgradeCost(n, 'speed'), novel: true, label: 'upgrade ALL Wells: speed (goal)', run: () => upgradeAll(g, 'well', 'speed') > 0 });
+      if (n) W.push({ cls: 'new', kind: 'upgrade', bulk: true, cost: upgradeCost(n, 'speed'), novel: true, label: 'upgrade ALL Drills: speed (goal)', run: () => upgradeAll(g, 'well', 'speed') > 0 });
     }
     return this.bulked(W);
   }
@@ -1066,7 +1066,7 @@ export class Bot {
 
   // ---------- the newcomer: only what the goal card says ----------
 
-  /** The first machine running this recipe, and the first Well on this material. */
+  /** The first machine running this recipe, and the first Drill on this material. */
   maker(recipe: string): GNode | null { return this.g.nodes.find((n) => n.recipe === recipe) ?? null; }
   wellOn(m: MatId): GNode | null { return this.g.nodes.find((n) => n.type === 'well' && n.material === m) ?? null; }
   wired(from: GNode, port: number, to: GNode): boolean { return this.outs(from, port).some((w) => w.to === to.id); }
@@ -1104,7 +1104,7 @@ export class Bot {
     const well = (m: MatId): Want | null => {
       const d = freeDeposits(g).find((x) => x.mat === m);
       return !d ? null : {
-        cls: 'new', kind: 'build', cost: nodeCost(g, 'well'), label: `card: place ${MATERIALS[m].name} Well`,
+        cls: 'new', kind: 'build', cost: nodeCost(g, 'well'), label: `card: place ${MATERIALS[m].name} Drill`,
         run: () => {
           const n = placeNode(g, 'well', d.x, d.y, { depositId: d.id });
           if (n) this.noteNode('well');
@@ -1115,7 +1115,7 @@ export class Bot {
     const study = (id: string): Want | null => (techAffordable(g, TECHS[id]) ? {
       cls: 'new', kind: 'research', cost: 0, label: `card: research ${id} ${TECHS[id].name} (${costStr(TECHS[id])})`, run: () => research(g, id),
     } : null);
-    /** "Research X, then put a Well on the deposit, build a Refiner from its port and sell what it makes." */
+    /** "Research X, then put a Drill on the deposit, build a Refiner from its port and sell what it makes." */
     const rawLine = (tech: string, m: MatId, recipe: string): Want | null => {
       if (!has(g, tech)) return study(tech);
       const w = this.wellOn(m);
@@ -1158,14 +1158,14 @@ export class Bot {
       case 'make-spark': return rawLine('P3', 'ember', 'spark');
       case 'first-order': return tendOrder();
       case 'bulk-upgrade': {
-        // "Select a Well and press Upgrade all beside Speed."
+        // "Select a Drill and press Upgrade all beside Speed."
         const w = g.nodes.find((n) => n.type === 'well' && n.lv.speed < maxLevel(g, 'speed'));
-        return w ? { cls: 'new', kind: 'upgrade', bulk: true, cost: upgradeCost(w, 'speed'), label: 'card: press Upgrade all on the Wells\' Speed', run: () => upgradeAll(g, 'well', 'speed') > 0 } : null;
+        return w ? { cls: 'new', kind: 'upgrade', bulk: true, cost: upgradeCost(w, 'speed'), label: 'card: press Upgrade all on the Drills\' Speed', run: () => upgradeAll(g, 'well', 'speed') > 0 } : null;
       }
       case 'route-lab': {
         const router = g.nodes.find((n) => n.type === 'router') ?? null;
         const spark = this.maker('spark');
-        if (!router) return spark && from(spark, 0, 'router'); // "Build a Router from the Spark Refiner's port...
+        if (!router) return spark && from(spark, 0, 'router'); // "Build a Router from the Copper Refiner's port...
         const step = wireIf(router, 0, lab) ?? wireIf(router, 0, market);
         if (step || routerFavoursLab(g) || !lab) return step;
         const toLab = this.outs(router).find((w) => w.to === lab.id)!;
@@ -1176,7 +1176,7 @@ export class Bot {
         if (!has(g, 'P4')) return study('P4');
         const a = this.maker('glyph');
         const ink = this.maker('ink');
-        // "...build an Assembler from the Ink Refiner's Ink port, wire it to the Market, then wire Spark into it."
+        // "...build an Assembler from the Refiner's Plastic port, wire it to the Market, then wire Copper into it."
         if (!a) return ink ? from(ink, 0, 'assembler', 'glyph') : buy('assembler', 'glyph');
         const fed = (m: MatId) => this.ins(a).some((w) => materialsAt(g, w.from, w.port).includes(m));
         return (fed('ink') ? null : wireIf(this.maker('ink'), 0, a)) ?? wireIf(a, 0, market) ?? (fed('spark') ? null : wireIf(this.maker('spark'), 0, a));
@@ -1186,13 +1186,13 @@ export class Bot {
       case 'make-prism': {
         const a = this.maker('prism');
         const mist = this.maker('mist');
-        // "Build another Assembler from the Mist Refiner's port, wire it to the Market, then wire Shard into it."
+        // "Build another Assembler from the Silicon Refiner's port, wire it to the Market, then wire Glass into it."
         if (!a) return !has(g, 'P5') ? null : mist ? from(mist, 0, 'assembler', 'prism') : buy('assembler', 'prism');
         const fed = (m: MatId) => this.ins(a).some((w) => materialsAt(g, w.from, w.port).includes(m));
         return (fed('mist') ? null : wireIf(this.maker('mist'), 0, a)) ?? wireIf(a, 0, market) ?? (fed('shard') ? null : wireIf(this.maker('shard'), 0, a));
       }
       case 'build-fabricator': {
-        // "Research Fabrication, then save up and build a Fabricator from the Prism Assembler's port."
+        // "Research Fabrication, then save up and build a Fabricator from the Screen Assembler's port."
         if (!has(g, 'P7')) return study('P7');
         const prism = this.maker('prism');
         return prism ? from(prism, 0, 'fabricator', 'lens') : buy('fabricator', 'lens');
@@ -1264,7 +1264,7 @@ export class Bot {
       const o = g.order;
       return { cls: 'new', kind: 'claim', cost: 0, label: `claim order: ${o.need} ${MATERIALS[o.mat].name}`, run: () => claimOrder(g) };
     }
-    // The card's sentence is finished even if the goal completes half-way through it ("...and sell the Spark"):
+    // The card's sentence is finished even if the goal completes half-way through it ("...and sell the Copper"):
     // the Claim button is only pressed 8–16 s after it lights up.
     const step = this.cardStep();
     if (step && step.cost <= g.credits + 1e-6 && (!g.goal.ready || step.kind === 'wire')) return step;
@@ -1449,7 +1449,7 @@ export class Bot {
     } else this.savingFor = null;
     const budget = short && this.P.spendShare < 1 ? this.P.spendShare * (g.lifetime - this.savingBase) - this.pettySpent : Infinity;
     const petty = (w: Want): Want => (short ? { ...w, run: () => { const ok = w.run(); if (ok) this.pettySpent += w.cost; return ok; } } : w);
-    // "One more of the same" (another Well, another Refiner, more board) never comes out of the money put aside for a new toy.
+    // "One more of the same" (another Drill, another Refiner, more board) never comes out of the money put aside for a new toy.
     const spare = target?.novel ? Math.max(target.cost * this.P.pettyShare, reserve) : Infinity;
     const buy = news.find((w) => can(w) && w.cost <= spare && w.cost <= budget);
     if (buy) return petty(buy);
@@ -1637,7 +1637,7 @@ export class Bot {
       } else if (ev.kind === 'demo-end') {
         this.statsAtEnd = { ...g.stats };
         this.pressesAtLens = { ...this.presses };
-        this.log('★ DEMO COMPLETE: first Lens');
+        this.log('★ DEMO COMPLETE: first Phone');
       } else if (ev.kind === 'toast') {
         this.log(`!! refused: ${ev.text}`);
       }
@@ -1752,7 +1752,7 @@ interface Result {
   goals: GoalTime[];
   /** Longest time on one goal of the demo, from the claim before it to its own claim. */
   goalMax: { seconds: number; title: string };
-  /** Share of credits earned before the first Lens that came from sales and orders. */
+  /** Share of credits earned before the first Phone that came from sales and orders. */
   earnedShare: number | null;
   /** Worst goal-path tech: price in seconds of Data income at the time. */
   wall: { id: string; seconds: number };
@@ -1761,13 +1761,13 @@ interface Result {
   flowStates: number;
   /** Seconds on "Build a Fabricator" (null if it was never claimed). */
   fabricator: number | null;
-  /** Presses of an Upgrade button before the first Lens (or in the whole run without one): one node, "Upgrade all", a wire. */
+  /** Presses of an Upgrade button before the first Phone (or in the whole run without one): one node, "Upgrade all", a wire. */
   presses: { single: number; bulk: number; wire: number; total: number };
   /** The newcomer: longest stretch in a wait with no tip on offer and nothing the card asks, and the goal it fell in. */
   tipless: { seconds: number; goal: string };
   tips: number;
   /**
-   * The newcomer's tips up to the first Lens: how many came on offer and how many were followed; among the
+   * The newcomer's tips up to the first Phone: how many came on offer and how many were followed; among the
    * followed, how many were steps without which the wait would not have ended, and the smallest and the
    * median of the savings the others promised at the moment they were followed.
    */
@@ -1777,7 +1777,7 @@ interface Result {
   flowGoal: { seconds: number; actions: string[] } | null;
   surplusAt: Bot['surplusAt'];
   /**
-   * "Nothing to do" up to the first Lens (Bot.nothing): seconds in all, their share of the time to the Lens, the
+   * "Nothing to do" up to the first Phone (Bot.nothing): seconds in all, their share of the time to the Phone, the
    * longest stretch and the goal it fell in, the seconds on each goal (by index), and the longest stretch on each.
    */
   nothing: { total: number; share: number; longest: number; longestGoal: string; perGoal: Record<number, number>; stretchOn: Record<number, number> };
@@ -1873,44 +1873,44 @@ function checks(r: Result): Check[] {
     by('first Lab', r.lab, T.labBy);
     by('first research', r.firstResearch, T.firstResearchBy);
     add('longest wait in the first 2 min', `${Math.round(r.earlyIdle)}s`, `≤ ${T.earlyIdleMax}s`, r.earlyIdle <= T.earlyIdleMax);
-    within('first Glyph', r.glyph, T.glyph);
-    within('first Lens', r.lens, T.lens);
+    within('first Circuit', r.glyph, T.glyph);
+    within('first Phone', r.lens, T.lens);
     fabricator(T.fabricatorMax);
     add('longest dead stretch before 10:00', `${Math.round(r.deadBefore10)}s`, `≤ ${T.deadBefore10}s`, r.deadBefore10 <= T.deadBefore10);
-    add('longest dead stretch before the Lens', `${Math.round(r.deadBeforeLens)}s`, `≤ ${T.deadBeforeLens}s`, r.lens != null && r.deadBeforeLens <= T.deadBeforeLens);
-    add('content lasts (first Paradox)', r.paradox == null ? `not within ${r.minutes} min` : mmss(r.paradox), `${mmss(T.contentUntil)}–${mmss(T.paradoxBy)}`, r.paradox != null && r.paradox >= T.contentUntil && r.paradox <= T.paradoxBy);
+    add('longest dead stretch before the Phone', `${Math.round(r.deadBeforeLens)}s`, `≤ ${T.deadBeforeLens}s`, r.lens != null && r.deadBeforeLens <= T.deadBeforeLens);
+    add('content lasts (first Robot)', r.paradox == null ? `not within ${r.minutes} min` : mmss(r.paradox), `${mmss(T.contentUntil)}–${mmss(T.paradoxBy)}`, r.paradox != null && r.paradox >= T.contentUntil && r.paradox <= T.paradoxBy);
   } else if (judge === 'newcomer') {
     const T = TARGETS.newcomer;
-    within('first Lens', r.lens, T.lens);
+    within('first Phone', r.lens, T.lens);
     goalMax(T.goalMax);
     fabricator(T.fabricatorMax);
   } else if (judge === 'newcomer10') {
     const T = TARGETS.newcomer10;
-    by('first Lens', r.lens, T.lensBy);
+    by('first Phone', r.lens, T.lensBy);
     goalMax(T.goalMax);
   } else if (judge === 'cardonly') {
     const T = TARGETS.cardonly;
-    within('first Lens', r.lens, T.lens);
+    within('first Phone', r.lens, T.lens);
     goalMax(T.goalMax);
     add('longest stretch with nothing to do', `${Math.round(r.nothing.longest)}s (${r.nothing.longestGoal})`, `≤ ${T.nothingStretch}s`, r.nothing.longest <= T.nothingStretch);
-    add('nothing to do, share of the time to the Lens', `${(r.nothing.share * 100).toFixed(1)}%`, `≤ ${Math.round(T.nothingShare * 100)}%`, r.lens != null && r.nothing.share <= T.nothingShare);
+    add('nothing to do, share of the time to the Phone', `${(r.nothing.share * 100).toFixed(1)}%`, `≤ ${Math.round(T.nothingShare * 100)}%`, r.lens != null && r.nothing.share <= T.nothingShare);
     const worst = Object.entries(r.nothing.perGoal).reduce((m, [i, s]) => (s > m.s ? { i: Number(i), s } : m), { i: -1, s: 0 });
     add('most nothing to do on one goal', `${Math.round(worst.s)}s (${GOALS[worst.i]?.title ?? '—'})`, `≤ ${T.nothingGoal}s`, worst.s <= T.nothingGoal);
   } else if (judge === 'nolines') {
-    by('first Lens', r.lens, TARGETS.nolines.lensBy);
+    by('first Phone', r.lens, TARGETS.nolines.lensBy);
   } else {
     const T = TARGETS.slow;
-    by('first Lens', r.lens, T.lensBy);
+    by('first Phone', r.lens, T.lensBy);
     goalMax(T.goalMax);
     add('dearest goal-path tech, in Data income', `${isFinite(r.wall.seconds) ? Math.round(r.wall.seconds) + 's' : 'never'} (${r.wall.id})`, `≤ about ${T.dataWall}s`, r.wall.seconds <= T.dataWall * 1.1);
   }
-  add('credits from sales and orders at the Lens', r.earnedShare == null ? '—' : `${Math.round(r.earnedShare * 100)}%`, `≥ ${Math.round(TARGETS.earnedShare * 100)}%`, r.earnedShare != null && r.earnedShare >= TARGETS.earnedShare);
-  // The card players sell nothing over its demand before the first Lens (one of the pacing targets): the first
+  add('credits from sales and orders at the Phone', r.earnedShare == null ? '—' : `${Math.round(r.earnedShare * 100)}%`, `≥ ${Math.round(TARGETS.earnedShare * 100)}%`, r.earnedShare != null && r.earnedShare >= TARGETS.earnedShare);
+  // The card players sell nothing over its demand before the first Phone (one of the pacing targets): the first
   // surplus, Market Lens and the Commerce branch belong to free play. (The fast players may: their own upgrades get
   // them there.)
   if (r.policy.card) {
     const early = r.surplusAt != null && (r.lens == null || r.surplusAt.t < r.lens);
-    add('first sale over demand', r.surplusAt ? mmss(r.surplusAt.t) : 'never', 'after the first Lens', !early);
+    add('first sale over demand', r.surplusAt ? mmss(r.surplusAt.t) : 'never', 'after the first Phone', !early);
   }
   return out;
 }
@@ -1922,7 +1922,7 @@ interface Payback { what: string; level: number; cost: number; gain: number; sec
 /** Recipes the demo's goal chain asks for; the rest is free play and is listed without a verdict. */
 const DEMO_RECIPES = ['shard', 'ink', 'spark', 'mist', 'glyph', 'prism', 'lens'];
 
-/** What a first and second Speed level cost and earn, for every Well and machine. */
+/** What a first and second Speed level cost and earn, for every Drill and machine. */
 function paybacks(): Payback[] {
   const rows: Payback[] = [];
   const probe = newGame().nodes[0];
@@ -1937,7 +1937,7 @@ function paybacks(): Payback[] {
       const refined = r ? (more / r.inputs[0][1]) * worth(r.outputs) : 0;
       const raw = more * MATERIALS[m].value;
       rows.push({
-        what: `${MATERIALS[m].name} Well`, level: level + 1, cost, gain: refined, seconds: cost / refined, note: `refined into ${r ? r.name : '?'}`,
+        what: `${MATERIALS[m].name} Drill`, level: level + 1, cost, gain: refined, seconds: cost / refined, note: `refined into ${r ? r.name : '?'}`,
         other: cost / raw, otherNote: 'sold raw', demo: true,
       });
     }
@@ -2026,14 +2026,14 @@ function report(bot: Bot, profile: Profile, profileName: string, timeline: boole
     P(`        ended by: ${d.endedBy}`);
   }
   const idleAll = bot.minutes_.reduce((s, m) => s + m.idle, 0);
-  P(`  longest before 10:00: ${Math.round(r.deadBefore10)}s; longest before the first Lens: ${Math.round(r.deadBeforeLens)}s; longest starting in the first 2 min: ${Math.round(r.earlyIdle)}s`);
+  P(`  longest before 10:00: ${Math.round(r.deadBefore10)}s; longest before the first Phone: ${Math.round(r.deadBeforeLens)}s; longest starting in the first 2 min: ${Math.round(r.earlyIdle)}s`);
   P(`  total idle: ${Math.round(idleAll)}s of ${bot.minutes * 60}s; actions: ${bot.actions}`);
   const top = [...bot.waits].sort((a, b) => b.to - b.from - (a.to - a.from)).slice(0, 8).sort((a, b) => a.from - b.from);
   P(`  longest waits: ${top.map((w) => `${mmss(w.from)} ${Math.round(w.to - w.from)}s`).join(' · ') || 'none'}`);
 
   P();
   P('== UPGRADES, AND THE SAVE FOR THE FABRICATOR ==');
-  P(`  presses of an Upgrade button ${bot.pressesAtLens ? 'before the first Lens' : 'in this run (no Lens)'}: ${r.presses.total} (${r.presses.single} on one node, ${r.presses.bulk} "Upgrade all", ${r.presses.wire} on a wire)${bot.pressesAtLens ? `; in the whole run: ${bot.presses.single + bot.presses.bulk + bot.presses.wire}` : ''}`);
+  P(`  presses of an Upgrade button ${bot.pressesAtLens ? 'before the first Phone' : 'in this run (no Phone)'}: ${r.presses.total} (${r.presses.single} on one node, ${r.presses.bulk} "Upgrade all", ${r.presses.wire} on a wire)${bot.pressesAtLens ? `; in the whole run: ${bot.presses.single + bot.presses.bulk + bot.presses.wire}` : ''}`);
   for (const m of bot.marks) P(`  ${mmss(m.t)}  ${padR(m.what, 46)} ${pad(fmt(m.credits), 7)}¢ in hand, +${f1(m.income)}¢/s, ${Math.floor(m.a)}α, ${Math.floor(m.b)}β`);
   P(`  time on "Build a Fabricator": ${r.fabricator == null ? '—' : Math.round(r.fabricator) + 's'}; first sale over demand: ${bot.surplusAt ? `${mmss(bot.surplusAt.t)} (${MATERIALS[bot.surplusAt.mat].name}, during goal ${bot.surplusAt.goal + 1})` : 'never'}`);
 
@@ -2062,7 +2062,7 @@ function report(bot: Bot, profile: Profile, profileName: string, timeline: boole
     const pct = (n: number) => `${Math.round((100 * n) / total)}%`;
     P(`  ${padR(label, 20)} sales ${fmt(st.fromSales)}¢ (${pct(st.fromSales)}) · orders ${fmt(st.fromOrders)}¢ (${pct(st.fromOrders)}) · goals ${fmt(st.fromGoals)}¢ (${pct(st.fromGoals)}) → sales + orders ${pct(st.fromSales + st.fromOrders)}`);
   };
-  if (bot.statsAtEnd) sources('at the first Lens:', bot.statsAtEnd);
+  if (bot.statsAtEnd) sources('at the first Phone:', bot.statsAtEnd);
   sources(`after ${bot.minutes} min:`, g.stats);
   P(`  Data from goals and orders: ${Math.round(bot.rewardTotal.a)}α, ${Math.round(bot.rewardTotal.b)}β, ${Math.round(bot.rewardTotal.g)}γ`);
 
@@ -2104,7 +2104,7 @@ function summary(results: Result[]): string {
   const fast = results.filter((r) => r.policy.judge === 'fast');
   if (fast.length) {
     P('== FAST PLAYERS: every run against the targets ("!" marks a miss) ==');
-    P('policy    seed  machine    Lab  research   Glyph    Lens  Fabricator  Paradox  idle<2m  dead<10m  dead<Lens  sales+orders  upgrade presses  orders     Flow States  first surplus  longest goal');
+    P('policy    seed  machine    Lab  research   Circuit    Phone  Fabricator  Robot  idle<2m  dead<10m  dead<Phone  sales+orders  upgrade presses  orders     Flow States  first surplus  longest goal');
     P(`target           ≤${mmss(F.firstMachineBy)} ≤${mmss(F.labBy)}  ≤${mmss(F.firstResearchBy)}  ${mmss(F.glyph[0])}–${mmss(F.glyph[1]).slice(1)} ${mmss(F.lens[0])}–${mmss(F.lens[1]).slice(0, 2)}  ≤${F.fabricatorMax}s     ≥${mmss(F.contentUntil)}  ≤${F.earlyIdleMax}s    ≤${F.deadBefore10}s      ≤${F.deadBeforeLens}s       ≥${Math.round(TARGETS.earnedShare * 100)}%`);
     for (const r of fast) {
       P([
@@ -2144,7 +2144,7 @@ function summary(results: Result[]): string {
       return { lensOk: r.lens != null && r.lens <= T.lensBy, goal: T.goalMax, fab: T.goalMax };
     };
     P('== THE NEWCOMER (the card, its "while you wait" lines, and the tips): every run against the targets ("!" marks a miss) ==');
-    P('policy      seed    Lens   longest goal                        Fabricator  free hands   tips: offered  followed  smallest  median  upgrade presses  sales+orders  Flow at unlock  first surplus');
+    P('policy      seed    Phone   longest goal                        Fabricator  free hands   tips: offered  followed  smallest  median  upgrade presses  sales+orders  Flow at unlock  first surplus');
     P(`newcomer         ${mmss(N.lens[0])}–${mmss(N.lens[1]).slice(0, 2)}  ≤${N.goalMax}s                               ≤${N.fabricatorMax}s                                                                                    ≥${Math.round(TARGETS.earnedShare * 100)}%`);
     P(`newcomer10       ≤${mmss(N10.lensBy)}   ≤${N10.goalMax}s                               (≤${N10.goalMax}s)`);
     P(`cardonly         ${mmss(C.lens[0])}–${mmss(C.lens[1]).slice(0, 2)}  ≤${C.goalMax}s                               (≤${C.goalMax}s)`);
@@ -2174,8 +2174,8 @@ function summary(results: Result[]): string {
     P('  when they were followed; "(n ∞)" of them were steps without which the wait would not have ended (they have no number).');
     P();
   }
-  P('== NOTHING TO DO, up to the first Lens: free hands, goal not ready, no order to claim, no step of the card\'s line that can be done now ==');
-  P(`policy      seed    Lens  nothing   share  longest stretch                        seconds on each goal with nothing to do, and the longest stretch of them there (goal: s (stretch), 10 s or more)`);
+  P('== NOTHING TO DO, up to the first Phone: free hands, goal not ready, no order to claim, no step of the card\'s line that can be done now ==');
+  P(`policy      seed    Phone  nothing   share  longest stretch                        seconds on each goal with nothing to do, and the longest stretch of them there (goal: s (stretch), 10 s or more)`);
   for (const r of results) {
     const x = r.nothing;
     const per = Object.entries(x.perGoal).filter(([, s]) => s >= 10).map(([i, s]) => `${Number(i) + 1}: ${Math.round(s)} (${Math.round(x.stretchOn[Number(i)] ?? 0)})`).join(' · ');
@@ -2330,7 +2330,7 @@ export function playOnce(policy: string, seed: number): {
   tips: { offered: number; followed: number };
   /** Seconds on "Hold 95% Flow", from the claim before it to its own (null if it was never claimed). */
   flowGoal: number | null;
-  /** "Nothing to do" up to the first Lens (Result.nothing). */
+  /** "Nothing to do" up to the first Phone (Result.nothing). */
   nothing: Result['nothing'];
 } {
   const p = POLICIES[policy];

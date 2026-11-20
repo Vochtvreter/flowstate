@@ -101,3 +101,31 @@ export function isWired(g: Game, n: GNode): boolean {
   const ports = c.outs.get(n.id);
   return !!ports && ports.some((ws) => ws && ws.length > 0);
 }
+
+/**
+ * A card's line: the card and everything it feeds, as far as the wires lead, for moving a whole line as one block.
+ * Drills are left out (a Drill stays on its deposit), and so is a Market, Lab or Dump that something outside the line
+ * feeds as well: the Market every line sells at belongs to none of them.
+ */
+export function lineFrom(g: Game, id: number): number[] {
+  const c = graph(g);
+  const seen = new Set<number>([id]);
+  const queue = [id];
+  while (queue.length) {
+    for (const port of c.outs.get(queue.pop()!) ?? []) {
+      for (const w of port ?? []) {
+        if (seen.has(w.to)) continue;
+        seen.add(w.to);
+        queue.push(w.to);
+      }
+    }
+  }
+  const out: number[] = [];
+  for (const nid of seen) {
+    const n = c.byId.get(nid);
+    if (!n || n.type === 'well') continue;
+    if (isSink(n) && nid !== id && (c.ins.get(nid) ?? []).some((w) => !seen.has(w.from))) continue;
+    out.push(nid);
+  }
+  return out;
+}

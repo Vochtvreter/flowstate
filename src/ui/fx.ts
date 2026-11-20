@@ -46,6 +46,8 @@ export interface Flow {
   rate: number;
   color: string;
   shape: DotShape;
+  /** Its dots are drawn in `color` as it is, not lightened: a wire that stands back (dimmed) has dots that stand back too. */
+  plain?: boolean;
   /** Distance of each dot from the start of the wire, furthest first. */
   dots: number[];
   /** Distance travelled since the last dot left the source. */
@@ -64,6 +66,15 @@ export function makeFlow(cold: boolean): Flow {
     x0: 0, y0: 0, x1: 0, y1: 0, occ: [], rate: 0, color: '#8C97AD', shape: 'circle',
     dots: [], acc: 0, cold, on: false,
   };
+}
+
+/** A wire's line is kept as this many runs between this many points and one. */
+export const FLOW_SEGS = SEGS;
+
+/** Take a wire's line as points: FLOW_SEGS + 1 of them, start to end (src/ui/wires.ts draws them, corners among them). */
+export function setFlowPts(f: Flow, pts: Pt[]) {
+  const last = pts.length - 1;
+  setFlowPath(f, (t) => pts[Math.min(last, Math.round(t * SEGS))]);
 }
 
 /** Re-sample a wire's path. `at(t)` gives the point at t in 0..1. */
@@ -493,6 +504,20 @@ function stepFlows(dt: number, view: { x: number; y: number; k: number }, paused
   return total;
 }
 
+const lightColors = new Map<string, string>();
+/**
+ * A wire's colour for the dots that run along it: the same colour, most of the way to white. The wire itself is a
+ * solid line in its material's colour, and a dot in that colour would not show on it.
+ */
+function lightOf(color: string): string {
+  let c = lightColors.get(color);
+  if (c) return c;
+  const m = /^#([0-9a-f]{2})([0-9a-f]{2})([0-9a-f]{2})$/i.exec(color);
+  c = m ? `rgb(${m.slice(1).map((h) => Math.round(parseInt(h, 16) + (255 - parseInt(h, 16)) * 0.62)).join(',')})` : color;
+  lightColors.set(color, c);
+  return c;
+}
+
 function drawFlows(c: CanvasRenderingContext2D, view: { x: number; y: number; k: number }) {
   const k = view.k;
   let key = '';
@@ -501,15 +526,15 @@ function drawFlows(c: CanvasRenderingContext2D, view: { x: number; y: number; k:
   for (const f of flows) {
     const dots = f.dots;
     if (!dots.length) continue;
-    const fk = f.color + f.shape;
+    const fk = f.color + f.shape + (f.plain ? '-' : '');
     if (fk !== key) {
       if (open) c.fill();
       c.beginPath();
-      c.fillStyle = f.color;
+      c.fillStyle = f.plain ? f.color : lightOf(f.color);
       key = fk;
       open = true;
     }
-    const base = Math.max(1.5, (3.6 + Math.min(2.4, f.rate * 0.5)) * k) * (1 + MOOD_SIZE * mood);
+    const base = Math.max(1.5, (3.2 + Math.min(2.2, f.rate * 0.5)) * k) * (1 + MOOD_SIZE * mood);
     const pts = f.pts, cum = f.cum, occ = f.occ, len = f.len;
     let seg = 0;
     for (let i = dots.length - 1; i >= 0 && budget > 0; i--) {
@@ -746,7 +771,7 @@ export function fly(from: Pt, to: Pt, color: string, count = 3, onArrive?: () =>
   if (!sent && onArrive) onArrive();
 }
 
-const FONT = (size: number) => `700 ${size}px "Space Grotesk", Inter, system-ui, sans-serif`;
+const FONT = (size: number) => `700 ${size}px Inter, system-ui, sans-serif`;
 
 /**
  * Text that pops in, rises and fades. (With `rise: 0` it pops in and stands where it is; with less

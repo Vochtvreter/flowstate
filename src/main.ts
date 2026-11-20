@@ -4,6 +4,7 @@ import './styles/hud.css';
 import './styles/advice.css';
 import './styles/feel.css';
 import './styles/phone.css';
+import './styles/clean.css';
 import { clearHistory, cutWire, deleteNode, nodeById, redo, refundOf, undo } from './actions';
 import { fmt, fmtTime, has, offlineCap } from './economy';
 import { offlineGains, tick } from './sim';
@@ -15,15 +16,17 @@ import {
 import { invalidateLayout } from './ui/dom';
 import { fx, initFx } from './ui/fx';
 import { hotbarTypes, initPanels, renderPanels, tickPanels } from './ui/panels';
+import { toggleFlows } from './ui/flows';
+import { revealOf } from './ui/reveal';
 import { closeTech, initTech, openTech, renderTech } from './ui/tech';
 import { initFeel } from './ui/feel';
 import { adviserStats, boardKey, holdAdviser } from './ui/advice-client';
 import { TIP, lineShown, offerTip, tipBought, tipShown } from './ui/advice-tip';
 import { focusSeen, markedControl, stillMarks } from './ui/advice-show';
-import { alertState, hudAnchors, initHud, setElsewhere, setLineFields } from './ui/hud';
+import { alertState, cardSaying, hudAnchors, initHud, setElsewhere, setLineFields } from './ui/hud';
 import { backToStart, initScreens, isStarted, screenOpen, screensApi, showStart } from './ui/hud-screens';
 import { initPhone } from './ui/phone';
-import { emitBeat, emitFrame, emitGame, emitNewGame, initToasts, onSignal, select, toast, touch, ui } from './ui/ui';
+import { emitBeat, emitFrame, emitGame, emitNewGame, initToasts, loadWireStyle, onSignal, select, toast, touch, ui } from './ui/ui';
 
 const STEP = 0.05;
 /** Seconds between refresh beats for on-board numbers and panels (see the frame loop). */
@@ -86,6 +89,8 @@ function boot() {
   resumedFrom = loaded ? loaded.savedAt : null;
   initToasts($('toasts'));
   initFx($<HTMLCanvasElement>('fx'));
+  // (How the wires are drawn is the player's choice in this browser, not part of the save.)
+  loadWireStyle();
   initBoard($('board'));
   initTech($('tech'));
   initPanels(
@@ -128,7 +133,8 @@ function boot() {
     ui, tick, fx, view: { fit: fitView, zoomBy, jumpTo, frame: frameNodes, tidy: tidyBoard }, onSignal,
     // (The HUD: the screens, where effects start from, what the alert slot says, the last look at the goal's nodes, and
     // fields laid over the goal's line, for scripts that show the card's side of `required` and `held`.)
-    hud: { ...screensApi, anchors: hudAnchors, alert: alertState, focus: focusSeen, lineFields: setLineFields },
+    // (...and whether the card is saying the why or the how under its title.)
+    hud: { ...screensApi, anchors: hudAnchors, alert: alertState, focus: focusSeen, lineFields: setLineFields, saying: () => cardSaying(ui.g) },
     // The adviser: how it is run and what it cost; the tip on the card and its timing; the control "Show me" ringed,
     // and the still marks it stood on the board under reduced motion; the goal card's "while you wait" line with its
     // next step; what the tip row says a followed tip bought.
@@ -289,16 +295,22 @@ function onKey(e: KeyboardEvent) {
   }
   if (k === 'delete' || k === 'backspace') {
     e.preventDefault();
+    // (The Flows list is not a thing to delete: the key leaves it open.)
+    if (ui.sel?.kind === 'flows') return;
     if (ui.sel?.kind === 'node') {
       const n = nodeById(g, ui.sel.id);
       if (n) {
         const refund = refundOf(g, n);
-        // A refusal (the last Well) raises its own toast, and the node stays selected.
+        // A refusal (the last Drill) raises its own toast, and the node stays selected.
         if (!deleteNode(g, n.id)) return renderPanels();
         if (refund > 0) toast(`Refunded <b>${fmt(refund)}¢</b>`, 'good');
       }
     } else if (ui.sel?.kind === 'wire') cutWire(g, ui.sel.id);
     select(null);
+    return renderPanels();
+  }
+  if (k === 'l' && revealOf(g).flows) {
+    toggleFlows();
     return renderPanels();
   }
   if (k === 'r' && has(g, 'R1')) openTech();

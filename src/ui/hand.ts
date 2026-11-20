@@ -11,7 +11,7 @@
 //    the air. The goal card can carry two such buttons (a tip's, and the "while you wait" line's):
 //    the hand goes to whichever was last reported stale, and leaves only when that one goes.
 //  - Show me ("showme"). It acts the tip's suggestion out twice and leaves: a wire from a port to a
-//    node, a build from a port into empty space, a Well from the build bar onto a deposit, or a
+//    node, a build from a port into empty space, a Drill from the build bar onto a deposit, or a
 //    press on a control: in the inspector, in the tech tree, or on the board itself (Expand board,
 //    which it stays on while the camera moves).
 //
@@ -33,9 +33,10 @@ import { Game, GNode } from '../state';
 import { armedPort, boardRect, buildPreview, radialOpen, toClient, toWorld } from './board';
 import { el, setClass, setStyle } from './dom';
 import { Overlay, addOverlay, ring } from './fx';
-import { Box, Pt, bezierAt, inPorts, matColor, nodeSize, outPorts } from './geom';
+import { Box, Pt, inPorts, matColor, nodeSize, outPorts } from './geom';
 import { env } from './phone-env';
 import { Signals, onBeat, onFrame, onNewGame, ui } from './ui';
+import { drawWire as wireShape } from './wires';
 
 /** Without input for this long (ms) before the hand shows the goal's gesture. */
 const IDLE_MS = 5000;
@@ -182,7 +183,7 @@ function wirePlan(g: Game, from: GNode, portIndex: number, to: GNode, source: So
   };
 }
 
-/** The goal's wire: the first Well that has nothing attached, to the Market. */
+/** The goal's wire: the first Drill that has nothing attached, to the Market. */
 function firstWirePlan(g: Game): Plan | null {
   const outs = graph(g).outs;
   const wells = g.nodes.filter((n) => n.type === 'well');
@@ -193,7 +194,7 @@ function firstWirePlan(g: Game): Plan | null {
 
 /**
  * Offsets from the port (world px) to the left side of "an empty spot" to try, nearest and most natural first: to
- * the right of the port, and when there is no room there (a Well on a new deposit sits against the edge of the
+ * the right of the port, and when there is no room there (a Drill on a new deposit sits against the edge of the
  * board) under or over its own card, then to the left of it.
  */
 const SPOTS: [number, number][] = [
@@ -217,8 +218,10 @@ for (const dy of [0, 200, -200, 400, -400]) for (const dx of [346, 606, -174, 86
 function wireCost(g: Game, port: Pt, b: Box): number {
   const end = { x: b.x0, y: (b.y0 + b.y1) / 2 };
   let cost = 0;
+  // (As the board would draw it: curved or squared.)
+  const line = wireShape(port, end, ui.wireStyle, 24).pts;
   for (let i = 1; i < 24; i++) {
-    const p = bezierAt(port, end, i / 24);
+    const p = line[i];
     let worst = 0;
     for (const n of g.nodes) {
       const { w, h } = nodeSize(n);
@@ -308,6 +311,9 @@ function wanted(g: Game): Plan | null {
   if (view.goal.id === 'build-refiner') {
     if (radialOpen()) builtOnce = true;
     const well = g.nodes.find((n) => n.type === 'well');
+    // (A Refiner placed from the build bar stands unfed: the gesture left to show is the wire into it.)
+    const loose = g.nodes.find((n) => n.type === 'refiner' && !g.wires.some((w) => w.to === n.id));
+    if (loose && well) return wirePlan(g, well, 0, loose, 'goal', Infinity);
     if (!buildDone(g) && well) return buildPlan(g, well, 0, 'goal', Infinity);
   }
   return null;
@@ -398,7 +404,7 @@ function resolve(g: Game, a: Act): Plan | 'done' | null {
       if (blockedOnBoard(own)) return null;
       const b = world({ x: d.x + 86, y: d.y + 36 });
       const card = { x: d.x, y: d.y, w: 172, h: 72 };
-      // The Well is already in hand: only where to put it is shown.
+      // The Drill is already in hand: only where to put it is shown.
       if (own) return { kind: 'place', source: a.source, mode: 'tap2', a: null, b, wire: null, card, ghost: null, color: '#fff', loops: a.loops };
       const btn = controlAt(byTestId(`hot-${a.type}`));
       if (!btn) return null;
@@ -805,8 +811,10 @@ function drawWire(c: CanvasRenderingContext2D, from: Pt, end: Pt, color: string,
   if (alpha <= 0) return;
   const k = ui.view.k;
   c.beginPath();
-  for (let i = 0; i <= 20; i++) {
-    const p = toClient(bezierAt(from, end, i / 20));
+  // (In the style the board's own wires are drawn in.)
+  const line = wireShape(from, end, ui.wireStyle, 20).pts;
+  for (let i = 0; i < line.length; i++) {
+    const p = toClient(line[i]);
     if (i) c.lineTo(p.x, p.y);
     else c.moveTo(p.x, p.y);
   }

@@ -1,7 +1,11 @@
-import { NodeType } from '../content';
+import { MatId, NodeType } from '../content';
 import { Game, GameEvent } from '../state';
 
-export interface Selection { kind: 'node' | 'wire'; id: number }
+/**
+ * What the panel beside the board (a phone's bottom sheet) is open on: a card, a wire, or the Flows list (`flows`,
+ * whose id is not used). Whatever closes the inspector closes the Flows list too.
+ */
+export interface Selection { kind: 'node' | 'wire' | 'flows'; id: number }
 
 export interface UIState {
   g: Game;
@@ -12,6 +16,10 @@ export interface UIState {
   techSel: string | null;
   recipeMenu: boolean;
   menuOpen: boolean;
+  /** The material the Flows panel is tracing on the board, while that panel is open: everything else stands back. */
+  trace: MatId | null;
+  /** How wires are drawn: curved, or squared (right angles, in lanes). The player's choice, kept in this browser (wires.ts). */
+  wireStyle: 'curved' | 'squared';
   /** Bumped whenever something outside the game state (selection, mode) needs a re-render. */
   uiRev: number;
 }
@@ -25,16 +33,44 @@ export const ui: UIState = {
   techSel: null,
   recipeMenu: false,
   menuOpen: false,
+  trace: null,
+  wireStyle: 'squared',
   uiRev: 0,
 };
 
 export function select(sel: Selection | null) {
   ui.sel = sel;
+  // (A trace belongs to the Flows panel: it ends when the panel gives way to anything else.)
+  if (sel?.kind !== 'flows') ui.trace = null;
   ui.recipeMenu = false;
   ui.uiRev++;
 }
 
 export function touch() {
+  ui.uiRev++;
+}
+
+/** Where the wire style is kept between visits (a choice of how the board looks, not part of the game). */
+const WIRE_KEY = 'flowstate-wires';
+
+/** Read the wire style the player chose in this browser. */
+export function loadWireStyle() {
+  try {
+    ui.wireStyle = localStorage.getItem(WIRE_KEY) === 'curved' ? 'curved' : 'squared';
+  } catch {
+    /* storage unavailable: squared it is */
+  }
+}
+
+/** Set how wires are drawn, and remember it. */
+export function setWireStyle(style: 'curved' | 'squared') {
+  if (style === ui.wireStyle) return;
+  ui.wireStyle = style;
+  try {
+    localStorage.setItem(WIRE_KEY, style);
+  } catch {
+    /* storage unavailable */
+  }
   ui.uiRev++;
 }
 
@@ -62,7 +98,7 @@ export interface Signals {
    * The player pressed "Show me" on a tip, and the interface has already selected and framed what it is
    * about. Whoever can point should now act the suggestion out. At most one of these is set:
    *  - `wire`: connect `from`'s output port `port` (0 when absent) to `to`;
-   *  - `build`: build a `type`, either from `from`'s output port `port` into empty space, or (a Well) on
+   *  - `build`: build a `type`, either from `from`'s output port `port` into empty space, or (a Drill) on
    *    deposit `deposit` from the build bar;
    *  - `press`: press the control with this `data-testid` (an upgrade button, Favour, Research, Cut wire).
    */
@@ -71,6 +107,8 @@ export interface Signals {
     build?: { type: NodeType; from?: number; port?: number; deposit?: number };
     press?: string;
   };
+  /** A card being moved came level with a port it is wired to: one of its wires now runs dead straight. `at` is the middle of that wire. */
+  level: { at: { x: number; y: number } };
   /**
    * The board has just been expanded: a new plot is on the board and the camera is about to glide out to
    * show it. `deposits` are the deposits it revealed, in the order they pop in, `stagger` milliseconds apart.

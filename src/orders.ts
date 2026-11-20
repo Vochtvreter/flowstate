@@ -5,7 +5,7 @@
 // waits for claimOrder(g), which pays it and rolls the next one. An order nobody delivers to for
 // RULES.orders.staleSeconds is quietly replaced, and so is one that, at the rate its material sells now,
 // would take more than RULES.orders.retire.eta seconds to fill (for `retire.hold` seconds running: a new
-// Assembler takes all the Spark an order was counting, and the order read "about 24 min", then "over an
+// Assembler takes all the Copper an order was counting, and the order read "about 24 min", then "over an
 // hour"). The next order never asks for the same material as the one it replaces, as long as the player
 // makes something else.
 //
@@ -45,7 +45,7 @@ function rand(g: Game): number {
   return g.orderSeed / 4294967296;
 }
 
-/** Items per second of each material coming out of Wells and machines right now. */
+/** Items per second of each material coming out of Drills and machines right now. */
 export function outputRates(g: Game): Bag {
   const out: Bag = {};
   for (const n of g.nodes) {

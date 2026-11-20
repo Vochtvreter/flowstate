@@ -14,7 +14,7 @@ const at = (g: Game, id: string) => {
 };
 
 describe('undo stops at the last claim', () => {
-  it('"Place a second Well": claimed, the Well cannot be undone, and "Wire it to the Market too" is not met for nothing', () => {
+  it('"Dig up more Sand": claimed, the Drill cannot be undone, and "Sell that Sand too" is not met for nothing', () => {
     const g = fresh();
     connect(g, well(g).id, 0, market(g).id);
     run(g, 1);
@@ -33,7 +33,7 @@ describe('undo stops at the last claim', () => {
     expect({ goal: activeGoal(g)!.id, ready: g.goal.ready }).toEqual({ goal: 'wire-all-wells', ready: false });
   });
 
-  it('"Upgrade a Well": claimed, the upgrade stays and so does the reward (not 100¢ and a Well at level 0)', () => {
+  it('"Speed up a Drill": claimed, the upgrade stays and so does the reward (not 100¢ and a Drill at level 0)', () => {
     const g = fresh();
     g.techs.push('P1', 'R1');
     at(g, 'upgrade-well');
@@ -92,7 +92,7 @@ describe('the board\'s expansion is one undo step', () => {
     expect(expandBoard(g)).toBe(true);
     const dep = g.deposits[g.deposits.length - 1];
     const w = placeNode(g, 'well', dep.x, dep.y, { depositId: dep.id })!;
-    expect(undo(g)).toBe(true); // the Well
+    expect(undo(g)).toBe(true); // the Drill
     expect(g.nodes.some((n) => n.id === w.id)).toBe(false);
     expect(undo(g)).toBe(true); // the plot
     expect(g.board.expansions).toBe(0);

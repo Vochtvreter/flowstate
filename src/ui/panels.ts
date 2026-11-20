@@ -16,9 +16,9 @@ import {
 } from '../economy';
 import { activeGoal } from '../goals';
 import { graph, isMachine, passCap } from '../sim';
-import { Game, GNode, RouterMode, Wire } from '../state';
+import { Game, GNode, MAX_PINS, RouterMode, Wire, nodeNoun } from '../state';
 import { isMuted, setMuted } from './audio';
-import { boardRect, jumpTo, startPlacing, fitView, zoomBy } from './board';
+import { boardRect, frameNodes, jumpTo, pinWire, startPlacing, fitView, toggleWires, unpinWire, wiresShown, zoomBy } from './board';
 import { marked, pressedMark, tendMark } from './advice-show';
 import { waitLine } from './advice-tip';
 import { Panel, cachedRect, el, invalidateLayout, makePanel, setAnchor, setAttr, setClass, setHTML, setHidden, setText } from './dom';
@@ -28,8 +28,10 @@ import { logoMark } from './hud-screens';
 import { PressWord, isTouch, withKey } from './hud-words';
 import { esc, icon, matGlyph, nodeIcon } from './icons';
 import { env } from './phone-env';
-import { bulkPlan, diagnose, matName, starvedShort, victoryQuiet, wayOn } from './status';
+import { bulkPlan, diagnose, limits, matName, starvedShort, victoryQuiet, wayOn } from './status';
 import { metData, pricedInMet, readyCount, setCardWait, teasedSlot } from './tech';
+import { revealOf, slotShown } from './reveal';
+import { flowTroubles, flowsAction, flowsHtml, flowsOpen, toggleFlows } from './flows';
 import { delegate, onPress, select, signal, toast, touch, ui } from './ui';
 
 let topEl: HTMLElement;
@@ -81,7 +83,11 @@ export function initPanels(refs: {
     const g = ui.g;
     // Whatever is chosen from the gear menu, the menu closes behind it.
     if (a !== 'menu' && ui.menuOpen && el.closest('.menu')) { ui.menuOpen = false; touch(); }
-    if (a === 'undo') { if (!ui.techOpen) undo(g); }
+    if (a === 'flows') {
+      ui.menuOpen = false;
+      toggleFlows();
+    } else if (a === 'wires') toggleWires();
+    else if (a === 'undo') { if (!ui.techOpen) undo(g); }
     else if (a === 'redo') { if (!ui.techOpen) redo(g); }
     else if (a === 'pause') { g.paused = !g.paused; touch(); }
     else if (a === 'sound') setMuted(!isMuted());
@@ -142,6 +148,7 @@ function inspectorAction(a: string, args: string[], openTech: (id?: string) => v
   const g = ui.g;
   const sel = ui.sel;
   if (a === 'close') return select(null);
+  if (flowsAction(a, args, jumpTo, (ids) => frameNodes(ids, true))) return;
   if (a === 'tech') return openTech(args[0]);
   if (a === 'jump') return jumpTo(Number(args[0]));
   if (a === 'upgsrc') {
@@ -149,7 +156,7 @@ function inspectorAction(a: string, args: string[], openTech: (id?: string) => v
     else wayPress = { node: Number(args[0]), at: g.time };
     return;
   }
-  if (!sel) return;
+  if (!sel || sel.kind === 'flows') return;
   if (sel.kind === 'node') {
     const n = nodeById(g, sel.id);
     if (!n) return;
@@ -170,7 +177,7 @@ function inspectorAction(a: string, args: string[], openTech: (id?: string) => v
       toast(c ? `Upgraded ${c} ${NODE_DEFS[n.type].name}${c > 1 ? 's' : ''}` : 'Not enough credits', c ? 'good' : 'bad');
     } else if (a === 'del') {
       const refund = refundOf(g, n);
-      // A refusal (the last Well) raises its own toast and leaves the node selected.
+      // A refusal (the last Drill) raises its own toast and leaves the node selected.
       if (!deleteNode(g, n.id)) return;
       select(null);
       if (refund > 0) toast(`Refunded <b>${fmt(refund)}¢</b>`, 'good');
@@ -195,6 +202,8 @@ function inspectorAction(a: string, args: string[], openTech: (id?: string) => v
     if (a === 'wireup') { if (!upgradeWire(g, w.id)) toast('Not enough credits', 'bad'); }
     else if (a === 'wireall') { const c = upgradeSaturatedWires(g); toast(c ? `Upgraded ${c} wire${c > 1 ? 's' : ''}` : 'Nothing to upgrade, or not enough credits', c ? 'good' : 'bad'); }
     else if (a === 'cut') { cutWire(g, w.id); select(null); }
+    else if (a === 'pin') pinWire(w.id);
+    else if (a === 'unpin') unpinWire(w.id);
   }
 }
 
@@ -337,9 +346,9 @@ function techInSight(g: Game, t: Tech | undefined): boolean {
 }
 
 const DATA_ABOUT: Record<DataTier, string> = {
-  a: 'α Data: Labs make it from raw and Tier 1 items. Spend it in the Tech tree.',
-  b: 'β Data: Labs make it from Tier 2 items such as Glyph. Spend it in the Tech tree.',
-  g: 'γ Data: Labs make it from Tier 3 items such as Lens. Spend it in the Tech tree.',
+  a: 'α Data: Labs make it from raw and refined materials. Spend it in the Tech tree.',
+  b: 'β Data: Labs make it from assembled parts such as the Circuit. Spend it in the Tech tree.',
+  g: 'γ Data: Labs make it from finished products such as the Phone. Spend it in the Tech tree.',
 };
 
 /** The three Data chips share one wrapper, so a narrow bar can stack them as one block (see style.css). */
@@ -405,7 +414,9 @@ function buildTop() {
   const undoBtn = el(`<button class="ibtn t-undo" data-act="undo">${icon('undo')}</button>`);
   addTopItem('actions', {
     el: undoBtn,
-    update() {
+    update(g) {
+      // (Undo and Redo come with the second goal: on the first screen there is nothing to take back. reveal.ts)
+      setHidden(undoBtn, !revealOf(g).undo);
       setAttr(undoBtn, 'disabled', canUndo() && !ui.techOpen ? null : '');
       label(undoBtn, 'Undo', 'Ctrl+Z');
     },
@@ -413,7 +424,8 @@ function buildTop() {
   const redoBtn = el(`<button class="ibtn t-redo" data-act="redo">${icon('redo')}</button>`);
   addTopItem('actions', {
     el: redoBtn,
-    update() {
+    update(g) {
+      setHidden(redoBtn, !revealOf(g).undo);
       setAttr(redoBtn, 'disabled', canRedo() && !ui.techOpen ? null : '');
       label(redoBtn, 'Redo', 'Ctrl+Shift+Z');
     },
@@ -430,6 +442,28 @@ function buildTop() {
     },
   });
   addTopItem('actions', { el: el(`<span class="sep t-sep"></span>`), update() {} });
+
+  // Flows: the list of what is made and where it goes (flows.ts). It comes with the second raw material (reveal.ts),
+  // and counts the materials in trouble on its badge. On a phone it is in the menu: the bar has no room for it.
+  const flowsBtn = el(`<button class="techbtn t-flows" data-act="flows">${icon('flows')}<span class="tlab">Flows</span><span class="badge warn" hidden><b class="mono"></b></span><span class="kbd">L</span></button>`);
+  const flowsBadge = flowsBtn.querySelector<HTMLElement>('.badge')!;
+  const flowsNum = flowsBadge.querySelector('b')!;
+  addTopItem('actions', {
+    el: flowsBtn,
+    update(g) {
+      const on = revealOf(g).flows && !env.phone;
+      if (setHidden(flowsBtn, !on)) invalidateLayout();
+      setAttr(flowsBtn, 'data-testid', on ? 'open-flows' : null);
+      if (!on) return;
+      const n = flowTroubles(g);
+      setClass(flowsBtn, 'on', flowsOpen());
+      setClass(flowsBtn, 'warn', n > 0);
+      setHidden(flowsBadge, !n);
+      setText(flowsNum, String(n));
+      setAttr(flowsBtn, 'aria-pressed', flowsOpen() ? 'true' : 'false');
+      setAttr(flowsBtn, 'aria-label', n ? `Flows, ${n} in trouble` : 'Flows');
+    },
+  });
 
   const techBtn = el(`<button class="techbtn t-tech" data-act="tech">${icon('tree')}<span class="tlab">Tech<span class="tl2"> tree</span></span><span class="badge" hidden><b class="mono"></b><span class="bw">ready</span></span><span class="kbd">R</span></button>`);
   const badge = techBtn.querySelector('.badge')!;
@@ -456,11 +490,11 @@ function buildTop() {
   const mItem = (act: string) =>
     `<button class="m-only" data-act="${act}" data-testid="menu-${act}" role="${act === 'sound' ? 'menuitemcheckbox' : 'menuitem'}"><span class="ml"></span><i class="ms"></i></button>`;
   const menuWrap = el(`<div class="menuwrap t-menu"><button class="ibtn" data-act="menu" data-testid="menu" aria-label="Menu" title="Menu" aria-haspopup="menu">${icon('gear')}</button>`
-    + `<div class="menu" role="menu" hidden>${mItem('pause')}${mItem('sound')}${mItem('undo')}${mItem('redo')}`
+    + `<div class="menu" role="menu" hidden>${mItem('flows')}${mItem('wires')}${mItem('pause')}${mItem('sound')}${mItem('undo')}${mItem('redo')}`
     + `<button class="danger" data-act="reset" data-testid="menu-reset" role="menuitem">New game…</button></div></div>`);
   const gear = menuWrap.querySelector<HTMLElement>('[data-act="menu"]')!;
   const menu = menuWrap.querySelector<HTMLElement>('.menu')!;
-  const [mPause, mSound, mUndo, mRedo] = [...menu.querySelectorAll<HTMLElement>('.m-only')];
+  const [mFlows, mWires, mPause, mSound, mUndo, mRedo] = [...menu.querySelectorAll<HTMLElement>('.m-only')];
   const say = (b: HTMLElement, text: string, state = '') => {
     setText(b.firstElementChild!, text);
     setText(b.lastElementChild!, state);
@@ -477,6 +511,13 @@ function buildTop() {
       setClass(topEl, 'menu-open', ui.menuOpen);
       // On a phone the pause button is in here, so the gear itself shows that the game is paused.
       setClass(gear, 'on', g.paused && env.phone);
+      // (Flows, on a phone: with how many materials are in trouble.)
+      const troubles = revealOf(g).flows ? flowTroubles(g) : 0;
+      setHidden(mFlows, !revealOf(g).flows);
+      say(mFlows, 'Flows', troubles ? `${troubles} in trouble` : '');
+      // (How wires are drawn, on a phone: a desktop has the button beside Tidy.)
+      setHidden(mWires, !wiresShown());
+      say(mWires, 'Wires', ui.wireStyle === 'squared' ? 'Squared' : 'Curved');
       say(mPause, g.paused ? 'Resume' : 'Pause', g.paused ? 'Paused' : '');
       setClass(mPause, 'on', g.paused);
       const muted = isMuted();
@@ -568,6 +609,8 @@ function renderHot(force: boolean) {
       if (tease.goal || !has(g, 'R1')) return `<div class="hb locked" data-testid="hot-locked" data-type="${type}" title="${def.name}: comes with this goal" aria-label="${def.name}, locked. It comes with this goal">${body}</div>`;
       return `<button class="hb locked" data-act="locked:${t.id}" data-testid="hot-locked" data-type="${type}" title="${def.name}: research ${esc(t.name)}" aria-label="${def.name}, locked. Research ${esc(t.name)}">${body}</button>`;
     }
+    // (A slot comes when it first has a use: the Drill's with the goal that places one, the Market's later. reveal.ts)
+    if (!slotShown(g, type)) return '';
     key++;
     slots++;
     const cost = nodeCost(g, type);
@@ -589,7 +632,7 @@ function renderHot(force: boolean) {
   // The Delete key is for keyboards: with a finger, Delete is a button in the inspector, which shows the refund.
   // (And only where the rail has room for it under the slots: on a short window a full bar takes it all.)
   const room = env.phone || hotRect().height >= slots * HOT_SLOT + HOT_PAD + HOT_SLOT;
-  const tip = touchy || !room ? '' : `<div class="grow"></div><div class="hb tip" title="Select a node and press Delete. Everything is refunded in full.">${icon('trash')}<span class="p">Del = refund</span></div>`;
+  const tip = touchy || !room || !revealOf(g).trash ? '' : `<div class="grow"></div><div class="hb tip" title="Select a node and press Delete. Everything is refunded in full.">${icon('trash')}<span class="p">Del = refund</span></div>`;
   hotPanel.render(items + tip, force);
   // (Only when the slots themselves change: a price filling up must not make the browser lay the page out.)
   const slotsKey = `${env.phone ? 1 : 0}|${slots}|${tease?.type ?? ''}|${tip ? 1 : 0}`;
@@ -606,7 +649,7 @@ function renderHot(force: boolean) {
 }
 
 /**
- * On a phone the build bar scrolls sideways once it holds more than fits (Market, Lab and Void went off its
+ * On a phone the build bar scrolls sideways once it holds more than fits (Market, Lab and Dump went off its
  * right edge unseen). It says so: `more-r` while there is more to the right, `more-l` to the left
  * (phone.css fades that edge and shows the chevron button that moves the bar that way: pageButton). Looked at when
  * its slots change, when it scrolls and when the window does.
@@ -638,7 +681,7 @@ const PAGE_DEAF = 600;
  * Move the phone's build bar on (1) or back (-1) by a page: the first slot that the chevron lay over comes to stand
  * clear, just inside the chevron at the other edge. With reduced motion the bar jumps there. For PAGE_DEAF ms after,
  * the slots take no press: a chevron that has done its work goes away, and a second tap aimed at it would land on
- * the slot that stands where it was (the Void, which is free).
+ * the slot that stands where it was (the Dump, which is free).
  */
 function hotPage(dir: 1 | -1) {
   const view = hotEl.getBoundingClientRect();
@@ -699,7 +742,7 @@ function pageButton(btn: HTMLElement | null, dir: 1 | -1) {
 
 /** Hotbar node types in key order (unlocked only). */
 export function hotbarTypes(g: Game) {
-  return HOTBAR.filter((t) => nodeUnlocked(g, t));
+  return HOTBAR.filter((t) => nodeUnlocked(g, t) && slotShown(g, t));
 }
 
 // ---------- inspector ----------
@@ -746,20 +789,36 @@ function shortNote(g: Game, n: GNode): string {
   return `<div class="sec"><div class="shortbox" data-testid="shortfall"><p>${icon('warn', 14)}<span>Receiving <span class="mono">${fmtRate(got)}</span> of <span class="mono">${fmtRate(need)}</span> ${matName(mat)}/s</span></p>${up ? `<div class="st-actions">${up}</div>` : ''}</div></div>`;
 }
 
+/**
+ * A Drill or machine that works flat out while one it feeds goes short (its card says "Can't keep up": status.ts,
+ * limits): its inspector says who is waiting and for what, and offers the two ways on, more Speed here or another one.
+ */
+function limitNote(g: Game, n: GNode): string {
+  const waiting = limits(g).get(n.id);
+  const taker = waiting ? nodeById(g, waiting.taker) : null;
+  if (!waiting || !taker) return '';
+  const mat = matName(waiting.mat);
+  const can = trackAvailable(g, n, 'speed') && n.lv.speed < maxLevel(g, 'speed') && !justRaised(g, n.id);
+  const speed = can ? buyBtn(`upgsrc:${n.id}`, upgradeCost(n, 'speed'), g.credits, 'Speed · ', 'upg-self') : '';
+  return `<div class="sec"><div class="statusbox limit" data-testid="limit-box"><div class="st-title">${icon('warn', 16)}Can’t keep up</div>
+    <p>The ${nodeNoun(taker)} wants more ${mat} than this gives. Make it faster, or build another ${NODE_DEFS[n.type].name}.</p>
+    <div class="st-actions">${speed}<button class="ghostbtn" data-act="jump:${taker.id}" data-testid="show-taker">Show who waits</button></div></div></div>`;
+}
+
 function statusBlock(g: Game, n: GNode): string {
   const dx = diagnose(g, n);
-  if (!dx.problem) return shortNote(g, n);
+  if (!dx.problem) return limitNote(g, n) || shortNote(g, n);
   const r = recipeOf(n);
   let title = '';
   let body = '';
   let cls = dx.problem;
   let actions = '';
   if (dx.problem === 'idle') {
-    title = n.recipe ? 'Idle: nothing connected' : 'Idle: no recipe';
+    title = n.recipe ? 'Nothing is coming in' : 'Nothing to make yet';
     body = n.recipe ? (isTouch() ? 'Tap a source\'s port, then tap this machine.' : 'Drag a wire from a source into this machine.') : 'Connect an input and the recipe is picked for you, or choose one below.';
   } else if (dx.problem === 'starved' && r) {
     const { got, need } = intake(g, n, dx.mat);
-    title = `Starved: not enough ${matName(dx.mat)}`;
+    title = `Not enough ${matName(dx.mat)}`;
     if (dx.culprit == null) body = `Nothing connected supplies ${matName(dx.mat)}.`;
     else {
       body = `Receiving <span class="mono">${fmtRate(got)}</span> of <span class="mono">${fmtRate(need)}</span> ${matName(dx.mat)}/s.`;
@@ -767,8 +826,8 @@ function statusBlock(g: Game, n: GNode): string {
       actions += `<button class="ghostbtn" data-act="jump:${dx.culprit}">Jump to source</button>`;
     }
   } else if (dx.problem === 'blocked') {
-    title = `Blocked: ${matName(dx.mat)} output is full`;
-    if (dx.openPort) body = `${matName(dx.mat)} has nowhere to go. ${isTouch() ? 'Tap its port, then tap an empty spot' : 'Drag from its port into empty space'} to send it somewhere.`;
+    title = dx.openPort ? `${matName(dx.mat)} has no exit` : `${matName(dx.mat)} is backed up`;
+    if (dx.openPort) body = `It is full of ${matName(dx.mat)} and has stopped: nothing is wired to that port. ${isTouch() ? 'Tap the port, then tap where it should go' : 'Drag from the port to where it should go'}.`;
     else {
       // What is full downstream, named, with the way on in one press where there is one: Speed on the Lab or machine
       // that takes no more (the same button a starved machine has for its source), and Show to go there.
@@ -884,7 +943,7 @@ function routerSection(g: Game, n: GNode): string {
   ];
   // A mode that still has to be researched is offered (locked, leading to the tree) only once that research
   // is in sight: it can be done now, and the player has met the kind of Data it costs. Priority Routing can be
-  // researched from the moment the Router arrives, but it costs β, and β does not exist until the first Glyph.
+  // researched from the moment the Router arrives, but it costs β, and β does not exist until the first Circuit.
   const seg = modes.filter((m) => has(g, m.tech) || techInSight(g, TECHS[m.tech ?? ''])).map((m) => has(g, m.tech)
     ? `<button data-act="mode:${m.id}" class="${n.mode === m.id ? 'on' : ''}" data-testid="mode-${m.id}">${m.name}</button>`
     : `<button data-act="tech:${m.tech}" class="lockedseg" data-testid="mode-${m.id}-locked">${icon('lock', 11)}${m.name}</button>`).join('');
@@ -930,9 +989,9 @@ function labSection(g: Game, n: GNode): string {
   }).join('');
   // What each tier of item gives, as far as the player has got: β and γ are named once Tier 2 and Tier 3
   // items can be made (or that kind of Data has been in hand), not before.
-  let kinds = 'Raw and Tier 1 items give α.';
-  if (has(g, 'P4') || everHad(g, 'b')) kinds += ' Tier 2 items give β.';
-  if (has(g, 'P7') || everHad(g, 'g')) kinds += ' Tier 3 items give γ.';
+  let kinds = 'Raw and refined materials give α.';
+  if (has(g, 'P4') || everHad(g, 'b')) kinds += ' Assembled parts give β.';
+  if (has(g, 'P7') || everHad(g, 'g')) kinds += ' Finished products give γ.';
   return `<div class="sec flow"><span class="lbl">Studying</span>${rows || '<div class="note">Wire any item into the Lab.</div>'}
     <div class="row sm"><span>Throughput</span><span class="mono"><b>${fmtRate(n.rate)}</b> / ${fmtRate(labRate(g, n))} /s</span></div>
     <div class="bar"><span style="width:${pct(n.rate / labRate(g, n))}%;background:#C4A1FF"></span></div>
@@ -941,7 +1000,7 @@ function labSection(g: Game, n: GNode): string {
 
 function nodeInspector(g: Game, n: GNode): string {
   const def = NODE_DEFS[n.type];
-  const title = n.type === 'well' && n.material ? `${MATERIALS[n.material].name} Well` : def.name;
+  const title = n.type === 'well' && n.material ? `${MATERIALS[n.material].name} Drill` : def.name;
   let body = statusBlock(g, n);
   if (isMachine(n)) body += recipeSection(g, n) + flowSection(g, n);
   else if (n.type === 'well') body += `<div class="sec flow"><span class="lbl">Flow</span><div class="row sm"><span>Extracting</span><span class="mono"><b>${fmtRate(n.rate)}</b> / ${fmtRate(wellRate(n))} /s</span></div><div class="bar"><span style="width:${pct(n.rate / wellRate(n))}%;background:${MATERIALS[n.material!].color}"></span></div></div>`;
@@ -953,16 +1012,36 @@ function nodeInspector(g: Game, n: GNode): string {
     body += `<div class="sec flow"><span class="lbl">Stored</span>${stored.map((m) => `<div><div class="row sm"><span>${matGlyph(m, 12)} ${MATERIALS[m].name}</span><span class="mono"><b>${Math.round(n.inb[m] ?? 0)}</b> / ${passCap(n)}</span></div><div class="bar"><span style="width:${pct((n.inb[m] ?? 0) / passCap(n))}%;background:${MATERIALS[m].color}"></span></div></div>`).join('') || '<div class="note">Empty.</div>'}
       <div class="note">Holds up to ${passCap(n)} of each material.</div></div>`;
   }
-  // (A Void or a Merger has nothing more to show: what it does is said once, under its name.)
-  body += upgradeSection(g, n);
+  // (A Dump or a Merger has nothing more to show: what it does is said once, under its name.)
+  // The inspector starts small (reveal.ts): until the goal that is about upgrades, a card opened says what it is and
+  // what is wrong with it, and offers nothing to buy; until there is a machine to move, nothing to duplicate or delete.
+  const shown = revealOf(g);
+  if (shown.upgrades) body += upgradeSection(g, n);
   const refund = refundOf(g, n);
   const fixed = n.type === 'well';
+  const foot = !shown.trash ? '' : `
+    <div class="foot"><button class="fbtn" data-act="dup" ${fixed ? 'disabled' : ''}>Duplicate <span class="kbd">Ctrl D</span></button>
+      <button class="fbtn danger" data-act="del" data-testid="delete">Delete${refund > 0 ? ` · <span class="mono">+${fmt(refund)}¢</span>` : ''}</button></div>`;
   return `<div class="sec head"><div class="hicon">${n.type === 'well' && n.material ? matGlyph(n.material, 22) : isMachine(n) && n.recipe ? matGlyph(RECIPES[n.recipe].outputs[0][0], 22) : nodeIcon(n.type, 22)}</div>
       <div class="htxt"><h2>${esc(title)}</h2><p>${esc(def.blurb)}</p></div>
       <button class="ibtn bare" data-act="close" aria-label="Close inspector">${icon('close', 16)}</button></div>
-    <div class="scroll">${body}</div>
-    <div class="foot"><button class="fbtn" data-act="dup" ${fixed ? 'disabled' : ''}>Duplicate <span class="kbd">Ctrl D</span></button>
-      <button class="fbtn danger" data-act="del" data-testid="delete">Delete${refund > 0 ? ` · <span class="mono">+${fmt(refund)}¢</span>` : ''}</button></div>`;
+    <div class="scroll">${body}</div>${foot}`;
+}
+
+/**
+ * A wire's Route part: its pins. A pin is a point the wire is drawn through, set by the player to lead it round a card
+ * or along a path of their own; it changes nothing about what the wire carries.
+ */
+function routeSection(w: Wire): string {
+  const n = w.pins?.length ?? 0;
+  const how = n
+    ? isTouch() ? 'Drag a pin to bend the wire.' : 'Drag a pin to bend the wire. Double-click a pin to take it off.'
+    : isTouch() ? 'A pin is a point the wire runs through: add one, then drag it.' : 'A pin is a point the wire runs through. Double-click the wire to set one, then drag it.';
+  return `<div class="sec route"><span class="lbl">Route</span>
+      <div class="row sm"><span>Pins</span><span class="mono"><b>${n}</b> / ${MAX_PINS}</span></div>
+      <div class="st-actions"><button class="ghostbtn" data-act="pin" data-testid="wire-pin"${n >= MAX_PINS ? ' disabled' : ''}>Add a pin</button>${
+        n ? `<button class="ghostbtn" data-act="unpin" data-testid="wire-unpin">Remove pin${n > 1 ? 's' : ''}</button>` : ''}</div>
+      <div class="note">${how}</div></div>`;
 }
 
 function wireInspector(g: Game, w: Wire): string {
@@ -983,6 +1062,7 @@ function wireInspector(g: Game, w: Wire): string {
       <div class="sec flow"><span class="lbl">Flow</span><div class="row sm"><span>Carrying</span><span class="mono"><b>${fmtRate(w.rate)}</b> / ${cap} /s</span></div>
       <div class="bar"><span style="width:${pct(w.rate / cap)}%;background:${mats[0] ? MATERIALS[mats[0]].color : '#9DB8FF'}"></span></div></div>
       <div class="sec"><span class="lbl">Pipe</span>${up}</div>
+      ${revealOf(g).wires ? routeSection(w) : ''}
     </div>
     <div class="foot"><button class="fbtn danger${marked('cut-wire')}" data-act="cut" data-testid="cut-wire">Cut wire${w.paid > 0 ? ` · <span class="mono">+${fmt(w.paid)}¢</span>` : ''}</button></div>`;
 }
@@ -999,7 +1079,7 @@ function renderInspector(force: boolean) {
   } else if (sel?.kind === 'wire') {
     const w = g.wires.find((x) => x.id === sel.id);
     if (w) html = wireInspector(g, w);
-  }
+  } else if (sel?.kind === 'flows') html = flowsHtml(g);
   if (!html && sel) ui.sel = null;
   // Opening or closing changes the width of the stage, so cached screen positions are thrown away.
   // (As a bottom sheet on a phone it lies over the stage instead, and nothing moves.)
@@ -1007,6 +1087,8 @@ function renderInspector(force: boolean) {
   // (The same as a class on #app, for the stylesheets: far cheaper to match than a has() selector on #app.)
   const appEl = inspEl.parentElement;
   if (appEl) setClass(appEl, 'insp-open', !!html);
+  // (For the phone's stylesheet: while the Flows list is up, the goal card keeps to its title. hud.css)
+  if (appEl) setClass(appEl, 'flows-open', !!html && sel?.kind === 'flows');
   if (html || !env.phone) {
     clearTimeout(inspEmpty);
     inspEmpty = 0;
@@ -1126,7 +1208,7 @@ function renderMini() {
   }
   const view = boardRect();
   // A node is drawn in the colour the board's ring has: a starved or blocked one that diagnose finds no problem with (a
-  // machine merely short of an input; any machine between the first Lens and free play, status.ts) as working.
+  // machine merely short of an input; any machine between the first Phone and free play, status.ts) as working.
   const states = g.nodes.map((n) => ((n.status === 'starved' || n.status === 'blocked') && !diagnose(g, n).problem ? 'working' : n.status));
   let key = `${g.board.w}x${g.board.h}|${Math.round(view.width)}x${Math.round(view.height)}`;
   g.nodes.forEach((n, i) => (key += `|${n.x},${n.y},${states[i][0]}`));
@@ -1174,7 +1256,20 @@ function renderZoom() {
  * Refresh every panel. Cheap to call often: each part writes only what changed.
  * `force` is for calls made straight from a press inside a panel, which must show at once.
  */
+/** The parts of the interface that are not on show yet are hidden by a class on #app (style.css, "start simple"). */
+let appEl: HTMLElement | null = null;
+function renderReveal() {
+  appEl ??= document.getElementById('app');
+  if (!appEl) return;
+  const r = revealOf(ui.g);
+  setClass(appEl, 'no-zoom', !r.zoom);
+  setClass(appEl, 'no-mini', !r.minimap);
+  setClass(appEl, 'no-plot', !r.plot);
+  setClass(appEl, 'no-undo', !r.undo);
+}
+
 export function renderPanels(force = false) {
+  renderReveal();
   renderTop();
   renderHot(force);
   renderInspector(force);

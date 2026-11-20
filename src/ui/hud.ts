@@ -32,12 +32,12 @@
 //    the stylesheet, which would otherwise need has() selectors.
 import { materialsAt, nodeById } from '../actions';
 import type { Advice } from '../advice';
-import { DATA_COLORS, DATA_NAMES, DataTier, MATERIALS, MatId, NODE_DEFS, RECIPES, TECHS } from '../content';
+import { DATA_COLORS, DATA_NAMES, DataTier, MATERIALS, MatId, NODE_DEFS, RECIPES, Recipe, TECHS } from '../content';
 import { fmt } from '../economy';
 import { FlowGoalView, GOALS, GoalProgress, GoalView, MAIN_GOALS, claimGoal, goalFocus, goalView } from '../goals';
 import { claimOrder, orderView } from '../orders';
 import { graph } from '../sim';
-import { Game, GNode, GoalReward, Reward } from '../state';
+import { Game, GNode, GoalReward, Reward, nodeNoun } from '../state';
 import { initAdviser, pollAdviser } from './advice-client';
 import { WaitLine, announceTips, lineHtml, lineShown, resetTips, showLine, showTip, tendCard, tipHtml, tipShown, waitLine } from './advice-tip';
 import { tendFocus, tendMark } from './advice-show';
@@ -94,6 +94,12 @@ export function initHud() {
         lastOrderClaim = now;
         if (pressed) pressClaim(pressed, true);
       }
+    } else if (a === 'how') {
+      // The card's "How?": the gesture in place of the why, and back again. Sent away, it does not come by itself.
+      if (howGoal === g.goal.i) {
+        howGoal = -1;
+        whyGoal = g.goal.i;
+      } else howGoal = g.goal.i;
     } else if (a === 'show' || a === 'show-line') {
       // The player is being taken to the board: on a phone the card gives it room first.
       foldHint();
@@ -174,6 +180,9 @@ export function initHud() {
     lastClaim = lastOrderClaim = -1e9;
     focusAfter = false;
     heldBefore = false;
+    howGoal = whyGoal = -1;
+    idleFrom = -1;
+    idleKey = '';
     // (A new game is this tab's own: main.ts saves it again, and the slot no longer says another tab has it.)
     elsewhere = false;
   });
@@ -277,7 +286,7 @@ function boughtWith(g: Game, v: GoalView): string | undefined {
 function progressHtml(p: GoalProgress, name?: string): string {
   const [cur, target, unit] = p;
   const share = target > 0 ? cur / target : 0;
-  // Saving up, in credits or in Data: "Saving 7 / 12¢" (named: "Saving for the Well · 7 / 12¢"), then "Saved 12 / 12¢"
+  // Saving up, in credits or in Data: "Saving 7 / 12¢" (named: "Saving for the Drill · 7 / 12¢"), then "Saved 12 / 12¢"
   // once there is enough.
   const saving = cur + 1e-6 >= target ? 'Saved' : 'Saving';
   const tier = DATA_OF[unit];
@@ -407,18 +416,73 @@ function ghostsHtml(now: number): { card: string; press: string } {
 /** A count still being saved up (credits or Data), not yet in hand. */
 const saving = (p: GoalProgress | null) => !!p && (p[2] === '¢' || !!DATA_OF[p[2]]) && p[0] + 1e-6 < p[1];
 
-/** "Make your first Lens": each input the Fabricator takes and whether it is wired in (from the rules, when they give it). */
+/** "Make your first Phone": each input the Fabricator takes and whether it is wired in (from the rules, when they give it). */
 type Inputs = { mat: MatId; name: string; fed: boolean }[];
 
-/** The Fabricator's inputs, wired or not: "Prism ✓ · Glyph ✗", on a bar of how many are wired. */
+/** The Fabricator's inputs, wired or not: "Screen ✓ · Circuit ✗", on a bar of how many are wired. */
 function inputsHtml(inputs: Inputs): string {
   const fed = inputs.filter((x) => x.fed).length;
   const parts = inputs.map((x) => `<span class="gi ${x.fed ? 'ok' : 'no'}" data-mat="${x.mat}">${matGlyph(x.mat, 13)}${esc(x.name)}${icon(x.fed ? 'check' : 'close', 12)}</span>`);
   return `${bar(inputs.length ? fed / inputs.length : 0, '#7AA2FF')}<span class="gc-num gc-inputs" data-testid="goal-inputs" aria-label="${esc(inputs.map((x) => `${x.name} ${x.fed ? 'wired' : 'not wired'}`).join(', '))}">${parts.join('<i class="gi-sep">·</i>')}</span>`;
 }
 
+// ---------- why, and how ----------
+// The card says why (Goal.why), and draws the recipe the goal is about. The gesture (Goal.hint) is behind its "How?"
+// button, and comes out by itself once the goal has been within reach, with the board left as it is, for HOW_AFTER
+// game seconds: nobody is left guessing for long, and nobody who is getting on is told where to click.
+
+/** Game seconds a goal can be acted on, with the board left alone, before the card says how by itself. */
+export const HOW_AFTER = 20;
+/** The goal the card is saying the how of (-1: none), and the goal on which the player sent the how away again. */
+let howGoal = -1;
+let whyGoal = -1;
+/** Since when (game time) the goal on the card has been within reach with the board as it is; -1 while it is not. */
+let idleFrom = -1;
+let idleKey = '';
+
+/** Note how long the player has had the goal within reach without touching the board: after HOW_AFTER the card says how. */
+function tendHow(g: Game, v: GoalView, waiting: boolean) {
+  const i = g.goal.i;
+  if (v.ready || waiting || g.paused) {
+    idleFrom = -1;
+    return;
+  }
+  const key = `${i}|${g.rev}`;
+  if (key !== idleKey || idleFrom < 0 || g.time < idleFrom) {
+    idleKey = key;
+    idleFrom = g.time;
+  }
+  if (howGoal !== i && whyGoal !== i && g.time - idleFrom >= HOW_AFTER) howGoal = i;
+}
+
+/** For scripts: what the card is saying under its title. */
+export const cardSaying = (g: Game): 'why' | 'how' => (howGoal === g.goal.i ? 'how' : 'why');
+
+/**
+ * A recipe as the card draws it: "2 Sand → Glass", each thing with its picture. Where several things are put
+ * together and the machine stands (GoalView.fed), each input says whether it is wired in, and what comes out
+ * whether it goes anywhere: what is left to do can be read off the card, with no word about where to click.
+ */
+function recipeHtml(r: Recipe, fed?: GoalView['fed']): string {
+  const chip = (m: MatId, q: number, state: '' | 'ok' | 'no') =>
+    `<span class="rc${state ? ' ' + state : ''}" data-mat="${m}">${matGlyph(m, 14)}${q > 1 ? `<b class="mono">${q}</b>` : ''}<span>${esc(MATERIALS[m].name)}</span>${state ? icon(state === 'ok' ? 'check' : 'close', 11) : ''}</span>`;
+  const ins = r.inputs.map(([m, q]) => chip(m, q, fed ? (fed.fed[m] ? 'ok' : 'no') : '')).join('<i class="rc-op">+</i>');
+  const outs = r.outputs.map(([m, q], port) => chip(m, q, fed && port === 0 ? (fed.out ? 'ok' : 'no') : '')).join('<i class="rc-op">+</i>');
+  const words = (xs: [MatId, number][]) => xs.map(([m, q]) => `${q > 1 ? q + ' ' : ''}${MATERIALS[m].name}`).join(' and ');
+  return `<span class="gc-recipe" data-testid="goal-recipe" role="img" aria-label="${esc(`${words(r.inputs)} make ${words(r.outputs)}`)}">${ins}<i class="rc-op">→</i>${outs}</span>`;
+}
+
+/** Under the title: the recipe, then the why, or the how in its place, with the button that swaps them. */
+function whyHtml(g: Game, v: GoalView): string {
+  const how = howGoal === g.goal.i;
+  // ("Make your first Phone" has a row of its own for what is wired in: the recipe is drawn plain there.)
+  const recipe = v.recipe ? recipeHtml(v.recipe, v.inputs ? undefined : v.fed) : '';
+  return `<p class="gc-hint${how ? ' how' : ''}" data-testid="goal-hint" data-say="${how ? 'how' : 'why'}">${recipe}<span class="gc-say">${esc(how ? v.hint : v.why)}</span> <button class="gc-how" data-act="how" data-testid="goal-how" aria-pressed="${how}" title="${how ? 'Why this goal' : 'How to do it'}">${how ? 'Why?' : 'How?'}</button></p>`;
+}
+
 function goalHtml(g: Game, v: GoalView, rows: string, prog: string): string {
-  const step = `${v.free ? 'Free play' : 'Goal'} ${v.number} / ${v.total}`;
+  // (The word is a part of its own: a phone's folded card keeps the count and drops the word.)
+  const step = `<span class="gc-w">${v.free ? 'Free play' : 'Goal'} </span>${v.number} / ${v.total}`;
   const gh = ghostsHtml(performance.now());
   // (The ghost comes after the body it lies over, and the two never pass for one another: the card is patched
   // in place by position, and a body rebuilt when the ghost comes or goes would rise a second time.)
@@ -431,19 +495,19 @@ function goalHtml(g: Game, v: GoalView, rows: string, prog: string): string {
   }
   return `<div class="gc-main">${pipsHtml(g)}${body}<div class="gc-head"><span class="gc-step">${step}</span><span class="gc-rewards">${rewardChips(v.reward)}</span></div>
       <h3 class="gc-title">${esc(v.goal.title)}</h3>
-      <p class="gc-hint">${esc(v.hint)}</p>
+      ${whyHtml(g, v)}
       ${prog}
       ${rows}</div>${gh.card}</div>${gh.press}`;
 }
 
 /**
- * The demo's last goal, done: what the card shows from the first Lens until the player has left the summary
+ * The demo's last goal, done: what the card shows from the first Phone until the player has left the summary
  * (Keep playing). Free play does not start behind the summary.
  */
 function endedHtml(g: Game): string {
   const goal = GOALS[MAIN_GOALS - 1];
   const gh = ghostsHtml(performance.now());
-  return `<div class="gc-main">${pipsHtml(g, true)}<div class="gc-body${rises ? ` rise${rises % 2}` : ''}" data-key="body"><div class="gc-head"><span class="gc-step">Goal ${MAIN_GOALS} / ${MAIN_GOALS}</span><span class="gc-done">${icon('check', 12)}Done</span></div>
+  return `<div class="gc-main">${pipsHtml(g, true)}<div class="gc-body${rises ? ` rise${rises % 2}` : ''}" data-key="body"><div class="gc-head"><span class="gc-step"><span class="gc-w">Goal </span>${MAIN_GOALS} / ${MAIN_GOALS}</span><span class="gc-done">${icon('check', 12)}Done</span></div>
       <h3 class="gc-title">${esc(goal.title)}</h3>
       <div class="gc-rewards"><span class="rw new">Demo complete</span></div></div>${gh.card}</div>${gh.press}`;
 }
@@ -452,7 +516,7 @@ function endedHtml(g: Game): string {
 
 /**
  * The demo has ended and the player has not gone on into free play yet (endingShown in hud-screens.ts): from the
- * first Lens until Keep playing (or Escape) on the summary, and behind the start screen of a save that has ended.
+ * first Phone until Keep playing (or Escape) on the summary, and behind the start screen of a save that has ended.
  * The card shows the demo's last goal done, with no Claim, whether or not the capstone was claimed: Keep playing
  * claims it. Under `?nosummary` there is no summary to leave: the card goes on as ever, Claim and all.
  */
@@ -510,10 +574,14 @@ function renderGoal(g: Game, force: boolean) {
     // A wait (what the goal asks for next has to be saved up for, or Flow has to be held): what there is to do
     // meanwhile is the line or the tip, and on a phone the hint folds behind a tap once the player has pressed the
     // board (hud.css, "phone seating"). Once it can be bought, the hint is what to do, and it is shown again.
-    // "Make your first Lens" folds it too once there is a Fabricator: its inputs row and its line say what the hint
+    // "Make your first Phone" folds it too once there is a Fabricator: its inputs row and its line say what the hint
     // says, wire by wire (with the hint open as well, the strip took 44.6% of a 360x740 stage).
     setClass(goalEl, 'wait', !!wait || saving(v.progress) || flowView || !!inputs?.length);
-  } else setClass(goalEl, 'wait', false);
+    tendHow(g, v, !!wait || saving(v.progress));
+  } else {
+    setClass(goalEl, 'wait', false);
+    tendHow(g, v, false);
+  }
   goalPanel.render(goalHtml(g, v, rows, prog), force);
   announceTips(goalEl);
 }
@@ -550,7 +618,7 @@ function renderOrder(g: Game, force: boolean) {
       : `No Market is getting ${name} yet. Wire some to a Market.`}</div>`
     : bar(o.need > 0 ? o.got / o.need : 0, color);
   orderPanel.render(`<div class="oc-ico">${matGlyph(o.order.mat, 20)}</div>
-    <div class="oc-main"><div class="oc-top"><span class="oc-lbl">Order</span>${left}</div><div class="oc-line">Deliver <b class="mono">${o.got} / ${o.need}</b> ${name}</div>
+    <div class="oc-main"><div class="oc-top"><span class="oc-lbl">Order</span>${left}</div><div class="oc-line"><span class="oc-w">Deliver </span><b class="mono">${o.got} / ${o.need}</b><span class="oc-w"> ${name}</span></div>
       ${state}
       <div class="oc-pay"><span class="gc-lbl">${o.ready ? 'Filled' : 'Pays'}</span>${rewardChips(o.reward)}</div></div>
     ${o.ready ? `<button class="claim sm" data-act="claim-order" data-testid="order-claim">Claim</button>` : ''}`, force);
@@ -558,10 +626,8 @@ function renderOrder(g: Game, force: boolean) {
 
 // ---------- bottleneck chip ----------
 
-function nodeName(n: GNode): string {
-  if (n.type === 'well') return `${matName(n.material)} Well`;
-  return `${NODE_DEFS[n.type].name}${n.recipe && RECIPES[n.recipe] ? ` (${RECIPES[n.recipe].name})` : ''}`;
-}
+/** A node as the alert names it, which is how its card is titled: "Sand Drill", "Glass Refiner", "Lab". */
+const nodeName = (n: GNode): string => nodeNoun(n);
 
 /** What is wrong with a node, in words that say what to do. null when it is fine, or only suffering from a problem elsewhere. */
 function problemText(g: Game, n: GNode): string | null {
@@ -631,7 +697,7 @@ function adviceNodes(g: Game, a: Advice | null | undefined): number[] {
 /**
  * Is the card already about this problem? It is when its hint or line names the node (goalFocus), or the tip on
  * offer or the line's next step is about the node or about where its trouble comes from (a starved machine's
- * supplier: "buy Speed on the Ember Well" says what "Refiner (Spark) needs more Ember" says).
+ * supplier: "buy Speed on the Ore Drill" says what "Copper Refiner needs more Ore" says).
  */
 function cardSays(g: Game, n: GNode, focus: number[]): boolean {
   const about = new Set<number>([n.id]);

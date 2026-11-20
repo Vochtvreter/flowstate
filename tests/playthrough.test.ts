@@ -52,7 +52,7 @@ function player(g: Game) {
   return p;
 }
 
-/** Goals 1 to 7, played without a pause: wire, second Well, Refiner, first Shard, Well upgrade, Lab. */
+/** Goals 1 to 7, played without a pause: wire, second Drill, Refiner, first Glass, Drill upgrade, Lab. */
 function opening(g: Game) {
   const p = player(g);
   const w1 = well(g);
@@ -61,7 +61,7 @@ function opening(g: Game) {
   connect(g, w1.id, 0, m.id);
   p.claim('wire-market');
 
-  const w2 = p.pay('the second Well', nodeCost(g, 'well'), () => placeNode(g, 'well', 0, 0, { depositId: 2 }));
+  const w2 = p.pay('the second Drill', nodeCost(g, 'well'), () => placeNode(g, 'well', 0, 0, { depositId: 2 }));
   p.claim('second-well');
 
   connect(g, w2.id, 0, m.id);
@@ -73,11 +73,11 @@ function opening(g: Game) {
   p.claim('build-refiner');
 
   connect(g, refiner.id, 0, m.id);
-  run(g, 6); // two Glint in, two seconds of refining, one Shard out and sold
+  run(g, 6); // two Sand in, two seconds of refining, one Glass out and sold
   p.claim('sell-shard');
   expect(has(g, 'R1')).toBe(true);
 
-  p.pay('a Well upgrade', upgradeCost(w1, 'speed'), () => upgrade(g, w1.id, 'speed'));
+  p.pay('a Drill upgrade', upgradeCost(w1, 'speed'), () => upgrade(g, w1.id, 'speed'));
   p.claim('upgrade-well');
 
   const lab = p.pay('the first Lab', nodeCost(g, 'lab'), () => placeNode(g, 'lab', 700, 100));
@@ -93,7 +93,7 @@ describe('scripted playthrough', () => {
     const { p } = opening(g);
     expect(p.claimed.slice(0, 5)).toEqual(GOALS.slice(0, 5).map((x) => x.id));
     expect(p.claimed).toEqual(GOALS.slice(0, 7).map((x) => x.id));
-    // Reward money alone bought the Well, the Refiner, the upgrade and the Lab: nothing had to be waited for.
+    // Reward money alone bought the Drill, the Refiner, the upgrade and the Lab: nothing had to be waited for.
     expect(p.purse).toBeGreaterThanOrEqual(0);
     expect(g.time).toBeLessThan(30);
     expect(g.credits).toBeGreaterThanOrEqual(p.purse);
@@ -111,33 +111,33 @@ describe('scripted playthrough', () => {
     };
 
     // Goal 8: the first research is the first real wait.
-    p.wait('α for Murk Deposits', 90, () => research(g, 'P2'));
+    p.wait('α for Oil Deposits', 90, () => research(g, 'P2'));
     p.claim('research-murk');
 
-    // Goal 9: a Well on the Murk deposit and a Refiner from its port.
-    const murk = build('the Murk Well', 30, () => nodeCost(g, 'well'), () => placeNode(g, 'well', 0, 0, { depositId: 3 }));
-    const ink = build('the Ink Refiner', 60, () => nodeCost(g, 'refiner'), () => placeNode(g, 'refiner', 400, 420));
+    // Goal 9: a Drill on the Oil deposit and a Refiner from its port.
+    const murk = build('the Oil Drill', 30, () => nodeCost(g, 'well'), () => placeNode(g, 'well', 0, 0, { depositId: 3 }));
+    const ink = build('the Plastic Refiner', 60, () => nodeCost(g, 'refiner'), () => placeNode(g, 'refiner', 400, 420));
     connect(g, murk.id, 0, ink.id);
     expect(ink.recipe).toBe('ink');
     connect(g, ink.id, 0, m.id);
-    p.wait('the first Ink', 15, () => !!g.made.ink);
+    p.wait('the first Plastic', 15, () => !!g.made.ink);
     p.claim('make-ink');
 
-    // Goal 10: the Silt needs an exit before the Refiner jams.
+    // Goal 10: the Tar needs an exit before the Refiner jams.
     const sink = placeNode(g, 'void', 700, 560)!;
     connect(g, ink.id, 1, sink.id);
-    p.wait('the Ink Refiner running', 20, () => g.goal.ready);
+    p.wait('the Plastic Refiner running', 20, () => g.goal.ready);
     p.claim('silt-exit');
-    connect(g, ink.id, 0, lab.id); // study some Ink too, as the Lab goal taught
+    connect(g, ink.id, 0, lab.id); // study some Plastic too, as the Lab goal taught
 
-    // Goal 11: Ember Deposits, an Ember Well and a Spark Refiner.
-    p.wait('α for Ember Deposits', 150, () => research(g, 'P3'));
-    const ember = build('the Ember Well', 30, () => nodeCost(g, 'well'), () => placeNode(g, 'well', 0, 0, { depositId: 4 }));
-    const spark = build('the Spark Refiner', 60, () => nodeCost(g, 'refiner'), () => placeNode(g, 'refiner', 400, 560));
+    // Goal 11: Ore Deposits, an Ore Drill and a Copper Refiner.
+    p.wait('α for Ore Deposits', 150, () => research(g, 'P3'));
+    const ember = build('the Ore Drill', 30, () => nodeCost(g, 'well'), () => placeNode(g, 'well', 0, 0, { depositId: 4 }));
+    const spark = build('the Copper Refiner', 60, () => nodeCost(g, 'refiner'), () => placeNode(g, 'refiner', 400, 560));
     connect(g, ember.id, 0, spark.id);
     expect(spark.recipe).toBe('spark');
     connect(g, spark.id, 0, m.id);
-    p.wait('the first Spark', 15, () => !!g.made.spark);
+    p.wait('the first Copper', 15, () => !!g.made.spark);
     p.claim('make-spark');
 
     expect(p.claimed).toEqual(GOALS.slice(0, 11).map((x) => x.id));
@@ -164,7 +164,7 @@ describe('scripted playthrough', () => {
 const on = (run: CardRun, id: string) => run.spent.find((x) => x.id === id)!;
 const lens = (r: CardRun) => r.g.stats.firstLensAt!;
 const SPINE = ['L1', 'P1', 'P2', 'P3', 'P4', 'P5', 'P7', 'R1', 'S1']; // what the goal chain grants or asks for
-/** ...and what a card's line asks the player to research: Lab Speed, then Deep Analysis ("Make your first Mist"). */
+/** ...and what a card's line asks the player to research: Lab Speed, then Deep Analysis ("Make and sell Silicon"). */
 const LINE_TECHS = ['R2', 'R3'];
 const lineTechs = (run: CardRun) => (run.lines.some((x) => x.line === 'deep-analysis') ? LINE_TECHS : []);
 const LONG = ['make-spark', 'make-glyph', 'make-mist', 'build-fabricator'];
@@ -183,8 +183,8 @@ describe('the whole demo, by the card alone', () => {
       expect(g.ended).toBe(true);
       expect(g.stats.firstLensAt).not.toBeNull();
       expect(g.credits).toBeGreaterThanOrEqual(0);
-      // No side techs, and no tip but the Flow ring's. The only upgrades are what the cards asked for: the Well's
-      // of goal 6, one level on every Well with "Upgrade all" (goal 20), and the steps of the lines (the Flow fix,
+      // No side techs, and no tip but the Flow ring's. The only upgrades are what the cards asked for: the Drill's
+      // of goal 6, one level on every Drill with "Upgrade all" (goal 20), and the steps of the lines (the Flow fix,
       // Speed on the pairs), or the ring's fix where no line named it.
       // (Market Lens comes by itself with the first sale over demand.) With the lines, Lab Speed and Deep Analysis too.
       expect(g.techs.filter((id) => id !== 'C1').sort()).toEqual([...SPINE, ...lineTechs(run)].sort());
@@ -197,13 +197,13 @@ describe('the whole demo, by the card alone', () => {
     expect(plain.tips.length).toBe(0);
     expect(lineTechs(plain)).toEqual(LINE_TECHS);
     expect(lineTechs(bare)).toEqual([]);
-    // The hints ask for one Lab. The lines add five more, four of them with a Well of their own, on a board expanded twice.
+    // The hints ask for one Lab. The lines add five more, four of them with a Drill of their own, on a board expanded twice.
     expect(bare.g.nodes.filter((n) => n.type === 'lab').length).toBe(1);
     expect(bare.g.board.expansions).toBe(1);
     expect(plain.g.nodes.filter((n) => n.type === 'lab').length).toBe(6);
     expect(plain.g.nodes.filter((n) => n.type === 'well').length).toBe(bare.g.nodes.filter((n) => n.type === 'well').length + 4);
     expect(plain.g.board.expansions).toBe(2);
-    // ...Ink is studied, and Glyph no longer is by the time the Fabricator is saved for.
+    // ...Plastic is studied, and Circuit no longer is by the time the Fabricator is saved for.
     const wired = (g: typeof plain.g, recipe: string, type: string) =>
       g.wires.some((w) => g.nodes.find((n) => n.id === w.from)?.recipe === recipe && g.nodes.find((n) => n.id === w.to)?.type === type);
     expect(wired(plain.g, 'ink', 'lab')).toBe(true);
@@ -213,12 +213,12 @@ describe('the whole demo, by the card alone', () => {
   });
 
   it('"Hold 95% Flow" is earned: it does not complete until the one machine short of its input is fixed', () => {
-    // The card sends the player to the Flow ring; what holds Flow back is the Spark Refiner, short of Ember. The
-    // card's line names the fix, in the words the ring's tip used to: "buy Speed on the Ember Well" (or "its Ember
-    // Well", where an Ember Well with a Lab of its own stands too).
+    // The card sends the player to the Flow ring; what holds Flow back is the Copper Refiner, short of Ore. The
+    // card's line names the fix, in the words the ring's tip used to: "buy Speed on the Ore Drill" (or "its Ore
+    // Drill", where an Ore Drill with a Lab of its own stands too).
     const steps = plain.lines.filter((x) => x.goal === 'hold-flow');
     expect(steps.length).toBeGreaterThanOrEqual(1);
-    expect(steps[0].text).toMatch(/^The Spark Refiner needs more Ember: buy Speed on (the|an|its) Ember Well \(50¢\)\.$/);
+    expect(steps[0].text).toMatch(/^The Copper Refiner needs more Ore: buy Speed on (the|an|its) Ore Drill \(50¢\)\.$/);
     expect(on(plain, 'hold-flow').seconds).toBeGreaterThan(20);
     expect(on(plain, 'hold-flow').seconds).toBeLessThan(60);
     // A player who ignores the lines gets no tip for it either (a tip never says what the card says): the valve
@@ -231,12 +231,12 @@ describe('the whole demo, by the card alone', () => {
   it('the lines are what makes it a twenty-minute game: with the hints alone every long wait is for α, and long', () => {
     const long = bare.spent.filter((x) => x.seconds > 180);
     expect(long.map((x) => `${x.title}: ${x.waitedFor}`)).toEqual([
-      'Make your first Spark: α for Ember Deposits',
-      'Assemble your first Glyph: α for Assembly',
-      'Make your first Mist: α for Breeze Deposits',
+      'Make and sell Copper: α for Ore Deposits',
+      'Make your first Circuit: α for Assembly',
+      'Make and sell Silicon: α for Quartz Deposits',
       'Build a Fabricator: α and β for Fabrication',
     ]);
-    // Most of an hour to the Lens with the hints alone, about seventeen minutes with the lines (this player claims
+    // Most of an hour to the Phone with the hints alone, about seventeen minutes with the lines (this player claims
     // within seconds; the pacing tool's card-only player, who claims 8–16 s late, at 17:34–18:14): no tip involved.
     expect(lens(bare)).toBeGreaterThan(40 * 60);
     expect(lens(bare)).toBeLessThan(70 * 60);
@@ -246,8 +246,8 @@ describe('the whole demo, by the card alone', () => {
     // No goal takes four and a half minutes (the pacing tool's card-only player, who claims late, has six).
     expect(Math.max(...plain.spent.map((x) => x.seconds))).toBeLessThan(270);
     expect(plain.g.stats.fromSales + plain.g.stats.fromGoals + plain.g.stats.fromOrders).toBeGreaterThan(9000);
-    // The two-price rule does not show itself to this player before the Lens: nothing the cards ask for sells over
-    // its demand (the Fabricator card's line that wired the raw Wells to the Market did, at minute 17). Market Lens
+    // The two-price rule does not show itself to this player before the Phone: nothing the cards ask for sells over
+    // its demand (the Fabricator card's line that wired the raw Drills to the Market did, at minute 17). Market Lens
     // comes with it, in free play.
     if (plain.surplusAt != null) expect(plain.surplusAt).toBeGreaterThanOrEqual(lens(plain));
     expect(plain.g.techs.includes('C1')).toBe(plain.g.seenSurplus);
@@ -298,7 +298,7 @@ describe('the whole demo, by the card and the tips', () => {
       for (let i = 1; i < tips.length; i++) expect(tips[i].at - tips[i - 1].at, `${name}: ${tips[i].text}`).toBeGreaterThanOrEqual(35);
     }
     for (const { name, run } of runs.slice(0, 4)) {
-      // With the tips the Lens comes a little sooner than by the cards alone, not half an hour sooner as it once did.
+      // With the tips the Phone comes a little sooner than by the cards alone, not half an hour sooner as it once did.
       expect(lens(run), name).toBeLessThan(lens(plain) + 30);
       expect(lens(run), name).toBeGreaterThan(lens(plain) - 4 * 60);
     }
@@ -325,7 +325,7 @@ describe('the whole demo, by the card and the tips', () => {
       }).join('')}`);
     });
     const row = (label: string, f: (r: CardRun) => string | number) => lines.push(`${label.padEnd(42)}${all.map((x) => pad(f(x.run), 12)).join('')}`);
-    row('first Lens', (r) => clock(lens(r)));
+    row('first Phone', (r) => clock(lens(r)));
     row('longest on one goal (s)', (r) => Math.round(Math.max(...r.spent.map((x) => x.seconds))));
     row('time on "Build a Fabricator" (s)', (r) => Math.round(on(r, 'build-fabricator').seconds));
     row('longest wait with no tip on offer (s)', (r) => r.longestTipless);

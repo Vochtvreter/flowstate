@@ -27,7 +27,7 @@ import { fresh, market, run, well } from './helpers';
 export interface CardOptions {
   /** Does what the card's "while you wait" lines say (the default). false: the hints alone, as before the lines existed. */
   meanwhile?: boolean;
-  /** Also wires every new Refiner to the Lab, as goal 7 taught for Shard. */
+  /** Also wires every new Refiner to the Lab, as goal 7 taught for Glass. */
   studyAll?: boolean;
   /** Follows the adviser's tips. */
   tips?: boolean;
@@ -88,12 +88,12 @@ export interface CardRun {
   longestTipless: number;
   /** When the first surplus sale was noted (g.seenSurplus), or null. */
   surplusAt: number | null;
-  /** Every step of a card's line the player took, and the levels "Upgrade all your Wells at once" bought. */
+  /** Every step of a card's line the player took, and the levels "Speed up every Drill at once" bought. */
   lines: LineStep[];
   bulkLevels: number;
 }
 
-/** Plays the demo to the first Lens by the card. */
+/** Plays the demo to the first Phone by the card. */
 export function playByTheCard(opts: CardOptions = {}): CardRun {
   const g = fresh();
   const HANDS = opts.hands ?? 6;
@@ -235,31 +235,31 @@ export function playByTheCard(opts: CardOptions = {}): CardRun {
   claim('build-refiner');
   wire(shard, m);
   claim('sell-shard');
-  wait('credits for a Well upgrade', () => g.credits >= upgradeCost(w1, 'speed'));
+  wait('credits for a Drill upgrade', () => g.credits >= upgradeCost(w1, 'speed'));
   act();
   expect(upgrade(g, w1.id, 'speed')).toBe(true);
   claim('upgrade-well');
   const lab = from(shard, 'lab');
   claim('feed-lab');
-  // 8–11: Murk, Silt, Ember.
+  // 8–11: Oil, Tar, Ore.
   study('P2');
   claim('research-murk');
   const ink = from(buy('well', { depositId: 3 }), 'refiner');
   expect(ink.recipe).toBe('ink');
   claim('make-ink');
-  wire(ink, m); // "sell the Ink at the Market..."
-  from(ink, 'void', 1); // "...then pick Void for the Silt"
+  wire(ink, m); // "sell the Plastic at the Market..."
+  from(ink, 'void', 1); // "...then pick Dump for the Tar"
   claim('silt-exit');
   if (opts.studyAll) wire(ink, lab);
   study('P3');
   const spark = from(buy('well', { depositId: 4 }), 'refiner');
   expect(spark.recipe).toBe('spark');
-  wire(spark, m); // "...and sell the Spark"
+  wire(spark, m); // "...and sell the Copper"
   claim('make-spark');
   if (opts.studyAll) wire(spark, lab);
   // 12–14: orders, the Router, the board.
   claim('first-order');
-  const router = from(spark, 'router'); // "Build a Router from the Spark Refiner's port..."
+  const router = from(spark, 'router'); // "Build a Router from the Copper Refiner's port..."
   wire(router, lab); // "...and wire it to a Lab and to a Market..."
   wire(router, m);
   act();
@@ -269,39 +269,39 @@ export function playByTheCard(opts: CardOptions = {}): CardRun {
   act();
   expect(expandBoard(g)).toBe(true);
   claim('expand');
-  // 15–17: Glyph, Flow, β.
+  // 15–17: Circuit, Flow, β.
   study('P4');
-  const glyph = from(ink, 'assembler'); // "...build an Assembler from the Ink Refiner's Ink port..."
+  const glyph = from(ink, 'assembler'); // "...build an Assembler from the Refiner's Plastic port..."
   expect(glyph.recipe).toBe('glyph');
   wire(glyph, m); // "...wire it to the Market..."
-  wire(spark, glyph); // "...then wire Spark into it to make Glyph"
+  wire(spark, glyph); // "...then wire Copper into it to make Circuit"
   claim('make-glyph');
   claim('hold-flow');
   wire(glyph, lab); // "Drag from the Assembler's port to a Lab"
   claim('study-glyph');
-  // 18–20: Mist, Prism, Upgrade all.
+  // 18–20: Silicon, Screen, Upgrade all.
   study('P5');
   const mist = from(buy('well', { depositId: 5 }), 'refiner');
   expect(mist.recipe).toBe('mist');
-  wire(mist, m); // "...and sell the Mist"
+  wire(mist, m); // "...and sell the Silicon"
   claim('make-mist');
   if (opts.studyAll) wire(mist, lab);
-  const prism = from(mist, 'assembler'); // "Build another Assembler from the Mist Refiner's port..."
+  const prism = from(mist, 'assembler'); // "Build another Assembler from the Silicon Refiner's port..."
   expect(prism.recipe).toBe('prism');
   wire(prism, m); // "...wire it to the Market..."
-  wire(shard, prism); // "...then wire Shard into it to make Prism (two for every Mist)"
+  wire(shard, prism); // "...then wire Glass into it to make Screen (two for every Silicon)"
   claim('make-prism');
   wait('credits for Upgrade all', () => g.credits >= upgradeCost(g.nodes.find((n) => n.type === 'well')!, 'speed'));
   act();
-  bulkLevels = upgradeAll(g, 'well', 'speed'); // "Select a Well and press Upgrade all beside Speed"
+  bulkLevels = upgradeAll(g, 'well', 'speed'); // "Select a Drill and press Upgrade all beside Speed"
   expect(bulkLevels).toBeGreaterThan(0);
   claim('bulk-upgrade');
-  // 21–22: the Fabricator and the Lens.
+  // 21–22: the Fabricator and the Phone.
   study('P7');
-  const fab = from(prism, 'fabricator'); // "...then save up and build a Fabricator from the Prism Assembler's port"
+  const fab = from(prism, 'fabricator'); // "...then save up and build a Fabricator from the Screen Assembler's port"
   expect(fab.recipe).toBe('lens');
   claim('build-fabricator');
-  wire(glyph, fab); // "Feed the Fabricator one Prism and two Glyph for every Lens": the Prism is wired already
+  wire(glyph, fab); // "Feed the Fabricator one Screen and two Circuit for every Phone": the Screen is wired already
   claim('make-lens');
   tickSurplus();
   return { g, spent, tips, longestTipless, surplusAt, lines, bulkLevels };

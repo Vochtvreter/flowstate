@@ -32,8 +32,8 @@ const WAIT = 150;
 const SPARE = 50;
 
 /**
- * "Assemble your first Glyph" where the blinking was seen: its second line up, the first expansion's deposits
- * each with a Well and a Lab, the board expanded again. The line's next step is a Well on a free deposit of the
+ * "Make your first Circuit" where the blinking was seen: its second line up, the first expansion's deposits
+ * each with a Drill and a Lab, the board expanded again. The line's next step is a Drill on a free deposit of the
  * second expansion, given only with its Lab's price free as well. Assembly is 150 s away at 1 α a second, so of the
  * Assembler's 600¢ the reserve keeps what the credits a second do not bring in by then: nothing at 4.3 ¢/s, 105¢ at
  * 3.3 ¢/s. The player holds the step's price and 50¢ more: covered at the top of the ripple, 55¢ short at the
@@ -215,7 +215,7 @@ describe('the step of a card\'s line does not blink with the reserve (ADVICE.lin
       g.credits = nodeCost(g, 'well') + nodeCost(g, 'lab') + SPARE;
     };
 
-    // The next step. The Well is placed and its Lab built (the Lab from the credits in hand, as ever); the Well the
+    // The next step. The Drill is placed and its Lab built (the Lab from the credits in hand, as ever); the Drill the
     // line asks for after that is another step: short, it is held at once.
     let { g } = kept();
     const first = lineAdvice(g)!;
@@ -242,10 +242,10 @@ describe('the step of a card\'s line does not blink with the reserve (ADVICE.lin
     g.creditRate = HIGH;
     expect(lineAdvice(g)).toMatchObject({ build: 'well', deposit: was.deposit });
 
-    // Another step at the very same price. On "Make your first Mist" the line that buys Speed on each Well with a Lab
-    // of its own goes from pair to pair, and a level costs the same on every Well. The first pair's Well is on offer
+    // Another step at the very same price. On "Make and sell Silicon" the line that buys Speed on each Drill with a Lab
+    // of its own goes from pair to pair, and a level costs the same on every Drill. The first pair's Drill is on offer
     // and kept; its level is bought, and its Lab's too, by hand, before the card is looked at again: what the line
-    // asks for now is the next pair's Well, for the price the kept step had. It is another step: held at once.
+    // asks for now is the next pair's Drill, for the price the kept step had. It is another step: held at once.
     const m = board().g;
     m.techs.push('P4');
     at(m, 'make-mist');
@@ -278,12 +278,12 @@ describe('the step of a card\'s line does not blink with the reserve (ADVICE.lin
     m.creditRate = 1e3;
     expect(lineAdvice(m)).toMatchObject({ upgrade: 'speed', node: next.node });
 
-    // Another goal with the same line and the same step ("Make your first Mist" picks the expansion up where the
-    // Glyph card left it): nothing is carried over. (With no credits coming in, all of its purchase is kept back.)
+    // Another goal with the same line and the same step ("Make and sell Silicon" picks the expansion up where the
+    // Circuit card left it): nothing is carried over. (With no credits coming in, all of its purchase is kept back.)
     ({ g } = kept());
     const glyph = lineAdvice(g)!;
     g.creditRate = 0;
-    expect(face(g)).toBe('step'); // still the Glyph card: kept, whatever the reserve has grown to
+    expect(face(g)).toBe('step'); // still the Circuit card: kept, whatever the reserve has grown to
     g.techs.push('P4');
     at(g, 'make-mist');
     expect(meanwhileOf(g)!.id).toBe('expand-labs');
@@ -339,7 +339,7 @@ describe('the step of a card\'s line does not blink with the reserve (ADVICE.lin
 describe('the dwell in the real game: the pacing tool\'s card player who claims 4 to 8 s late, to minute seven', () => {
   /**
    * Seed 0 up to 7 min 12 s, the card looked at on every tick as the page looks at it. Around 6:50 this player has
-   * just built the Lab of the Ember Well of the second expansion and the line asks for a Well on the Glint deposit;
+   * just built the Lab of the Ore Drill of the second expansion and the line asks for a Drill on the Sand deposit;
    * their hands are busy for six seconds more. Returns every look at a line that is up and not done.
    */
   const play = (hold: number) => withHold(hold, () => {

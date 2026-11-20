@@ -107,9 +107,9 @@ export function recipesFor(g: Game, type: NodeType): Recipe[] {
 /**
  * The unlocked recipe a machine of this type takes from the materials wired into it: of those that use any of
  * them, the one that uses the largest share of its inputs from them, then the one with the fewest inputs, then
- * the earliest in the tech tree (RECIPES order). So a Fabricator built from the Prism Assembler's port makes
- * Lens even once Dynamo is researched, and an Assembler built from the Spark Refiner's port makes Glyph after
- * Reclamation: what the cards say. (It used to be the dearest output, which picked Dynamo and Coil there.)
+ * the earliest in the tech tree (RECIPES order). So a Fabricator built from the Screen Assembler's port makes
+ * Phone even once Laptop is researched, and an Assembler built from the Copper Refiner's port makes Circuit after
+ * Reclamation: what the cards say. (It used to be the dearest output, which picked Laptop and Cable there.)
  */
 export function pickRecipe(g: Game, type: NodeType, mats: MatId[]): Recipe | null {
   const order = Object.keys(RECIPES);
@@ -121,7 +121,7 @@ export function pickRecipe(g: Game, type: NodeType, mats: MatId[]): Recipe | nul
 
 /**
  * Machines that stand without a recipe with something wired into them take the recipe that research has since
- * made possible for what they get (a Refiner on the Silt port picks Clay once Reclamation is researched).
+ * made possible for what they get (a Refiner on the Tar port picks Rubber once Reclamation is researched).
  * Called after every grant of a tech, and once a tick (src/sim.ts) for a board loaded or changed otherwise: it
  * costs a look at each machine without a recipe, and there are hardly ever any.
  */
@@ -294,19 +294,19 @@ export function grantTech(g: Game, id: string) {
   adoptRecipes(g);
 }
 
-/** The demo is complete (first Lens). Sets `ended` once and raises 'demo-end'; later calls do nothing. */
+/** The demo is complete (first Phone). Sets `ended` once and raises 'demo-end'; later calls do nothing. */
 export function endDemo(g: Game) {
   if (g.ended) return;
   g.ended = true;
   g.stats.firstLensAt = g.time;
-  g.events.push({ kind: 'demo-end', text: 'Demo complete: you made your first Lens.' });
+  g.events.push({ kind: 'demo-end', text: 'Demo complete: you made your first Phone.' });
   g.rev++;
 }
 
 export interface EndStats {
   /** Seconds played (game time; time away is not counted). */
   playTime: number;
-  /** Game time of the first Lens, or null before it. */
+  /** Game time of the first Phone, or null before it. */
   firstLensAt: number | null;
   /** Credits earned, by source. */
   fromSales: number;

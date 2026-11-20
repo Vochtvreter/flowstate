@@ -44,6 +44,26 @@
 .gc-done { display: inline-flex; align-items: center; gap: 4px; font-size: 10.5px; font-weight: 700; letter-spacing: 0.09em; text-transform: uppercase; color: #4ade80; }
 .gc-title { margin: 0; font-family: var(--disp); font-size: 17px; font-weight: 700; line-height: 21px; color: #fff; }
 .gc-hint { margin: 0; font-size: 12.5px; line-height: 17px; color: #c9d3e8; }
+/* Under the title the card says why (hud.ts, whyHtml). The gesture is behind "How?", a word-sized button at the
+   end of the sentence; pressed, or when the player has not got anywhere, the how stands in the why's place, marked. */
+.gc-how { position: relative; appearance: none; margin: 0 0 0 2px; padding: 0; border: 0; background: none; font-size: inherit; line-height: inherit; font-weight: 600; color: #9db8ff; text-decoration: underline; text-decoration-color: rgba(157, 184, 255, 0.45); text-underline-offset: 2px; white-space: nowrap; }
+.gc-how:hover { color: #c7d6ff; }
+/* (A finger gets 44 px to press: the word is small, its reach is not.) */
+.gc-how::after { content: ''; position: absolute; inset: -14px -12px; }
+.gc-hint.how .gc-say { color: #fff; }
+.gc-hint.how .gc-say::before { content: 'How'; margin-right: 7px; padding: 1px 6px; border-radius: 5px; background: rgba(122, 162, 255, 0.18); font-size: 10px; font-weight: 700; letter-spacing: 0.08em; text-transform: uppercase; color: #9db8ff; vertical-align: 1px; }
+/* The recipe the goal is about, drawn: "2 Sand → Glass". An input that is wired into its machine is ticked, one
+   that is not stands dashed with a cross: what is left to do is read off the picture. */
+.gc-recipe { display: flex; flex-wrap: wrap; align-items: center; gap: 4px 5px; margin: 2px 0 5px; }
+.rc { display: inline-flex; align-items: center; gap: 5px; height: 23px; padding: 0 8px 0 6px; border-radius: 7px; border: 1px solid #2c3b66; background: rgba(255, 255, 255, 0.05); font-size: 12px; font-weight: 500; line-height: 1; color: #e6ebf5; white-space: nowrap; }
+.rc b { font-weight: 600; margin-right: -1px; }
+.rc svg { flex: none; }
+.rc.ok { border-color: rgba(74, 222, 128, 0.55); }
+.rc.ok > svg:last-child { color: #4ade80; }
+.rc.no { border-style: dashed; border-color: #5b6c9a; color: #b6c2df; }
+.rc.no > svg:last-child { color: #f8a5a5; }
+.rc > svg:last-child .ic { stroke-width: 3; }
+.rc-op { font-style: normal; font-size: 13px; color: var(--muted); }
 /* The bar, the count, and during a wait the time left. On a narrow card the time drops to a line of its own. */
 .gc-prog { display: flex; flex-wrap: wrap; align-items: center; gap: 2px 10px; margin-top: 2px; font-size: 11.5px; color: #c9d3e8; }
 .gc-prog .pbar { flex: 1 1 60px; }
@@ -177,7 +197,7 @@ html[data-input='touch'] .res.credits.flow-on::after { content: ''; position: ab
 
 /* ---------- inspector: a machine short of an input ----------
    Not a problem (status.ts: starved means under 60% of its time at work): no warning box, no red. One amber line says
-   how short it is ("Receiving 0.80 of 1.00 Ember/s"), with the quickest fix under it when there is one (panels.ts). */
+   how short it is ("Receiving 0.80 of 1.00 Ore/s"), with the quickest fix under it when there is one (panels.ts). */
 .shortbox { border-radius: 12px; padding: 9px 12px; border: 1px solid #4a3d18; background: #1d1910; }
 .shortbox p { display: flex; align-items: center; gap: 8px; margin: 0; font-size: 12.5px; line-height: 17px; color: #fcd34d; }
 .shortbox p svg { flex: none; }
@@ -278,7 +298,7 @@ button.fav:hover { background: #263252; }
 .sum-ico { flex: none; width: 46px; height: 46px; border-radius: 50%; display: flex; align-items: center; justify-content: center; color: #fff; background: radial-gradient(circle, #2a3963 0%, #17203a 70%); border: 1px solid #3a4a70; }
 .sum-head { min-width: 0; display: flex; flex-direction: column; gap: 2px; }
 .sum-kicker { font-size: 10.5px; font-weight: 700; letter-spacing: 0.09em; line-height: 13px; text-transform: uppercase; color: #4ade80; }
-/* The headline is how long the first Lens took. */
+/* The headline is how long the first Phone took. */
 .sum-head h2 { margin: 0; font-family: var(--disp); font-size: 26px; font-weight: 700; line-height: 1.12; letter-spacing: -0.01em; }
 .sum-head h2 b { font-weight: 600; color: var(--credits); }
 .sum-grid { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 8px; }
@@ -374,7 +394,7 @@ button.fav:hover { background: #263252; }
 
 /* ---------- touch ----------
    A finger gets 44px targets, and is never shown a key. */
-html[data-input='touch'] #hints, html[data-input='touch'] .kbd { display: none; }
+html[data-input='touch'] .kbd { display: none; }
 html[data-input='touch'] .alertchip { min-height: 44px; }
 /* (Where the squeezed strip draws it 40 px tall, a tablet held upright, it reaches 3 px into the gap above and the
    board below: 46 px to press. Measured from inside the chip's 1 px border, hence 4 px.) */
@@ -479,7 +499,7 @@ html[data-input='touch'] #app:not(.phone) #hud #toasts { right: var(--toast-r, 2
 .gc-hold b { font-weight: 600; color: #fff; }
 .gc-valve { flex: 1 0 100%; font-size: 11.5px; line-height: 15px; color: #5ce1ff; animation: tip-in 0.35s ease-out; }
 
-/* "Make your first Lens": the Fabricator's inputs, wired or not ("Prism ✓ · Glyph ✗"). */
+/* "Make your first Phone": the Fabricator's inputs, wired or not ("Screen ✓ · Circuit ✗"). */
 .gc-inputs { display: inline-flex; align-items: center; gap: 6px; }
 .gi { display: inline-flex; align-items: center; gap: 4px; font-weight: 600; color: var(--text); }
 .gi svg:last-child { flex: none; }
@@ -639,6 +659,12 @@ html[data-input='mouse'] #hud-strip.tight .claim.sm { height: 32px; }
 #app.phone .gc-head .rw { height: 18px; padding: 0 6px; font-size: 11px; line-height: 18px; }
 #app.phone .gc-title { font-size: 15px; line-height: 18px; }
 #app.phone .gc-hint { font-size: 12.5px; line-height: 16px; }
+#app.phone .gc-recipe { gap: 3px 4px; margin: 1px 0 3px; }
+/* While the Flows list is up on a phone the card keeps to its title, and an order that is not ready steps aside: the
+   sheet and the card together left a strip of board too thin to see a material traced on. */
+#app.phone.flows-open #goal .gc-hint, #app.phone.flows-open #goal .gc-prog, #app.phone.flows-open #goal .gc-line, #app.phone.flows-open #goal .gc-tip,
+#app.phone.flows-open #order:not([data-ready='1']), #app.phone.flows-open #hud-alert { display: none; }
+#app.phone .rc { height: 21px; padding: 0 6px 0 5px; gap: 4px; font-size: 11.5px; }
 #app.phone .gc-prog { margin-top: 1px; gap: 0 8px; font-size: 11.5px; line-height: 14px; }
 #app.phone .gc-eta::before { margin-right: 6px; }
 /* What the count is for stands on a line of its own over the bar, the count and the time left, always: at 360 px

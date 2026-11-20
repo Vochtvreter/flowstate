@@ -10,7 +10,7 @@ import { Game, Order, deserialize, serialize } from '../src/state';
 import { market, rich, run, take, well } from './helpers';
 
 /**
- * A small factory that makes and sells Glint, Shard, Ink (+ Silt) and Spark, in that order of first make.
+ * A small factory that makes and sells Sand, Glass, Plastic (+ Tar) and Copper, in that order of first make.
  * Research still to buy: plenty that costs α, so orders pay α.
  */
 function factory(): Game {
@@ -63,7 +63,7 @@ describe('orders (2.5)', () => {
     expect(rates.shard).toBeCloseTo(0.5, 1);
     expect(rates.ink).toBeCloseTo(0.5, 1);
     expect(rates.spark).toBeCloseTo(0.4, 1);
-    expect(orderCandidates(g)).toEqual(['spark', 'ink', 'shard']); // newest first; no Silt, no raw materials
+    expect(orderCandidates(g)).toEqual(['spark', 'ink', 'shard']); // newest first; no Tar, no raw materials
     for (let i = 0; i < 200; i++) {
       const o = makeOrder(g);
       expect(['spark', 'ink', 'shard']).toContain(o.mat);
@@ -93,13 +93,13 @@ describe('orders (2.5)', () => {
     const g = rich();
     connect(g, well(g).id, 0, market(g).id);
     run(g, 10);
-    // Only raw Glint is produced: that is what gets asked for.
+    // Only raw Sand is produced: that is what gets asked for.
     expect(orderCandidates(g)).toEqual(['glint']);
     g.stats.ordersFilled = 1;
     const o = makeOrder(g);
     expect(o.mat).toBe('glint');
-    expect(o.need).toBeGreaterThanOrEqual(RULES.orders.minSeconds); // a Glint a second, for at least that long
-    // Nothing is produced at all (the Well is backed up): still a valid order.
+    expect(o.need).toBeGreaterThanOrEqual(RULES.orders.minSeconds); // a Sand a second, for at least that long
+    // Nothing is produced at all (the Drill is backed up): still a valid order.
     cutWire(g, g.wires[0].id);
     run(g, 30);
     const idle = makeOrder(g);
@@ -111,7 +111,7 @@ describe('orders (2.5)', () => {
   });
 
   it('sizes an order from what is sold, not from what is made', () => {
-    // Half the Shard is studied: 0.5/s is made, 0.25/s reaches the Market.
+    // Half the Glass is studied: 0.5/s is made, 0.25/s reaches the Market.
     const g = factory();
     g.stats.ordersFilled = 1;
     const shard = g.nodes.find((n) => n.recipe === 'shard')!;
@@ -190,7 +190,7 @@ describe('orders (2.5)', () => {
     expect(idle.order).toBeNull();
   });
 
-  /** The board a player has when Orders unlock by following the goal card: Shard sold and studied, Ink sold, Spark with no wire out. */
+  /** The board a player has when Orders unlock by following the goal card: Glass sold and studied, Plastic sold, Copper with no wire out. */
   function byTheCardAtOrders(): Game {
     const g = rich();
     g.techs = ['P1', 'R1', 'P2', 'P3'];
@@ -209,7 +209,7 @@ describe('orders (2.5)', () => {
     run(g, 60);
     const spark = placeNode(g, 'refiner', 400, 540)!;
     connect(g, placeNode(g, 'well', 0, 0, { depositId: 4 })!.id, 0, spark.id);
-    run(g, 12); // the first Spark is made; the goal is claimed a few seconds later
+    run(g, 12); // the first Copper is made; the goal is claimed a few seconds later
     g.events = [];
     return g;
   }
@@ -218,7 +218,7 @@ describe('orders (2.5)', () => {
     for (let seed = 0; seed < 12; seed++) {
       const g = byTheCardAtOrders();
       g.orderSeed = (g.orderSeed + seed * 7919) >>> 0;
-      expect(orderCandidates(g)[0]).toBe('ink'); // Spark is newer, but none of it is sold
+      expect(orderCandidates(g)[0]).toBe('ink'); // Copper is newer, but none of it is sold
       const wires = g.wires.length;
       unlock(g);
       const o = g.order!;
@@ -247,7 +247,7 @@ describe('orders (2.5)', () => {
     expect(RULES.orders.minNeed / RULES.orders.marketRate).toBe(100);
     const g = factory();
     g.stats.ordersFilled = 1;
-    // Spark is the newest thing made and comes first while it sells...
+    // Copper is the newest thing made and comes first while it sells...
     expect(orderCandidates(g, { shard: 0.5, ink: 0.5, spark: 0.4 })).toEqual(['spark', 'ink', 'shard']);
     expect(orderCandidates(g, { shard: 0.5, ink: 0.5, spark: 0.08 })).toEqual(['spark', 'ink', 'shard']);
     // ...and last when only a trickle of it reaches the Market, exactly as if none did.
@@ -307,7 +307,7 @@ describe('orders (2.5)', () => {
   it('prefers what is selling, and says so when the ordered material reaches no Market', () => {
     const g = byTheCardAtOrders();
     g.stats.ordersFilled = 1;
-    // Newest first among what is sold, then what is not: Spark has no wire out.
+    // Newest first among what is sold, then what is not: Copper has no wire out.
     expect(orderCandidates(g)).toEqual(['ink', 'shard', 'spark']);
     const count: Record<string, number> = {};
     for (let i = 0; i < 400; i++) {
@@ -319,7 +319,7 @@ describe('orders (2.5)', () => {
     expect(count.shard).toBeGreaterThan(count.spark);
     expect(count.spark).toBeGreaterThan(0);
 
-    // An order for Spark: the chip can say it is not reaching a Market, at once.
+    // An order for Copper: the chip can say it is not reaching a Market, at once.
     unlock(g);
     while (g.order!.mat !== 'spark') g.order = makeOrder(g);
     expect(orderReachesMarket(g)).toBe(false);
@@ -330,7 +330,7 @@ describe('orders (2.5)', () => {
     run(g, 20);
     expect(orderView(g)!.reachesMarket).toBe(false);
     expect(g.order!.got).toBe(0);
-    // One wire later it is, as soon as the first Spark is sold.
+    // One wire later it is, as soon as the first Copper is sold.
     const spark = g.nodes.find((n) => n.recipe === 'spark')!;
     connect(g, spark.id, 0, market(g).id);
     run(g, 1);
@@ -359,7 +359,7 @@ describe('orders (2.5)', () => {
     const g = factory();
     expect(neededTier(g)).toBe('a');
     const r = orderReward(g, 'spark', 30);
-    expect(r.a).toBe(90); // what studying 30 Spark would give: 3α each
+    expect(r.a).toBe(90); // what studying 30 Copper would give: 3α each
     expect(r.b).toBe(0);
     expect(r.g).toBe(0);
     expect(r.credits).toBe(90); // half of 30 × 6¢
@@ -372,10 +372,10 @@ describe('orders (2.5)', () => {
     expect(neededTier(g)).toBe('b');
     const rb = orderReward(g, 'spark', 30);
     expect(rb.a).toBe(0);
-    // 90 α-worth is 22.5 β, and a quarter of it survives the conversion: Spark is α in a Lab, not β.
+    // 90 α-worth is 22.5 β, and a quarter of it survives the conversion: Copper is α in a Lab, not β.
     expect(RULES.orders.convertShare).toBe(0.25);
     expect(rb.b).toBe(6);
-    // The other way round as well: Glyph is 5 β each in a Lab. Paid in β that is the whole 50 β for ten;
+    // The other way round as well: Circuit is 5 β each in a Lab. Paid in β that is the whole 50 β for ten;
     // paid in α (to a player who is short of α) it is a quarter of the 200 α they would be worth.
     expect(orderReward(g, 'glyph', 10).b).toBe(50);
     g.data.a = 0;

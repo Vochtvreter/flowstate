@@ -1,4 +1,4 @@
-// "Hold 95% Flow" when the player has built ahead: a second Glyph Assembler, which the credits in hand pay for
+// "Hold 95% Flow" when the player has built ahead: a second Circuit Assembler, which the credits in hand pay for
 // when the goal comes up, leaves two producers short that no single change puts right: the chain used to stop
 // there for good. The valve's second step (all but two, at 180 s) lets it through, and the card's own line names
 // what it can fix on the way. Left alone, the board is three short: the third step (all but three, at 300 s)
@@ -16,7 +16,7 @@ import { Game, GNode, cloneGame, deserialize, nodeNoun } from '../src/state';
 import { playByTheCard } from './cardPlayer';
 import { PUBLIC_BOARD } from './fixtures/public-version';
 
-/** The scripted card player's board the moment "Hold 95% Flow" comes up, with a second Glyph Assembler built as the Glyph card taught. */
+/** The scripted card player's board the moment "Hold 95% Flow" comes up, with a second Circuit Assembler built as the Circuit card taught. */
 function builtAhead(): { g: Game; second: number } {
   let snap: Game | null = null;
   playByTheCard({ tendOrders: 'asked', onIdle: (x) => { if (!snap && activeGoal(x)!.id === 'hold-flow') snap = cloneGame(x); } });
@@ -34,7 +34,7 @@ function builtAhead(): { g: Game; second: number } {
 }
 const short = (g: Game) => g.nodes.filter((n) => countsForFlow(g, n) && !isFlowing(n)).length;
 
-describe('Hold 95% Flow with a second Glyph Assembler built ahead', () => {
+describe('Hold 95% Flow with a second Circuit Assembler built ahead', () => {
   it('the player who does what the card says: its line\'s step, then the valve\'s second step, and the goal is met', () => {
     const { g } = builtAhead();
     const t0 = g.time;
@@ -59,12 +59,12 @@ describe('Hold 95% Flow with a second Glyph Assembler built ahead', () => {
         busy = g.time + 6;
       }
     }
-    console.info(`Hold Flow with a second Glyph Assembler: ready after ${Math.round(g.time - t0)} s\n  ${did.join('\n  ')}`);
+    console.info(`Hold Flow with a second Circuit Assembler: ready after ${Math.round(g.time - t0)} s\n  ${did.join('\n  ')}`);
     expect(g.goal.ready, did.join('\n')).toBe(true);
     // Within the valve's second step and its ten seconds (and the moment it takes the smoothed Flow to settle).
     expect(g.time - t0).toBeLessThanOrEqual(RULES.flow.valveAfter2 + RULES.flow.holdSeconds + 15);
-    // The card's line named the one fix there is (the Spark Refiner short of Ember).
-    expect(did.some((x) => /line: The Spark Refiner needs more Ember/.test(x))).toBe(true);
+    // The card's line named the one fix there is (the Copper Refiner short of Ore).
+    expect(did.some((x) => /line: The Copper Refiner needs more Ore/.test(x))).toBe(true);
     expect(slack2 || g.time - t0 < RULES.flow.valveAfter2).toBe(true);
   }, 120_000);
 
@@ -84,7 +84,7 @@ describe('Hold 95% Flow with a second Glyph Assembler built ahead', () => {
     console.info(`Hold Flow by the tips alone: ready after ${Math.round(g.time - t0)} s\n  ${tips.join('\n  ')}`);
     expect(g.goal.ready, tips.join('\n')).toBe(true);
     expect(g.time - t0).toBeLessThanOrEqual(RULES.flow.valveAfter2 + RULES.flow.holdSeconds + 30);
-    expect(tips.some((x) => /The Spark Refiner needs more Ember/.test(x))).toBe(true);
+    expect(tips.some((x) => /The Copper Refiner needs more Ore/.test(x))).toBe(true);
   }, 120_000);
 
   it('the goal view says how many may be short: none, then one at 90 s, then two at 180 s', () => {
@@ -118,23 +118,23 @@ describe('Hold 95% Flow with a second Glyph Assembler built ahead', () => {
     expect(step.upgrade).toBe('speed');
     const acts = g.nodes.find((n) => n.id === step.node)!;
     const ring = worstProducer(g)!;
-    // The ring jumps to a Glyph Assembler; the step is Speed on the Ember Well (for the Spark Refiner).
-    expect(nodeNoun(ring)).toBe('Glyph Assembler');
-    expect(nodeNoun(acts)).toBe('Ember Well');
+    // The ring jumps to a Circuit Assembler; the step is Speed on the Ore Drill (for the Copper Refiner).
+    expect(nodeNoun(ring)).toBe('Circuit Assembler');
+    expect(nodeNoun(acts)).toBe('Ore Drill');
     for (const touch of [false, true]) {
       const text = goalView(g, touch)!.meanwhile!.text;
-      // (Two Ember Wells stand on this board, one with a Lab of its own: the line says which, "its".)
-      expect(text).toBe('The Spark Refiner needs more Ember: buy Speed on its Ember Well.');
-      expect(text).not.toContain('Glyph Assembler');
+      // (Two Ore Drills stand on this board, one with a Lab of its own: the line says which, "its".)
+      expect(text).toBe('The Copper Refiner needs more Ore: buy Speed on its Ore Drill.');
+      expect(text).not.toContain('Circuit Assembler');
     }
-    // Its Show me is the same step, in the same words with the price: it selects that Ember Well and points at its
+    // Its Show me is the same step, in the same words with the price: it selects that Ore Drill and points at its
     // Speed button (src/ui/advice-show.ts).
-    expect(step.text.mouse).toMatch(/^The Spark Refiner needs more Ember: buy Speed on its Ember Well \(\d+¢\)\.$/);
-    // The adviser's own Flow tip names that Well the same way: "its Ember Well" (it said "an Ember Well", which sent
+    expect(step.text.mouse).toMatch(/^The Copper Refiner needs more Ore: buy Speed on its Ore Drill \(\d+¢\)\.$/);
+    // The adviser's own Flow tip names that Drill the same way: "its Ore Drill" (it said "an Ore Drill", which sent
     // the player to either of the two).
-    const tips = adviceTrials(g)!.trials.map((x) => x.text).filter((x) => /needs more Ember: buy Speed on/.test(x));
+    const tips = adviceTrials(g)!.trials.map((x) => x.text).filter((x) => /needs more Ore: buy Speed on/.test(x));
     expect(tips.length).toBeGreaterThan(0);
-    for (const t of tips) expect(t).toMatch(/needs more Ember: buy Speed on its Ember Well \(\d+¢\)\.$/);
+    for (const t of tips) expect(t).toMatch(/needs more Ore: buy Speed on its Ore Drill \(\d+¢\)\.$/);
     // Once everything flows, the line is done and reads its own words.
     applyAdvice(g, step);
     clearHistory();
