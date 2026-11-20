@@ -139,9 +139,9 @@ const TAP_SNAP_PX = 20;
 
 // Touch. All distances are screen pixels, whatever the zoom.
 /** A finger this close to a port's centre means the port, even when it is on the card (a 44 px target). */
-const PORT_NEAR = 22;
+const PORT_NEAR = 26;
 /** Input ports get a little less, so that the left edge of a card still selects and drags it. */
-const PORT_IN_NEAR = 18;
+const PORT_IN_NEAR = 22;
 /** Off the cards, the nearest output port within this distance is taken. */
 const PORT_REACH = 44;
 /**
@@ -151,9 +151,9 @@ const PORT_REACH = 44;
 const PORT_EDGE = 30;
 const WIRE_LONG = 100;
 /** Half the width of the band along a wire that selects it (28 px in all). */
-const WIRE_REACH = 14;
+const WIRE_REACH = 16;
 /** A finger this close to a pin on a wire means the pin (a 36 px target; it comes before the wire it is on). */
-const PIN_REACH = 18;
+const PIN_REACH = 22;
 /** ...and a mouse pointer on the wire, this close. */
 const PIN_MOUSE = 10;
 /** A pin set from the inspector is brought into view with this much board round it (board pixels). */
@@ -2419,9 +2419,11 @@ function buildNode(n: GNode, w: number, h: number, ins: Port[], outs: Port[], si
   const hasRing = n.type === 'well' || isMachine(n);
   const compact = w < 160;
   const sub = nodeSub(n);
+  // The card wears the colour of what it makes (a Market the coin's, a Lab the Data's): the board reads by colour.
+  const tint = n.type === 'market' ? '#FFC857' : n.type === 'lab' ? '#C4A1FF' : outs[0]?.mat ? matColor(outs[0].mat) : '#8C97AD';
   const e = el(`
     <div class="node t-${n.type}${compact ? ' compact' : ''}" data-id="${n.id}" data-testid="node-${n.type}"
-         style="left:${n.x}px;top:${n.y}px;width:${w}px;height:${h}px">
+         style="left:${n.x}px;top:${n.y}px;width:${w}px;height:${h}px;--c:${tint}">
       <div class="ring${hasRing ? '' : ' flat'}">
         ${hasRing ? `<svg viewBox="0 0 40 40" width="40" height="40"><circle cx="20" cy="20" r="17" class="trk"/><circle cx="20" cy="20" r="17" class="val" pathLength="100"/></svg>` : ''}
         <div class="glyph">${nodeGlyph(n)}</div>
@@ -2657,7 +2659,7 @@ const chipScale = () => (big ? 1.42 : 1);
  * Whether a wire's rate chip is on show. The cards already say what each node makes, so a chip is only
  * worth its place when it answers a question the player is asking or should be:
  *  - the wire belongs to the selection (it is selected, or runs to or from the selected node);
- *  - it is a problem wire: nothing flows on it (0/s), or it is full (MAX);
+ *  - it is full (MAX). (A wire that carries nothing has no chip: it is a thin grey line, and that says it.)
  *  - it was made in the last three seconds;
  *  - the mouse is resting on it or on a node at either end.
  * Never in the overview, where nothing is read. The same on every screen.
@@ -2666,7 +2668,7 @@ function chipWanted(w: Wire, refs: WireRefs, now: number): boolean {
   if (over || refs.chipOff) return false;
   // (While the Flows panel traces a material, the wires that carry it say how much: the rest keep quiet.)
   if (traced) return traced.wires.has(w.id);
-  return refs.on || refs.cFlowing === false || refs.cSat === true || now < refs.fresh
+  return refs.on || refs.cSat === true || now < refs.fresh
     || hoverWire === w.id || (hoverNode != null && (hoverNode === w.from || hoverNode === w.to));
 }
 
@@ -2716,6 +2718,7 @@ function syncChips(): boolean {
       refs.dim = dim;
       refs.g.classList.toggle('dim', dim);
       refs.flow.color = dim ? faded(refs.cColor) : refs.cColor;
+      refs.flow.plain = dim;
       dims = true;
     }
   }
@@ -3085,6 +3088,7 @@ function updateWires(g: Game) {
       refs.cColor = color;
       refs.g.style.color = color;
       refs.flow.color = refs.dim ? faded(color) : color;
+      refs.flow.plain = refs.dim;
       refs.flow.shape = matShape(mat);
       recolored = true;
     }

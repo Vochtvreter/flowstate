@@ -491,9 +491,12 @@ function sync() {
   hintNow = line;
   // Where the goal card folds its hint away, a new goal starts with the hint open.
   if (g.goal.i !== hintGoal) {
+    // (A game that is taken up again where it was left starts with the card folded: its title is enough to go on
+    // with, and the board is what the player came back to. A new game starts with its first goal open.)
+    const resumed = hintGoal === -1 && g.goal.i > 0;
     hintGoal = g.goal.i;
     hintH = 0;
-    setHintOpen(true);
+    setHintOpen(!resumed);
   }
   // A sheet that opens folds it away too, as the tap on the board that opens one does: a sheet opened from the alert's
   // Show or the Flow ring was left a sliver on a short phone while the hint stood open above it.
@@ -506,7 +509,9 @@ function sync() {
   // always on a phone held sideways, and upright while the strip with the hint in it would pass 45%
   // of the stage. (Judged with the hint counted in, folded or not, so the answer cannot flip-flop.)
   const withHint = c.top + (fold && !hintOpen ? hintH : 0);
-  fold = env.phone && (!!shortLandscape?.matches || (stageH > 0 && withHint > stageH * STRIP_SHARE));
+  // (A phone's card is always folded to one row until it is asked for: the board is what the screen is for.)
+  fold = env.phone;
+  void withHint;
   if (setClass(app, 'fold', fold)) sizeRev++;
   // How tall the strip is decides how tall a sheet may be (see phone.css), so that comes first.
   let moved = setStyle(app, '--strip-h', c.top + 'px');
@@ -591,6 +596,11 @@ export function initPhone() {
   // The goal card folds its hint away on a phone held sideways: a tap on the card (not on a button
   // in it) opens and closes it, and a press on the board closes it, since the board is what is short.
   goalEl?.addEventListener('click', (e) => {
+    if (!env.phone || (e.target as HTMLElement).closest('button')) return;
+    setHintOpen(!hintOpen);
+  });
+  // (The order beside it is folded with it, to its count: a tap on it opens both.)
+  orderEl?.addEventListener('click', (e) => {
     if (!env.phone || (e.target as HTMLElement).closest('button')) return;
     setHintOpen(!hintOpen);
   });

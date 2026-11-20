@@ -481,7 +481,8 @@ function whyHtml(g: Game, v: GoalView): string {
 }
 
 function goalHtml(g: Game, v: GoalView, rows: string, prog: string): string {
-  const step = `${v.free ? 'Free play' : 'Goal'} ${v.number} / ${v.total}`;
+  // (The word is a part of its own: a phone's folded card keeps the count and drops the word.)
+  const step = `<span class="gc-w">${v.free ? 'Free play' : 'Goal'} </span>${v.number} / ${v.total}`;
   const gh = ghostsHtml(performance.now());
   // (The ghost comes after the body it lies over, and the two never pass for one another: the card is patched
   // in place by position, and a body rebuilt when the ghost comes or goes would rise a second time.)
@@ -506,7 +507,7 @@ function goalHtml(g: Game, v: GoalView, rows: string, prog: string): string {
 function endedHtml(g: Game): string {
   const goal = GOALS[MAIN_GOALS - 1];
   const gh = ghostsHtml(performance.now());
-  return `<div class="gc-main">${pipsHtml(g, true)}<div class="gc-body${rises ? ` rise${rises % 2}` : ''}" data-key="body"><div class="gc-head"><span class="gc-step">Goal ${MAIN_GOALS} / ${MAIN_GOALS}</span><span class="gc-done">${icon('check', 12)}Done</span></div>
+  return `<div class="gc-main">${pipsHtml(g, true)}<div class="gc-body${rises ? ` rise${rises % 2}` : ''}" data-key="body"><div class="gc-head"><span class="gc-step"><span class="gc-w">Goal </span>${MAIN_GOALS} / ${MAIN_GOALS}</span><span class="gc-done">${icon('check', 12)}Done</span></div>
       <h3 class="gc-title">${esc(goal.title)}</h3>
       <div class="gc-rewards"><span class="rw new">Demo complete</span></div></div>${gh.card}</div>${gh.press}`;
 }
@@ -617,7 +618,7 @@ function renderOrder(g: Game, force: boolean) {
       : `No Market is getting ${name} yet. Wire some to a Market.`}</div>`
     : bar(o.need > 0 ? o.got / o.need : 0, color);
   orderPanel.render(`<div class="oc-ico">${matGlyph(o.order.mat, 20)}</div>
-    <div class="oc-main"><div class="oc-top"><span class="oc-lbl">Order</span>${left}</div><div class="oc-line">Deliver <b class="mono">${o.got} / ${o.need}</b> ${name}</div>
+    <div class="oc-main"><div class="oc-top"><span class="oc-lbl">Order</span>${left}</div><div class="oc-line"><span class="oc-w">Deliver </span><b class="mono">${o.got} / ${o.need}</b><span class="oc-w"> ${name}</span></div>
       ${state}
       <div class="oc-pay"><span class="gc-lbl">${o.ready ? 'Filled' : 'Pays'}</span>${rewardChips(o.reward)}</div></div>
     ${o.ready ? `<button class="claim sm" data-act="claim-order" data-testid="order-claim">Claim</button>` : ''}`, force);

@@ -41,7 +41,7 @@ The phone layout is on when the window is under 700 px wide, or is wider than ta
 - At 1240 px the logo loses its word; at 1100 px the Data chips lose their rates; at 900 px Data becomes one block and "Tech tree" becomes "Tech".
 - A finger on this layout gets 44 px buttons, no key labels, and the "Tap where…" line under the goal card.
 
-**Phone.** The inspector sheet takes at most 45% of the screen and, where it can, leaves 176 px of board under the strip; the build sheet may grow taller, keeping 120 px for the spot being built on. The thumb row holds, on the left, Claim when a goal is ready, or the "Tap where…" line with its ✕ while a port is armed or a card is in hand, or else the docked Expand button; on the right Fit and Undo, with Tidy above Undo. The card folds its hint behind a tap when the strip would take more than 45% of the stage, and during a wait; a new goal always opens with its hint showing.
+**Phone.** What a phone's screen is for is the board: between the top bar (52 px) and the build bar (64 px) it has all of it but one row. That row is the goal card folded to its count and its title ("16 / 22 · Hold 95% Flow…"), with its progress as a thin bar along its foot, and beside it the order folded to its picture and count ("8 / 8", with its own Claim when it is filled). A tap on either opens the card as it is on a desk: the why, the recipe, the progress in words, the row of guidance, the order in full. A press on the board folds it again; a new goal opens it by itself, and a game taken up where it was left starts with it folded. A chevron on the folded card is lit while the card has something for the player to do. Folded, the strip is 46 px tall. Measured on a 21-card board: at 390×844, 81% of the screen is board in play (it was 59%) and 41% with a card's sheet open (it was 21%); at 360×640, 75% (it was 45%) and 35% (it was 23%). The inspector sheet takes at most 40% of the screen and, where it can, leaves 176 px of board under the strip; the build sheet may grow taller, keeping 120 px for the spot being built on. The thumb row holds, on the left, Claim when a goal is ready, or the "Tap where…" line with its ✕ while a port is armed or a card is in hand, or else the docked Expand button; on the right Fit and Undo, with Tidy above Undo.
 
 **Phone sideways.** The board is a strip a few cards high, so the card always folds its hint. A newcomer who starts this way is told once, after goal 1, "Best played upright: turn your phone for more room."
 
@@ -60,7 +60,7 @@ The phone layout is on when the window is under 700 px wide, or is wider than ta
 
 ### Goal card (`hud.ts`, `advice-tip.ts`)
 
-From the top: a row of pips (one for each of the 22 goals, larger for the six big ones, filled when claimed); "Goal 15 / 22" and the reward as chips; the title, which is an outcome ("Make your first Circuit"); the recipe, where the goal is about one; the why; a progress row; then up to two rows of guidance. The card's small labels are drawn in capitals ("GOAL 15 / 22", "DONE", "WHILE YOU WAIT · 1 OF 2").
+From the top: "Goal 15 / 22" and the reward as a chip; the title, which is an outcome ("Make your first Circuit"); the recipe, where the goal is about one; the why; a progress row; then up to two rows of guidance. (The row of pips that stood over it, one for each goal, is not shown: the count says it.) Its small labels are set as words are ("Goal 15 / 22", "Done", "While you wait · 1 of 2"), not in capitals.
 
 | Row | What it shows |
 |---|---|
@@ -92,12 +92,12 @@ For what nothing else on screen says: refusals, refunds, "Tidied. Ctrl Z puts it
 
 ## 4. The board (`board.ts`, `fx.ts`)
 
-A dot grid (24 px) with the plot as a dashed outline labelled "Board · 2 plots". The label stands at the plot's top left corner; where the goal card or the stage's edge would cut it, it slides along the plot's top edge to where it reads whole, or is hidden until it can be. The overview does not show it. Cards and wires are DOM and SVG; wire dots, particles and floating gains are drawn on one canvas above them.
+A faint dot grid (24 px) with the plot as a faint dashed outline (its label, "Board · 2 plots", is not shown: the Expand button is where plots are counted). Cards and wires are DOM and SVG; wire dots, particles and floating gains are drawn on one canvas above them.
 
-- **Card:** 172 px wide and 72, 92 or 112 px tall by its number of ports (a Router, Merger or Dump is 136×60 px). On a Drill or a machine, a ring round the glyph of what it makes shows utilisation; then the name ("Sand Drill"; a machine by what it makes, its kind after it in small type: "Glass Refiner"), a second line (for a machine, its recipe in words, or "makes Circuit" where the recipe is too long for the line) and a rate line ("0.50/s · 100%"). Positions snap to a 20 px grid, and cards never overlap.
-- **Ports:** 14 px dots on the card's sides, inputs left and outputs right, in the material's colour. An output with no wire pulses. A machine with two outputs labels them.
-- **Wire:** a line in the material's colour (a curve, or right angles with rounded corners: "Cable management" in section 5), 2 to 7 px wide by its rate, with dots in the material's shape travelling along it. A full wire glows brighter; a wire carrying nothing is grey, dashed and has no dots (in its material's colour it read as an alarm: Copper is red). While something is selected, wires that are not its own are drawn faint.
-- **Rate chip:** on a wire only when it has something to say: the wire is selected or runs to the selected card, carries nothing ("0/s") or is full ("MAX"), was made in the last 3 s, or is under the mouse.
+- **Card:** 172 px wide and 72, 92 or 112 px tall by its number of ports (a Router, Merger or Dump is 136×60 px). A card is a flat tile with no outline at rest, and wears the colour of what it makes: the glyph stands on a disc of that colour (a Market's is the coin's gold, a Lab's the Data's violet). An outline means something: blue for selected, amber or red for trouble; a card that is not at work stands back, faded. On a Drill or a machine, a ring round the glyph shows utilisation; then the name ("Sand Drill"; a machine by what it makes, its kind after it in small type: "Glass Refiner"), a second line (for a machine, its recipe in words, or "makes Circuit" where the recipe is too long for the line) and a rate line ("0.50/s · 100%"). Positions snap to a 20 px grid, and cards never overlap.
+- **Ports:** 16 px dots (22 px for a finger) on the card's sides, inputs left and outputs right, in the material's colour. An output with no wire pulses. A machine with two outputs labels them.
+- **Wire:** a line in the material's colour (a curve, or right angles with rounded corners: "Cable management" in section 5), a solid line 2 to 7 px wide by its rate, with dots in the material's shape and a lighter tint of its colour travelling along it. A full wire is at full strength with a soft glow; a wire carrying nothing is a thin grey line with no dots (in its material's colour it read as an alarm: Copper is red; as a row of dashes it was noise). While something is selected, wires that are not its own are drawn faint.
+- **Rate chip:** on a wire only when it has something to say: the wire is selected or runs to the selected card, is full ("MAX"), was made in the last 3 s, or is under the mouse. (A wire that carries nothing had a "0/s" chip: the thin grey line says it.)
 - **Deposit:** a dashed tile the size of a card ("Sand deposit · empty · place a Drill"; "Unknown deposit · needs research"). Until there is a Lab a locked deposit is a faint outline with a lock and no words, and until the Drill has its slot in the build bar a free deposit says only "empty".
 - **Gains:** once a second "+5¢" floats above each Market and "+1α" above each Lab, and coins fly to the credits pill.
 
@@ -143,7 +143,7 @@ The camera goes only as far out as it takes to show everything, so a small facto
 
 **Tap to arm.** A tap or click on an output port arms it: the port stays lit and waits. A tap on a card makes the wire; a tap on empty board opens the build menu there; a tap on the armed port, `Esc`, or the ✕ on the "Tap where the Sand should go" line lets go. This is how a finger wires across a board too big for one screen.
 
-**How a finger is matched** (by distance on screen, whatever the zoom; `touchHit`): a port within 22 px (18 px for an input port); else the card under the finger; else a free deposit; else a pin within 18 px; else a wire within 14 px; else the nearest output port within 44 px; else a card missed by under 10 px. Only the first of these starts a wire when the finger drags: a drag that starts on a wire or in a gap pans. With a port armed, a tap on a wire counts as a tap on the board under it. In the overview a finger's drag always pans; a port is armed by a tap within 16 px of its dot (12 px for a mouse, which can also drag from it).
+**How a finger is matched** (by distance on screen, whatever the zoom; `touchHit`): a port within 26 px (22 px for an input port); else the card under the finger; else a free deposit; else a pin within 22 px; else a wire within 16 px; else the nearest output port within 44 px; else a card missed by under 10 px. Only the first of these starts a wire when the finger drags: a drag that starts on a wire or in a gap pans. With a port armed, a tap on a wire counts as a tap on the board under it. In the overview a finger's drag always pans; a port is armed by a tap within 16 px of its dot (12 px for a mouse, which can also drag from it).
 
 **Build menu** (`openRadial`). Let go of a wire on empty board, clear of its port (about 36 px).
 
@@ -273,13 +273,13 @@ The first screen is a Drill, a Market, the goal card, the credits, Pause, Sound 
 | From | What arrives |
 |---|---|
 | Goal 2, "Dig up more Sand" | The Drill's slot in the build bar; Undo and Redo |
-| Goal 4, "Turn Sand into Glass" | The zoom buttons and Fit; the Delete tip under the build bar; Duplicate and Delete in a card's inspector |
+| Goal 4, "Turn Sand into Glass" | The zoom buttons and Fit; Duplicate and Delete in a card's inspector |
 | The Lab (goal 5's reward) | The Tech tree button; locked deposits say "needs research" |
 | Goal 6, "Speed up a Drill" | The Market's slot (sooner, the moment a second Market can be paid for); the upgrades in a card's inspector (sooner, once anything has been upgraded) |
 | Goal 9, "Turn Oil into Plastic" | The Flows button; the minimap (sooner, once eight cards stand) |
 | Six cards | Tidy; cable management: the Wires button, and pins on a wire (the Route part of its inspector, a double click on it) |
 | Goal 11's reward | The order chip |
-| Goal 14, "Open up more land" | The Expand button; the plot's label |
+| Goal 14, "Open up more land" | The Expand button |
 | Goal 15's reward | The Flow ring |
 
 A machine's slot appears when it is unlocked; one locked machine is shown as a silhouette. On a phone the floating Fit and Undo keep their places and are only made visible, so the row beside them does not move.
@@ -308,7 +308,7 @@ Opened from the top bar (`L`; on a phone from the gear menu), it stands where th
 | Data α / β / γ | `#5EEAD4` / `#C4A1FF` / `#FF8FB1` | Data chips, prices, gains (`DATA_COLORS` in `src/content.ts`, not `:root`) |
 | working / blocked / starved / idle | `#4ADE80` / `#FBBF24` / `#F87171` / `#64748B` | Rings, pills, minimap |
 
-Type: **Space Grotesk** (display), **Inter** (interface), **JetBrains Mono** (every number, tabular). The fonts load after the first paint; until then system fonts show. Material colours and shapes are in `src/content.ts` and `src/ui/icons.ts`.
+**The look** (`src/styles/clean.css`, loaded last: the other stylesheets lay the interface out, this one says what it looks like). Clean and minimal, by four rules. The board is what the screen is for: bars and panels take as little of it as they can. A surface is told from what is behind it by its fill and a soft shadow, not by an outline: nothing at rest has a border, and a border means something (selected, in trouble, asked for). One face, **Inter**, at a few sizes: numbers are set in it too, with even-width figures (a row of mono type read as a console), labels are set as words are and not in spaced capitals, and no key cap is printed on a button (a key is in its button's tooltip, and a build-bar slot shows its number while the pointer is on the bar). Colour belongs to the materials: a card wears the colour of what it makes and a wire the colour of what it carries; everything else is grey until it has something to say. The font loads after the first paint; until then the system font shows. Material colours and shapes are in `src/content.ts` and `src/ui/icons.ts`.
 
 ---
 

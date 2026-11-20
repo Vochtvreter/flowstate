@@ -1,0 +1,432 @@
+/* The look: clean and minimal. Loaded last, so what is said here is what shows.
+
+   The other stylesheets lay the interface out; this one says what it looks like. The rules of the look:
+
+   1. The board is what the screen is for. Bars and panels take as little of it as they can, and on a phone the
+      goal card is one row until it is asked for (part 3).
+   2. A surface is told from what is behind it by its fill and a soft shadow, not by an outline. Nothing at rest
+      has a border; a border means something: selected, in trouble, asked for.
+   3. One face (Inter) at a few sizes. Numbers are set in it too, with even-width figures: a row of mono type reads
+      as a console. No capitals-and-spacing labels, and no key caps: a key is in its button's tooltip.
+   4. Colour belongs to the materials. A card wears the colour of what it makes and a wire the colour of what it
+      carries, as a solid line; everything else is grey until it has something to say.
+
+   Parts: 1 the chrome (bars, panels, buttons), 2 the board (cards, ports, wires), 3 the phone. */
+
+:root {
+  --canvas: #0b0e14; --chrome: #0b0e14; --node: #171c28; --panel: #151a25; --panel-2: #1c2230;
+  --fill: rgba(255, 255, 255, 0.06); --fill-2: rgba(255, 255, 255, 0.11);
+  --border: #2a3142; --line: rgba(255, 255, 255, 0.06);
+  --text: #f0f3f8; --muted: #9aa3b5; --dim: #6c7587;
+  --mono: Inter, system-ui, sans-serif; --disp: Inter, system-ui, sans-serif;
+  --shadow: 0 10px 30px rgba(0, 0, 0, 0.38);
+}
+.mono { font-variant-numeric: tabular-nums; letter-spacing: -0.01em; }
+/* A key is said in its button's tooltip ("Fit board (F)"), not printed on the button. */
+.kbd { display: none; }
+
+/* ================= 1. the chrome ================= */
+
+/* ----- top bar: no bar to see, only what stands on it ----- */
+#top { background: var(--canvas); border-bottom: 0; }
+.logo { font-weight: 700; letter-spacing: -0.02em; }
+.res { height: 40px; padding: 0 6px 0 2px; gap: 8px; background: none; border: 0; border-radius: 0; }
+.res .sym { background: none; width: auto; min-width: 18px; height: auto; font-size: 16px; }
+.res .nums b { font-size: 15px; font-weight: 650; }
+.res.credits .nums b { font-size: 17px; }
+.res .nums i { font-size: 11px; opacity: 0.85; }
+.resrow { gap: 14px; }
+.ibtn { border: 0; background: var(--fill); color: #d5dbe8; border-radius: 12px; }
+.ibtn:hover:not(:disabled) { background: var(--fill-2); }
+.ibtn.on { background: rgba(252, 211, 77, 0.16); color: #fcd34d; }
+.ibtn.bare { background: transparent; }
+.ibtn.bare:hover:not(:disabled) { background: var(--fill); }
+#top .sep { display: none; }
+.techbtn { height: 36px; border: 0; background: var(--fill); border-radius: 12px; padding: 0 12px; }
+.techbtn:hover { background: var(--fill-2); }
+.techbtn.ready { background: rgba(94, 234, 212, 0.13); }
+.techbtn.t-flows.on { background: rgba(122, 162, 255, 0.2); }
+.techbtn.t-flows.warn { background: rgba(251, 191, 36, 0.12); }
+.techbtn .badge { font-weight: 700; }
+.menu { border: 0; background: var(--panel-2); border-radius: 14px; box-shadow: var(--shadow); padding: 6px; }
+.menu button { border-radius: 9px; }
+.menu button:hover:not(:disabled) { background: var(--fill); }
+.menu .danger:hover { background: rgba(248, 113, 113, 0.12); }
+
+/* ----- build bar: pictures with a name and a price ----- */
+#hot { background: var(--canvas); border-right: 0; }
+.hb { border: 0; border-radius: 14px; color: #d5dbe8; }
+.hb:hover { background: var(--fill); }
+.hb.on { background: rgba(122, 162, 255, 0.2); color: #fff; }
+.hb .n { font-size: 10.5px; }
+.hb .p { font-size: 10.5px; color: var(--muted); }
+/* Its key shows while the pointer is on the bar. */
+.hb .k { opacity: 0; transition: opacity 0.12s; }
+#hot:hover .hb .k { opacity: 1; }
+.hb .fill { background: rgba(255, 200, 87, 0.1); border-radius: 0 0 14px 14px; }
+.hb.poor { color: #717b8f; }
+.hb.poor .p { color: #717b8f; }
+.hb.locked { border: 0; color: var(--dim); }
+.hb.locked .p { color: #4fb5a6; }
+div.hb.locked:hover { background: transparent; }
+/* (The Delete tip stood at the foot of the bar: Del and the inspector's button say it.) */
+.hb.tip { display: none; }
+
+/* ----- panels over the board: the goal card, the order, the alert, toasts ----- */
+#goal { background: var(--panel); border: 0; border-radius: 18px; padding: 13px 16px 14px 18px; box-shadow: var(--shadow); }
+#goal[data-ready='1'] { background: #12241b; border: 0; box-shadow: 0 0 0 1.5px rgba(74, 222, 128, 0.55), var(--shadow); }
+#goal.done { background: var(--panel); border: 0; box-shadow: var(--shadow); }
+/* The row of pips said what "16 / 22" says. */
+.gc-pips { display: none; }
+.gc-step, .gc-done { font-size: 12px; font-weight: 600; letter-spacing: 0; text-transform: none; }
+.gc-step { color: var(--muted); }
+.gc-title { font-size: 17px; font-weight: 650; letter-spacing: -0.01em; line-height: 22px; }
+.gc-hint { color: #b6bfd0; }
+.gc-how { color: #9db8ff; text-decoration: none; }
+.gc-hint.how .gc-say::before { text-transform: none; letter-spacing: 0; font-size: 11px; border-radius: 999px; padding: 1px 7px; }
+.gc-lbl, .oc-lbl, .lbl { font-size: 12px; font-weight: 600; letter-spacing: 0; text-transform: none; color: var(--muted); }
+.rc { border: 0; background: var(--fill); border-radius: 999px; padding: 0 9px 0 7px; }
+.rc.ok { border: 0; }
+.rc.no { border: 0; background: transparent; box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.2); color: #b6c2df; }
+.pbar { height: 5px; background: rgba(255, 255, 255, 0.09); }
+.rw { border: 0; border-radius: 999px; background: color-mix(in srgb, var(--c) 16%, transparent); }
+#order { background: var(--panel); border: 0; border-radius: 18px; box-shadow: var(--shadow); }
+#order[data-ready='1'] { background: #12241b; border: 0; box-shadow: 0 0 0 1.5px rgba(74, 222, 128, 0.55), var(--shadow); }
+#order[data-stuck='1'] { border: 0; box-shadow: 0 0 0 1.5px rgba(252, 211, 77, 0.35), var(--shadow); }
+.oc-ico { background: var(--fill); border-radius: 12px; }
+.alertchip { border: 0; background: var(--panel-2); box-shadow: var(--shadow); }
+.alertchip:hover { background: #232a3a; }
+.al-go { border: 0; background: var(--fill-2); }
+.alertchip.paused { border: 0; background: #2b2512; }
+.alertchip.paused .al-go { border: 0; background: rgba(252, 211, 77, 0.18); }
+.alertchip.notice { border: 0; }
+.toast { border: 0; background: var(--panel-2); border-radius: 14px; box-shadow: var(--shadow); }
+.toast.good { border: 0; background: #14291f; }
+.toast.bad { border: 0; background: #2c171c; }
+.claim { font-family: inherit; font-weight: 700; letter-spacing: 0; }
+
+/* ----- zoom and the minimap: small and quiet in their corner ----- */
+#zoom .zl { border: 0; background: none; color: var(--muted); font-size: 11.5px; }
+#mini { border: 0; background: rgba(255, 255, 255, 0.035); border-radius: 14px; }
+#zoom [data-testid='wires'][data-style='squared'] { background: rgba(122, 162, 255, 0.2); }
+
+/* ----- the inspector and what stands in it ----- */
+#insp { background: #10141c; border-left: 0; }
+.sec { border-bottom: 0; padding: 12px 18px; }
+.sec.head { padding-top: 16px; }
+.hicon { background: var(--fill); border-radius: 14px; }
+.htxt h2 { font-size: 18px; font-weight: 650; letter-spacing: -0.01em; }
+.htxt p { font-size: 12px; line-height: 16px; }
+.tok { border: 0; background: var(--fill); border-radius: 999px; padding: 4px 10px 4px 7px; }
+.bar { height: 5px; background: rgba(255, 255, 255, 0.09); }
+.bar span { height: 5px; }
+.statusbox { border: 0; background: var(--fill); border-radius: 14px; }
+.statusbox.starved { border: 0; background: rgba(248, 113, 113, 0.12); }
+.statusbox.blocked { border: 0; background: rgba(251, 191, 36, 0.11); }
+.statusbox.limit { border: 0; background: rgba(122, 162, 255, 0.13); }
+.ghostbtn { border: 0; background: var(--fill-2); border-radius: 10px; }
+.ghostbtn:hover { background: rgba(255, 255, 255, 0.16); }
+.ghostbtn.dashed { border: 0; }
+.recipelist button { border: 0; background: var(--fill); border-radius: 12px; }
+.recipelist button.on { border: 0; background: rgba(122, 162, 255, 0.22); }
+.recipelist button:hover { background: var(--fill-2); }
+.buy { border: 0; background: var(--fill-2); border-radius: 12px; font-weight: 650; }
+.buy.ok { border: 0; }
+.buy.dashed { border: 0; background: var(--fill); }
+.seg { border: 0; background: var(--fill); border-radius: 12px; }
+.seg button { border-radius: 9px; }
+.seg button.on { background: rgba(255, 255, 255, 0.14); }
+.step, .filt { border: 0; background: var(--fill-2); }
+.foot { border-top: 0; padding-top: 8px; }
+.fbtn { border: 0; background: var(--fill-2); border-radius: 12px; }
+.fbtn:hover:not(:disabled) { background: rgba(255, 255, 255, 0.16); }
+.fbtn.danger { border: 0; background: rgba(248, 113, 113, 0.1); color: #f6a4ae; }
+.fbtn.danger:hover { background: rgba(248, 113, 113, 0.18); }
+.flrow { border-bottom: 0; }
+.fl-ico { border: 0; background: color-mix(in srgb, var(--c) 15%, transparent); border-radius: 10px; }
+.fl-tag { border: 0; font-size: 11px; padding: 1px 8px; }
+.fl-go { border: 0; background: var(--fill-2); border-radius: 10px; }
+.fl-go:hover { background: rgba(255, 255, 255, 0.16); }
+
+/* ----- the build menu's fan, the card in hand, dialogs ----- */
+#radial .disc { border: 0; background: rgba(11, 14, 20, 0.88); }
+#radial .hub { border: 0; background: var(--panel-2); box-shadow: var(--shadow); }
+.slot { border: 0; background: var(--panel-2); box-shadow: var(--shadow); }
+.slot:hover:not(:disabled) { background: #262d3e; }
+.slot.best { border: 0; background: #263354; box-shadow: 0 0 0 2px var(--sel), var(--shadow); }
+.slot.locked { border: 0; background: var(--panel); }
+#ghost-cap { border: 0; background: var(--panel-2); border-radius: 10px; }
+#modal .card { border: 0; background: var(--panel); border-radius: 22px; }
+#modal h2 { font-weight: 650; }
+#tap-hint { border: 0; background: var(--panel-2); }
+.fab { border: 0; background: rgba(28, 34, 48, 0.94); border-radius: 16px; }
+.bopt { border: 0; background: var(--fill); border-radius: 16px; }
+.bopt.best { border: 0; padding: 7px 10px; background: rgba(122, 162, 255, 0.2); box-shadow: inset 0 0 0 2px var(--sel); }
+.bopt.locked { border: 0; background: transparent; box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.1); }
+.hot-page i { border: 0; background: #262d3e; }
+
+/* ================= 2. the board ================= */
+
+#board { background-image: radial-gradient(rgba(255, 255, 255, 0.055) 1px, transparent 1px); }
+#plot { border: 1px dashed rgba(255, 255, 255, 0.09); }
+/* (How many plots there are is the Expand button's business.) */
+#plot-label { display: none; }
+
+/* ----- cards: a flat tile in the colour of what it makes ----- */
+.node { background: var(--node); border: 1.5px solid transparent; border-radius: 16px; box-shadow: 0 6px 16px rgba(0, 0, 0, 0.3); }
+.node.sel { border-color: var(--sel); box-shadow: 0 0 0 4px rgba(122, 162, 255, 0.2), 0 6px 16px rgba(0, 0, 0, 0.3); }
+.node.target { border-color: #fff; }
+.node.blk:not(.sel) { border-color: var(--sel); box-shadow: 0 0 0 3px rgba(122, 162, 255, 0.25), 0 6px 16px rgba(0, 0, 0, 0.3); }
+/* The picture stands on a disc of the card's colour; the ring round it is how the machine is doing. */
+.ring::before { content: ''; position: absolute; inset: 5px; border-radius: 50%; background: color-mix(in srgb, var(--c, #8c97ad) 20%, transparent); }
+.ring .glyph { color: var(--c, #c9d3e8); }
+.ring.flat { background: color-mix(in srgb, var(--c, #8c97ad) 18%, transparent); border-radius: 12px; }
+.ring.flat::before { content: none; }
+.t-lab .ring.flat { background: color-mix(in srgb, #c4a1ff 20%, transparent); }
+.trk { stroke: rgba(255, 255, 255, 0.07); }
+.nt { font-size: 13.5px; font-weight: 650; letter-spacing: -0.01em; }
+.nt .nk { font-size: 11px; font-weight: 500; }
+.nr { color: var(--muted); }
+/* Not at work: the card stands back. In trouble: its outline says so, in the colour of the trouble. */
+.node[data-st='idle'] { border-style: solid; }
+.node[data-st='idle'] .ring, .node[data-st='idle'] .txt { opacity: 0.55; }
+.node[data-st='blocked']:not(.sel) { border-color: rgba(251, 191, 36, 0.5); }
+.node[data-st='starved']:not(.sel) { border-color: rgba(248, 113, 113, 0.55); }
+.node.t-well[data-st='blocked']:not(.sel):not(.target) { border-color: transparent; }
+.node.limit:not(.sel) { border-color: rgba(122, 162, 255, 0.6); }
+.pill { border: 0; font-size: 11px; font-weight: 650; padding: 3px 9px; top: -11px; }
+.pill[data-kind='blocked'] { background: #fbbf24; color: #2a1c00; border: 0; }
+.pill[data-kind='starved'] { background: #f87171; color: #2c0b0e; border: 0; }
+.pill[data-kind='short'] { background: #4a3b12; color: #fcd77f; border: 0; }
+.pill[data-kind='limit'] { background: #7aa2ff; color: #0b1430; border: 0; }
+.port { width: 16px; height: 16px; margin-top: -8px; border: 3px solid var(--canvas); box-shadow: none; }
+.port.in { left: -9px; }
+.port.out { right: -9px; }
+.port.out.open { box-shadow: 0 0 0 1.5px rgba(255, 255, 255, 0.35); }
+.port-label { color: var(--muted); }
+.deposit { border-width: 1px; border-radius: 16px; }
+.deposit.locked.quiet { border-color: rgba(255, 255, 255, 0.06); }
+#ghost, #site { border-radius: 16px; }
+#expand { border: 1px dashed rgba(255, 255, 255, 0.18); background: rgba(255, 255, 255, 0.03); border-radius: 16px; }
+
+/* ----- wires: a solid line in the colour of what it carries, with light running along it ----- */
+g.wire .base { stroke-opacity: 0.8; }
+g.wire .glow { stroke-opacity: 0; }
+g.wire.sat .glow { stroke-opacity: 0.18; }
+g.wire.sat .base { stroke-opacity: 1; }
+g.wire:hover .base { stroke-opacity: 1; }
+/* Carrying nothing: a thin grey line, not a row of dashes. */
+g.wire.stalled .base { stroke: #5a6377; stroke-dasharray: none; stroke-opacity: 0.6; }
+g.wire.stalled:not(.new) .base { stroke-width: 1.5px !important; }
+g.wire.sel .glow { stroke-opacity: 0.4; stroke: var(--sel); }
+g.wire.dim .base { stroke-opacity: 0.16; }
+g.wire.dim.sat .base { stroke-opacity: 0.2; }
+g.wire.dim.stalled .base { stroke-opacity: 0.22; }
+#board.ov g.wire .base { stroke-opacity: 0.75; }
+#board.ov g.wire.stalled .base { stroke-dasharray: none; }
+.chip i { border: 0; background: #232a3a; color: #dbe1ec; font-weight: 600; }
+.chip.stalled i { color: #98a1b3; }
+
+/* ================= 3. the phone ================= */
+
+/* What a phone's screen is for is the board. Between the two bars it has all of it but one row: the goal card,
+   folded to its title with its progress along its foot, and beside it the order as a count. A tap on either opens
+   the card as it is on a desk (the why, the recipe, the line to do meanwhile, the order in full); a press on the
+   board folds it again, and a new goal opens it by itself (phone.ts: #app.hint-open). */
+
+#app.phone { --hot-h: calc(64px + env(safe-area-inset-bottom, 0px)); }
+#app.phone #top { gap: 8px; }
+#app.phone .res { padding: 0 4px 0 0; }
+#app.phone .res.credits { padding: 0 4px 0 2px; }
+.datas { background: none; border: 0; padding: 0 4px; }
+#app.phone .datas { padding: 0 4px; }
+#app.phone .flowpct { font-size: 12px; }
+#app.phone .res .nums i { font-size: 11px; }
+#app.phone .menu { border-radius: 16px; }
+#app.phone .menu .danger { border-top: 0; margin-top: 2px; }
+
+/* ----- the build bar ----- */
+#app.phone #hot { border-top: 0; gap: 6px; }
+#app.phone .hb { height: 52px; min-width: 66px; border: 0; background: var(--fill); border-radius: 14px; color: #e3e8f2; }
+#app.phone .hb .n { font-size: 12px; line-height: 15px; }
+#app.phone .hb .p { font-size: 12px; line-height: 14px; }
+#app.phone .hb svg { width: 18px; height: 18px; }
+#app.phone .hb.on { background: rgba(122, 162, 255, 0.24); }
+#app.phone .hb.poor { background: rgba(255, 255, 255, 0.03); color: #8a94a8; }
+#app.phone .hb.poor .p { color: #8a94a8; }
+#app.phone .hb.locked { background: transparent; }
+#app.phone #hot.more-r ~ #hot-more, #app.phone #hot.more-l ~ #hot-less { padding-top: 19px; }
+
+/* ----- the strip, folded: one row ----- */
+#app.phone #hud { padding-top: 2px; }
+#app.phone:not(.hint-open) #hud-row { flex-direction: row; align-items: stretch; gap: 6px; }
+#app.phone:not(.hint-open) #hud-row #goal { flex: 1 1 0; min-width: 0; align-items: stretch; min-height: 44px; padding: 0 12px 0 14px; border-radius: 14px; cursor: pointer; }
+#app.phone:not(.hint-open) #hud-row #goal.done { align-self: stretch; }
+#app.phone:not(.hint-open) #goal .gc-main { justify-content: center; }
+#app.phone:not(.hint-open) #goal .gc-body:not(.gc-ghost) { display: grid; grid-template-columns: auto minmax(0, 1fr) auto auto; grid-template-areas: none; align-items: center; gap: 0 9px; }
+#app.phone:not(.hint-open) #goal .gc-body > * { grid-area: auto; }
+#app.phone:not(.hint-open) #goal .gc-hint, #app.phone:not(.hint-open) #goal .gc-line, #app.phone:not(.hint-open) #goal .gc-tip,
+#app.phone:not(.hint-open) #goal .gc-head .gc-rewards, #app.phone:not(.hint-open) #goal .gc-w, #app.phone:not(.hint-open) #goal .gc-lbl { display: none; }
+#app.phone:not(.hint-open) #goal .gc-head { min-height: 0; justify-content: flex-start; }
+#app.phone:not(.hint-open) #goal .gc-head::after { content: none !important; }
+#app.phone:not(.hint-open) #goal .gc-step { font-size: 12.5px; font-weight: 600; color: var(--muted); font-variant-numeric: tabular-nums; }
+#app.phone:not(.hint-open) #goal .gc-title { font-size: 15px; line-height: 20px; font-weight: 650; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+/* Its progress is the card's foot: the bar alone, the whole width of the card. The count is behind the tap. */
+#app.phone:not(.hint-open) #goal .gc-prog { position: absolute; left: 0; right: 0; bottom: 5px; margin: 0; gap: 0; flex-wrap: nowrap; }
+#app.phone:not(.hint-open) #goal .gc-prog > :not(.pbar):not(.fl-bar) { display: none; }
+#app.phone:not(.hint-open) #goal .gc-prog .pbar, #app.phone:not(.hint-open) #goal .gc-prog .fl-bar { flex: 1 1 auto; width: auto; height: 3px; }
+/* A chevron says there is more behind a tap; it is lit while the card has something for the player to do. */
+#app.phone:not(.hint-open) #goal:not([data-ready='1']):not(.done) .gc-body:not(.gc-ghost)::after { content: ''; width: 7px; height: 7px; margin: -4px 3px 0 2px; border-right: 2px solid var(--dim); border-bottom: 2px solid var(--dim); transform: rotate(45deg); }
+#app.phone:not(.hint-open) #goal:not([data-ready='1']) .gc-body:has(.gc-line, .gc-tip)::after { border-color: #9db8ff; }
+/* Ready: a tick, the title and what it pays. Claim is where the thumb is (hud.css, "phone seating"). */
+#app.phone:not(.hint-open) #goal[data-ready='1'] .gc-step { display: none; }
+#app.phone:not(.hint-open) #goal .gc-done { font-size: 0; }
+#app.phone:not(.hint-open) #goal .gc-done svg { width: 16px; height: 16px; }
+#app.phone:not(.hint-open) #goal div.gc-rewards { margin: 0; flex-wrap: nowrap; }
+
+/* The order, folded: its picture and how much of it is in. Ready, it has its Claim. */
+#app.phone:not(.hint-open) #hud-row #order { flex: none; min-height: 44px; padding: 0 12px 0 8px; gap: 5px; border-radius: 14px; align-items: center; cursor: pointer; }
+#app.phone:not(.hint-open) #hud-row #order .oc-top, #app.phone:not(.hint-open) #hud-row #order .oc-w, #app.phone:not(.hint-open) #hud-row #order .oc-pay,
+#app.phone:not(.hint-open) #hud-row #order .pbar, #app.phone:not(.hint-open) #hud-row #order .oc-warn { display: none; }
+#app.phone:not(.hint-open) #hud-row #order .oc-ico { width: 26px; height: 26px; background: none; }
+#app.phone:not(.hint-open) #hud-row #order .oc-line { font-size: 14px; line-height: 18px; white-space: nowrap; }
+#app.phone:not(.hint-open) #hud-row #order[data-stuck='1'] .oc-line b { color: #fcd34d; }
+#app.phone:not(.hint-open) #hud-row #order[data-ready='1'] { padding: 0 4px 0 8px; }
+#app.phone:not(.hint-open) #hud-row #order .claim.sm { height: 36px; min-width: 64px; padding: 0 12px; }
+
+/* ----- the strip, open: the card as it is, a size up ----- */
+#app.phone #goal { padding: 10px 12px 12px 14px; border-radius: 16px; }
+#app.phone .gc-main { --gc-gap: 4px; }
+#app.phone .gc-step, #app.phone .gc-done { font-size: 12.5px; }
+#app.phone .gc-title { font-size: 17px; line-height: 22px; }
+#app.phone .gc-hint { font-size: 14px; line-height: 19px; }
+#app.phone .gc-prog { font-size: 13px; line-height: 17px; margin-top: 3px; }
+#app.phone .gc-head .rw { height: 22px; padding: 0 9px; font-size: 12.5px; line-height: 22px; }
+#app.phone .rc { height: 26px; font-size: 13px; }
+#app.phone .gc-linebody, #app.phone .gc-tip > .gc-in { font-size: 13.5px; line-height: 18px; }
+#app.phone .gc-linehead .gc-lbl { font-size: 12.5px; }
+#app.phone .gc-linehead { height: 17px; line-height: 17px; }
+#app.phone #order { border-radius: 16px; }
+#app.phone #hud-row #order:not([data-ready='1']):not([data-stuck='1']) { min-height: 44px; padding-top: 6px; padding-bottom: 8px; }
+#app.phone .oc-line { font-size: 14px; line-height: 18px; }
+#app.phone .oc-warn { font-size: 13px; line-height: 17px; }
+#app.phone .alertchip { font-size: 13.5px; line-height: 18px; min-height: 40px; }
+#app.phone .toast { font-size: 14px; }
+
+/* ----- sheets ----- */
+#app.phone #insp, #app.phone #build-sheet {
+  background: var(--panel); border: 0; border-radius: 22px 22px 0 0; box-shadow: 0 -10px 36px rgba(0, 0, 0, 0.5);
+  /* Two fifths of the screen at most: the card the sheet is about stays in view above it. */
+  max-height: max(190px, min(40vh, calc(100% - var(--strip-h, 0px) - 176px)));
+  max-height: max(190px, min(40dvh, calc(100% - var(--strip-h, 0px) - 176px)));
+}
+#app.phone .sheet-grab::before { background: rgba(255, 255, 255, 0.22); }
+#app.phone :where(#insp) .sec { padding: 10px 18px; }
+#app.phone :where(#insp) .sec.head { padding: 0 8px 6px 18px; }
+#app.phone #insp .htxt h2 { font-size: 19px; }
+#app.phone #insp .htxt p { font-size: 13.5px; line-height: 18px; }
+#app.phone #insp .lbl { font-size: 13px; }
+#app.phone #insp .row.sm, #app.phone #insp .rrow, #app.phone #insp .mrow { font-size: 14px; }
+#app.phone #insp .note { font-size: 13px; line-height: 18px; }
+#app.phone #insp .uprow b { font-size: 15px; }
+#app.phone #insp .uprow small { font-size: 13px; }
+#app.phone #insp .st-title { font-size: 15px; }
+#app.phone #insp .statusbox p { font-size: 14px; line-height: 19px; }
+#app.phone #insp .tok { font-size: 14px; }
+#app.phone :where(#insp) .buy, #app.phone :where(#insp) .fbtn, #app.phone :where(#insp) .ghostbtn { font-size: 14.5px; border-radius: 14px; }
+#app.phone .fl-name { font-size: 15px; }
+#app.phone .fl-rate { font-size: 14px; }
+#app.phone .fl-note { font-size: 13px; line-height: 17px; }
+#app.phone .fl-tag { font-size: 12px; line-height: 17px; }
+#app.phone .fl-key { font-size: 12px; }
+.bhead .bt { font-size: 17px; font-weight: 600; }
+.bopt .bn { font-size: 15px; }
+.bopt .bs { font-size: 13px; }
+
+/* ----- a finger on the board ----- */
+/* A port is something to press: for a finger it is drawn half as big again (and found from further off: board.ts). */
+html[data-input='touch'] .port { width: 22px; height: 22px; margin-top: -11px; border-width: 4px; }
+html[data-input='touch'] .port.in { left: -12px; }
+html[data-input='touch'] .port.out { right: -12px; }
+html[data-input='touch'] g.wire .pin { stroke-width: 3px; }
+/* (A landscape phone: the folded strip is one row as it is upright.) */
+@media (orientation: landscape) and (max-height: 520px) {
+  #app.phone:not(.hint-open) #hud-strip, #app.phone:not(.hint-open) #hud-strip.over-tech { display: flex; flex-direction: column; }
+  #app.phone:not(.hint-open) #hud-row { display: flex; }
+  #app.phone:not(.hint-open) #goal .gc-prog { grid-area: auto; }
+  #app.phone #goal .claim { height: 48px; }
+}
+
+/* ================= 4. the screens: the tech tree, the start, the summary ================= */
+
+#tech { background: var(--canvas); }
+#tech .thead { border-bottom: 0; }
+#tech .dc { border: 0; background: var(--fill); border-radius: 999px; }
+#tech .tclose { border: 0; background: var(--fill); border-radius: 12px; }
+#tech .tgoal { border-bottom: 0; background: rgba(255, 200, 87, 0.13); }
+#tech .tbranch { border-top: 0; padding: 16px 0; }
+#tech .more { border-top: 0; }
+#tech .tt { border: 1.5px solid transparent; background: var(--fill); border-radius: 14px; }
+#tech .tt .ti { background: var(--fill-2); border-radius: 10px; }
+#tech .tt.own { background: transparent; border-color: transparent; color: #8f9bb5; }
+#tech .tt.rdy { background: rgba(94, 234, 212, 0.12); border-color: var(--rdy); }
+#tech .tt.rdy.slows { background: var(--fill); border-color: transparent; }
+#tech .tt.goal { background: rgba(122, 162, 255, 0.1); border: 1.5px solid transparent; }
+#tech .tt.veil { background: transparent; border: 1.5px dashed rgba(255, 255, 255, 0.1); }
+#tech .tt .pb { background: rgba(255, 255, 255, 0.1); }
+#tech .slows { border: 0; background: rgba(251, 191, 36, 0.12); border-radius: 12px; }
+#tech .tdetail { background: var(--panel); border-left: 0; }
+#tech .tag { font-size: 12px; font-weight: 600; letter-spacing: 0; text-transform: none; border-radius: 999px; padding: 3px 10px; background: rgba(122, 162, 255, 0.16); }
+#tech .cbar { height: 5px; background: rgba(255, 255, 255, 0.1); }
+#tech .gnote { border: 0; background: rgba(122, 162, 255, 0.1); border-radius: 14px; }
+#tech .dgo { border: 0; background: var(--fill-2); border-radius: 12px; }
+#tech .dfoot { border-top: 0; background: var(--panel); }
+#tech .rbtn { border: 0; background: var(--fill-2); border-radius: 14px; }
+#tech .rbtn.ok { border: 0; }
+#app.phone #tech .ttabs { border-bottom: 0; }
+#app.phone #tech .tdetail { border-top: 0; border-radius: 22px 22px 0 0; }
+#app.phone #tech .tt, #app.phone #tech .tt.own { border-radius: 14px; }
+@media (hover: hover) {
+  #tech .tclose:hover, #tech .dgo:hover { background: var(--fill-2); }
+  #tech .tt:hover { background: var(--fill-2); }
+  #tech .tt.own:hover, #tech .tt.veil:hover { background: var(--fill); }
+  #tech .tt.rdy:hover { background: rgba(94, 234, 212, 0.18); }
+  #tech .tt.goal:hover { background: rgba(122, 162, 255, 0.16); }
+}
+
+.start-card { border: 0; background: var(--panel); border-radius: 28px; }
+.start-card h1 { font-weight: 700; letter-spacing: -0.03em; }
+.start-go { font-family: inherit; border-radius: 16px; }
+.start-new { text-decoration: none; }
+.sum-card { border: 0; background: var(--panel); border-radius: 24px; }
+.sum-kicker, .sum-lbl { font-size: 12px; font-weight: 600; letter-spacing: 0; text-transform: none; }
+.sum-stat { border: 0; background: var(--fill); border-radius: 14px; }
+.sum-nx { border: 0; background: var(--fill); border-radius: 999px; }
+.sum-nx.made { border: 0; background: var(--fill-2); }
+.sum-go { font-family: inherit; }
+.sum-copy { border: 0; background: var(--fill-2); }
+.sum-copy:hover { background: rgba(255, 255, 255, 0.16); }
+.sum-copy.done { border: 0; background: rgba(74, 222, 128, 0.14); }
+.sum-over { text-decoration: none; }
+
+/* ----- the goal card's rows of guidance, and its small buttons ----- */
+.gc-show { border: 0; background: rgba(122, 162, 255, 0.2); color: #dbe6ff; border-radius: 10px; }
+.gc-show:hover { background: rgba(122, 162, 255, 0.3); }
+
+/* ----- the zoom cluster stands on a plate of its own, so it reads over whatever card is under it ----- */
+#zoom { padding: 4px; border-radius: 16px; background: rgba(21, 26, 37, 0.92); box-shadow: 0 6px 18px rgba(0, 0, 0, 0.3); bottom: 130px; right: 14px; box-sizing: content-box; }
+#zoom .ibtn { background: transparent; }
+#zoom .ibtn:hover:not(:disabled) { background: var(--fill-2); }
+#app.no-mini:not(.phone) #zoom { bottom: 14px; }
+
+/* ----- what was left with an outline ----- */
+.fav { border-radius: 10px; background: var(--fill-2); }
+button.fav:hover { background: rgba(255, 255, 255, 0.16); }
+.fav.on { box-shadow: none; background: rgba(94, 234, 212, 0.14); }
+.shortbox { border: 0; background: rgba(251, 191, 36, 0.11); border-radius: 14px; }
+.up-pill { border: 0; background: var(--panel-2); border-radius: 14px; }
+.cel-card { border: 0; }
+/* A short phone has no room for a sheet to say what a machine is before it says how it is doing. */
+@media (max-height: 700px) {
+  #app.phone #insp .sec.head .htxt p { display: none; }
+}

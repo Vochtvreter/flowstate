@@ -4,6 +4,7 @@ import './styles/hud.css';
 import './styles/advice.css';
 import './styles/feel.css';
 import './styles/phone.css';
+import './styles/clean.css';
 import { clearHistory, cutWire, deleteNode, nodeById, redo, refundOf, undo } from './actions';
 import { fmt, fmtTime, has, offlineCap } from './economy';
 import { offlineGains, tick } from './sim';

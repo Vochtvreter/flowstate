@@ -242,7 +242,7 @@ This is the most important section. The editor *is* the game. Sizes, layouts and
 
 ### 7.3 Readability
 
-- **Wires** are smooth curves, thicker with throughput, with dots in the material's color and shape travelling along them. A wire with nothing flowing turns dashed and still.
+- **Wires** are solid lines in their material's colour (curved, or squared: §7.2), thicker with throughput, with lighter dots in the material's shape travelling along them. A wire with nothing flowing is a thin grey line.
 - **Rate labels** show when they answer a question (pillar 2), never in the overview.
 - **Node rings** show utilization; status color is unmistakable.
 - **Labels in plain words.** A card with a problem of its own carries a label that says it as a person would: "Needs more Copper" ("Needs Copper" when nothing wired in brings any), "Tar has no exit" for a port with no wire, "Backed up" for an output that is wired and still full, "No input". A Drill says only that its material has no exit. A machine that runs a little short but works most of its time (60% or more, and under 88%) is no problem and raises no alert; it carries "Short of Ore" in amber, so that the card, the Flow meter and the Flows panel agree. The Drill or machine that a starved one is waiting on, when it works flat out, says "Can't keep up", and its inspector names who is waiting and offers Speed: it used to stand in healthy green beside the red one. (The simulation's own words, blocked, starved and idle, are not shown anywhere.)
