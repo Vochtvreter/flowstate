@@ -55,6 +55,12 @@ export interface Wire {
   paid: number;
   weight: number;
   filter: MatId | null;
+  /**
+   * Pins: points on the board the player has set this wire to run by, in order from its start (at most MAX_PINS). They
+   * are how the wire is drawn and nothing else (src/ui/wires.ts): no rule reads them, and a wire carries the same
+   * with them or without. Absent on a wire that has none.
+   */
+  pins?: { x: number; y: number }[];
   // --- runtime ---
   /** Items per second, smoothed. Steady and exact when the wire carries its items in regular gulps (measureWire in src/sim.ts). */
   rate: number;
@@ -281,6 +287,26 @@ export function noteEdit(g: Game, what: string) {
 export const GRID = 20;
 export const snap = (v: number) => Math.round(v / GRID) * GRID;
 
+/** A wire can carry this many pins, and a pin stands on a grid of this many pixels (half the cards' own). */
+export const MAX_PINS = 4;
+export const PIN_GRID = 10;
+
+/** Pins as they may be kept: whole points on the pin grid inside the plot, no two in a row the same, MAX_PINS at most. Anything else in the list is dropped. */
+export function cleanPins(pins: unknown, board: { w: number; h: number }): { x: number; y: number }[] {
+  const out: { x: number; y: number }[] = [];
+  if (!Array.isArray(pins)) return out;
+  for (const p of pins) {
+    if (out.length >= MAX_PINS) break;
+    if (!p || typeof p !== 'object' || typeof p.x !== 'number' || typeof p.y !== 'number' || !isFinite(p.x) || !isFinite(p.y)) continue;
+    const x = Math.max(0, Math.min(board.w, Math.round(p.x / PIN_GRID) * PIN_GRID));
+    const y = Math.max(0, Math.min(board.h, Math.round(p.y / PIN_GRID) * PIN_GRID));
+    const last = out[out.length - 1];
+    if (last && last.x === x && last.y === y) continue;
+    out.push({ x, y });
+  }
+  return out;
+}
+
 export function makeNode(g: Game, type: NodeType, x: number, y: number): GNode {
   return {
     id: g.nextId++, type, x, y,
@@ -474,13 +500,20 @@ export function deserialize(json: string): Game | null {
       if (port < 0 || port >= Math.max(1, portsOf(from))) return false;
       seen.add(w.id);
       return true;
-    }).map((w: Wire): Wire => ({
-      ...w, port: Math.floor(num(w.port, 0)),
-      // A pipe tier this version does not have is the best one it has.
-      tier: Math.min(PIPES.length - 1, Math.floor(pos(w.tier))), paid: pos(w.paid), weight: Math.min(99, Math.floor(pos(w.weight, 1))),
-      filter: w.filter && MATERIALS[w.filter] ? w.filter : null, mat: w.mat && MATERIALS[w.mat] ? w.mat : null,
-      mixed: !!w.mixed, budget: num(w.budget, 0), flow: num(w.flow, 0),
-    }));
+    }).map((w: Wire): Wire => {
+      const out: Wire = {
+        ...w, port: Math.floor(num(w.port, 0)),
+        // A pipe tier this version does not have is the best one it has.
+        tier: Math.min(PIPES.length - 1, Math.floor(pos(w.tier))), paid: pos(w.paid), weight: Math.min(99, Math.floor(pos(w.weight, 1))),
+        filter: w.filter && MATERIALS[w.filter] ? w.filter : null, mat: w.mat && MATERIALS[w.mat] ? w.mat : null,
+        mixed: !!w.mixed, budget: num(w.budget, 0), flow: num(w.flow, 0),
+      };
+      // Pins are only how the wire is drawn: whatever of them makes sense is kept, and the rest dropped.
+      const pins = cleanPins(w.pins, g.board);
+      if (pins.length) out.pins = pins;
+      else delete out.pins;
+      return out;
+    });
     // Ids are handed out from nextId: never one that is already in use.
     let top = 0;
     for (const x of [...g.nodes, ...g.wires, ...g.deposits]) top = Math.max(top, x.id);
@@ -609,7 +642,7 @@ export const isLookahead = (g: Game) => lookaheads.has(g);
 
 export interface Snapshot {
   nodes: Pick<GNode, 'id' | 'type' | 'x' | 'y' | 'recipe' | 'material' | 'depositId' | 'lv' | 'paid' | 'legacyPaid' | 'mode' | 'born'>[];
-  wires: Pick<Wire, 'id' | 'from' | 'port' | 'to' | 'tier' | 'paid' | 'weight' | 'filter'>[];
+  wires: Pick<Wire, 'id' | 'from' | 'port' | 'to' | 'tier' | 'paid' | 'weight' | 'filter' | 'pins'>[];
   /** The board's size and its deposits: an expansion is undone with the rest (actions.ts expandBoard). */
   board?: Game['board'];
   deposits?: Deposit[];
@@ -628,6 +661,7 @@ export function snapshot(g: Game): Snapshot {
     })),
     wires: g.wires.map((w) => ({
       id: w.id, from: w.from, port: w.port, to: w.to, tier: w.tier, paid: w.paid, weight: w.weight, filter: w.filter,
+      ...(w.pins?.length ? { pins: w.pins.map((p) => ({ x: p.x, y: p.y })) } : {}),
     })),
     board: { ...g.board },
     deposits: g.deposits.map((d) => ({ ...d })),
@@ -685,7 +719,11 @@ export function restore(g: Game, s: Snapshot) {
     const prev = oldW.get(sw.id);
     const fresh = makeWire(g, sw.from, sw.port, sw.to);
     g.nextId--;
-    return { ...(prev ?? fresh), ...sw };
+    const w: Wire = { ...(prev ?? fresh), ...sw };
+    // (A wire's pins are as the snapshot has them: none, where it has none.)
+    if (sw.pins?.length) w.pins = sw.pins.map((p) => ({ x: p.x, y: p.y }));
+    else delete w.pins;
+    return w;
   });
   if (s.board) g.board = { ...s.board };
   if (s.deposits) g.deposits = s.deposits.map((d) => ({ ...d }));

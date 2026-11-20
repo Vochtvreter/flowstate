@@ -13,6 +13,8 @@
 //   goal 9  "Turn Oil into Plastic"  the minimap (or once the board holds eight cards); the Flows button: with
 //                                    a second raw material there is something to compare
 //   goal 14 "Open up more land"      the plot's label, "Board · 1 plot"
+//   six cards on the board           cable management, with Tidy: the Wires button (curved or squared), and pins on
+//                                    a wire (its inspector's Route part, a double click on it)
 //
 // A save that is further on shows everything it has reached, at once. (The slots of machines that are still locked,
 // the Tech tree button, the order chip, the Flow ring and the Expand button were already brought in this way, each by
@@ -38,6 +40,8 @@ const FROM = {
 const MINIMAP_CARDS = 8;
 /** ...and the Flows button once this many materials are being made. */
 const FLOWS_MATS = 4;
+/** Cable management comes when the board holds this many cards (Tidy's own number: board.ts), or a wire has a pin already. */
+export const WIRES_CARDS = 6;
 
 export interface Reveal {
   /** Undo and Redo (the top bar; on a phone the floating Undo). */
@@ -55,6 +59,8 @@ export interface Reveal {
   flows: boolean;
   /** A card's inspector lists its upgrades (before, it says what the machine is and what is wrong with it, and no more). */
   upgrades: boolean;
+  /** Cable management: the Wires button (how wires are drawn), and pins on a wire. */
+  wires: boolean;
 }
 
 export function revealOf(g: Game): Reveal {
@@ -68,6 +74,7 @@ export function revealOf(g: Game): Reveal {
     depositWords: has(g, 'R1'),
     flows: i >= FROM.flows || Object.keys(g.made).length >= FLOWS_MATS,
     upgrades: i >= FROM.upgrades || g.nodes.some((n) => n.lv.speed + n.lv.eff + n.lv.buffer > 0),
+    wires: g.nodes.length >= WIRES_CARDS || g.wires.some((w) => !!w.pins?.length),
   };
 }
 

@@ -66,6 +66,15 @@ export function makeFlow(cold: boolean): Flow {
   };
 }
 
+/** A wire's line is kept as this many runs between this many points and one. */
+export const FLOW_SEGS = SEGS;
+
+/** Take a wire's line as points: FLOW_SEGS + 1 of them, start to end (src/ui/wires.ts draws them, corners among them). */
+export function setFlowPts(f: Flow, pts: Pt[]) {
+  const last = pts.length - 1;
+  setFlowPath(f, (t) => pts[Math.min(last, Math.round(t * SEGS))]);
+}
+
 /** Re-sample a wire's path. `at(t)` gives the point at t in 0..1. */
 export function setFlowPath(f: Flow, at: (t: number) => Pt) {
   let x0 = Infinity, y0 = Infinity, x1 = -Infinity, y1 = -Infinity;

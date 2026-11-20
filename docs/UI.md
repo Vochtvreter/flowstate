@@ -28,7 +28,7 @@ The phone layout is on when the window is under 700 px wide, or is wider than ta
 | Goal card, order, alert | Card over the top of the board, order beside it, alert under it | One strip across the top of the board | Card at the top left, its hint folded away at the first press on the board; order and alert as pills beside it |
 | Inspector | 320 px panel at the right; the board gets narrower | Bottom sheet | Sheet at the right, at most 340 px |
 | Build menu | Fan round where the new card will stand (the pointer, unless the card has to stand elsewhere), with its outline | Bottom sheet, the card's outline on the board above it | Sheet at the right, the outline beside it |
-| Zoom, Fit, Tidy | Buttons above the minimap, bottom right | Pinch; Fit, Undo and Tidy float above the build bar | The same |
+| Zoom, Fit, Tidy, Wires | Buttons above the minimap, bottom right | Pinch; Fit, Undo and Tidy float above the build bar; Wires is in the gear menu | The same |
 | Minimap | Shown | Not shown | Not shown |
 | Undo, Redo, Pause, Sound | Top bar | Undo floats; all four in the gear menu | The same |
 | Claim | On the goal card | In the thumb row, above the build bar | The same |
@@ -96,7 +96,7 @@ A dot grid (24 px) with the plot as a dashed outline labelled "Board · 2 plots"
 
 - **Card:** 172 px wide and 72, 92 or 112 px tall by its number of ports (a Router, Merger or Dump is 136×60 px). On a Drill or a machine, a ring round the glyph of what it makes shows utilisation; then the name ("Sand Drill"; a machine by what it makes, its kind after it in small type: "Glass Refiner"), a second line (for a machine, its recipe in words, or "makes Circuit" where the recipe is too long for the line) and a rate line ("0.50/s · 100%"). Positions snap to a 20 px grid, and cards never overlap.
 - **Ports:** 14 px dots on the card's sides, inputs left and outputs right, in the material's colour. An output with no wire pulses. A machine with two outputs labels them.
-- **Wire:** a curve in the material's colour, 2 to 7 px wide by its rate, with dots in the material's shape travelling along it. A full wire glows brighter; a wire carrying nothing is grey, dashed and has no dots (in its material's colour it read as an alarm: Copper is red). While something is selected, wires that are not its own are drawn faint.
+- **Wire:** a line in the material's colour (a curve, or right angles with rounded corners: "Cable management" in section 5), 2 to 7 px wide by its rate, with dots in the material's shape travelling along it. A full wire glows brighter; a wire carrying nothing is grey, dashed and has no dots (in its material's colour it read as an alarm: Copper is red). While something is selected, wires that are not its own are drawn faint.
 - **Rate chip:** on a wire only when it has something to say: the wire is selected or runs to the selected card, carries nothing ("0/s") or is full ("MAX"), was made in the last 3 s, or is under the mouse.
 - **Deposit:** a dashed tile the size of a card ("Sand deposit · empty · place a Drill"; "Unknown deposit · needs research"). Until there is a Lab a locked deposit is a faint outline with a lock and no words, and until the Drill has its slot in the build bar a free deposit says only "empty".
 - **Gains:** once a second "+5¢" floats above each Market and "+1α" above each Lab, and coins fly to the credits pill.
@@ -143,7 +143,7 @@ The camera goes only as far out as it takes to show everything, so a small facto
 
 **Tap to arm.** A tap or click on an output port arms it: the port stays lit and waits. A tap on a card makes the wire; a tap on empty board opens the build menu there; a tap on the armed port, `Esc`, or the ✕ on the "Tap where the Sand should go" line lets go. This is how a finger wires across a board too big for one screen.
 
-**How a finger is matched** (by distance on screen, whatever the zoom; `touchHit`): a port within 22 px (18 px for an input port); else the card under the finger; else a free deposit; else a wire within 14 px; else the nearest output port within 44 px; else a card missed by under 10 px. Only the first of these starts a wire when the finger drags: a drag that starts on a wire or in a gap pans. With a port armed, a tap on a wire counts as a tap on the board under it. In the overview a finger's drag always pans; a port is armed by a tap within 16 px of its dot (12 px for a mouse, which can also drag from it).
+**How a finger is matched** (by distance on screen, whatever the zoom; `touchHit`): a port within 22 px (18 px for an input port); else the card under the finger; else a free deposit; else a pin within 18 px; else a wire within 14 px; else the nearest output port within 44 px; else a card missed by under 10 px. Only the first of these starts a wire when the finger drags: a drag that starts on a wire or in a gap pans. With a port armed, a tap on a wire counts as a tap on the board under it. In the overview a finger's drag always pans; a port is armed by a tap within 16 px of its dot (12 px for a mouse, which can also drag from it).
 
 **Build menu** (`openRadial`). Let go of a wire on empty board, clear of its port (about 36 px).
 
@@ -161,7 +161,14 @@ The camera goes only as far out as it takes to show everything, so a small facto
 
 **Cut.** `Shift`+drag draws a red dashed line and cuts every wire it crosses (mouse only). Or select the wire and press `Del`, or **Cut wire** in the inspector.
 
-**Undo.** Each edit is one step: a build with its wire, a move with its splice, a whole Tidy, an expansion. Undo takes back what was paid or refunded, and refuses when a refund has been spent. 200 steps are kept, back to the last claimed goal. Deleting refunds in full; the last Drill cannot be deleted.
+**Cable management** (`wires.ts`; from six cards, with Tidy).
+
+- *Style.* The Wires button beside Tidy (`W`; **Wires** in a phone's gear menu) switches every wire between **curved** and **squared**. The button draws the style the board is in and is lit while it is squared. The choice is kept in the browser, not in the save, and a board that is squared always has the switch, however few cards stand on it.
+- *Squared.* A wire leaves its port level, turns once down or up and comes in level: a 20 px stub at each end, corners rounded by 10 px. Of the three places it can turn (just before the card it ends at, just after the one it starts from, halfway) it takes the one that passes behind the fewest cards, and before the end card when they tie. Wires that turn before the same card each get a lane 8 px from the next, the one with furthest to climb nearest the card, so they run side by side and do not cross each other on the way in; wires from above and from below keep to their own sides. A wire that ends behind its port, or under 40 px ahead of it, goes round: out by the stub, across, and in by the stub. It goes across halfway between the two ports where they are far enough apart in height (112 px), and otherwise 70 px under or over them, whichever passes behind fewer cards.
+- *Pins.* A pin is a point the wire is drawn through: a small ring in the wire's colour, on a 10 px grid inside the plot, up to four a wire. With a mouse, a double click on a wire sets a pin there and a double click on a pin takes it off; a wire's inspector has **Add a pin** (in the middle of its longest stretch without one; the camera brings the pin clear of the sheet) and **Remove pins**. A pin is dragged like a card (after 4 px, or 10 for a finger; `Esc` puts it back), and each change is one undo step. A curved wire bends smoothly through its pins; a squared one runs level to above or below each pin and turns up or down through it, so every pin is a corner or lies on an upright run. Pins stay where they were set when a card at either end moves; the pins of a wire between two cards of a block move with the block. Tidy takes every pin off (the same undo step puts them back). Cutting a wire, deleting a card at its end or splicing a machine into it loses its pins. Pins are saved with the game and are not drawn in the overview.
+- Whatever the style and the pins, the dots, the rate chip, a tap, the cutting line and the light of the ending follow the wire as it is drawn, and the wire carries the same: nothing about cable management is read by the rules.
+
+**Undo.** Each edit is one step: a build with its wire, a move with its splice, a pin set or moved, a whole Tidy, an expansion. Undo takes back what was paid or refunded, and refuses when a refund has been spent. 200 steps are kept, back to the last claimed goal. Deleting refunds in full; the last Drill cannot be deleted.
 
 ---
 
@@ -200,7 +207,7 @@ Opens when a card or a wire is selected: a 320 px panel beside the board on a de
 | Upgrades | One row per track: level, effect, and a buy button that fills as credits come in. With the Bulk Upgrade tech each row also has a second buy button with the price of one press on it ("Upgrade all · 819¢"): it raises every node of that type by one level, lowest level first. Where the credits reach only some it says how many ("Upgrade 6 of 9 · 512¢"); a press that would buy more than the button said buys nothing and asks for a second press |
 | Footer | **Duplicate** (not for a Drill) and **Delete · +refund** |
 
-A wire's inspector shows what it carries against its capacity, "At capacity" when it is the bottleneck, the next pipe tier with its price, **Upgrade every full wire**, and **Cut wire · +refund**.
+A wire's inspector shows what it carries against its capacity, "At capacity" when it is the bottleneck, the next pipe tier with its price, **Upgrade every full wire**, from six cards a **Route** part (how many pins of four, **Add a pin**, **Remove pins**, and a line on how a pin is set and dragged), and **Cut wire · +refund**.
 
 ---
 
@@ -268,7 +275,7 @@ The first screen is a Drill, a Market, the goal card, the credits, Pause, Sound 
 | The Lab (goal 5's reward) | The Tech tree button; locked deposits say "needs research" |
 | Goal 6, "Speed up a Drill" | The Market's slot (sooner, the moment a second Market can be paid for); the upgrades in a card's inspector (sooner, once anything has been upgraded) |
 | Goal 9, "Turn Oil into Plastic" | The Flows button; the minimap (sooner, once eight cards stand) |
-| Six cards | Tidy |
+| Six cards | Tidy; cable management: the Wires button, and pins on a wire (the Route part of its inspector, a double click on it) |
 | Goal 11's reward | The order chip |
 | Goal 14, "Open up more land" | The Expand button; the plot's label |
 | Goal 15's reward | The Flow ring |

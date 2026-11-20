@@ -33,9 +33,10 @@ import { Game, GNode } from '../state';
 import { armedPort, boardRect, buildPreview, radialOpen, toClient, toWorld } from './board';
 import { el, setClass, setStyle } from './dom';
 import { Overlay, addOverlay, ring } from './fx';
-import { Box, Pt, bezierAt, inPorts, matColor, nodeSize, outPorts } from './geom';
+import { Box, Pt, inPorts, matColor, nodeSize, outPorts } from './geom';
 import { env } from './phone-env';
 import { Signals, onBeat, onFrame, onNewGame, ui } from './ui';
+import { drawWire as wireShape } from './wires';
 
 /** Without input for this long (ms) before the hand shows the goal's gesture. */
 const IDLE_MS = 5000;
@@ -217,8 +218,10 @@ for (const dy of [0, 200, -200, 400, -400]) for (const dx of [346, 606, -174, 86
 function wireCost(g: Game, port: Pt, b: Box): number {
   const end = { x: b.x0, y: (b.y0 + b.y1) / 2 };
   let cost = 0;
+  // (As the board would draw it: curved or squared.)
+  const line = wireShape(port, end, ui.wireStyle, 24).pts;
   for (let i = 1; i < 24; i++) {
-    const p = bezierAt(port, end, i / 24);
+    const p = line[i];
     let worst = 0;
     for (const n of g.nodes) {
       const { w, h } = nodeSize(n);
@@ -808,8 +811,10 @@ function drawWire(c: CanvasRenderingContext2D, from: Pt, end: Pt, color: string,
   if (alpha <= 0) return;
   const k = ui.view.k;
   c.beginPath();
-  for (let i = 0; i <= 20; i++) {
-    const p = toClient(bezierAt(from, end, i / 20));
+  // (In the style the board's own wires are drawn in.)
+  const line = wireShape(from, end, ui.wireStyle, 20).pts;
+  for (let i = 0; i < line.length; i++) {
+    const p = toClient(line[i]);
     if (i) c.lineTo(p.x, p.y);
     else c.moveTo(p.x, p.y);
   }

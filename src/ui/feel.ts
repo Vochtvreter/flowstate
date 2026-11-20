@@ -14,12 +14,13 @@ import {
   cueReady, cueSales, cueStart, cueSurplus, cueTip, freshenSales, initAudio, isMuted, onMuteChange, renderCue, renderPeak, renderSales,
   resetAudio, saleLevel, saleStep, setDrone, setMuted,
 } from './audio';
-import { boardRect, toClient } from './board';
+import { boardRect, toClient, wireLine } from './board';
 import { celebrateEnd, celebrateFirstData, celebrateFlow, celebrateGoal, celebrateResearch, cancelCelebrations, celebrating, initCelebrate } from './celebrate';
 import { anchorPt, el, setAttr, setClass, setHTML } from './dom';
 import { FlyOpts, Overlay, addOverlay, burst, clearParticles, fly, pop, ring, setMood, textWidth } from './fx';
 import { Pt, bezierAt, matColor, nodeSize, outPorts, wireEnds } from './geom';
 import { actOut, handState, initHand, tipSignal } from './hand';
+import { lineAt } from './wires';
 import { setResearchCard } from './hud-toasts';
 import { addTopItem, renderPanels } from './panels';
 import { onBeat, onFrame, onGame, onNewGame, onPress, onSignal, signal, ui } from './ui';
@@ -468,7 +469,7 @@ function onSale(d: { id: number; amount: number }) {
 
 // A streak of light that runs along a wire the moment it is connected, from the source to the
 // target, and ends in a burst there. Drawn in world space so it stays on the wire.
-interface Racer { a: Pt; b: Pt; color: string; t: number }
+interface Racer { a: Pt; b: Pt; color: string; t: number; wire: number }
 const racers: Racer[] = [];
 const RACE = 0.26;
 
@@ -489,9 +490,12 @@ const racerOverlay: Overlay = {
       }
       const head = u * u * (3 - 2 * u);
       const tail = Math.max(0, head - 0.3);
+      // (Along the wire as the board draws it, curved or squared, round its pins; the plain curve until it is drawn.)
+      const line = wireLine(r.wire);
       c.beginPath();
       for (let s = 0; s <= 8; s++) {
-        const p = toClient(bezierAt(r.a, r.b, tail + ((head - tail) * s) / 8));
+        const at = tail + ((head - tail) * s) / 8;
+        const p = toClient(line ? lineAt(line, at) : bezierAt(r.a, r.b, at));
         if (s) c.lineTo(p.x, p.y);
         else c.moveTo(p.x, p.y);
       }
@@ -517,7 +521,7 @@ function onConnect(d: { from: number; to: number; at: Pt }) {
   for (let i = g.wires.length - 1; i >= 0 && !wire; i--) if (g.wires[i].from === d.from && g.wires[i].to === d.to) wire = g.wires[i];
   const ends = wire && wireEnds(g, wire);
   const color = matColor(wire ? materialsAt(g, wire.from, wire.port)[0] ?? null : null);
-  if (ends) racers.push({ a: ends.a, b: ends.b, color, t: 0 });
+  if (ends && wire) racers.push({ a: ends.a, b: ends.b, color, t: 0, wire: wire.id });
   else {
     burst(d.at, color, 9);
     ring(d.at, '#ffffff');

@@ -16,9 +16,9 @@ import {
 } from '../economy';
 import { activeGoal } from '../goals';
 import { graph, isMachine, passCap } from '../sim';
-import { Game, GNode, RouterMode, Wire , nodeNoun } from '../state';
+import { Game, GNode, MAX_PINS, RouterMode, Wire, nodeNoun } from '../state';
 import { isMuted, setMuted } from './audio';
-import { boardRect, frameNodes, jumpTo, startPlacing, fitView, zoomBy } from './board';
+import { boardRect, frameNodes, jumpTo, pinWire, startPlacing, fitView, toggleWires, unpinWire, wiresShown, zoomBy } from './board';
 import { marked, pressedMark, tendMark } from './advice-show';
 import { waitLine } from './advice-tip';
 import { Panel, cachedRect, el, invalidateLayout, makePanel, setAnchor, setAttr, setClass, setHTML, setHidden, setText } from './dom';
@@ -86,7 +86,8 @@ export function initPanels(refs: {
     if (a === 'flows') {
       ui.menuOpen = false;
       toggleFlows();
-    } else if (a === 'undo') { if (!ui.techOpen) undo(g); }
+    } else if (a === 'wires') toggleWires();
+    else if (a === 'undo') { if (!ui.techOpen) undo(g); }
     else if (a === 'redo') { if (!ui.techOpen) redo(g); }
     else if (a === 'pause') { g.paused = !g.paused; touch(); }
     else if (a === 'sound') setMuted(!isMuted());
@@ -201,6 +202,8 @@ function inspectorAction(a: string, args: string[], openTech: (id?: string) => v
     if (a === 'wireup') { if (!upgradeWire(g, w.id)) toast('Not enough credits', 'bad'); }
     else if (a === 'wireall') { const c = upgradeSaturatedWires(g); toast(c ? `Upgraded ${c} wire${c > 1 ? 's' : ''}` : 'Nothing to upgrade, or not enough credits', c ? 'good' : 'bad'); }
     else if (a === 'cut') { cutWire(g, w.id); select(null); }
+    else if (a === 'pin') pinWire(w.id);
+    else if (a === 'unpin') unpinWire(w.id);
   }
 }
 
@@ -487,11 +490,11 @@ function buildTop() {
   const mItem = (act: string) =>
     `<button class="m-only" data-act="${act}" data-testid="menu-${act}" role="${act === 'sound' ? 'menuitemcheckbox' : 'menuitem'}"><span class="ml"></span><i class="ms"></i></button>`;
   const menuWrap = el(`<div class="menuwrap t-menu"><button class="ibtn" data-act="menu" data-testid="menu" aria-label="Menu" title="Menu" aria-haspopup="menu">${icon('gear')}</button>`
-    + `<div class="menu" role="menu" hidden>${mItem('flows')}${mItem('pause')}${mItem('sound')}${mItem('undo')}${mItem('redo')}`
+    + `<div class="menu" role="menu" hidden>${mItem('flows')}${mItem('wires')}${mItem('pause')}${mItem('sound')}${mItem('undo')}${mItem('redo')}`
     + `<button class="danger" data-act="reset" data-testid="menu-reset" role="menuitem">New game…</button></div></div>`);
   const gear = menuWrap.querySelector<HTMLElement>('[data-act="menu"]')!;
   const menu = menuWrap.querySelector<HTMLElement>('.menu')!;
-  const [mFlows, mPause, mSound, mUndo, mRedo] = [...menu.querySelectorAll<HTMLElement>('.m-only')];
+  const [mFlows, mWires, mPause, mSound, mUndo, mRedo] = [...menu.querySelectorAll<HTMLElement>('.m-only')];
   const say = (b: HTMLElement, text: string, state = '') => {
     setText(b.firstElementChild!, text);
     setText(b.lastElementChild!, state);
@@ -512,6 +515,9 @@ function buildTop() {
       const troubles = revealOf(g).flows ? flowTroubles(g) : 0;
       setHidden(mFlows, !revealOf(g).flows);
       say(mFlows, 'Flows', troubles ? `${troubles} in trouble` : '');
+      // (How wires are drawn, on a phone: a desktop has the button beside Tidy.)
+      setHidden(mWires, !wiresShown());
+      say(mWires, 'Wires', ui.wireStyle === 'squared' ? 'Squared' : 'Curved');
       say(mPause, g.paused ? 'Resume' : 'Pause', g.paused ? 'Paused' : '');
       setClass(mPause, 'on', g.paused);
       const muted = isMuted();
@@ -1022,6 +1028,22 @@ function nodeInspector(g: Game, n: GNode): string {
     <div class="scroll">${body}</div>${foot}`;
 }
 
+/**
+ * A wire's Route part: its pins. A pin is a point the wire is drawn through, set by the player to lead it round a card
+ * or along a path of their own; it changes nothing about what the wire carries.
+ */
+function routeSection(w: Wire): string {
+  const n = w.pins?.length ?? 0;
+  const how = n
+    ? isTouch() ? 'Drag a pin to bend the wire.' : 'Drag a pin to bend the wire. Double-click a pin to take it off.'
+    : isTouch() ? 'A pin is a point the wire runs through: add one, then drag it.' : 'A pin is a point the wire runs through. Double-click the wire to set one, then drag it.';
+  return `<div class="sec route"><span class="lbl">Route</span>
+      <div class="row sm"><span>Pins</span><span class="mono"><b>${n}</b> / ${MAX_PINS}</span></div>
+      <div class="st-actions"><button class="ghostbtn" data-act="pin" data-testid="wire-pin"${n >= MAX_PINS ? ' disabled' : ''}>Add a pin</button>${
+        n ? `<button class="ghostbtn" data-act="unpin" data-testid="wire-unpin">Remove pin${n > 1 ? 's' : ''}</button>` : ''}</div>
+      <div class="note">${how}</div></div>`;
+}
+
 function wireInspector(g: Game, w: Wire): string {
   const cap = PIPES[w.tier].cap;
   const mats = materialsAt(g, w.from, w.port);
@@ -1040,6 +1062,7 @@ function wireInspector(g: Game, w: Wire): string {
       <div class="sec flow"><span class="lbl">Flow</span><div class="row sm"><span>Carrying</span><span class="mono"><b>${fmtRate(w.rate)}</b> / ${cap} /s</span></div>
       <div class="bar"><span style="width:${pct(w.rate / cap)}%;background:${mats[0] ? MATERIALS[mats[0]].color : '#9DB8FF'}"></span></div></div>
       <div class="sec"><span class="lbl">Pipe</span>${up}</div>
+      ${revealOf(g).wires ? routeSection(w) : ''}
     </div>
     <div class="foot"><button class="fbtn danger${marked('cut-wire')}" data-act="cut" data-testid="cut-wire">Cut wire${w.paid > 0 ? ` · <span class="mono">+${fmt(w.paid)}¢</span>` : ''}</button></div>`;
 }

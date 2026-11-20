@@ -224,6 +224,7 @@ This is the most important section. The editor *is* the game. Sizes, layouts and
 | Duplicate | `Ctrl+D`: another node of the same type and recipe to place, at the normal price. | Duplicate in the inspector. |
 | Inspect | Click a node or wire → inspector with recipe, in/out rates, utilization, upgrades, and what is wrong with a one-press fix ("Receiving 0.80 of 1.00 Ore/s", with an "Upgrade source · 50¢" button). Hovering shows the rates on its wires. | Tap → the inspector as a bottom sheet. |
 | Camera | Wheel zooms; drag empty board (or middle or right drag) pans; `F` fits; `T` tidies. | Pinch zooms; drag empty board pans; Fit and Tidy buttons. |
+| Cables | `W` or the Wires button: curved or squared wires. Double-click a wire to pin it, drag the pin, double-click the pin to take it off. | Wires in the gear menu; Add a pin in a wire's sheet, then drag the pin. |
 | Other keys | `1`–`9`, `0` build bar or menu option · `R` tech tree · `P` pause · `Esc` backs out | |
 
 *Not built:* box-select, a block of cards for a finger, named groups or frames round a line, copy/paste of a selection, a trash target, a grid toggle, right-drag cutting, a node tooltip on hover.
@@ -236,6 +237,7 @@ This is the most important section. The editor *is* the game. Sizes, layouts and
 - **Level:** cards stand on a 20 px grid and their ports do not (a card with one port has it 36 px down, one with two 31 and 61, a small card 30), so a wire between two cards of different shapes never ran straight. A card that is dragged within 9 px of the height at which one of its wires would be a straight line comes level by itself: the wire lights up, a soft click says so, and the card stays there, a few pixels off the grid, when it is let go.
 - **Block:** several cards can be put in a block and moved as one (§7.1): the way to set a whole line in a row, or to make room for one, without a drag a card.
 - **Tidy** (`T`, from six nodes): lays the whole board out again so that no wire runs behind a card it does not end at, and wires are short and cross little. Then cards come level as under the hand, where that takes under half a grid step. Drills stay on their deposits, the cards glide to their places, and one undo puts everything back. *The layout does not set cards in rows:* on two boards played by the card, Tidy left 2 of 22 and 4 of 34 wires straight. A row is made by hand.
+- **Cable management** (from six nodes): how a wire runs is the player's to arrange, and never part of the rules. Wires are drawn curved, or squared: right angles, the turn that passes behind the fewest cards, and a lane of its own for each wire that turns in before the same card. A wire can be given up to four pins, points it is drawn through, to lead it round a card or along a path of the player's own. The style is a setting of the browser; pins are part of the board (saved, undone, moved with a block, taken off by Tidy). *Squared wires do not route themselves round cards:* where each of the three turns passes behind one, a pin is the way out.
 - *Not built:* a ratio hint while placing ("needs 2.0/s Sand · 1.4/s spare upstream").
 
 ### 7.3 Readability

@@ -18,7 +18,7 @@ import { recipeOf } from '../economy';
 import { GOALS } from '../goals';
 import { graph, isMachine } from '../sim';
 import { GNode, GoalReward } from '../state';
-import { boardRect, fitView, frameNodes, toClient } from './board';
+import { boardRect, fitView, frameNodes, toClient, wireLine } from './board';
 import { anchorPt } from './dom';
 import { SUMMARY_DELAY } from './hud-screens';
 import { Overlay, addOverlay, burst, fly, holdFlows, ring } from './fx';
@@ -582,7 +582,7 @@ function lensCard(life: number, holds = true) {
 // leads to the Phone lights from its source to its target, one row of the factory after another,
 // and each card gets an outline as the light reaches it.
 
-interface BowWire { pts: Float32Array; from: number; to: number; color: string }
+interface BowWire { pts: Float32Array; /** How far along the wire each point is. */ cum: Float32Array; from: number; to: number; color: string }
 interface BowNode { x: number; y: number; w: number; h: number; at: number; color: string }
 
 let bow: { t0: number; step: number; rows: number; wires: BowWire[]; nodes: BowNode[]; lens: BowNode | null; revealAt: number; revealed: boolean; fadeFrom: number; timers: number[] } | null = null;
@@ -637,13 +637,19 @@ function startBow() {
     for (const wire of gr.ins.get(id) ?? []) {
       const ends = wireEnds(g, wire);
       if (!ends || !depth.has(wire.from)) continue;
-      const pts = new Float32Array((BOW_SEGS + 1) * 2);
-      for (let i = 0; i <= BOW_SEGS; i++) {
-        const p = bezierAt(ends.a, ends.b, i / BOW_SEGS);
-        pts[i * 2] = p.x;
-        pts[i * 2 + 1] = p.y;
+      // (The wire as the board draws it, curved or squared, round its pins; the plain curve if it is not drawn.)
+      let pts = wireLine(wire.id)?.slice();
+      if (!pts) {
+        pts = new Float32Array((BOW_SEGS + 1) * 2);
+        for (let i = 0; i <= BOW_SEGS; i++) {
+          const p = bezierAt(ends.a, ends.b, i / BOW_SEGS);
+          pts[i * 2] = p.x;
+          pts[i * 2 + 1] = p.y;
+        }
       }
-      wires.push({ pts, from: depth.get(wire.from)! * step, to: d * step, color: ends.mat ? MATERIALS[ends.mat].color : '#9DB8FF' });
+      const cum = new Float32Array(pts.length / 2);
+      for (let i = 1; i < cum.length; i++) cum[i] = cum[i - 1] + Math.hypot(pts[i * 2] - pts[i * 2 - 2], pts[i * 2 + 1] - pts[i * 2 - 1]);
+      wires.push({ pts, cum, from: depth.get(wire.from)! * step, to: d * step, color: ends.mat ? MATERIALS[ends.mat].color : '#9DB8FF' });
     }
   }
   // Bring the line into view if part of it is off screen, never zooming in: a line
@@ -760,14 +766,17 @@ const bowOverlay: Overlay = {
       if (t <= w.from) continue;
       const span = Math.max(0.05, w.to - w.from);
       const p = Math.min(1, (t - w.from) / span);
-      const upto = p * BOW_SEGS;
-      const whole = Math.floor(upto);
-      const frac = upto - whole;
+      // How far the light has come, by length along the wire: every whole stretch behind it, and part of the next.
+      const last = w.cum.length - 1;
+      const upto = p * w.cum[last];
+      let whole = 0;
+      while (whole < last && w.cum[whole + 1] <= upto) whole++;
       c.beginPath();
       c.moveTo(w.pts[0] * k + o.x, w.pts[1] * k + o.y);
       for (let i = 1; i <= whole; i++) c.lineTo(w.pts[i * 2] * k + o.x, w.pts[i * 2 + 1] * k + o.y);
       let hx = w.pts[whole * 2], hy = w.pts[whole * 2 + 1];
-      if (whole < BOW_SEGS) {
+      if (whole < last) {
+        const frac = (upto - w.cum[whole]) / (w.cum[whole + 1] - w.cum[whole] || 1);
         hx += (w.pts[whole * 2 + 2] - hx) * frac;
         hy += (w.pts[whole * 2 + 3] - hy) * frac;
         c.lineTo(hx * k + o.x, hy * k + o.y);

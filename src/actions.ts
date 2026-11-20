@@ -6,7 +6,7 @@ import {
   recipeOf, recipeUnlocked, trackAvailable, upgradeCost, upgradeValue,
 } from './economy';
 import { graph, isMachine, isPass, isSink, outPortCount } from './sim';
-import { Game, GNode, RouterMode, Snapshot, Wire, isLookahead, makeNode, makeWire, nodeNoun, noteEdit, restore, shelve, snap, snapshot } from './state';
+import { Game, GNode, RouterMode, Snapshot, Wire, cleanPins, isLookahead, makeNode, makeWire, nodeNoun, noteEdit, restore, shelve, snap, snapshot } from './state';
 
 export { claimGoal } from './goals';
 export { materialsAt, pickRecipe, recipesFor } from './economy';
@@ -302,6 +302,34 @@ export function setWeight(g: Game, wireId: number, weight: number): boolean {
     noteEdit(g, 'edit');
     return 0;
   });
+}
+
+/**
+ * Set the pins a wire runs by (src/ui/wires.ts), or with an empty list take them all off. Only how the wire is
+ * drawn: no rule reads a pin. One undo step; false when the wire is not there or nothing would change.
+ */
+export function setPins(g: Game, wireId: number, pins: { x: number; y: number }[]): boolean {
+  const w = g.wires.find((x) => x.id === wireId);
+  if (!w) return false;
+  const next = cleanPins(pins, g.board);
+  const was = w.pins ?? [];
+  if (next.length === was.length && next.every((p, i) => p.x === was[i].x && p.y === was[i].y)) return false;
+  return act(g, () => {
+    if (next.length) w.pins = next;
+    else delete w.pins;
+    return 0;
+  });
+}
+
+/** Take every pin off every wire, as part of a step that is already being taken (Tidy: the cards the pins were set round have moved). Returns how many wires had some. */
+export function dropPins(g: Game): number {
+  let n = 0;
+  for (const w of g.wires) {
+    if (!w.pins?.length) continue;
+    delete w.pins;
+    n++;
+  }
+  return n;
 }
 
 export function setFilter(g: Game, wireId: number, filter: MatId | null): boolean {

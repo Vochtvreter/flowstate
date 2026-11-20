@@ -25,7 +25,7 @@ import { focusSeen, markedControl, stillMarks } from './ui/advice-show';
 import { alertState, cardSaying, hudAnchors, initHud, setElsewhere, setLineFields } from './ui/hud';
 import { backToStart, initScreens, isStarted, screenOpen, screensApi, showStart } from './ui/hud-screens';
 import { initPhone } from './ui/phone';
-import { emitBeat, emitFrame, emitGame, emitNewGame, initToasts, onSignal, select, toast, touch, ui } from './ui/ui';
+import { emitBeat, emitFrame, emitGame, emitNewGame, initToasts, loadWireStyle, onSignal, select, toast, touch, ui } from './ui/ui';
 
 const STEP = 0.05;
 /** Seconds between refresh beats for on-board numbers and panels (see the frame loop). */
@@ -88,6 +88,8 @@ function boot() {
   resumedFrom = loaded ? loaded.savedAt : null;
   initToasts($('toasts'));
   initFx($<HTMLCanvasElement>('fx'));
+  // (How the wires are drawn is the player's choice in this browser, not part of the save.)
+  loadWireStyle();
   initBoard($('board'));
   initTech($('tech'));
   initPanels(

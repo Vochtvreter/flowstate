@@ -19,7 +19,7 @@ const slots = (g: Game) => HOTBAR.filter((t) => slotShown(g, t));
 describe('start simple: the first screen is a Drill, a Market and one sentence', () => {
   it('on goal 1 nothing is on show that has no use yet', () => {
     const g = at('wire-market');
-    expect(revealOf(g)).toEqual({ undo: false, zoom: false, minimap: false, trash: false, plot: false, depositWords: false, flows: false, upgrades: false });
+    expect(revealOf(g)).toEqual({ undo: false, zoom: false, minimap: false, trash: false, plot: false, depositWords: false, flows: false, upgrades: false, wires: false });
     expect(slots(g)).toEqual([]);
   });
 
@@ -74,6 +74,24 @@ describe('start simple: the first screen is a Drill, a Market and one sentence',
   it('a save that is further on shows all of it at once', () => {
     const g = at('make-glyph', ['P1', 'R1', 'P2', 'P3', 'L1']);
     g.board.expansions = 1;
-    expect(revealOf(g)).toEqual({ undo: true, zoom: true, minimap: true, trash: true, plot: true, depositWords: true, flows: true, upgrades: true });
+    g.credits = 1e6;
+    for (let i = 0; i < 4; i++) placeNode(g, 'refiner', 300 + 200 * (i % 2), 100 + 140 * Math.floor(i / 2));
+    expect(revealOf(g)).toEqual({ undo: true, zoom: true, minimap: true, trash: true, plot: true, depositWords: true, flows: true, upgrades: true, wires: true });
+  });
+
+  it('cable management comes with the sixth card on the board, whatever the goal, and stays while a wire has a pin', () => {
+    const g = at('make-glyph', ['P1', 'R1', 'P2', 'P3', 'L1']);
+    g.credits = 1e6;
+    expect(g.nodes.length).toBe(2);
+    expect(revealOf(g).wires).toBe(false);
+    for (let i = 0; i < 3; i++) placeNode(g, 'refiner', 300 + 200 * i, 100);
+    expect(revealOf(g).wires).toBe(false);
+    placeNode(g, 'refiner', 300, 240);
+    expect(g.nodes.length).toBe(6);
+    expect(revealOf(g).wires).toBe(true);
+    const few = at('second-well');
+    const [drill, market] = few.nodes;
+    few.wires.push({ id: 1, from: drill.id, port: 0, to: market.id, tier: 0, rate: 0, paid: 0, pins: [{ x: 300, y: 200 }] } as Game['wires'][number]);
+    expect(revealOf(few).wires).toBe(true);
   });
 });

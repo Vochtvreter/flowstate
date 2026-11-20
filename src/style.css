@@ -182,6 +182,13 @@ g.wire.stalled .base { stroke: #7f8aa3; stroke-dasharray: 5 7; stroke-opacity: 0
 g.wire.stalled:not(.new) .base { stroke-width: 2px !important; }
 g.wire.stalled .glow { stroke-opacity: 0; }
 g.wire.sel .glow { stroke-opacity: 0.35; stroke: var(--sel); }
+/* A pin: a point the player set for the wire to run through (board.ts). A small ring in the wire's colour, quiet
+   until the pointer is on the wire or the wire is selected; it can be dragged. Not drawn in the overview. */
+g.wire .pin { fill: #0c1220; stroke: currentColor; stroke-width: 2px; stroke-opacity: 0.6; pointer-events: all; cursor: grab; }
+g.wire:hover .pin { stroke-opacity: 1; }
+g.wire.sel .pin { stroke: var(--sel); stroke-opacity: 1; fill: #16203a; }
+g.wire.dim .pin { stroke-opacity: 0.2; }
+#board.ov g.wire .pin { display: none; }
 g.wire:hover .base { stroke-opacity: 0.6; }
 /* A wire that has just been connected swells for a moment. */
 g.wire.new .base { animation: wire-in 0.15s ease-out; stroke-dasharray: none; }
@@ -388,8 +395,13 @@ html:not([data-input='touch']) #board.ov .port:hover { --pk: 1.3; }
    far end from Fit): it grows to the left by the button's width, and stays the width of the minimap without it.
    While the layout is being worked out the button says so. */
 #zoom [data-testid='tidy'][aria-busy='true'] { opacity: 0.55; cursor: progress; }
-#zoom:has([data-testid='tidy']:not([hidden])) { width: 196px; }
-html[data-input='touch'] #zoom:has([data-testid='tidy']:not([hidden])) { width: 244px; }
+#zoom:has([data-testid='tidy']:not([hidden])), #zoom:has([data-testid='wires']:not([hidden])) { width: 196px; }
+html[data-input='touch'] #zoom:has([data-testid='tidy']:not([hidden])), html[data-input='touch'] #zoom:has([data-testid='wires']:not([hidden])) { width: 244px; }
+/* ...and a sixth, Wires (how the wires are drawn: curved or squared), which comes with Tidy and stands beside it. */
+#zoom:has([data-testid='tidy']:not([hidden])):has([data-testid='wires']:not([hidden])) { width: 232px; }
+html[data-input='touch'] #zoom:has([data-testid='tidy']:not([hidden])):has([data-testid='wires']:not([hidden])) { width: 292px; }
+#zoom [data-testid='wires'] svg { fill: none; stroke: currentColor; stroke-width: 2; stroke-linecap: round; stroke-linejoin: round; }
+#zoom [data-testid='wires'][data-style='squared'] { color: var(--sel); border-color: var(--sel); }
 
 /* With the inspector open the stage is narrow (under 1200 px whenever the window is under 1596 px): the
    minimap goes, and the zoom buttons drop into its corner, so that less of the board lies under them. */
@@ -486,6 +498,8 @@ html[data-input='touch'] #zoom .zl { height: 44px; }
 .st-actions { display: flex; gap: 8px; margin-top: 10px; flex-wrap: wrap; }
 .ghostbtn { height: 30px; padding: 0 10px; border-radius: 8px; border: 1px solid #3a4a70; background: transparent; font-size: 12px; font-weight: 600; }
 .ghostbtn:hover { background: #1a2338; }
+.ghostbtn:disabled { opacity: 0.45; cursor: default; }
+.ghostbtn:disabled:hover { background: transparent; }
 .ghostbtn.dashed { border-style: dashed; color: #c9d3e8; }
 .recipelist { display: flex; flex-direction: column; gap: 4px; }
 .recipelist button { display: flex; align-items: center; gap: 8px; height: 34px; padding: 0 10px; border-radius: 9px; border: 1px solid var(--border); background: #121929; font-size: 12px; text-align: left; }

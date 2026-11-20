@@ -18,6 +18,8 @@ export interface UIState {
   menuOpen: boolean;
   /** The material the Flows panel is tracing on the board, while that panel is open: everything else stands back. */
   trace: MatId | null;
+  /** How wires are drawn: curved, or squared (right angles, in lanes). The player's choice, kept in this browser (wires.ts). */
+  wireStyle: 'curved' | 'squared';
   /** Bumped whenever something outside the game state (selection, mode) needs a re-render. */
   uiRev: number;
 }
@@ -32,6 +34,7 @@ export const ui: UIState = {
   recipeMenu: false,
   menuOpen: false,
   trace: null,
+  wireStyle: 'curved',
   uiRev: 0,
 };
 
@@ -44,6 +47,30 @@ export function select(sel: Selection | null) {
 }
 
 export function touch() {
+  ui.uiRev++;
+}
+
+/** Where the wire style is kept between visits (a choice of how the board looks, not part of the game). */
+const WIRE_KEY = 'flowstate-wires';
+
+/** Read the wire style the player chose in this browser. */
+export function loadWireStyle() {
+  try {
+    ui.wireStyle = localStorage.getItem(WIRE_KEY) === 'squared' ? 'squared' : 'curved';
+  } catch {
+    /* storage unavailable: curved it is */
+  }
+}
+
+/** Set how wires are drawn, and remember it. */
+export function setWireStyle(style: 'curved' | 'squared') {
+  if (style === ui.wireStyle) return;
+  ui.wireStyle = style;
+  try {
+    localStorage.setItem(WIRE_KEY, style);
+  } catch {
+    /* storage unavailable */
+  }
   ui.uiRev++;
 }
 

@@ -14,24 +14,25 @@
 // factory fits the screen. Fit goes there when the factory is too big for the floor.
 import { DATA_COLORS, DATA_NAMES, DataTier, MATERIALS, MatId, NODE_DEFS, NodeType, PIPES, RECIPES, Recipe, TECHS } from '../content';
 import {
-  act, canConnect, connect, cutWires, expandBoard, freeDeposits, materialsAt, nodeById, placeNode, recipesFor, splice,
+  act, canConnect, connect, cutWires, dropPins, expandBoard, freeDeposits, materialsAt, nodeById, placeNode, recipesFor, setPins, splice,
 } from '../actions';
 import {
   expansionCost, fmt, fmtRate, labRate, matUnlocked, nodeCost, nodeUnlocked, recipeOf, recipeUnlocked,
 } from '../economy';
 import { bagTotal, graph, isMachine, isSink, outPortCount } from '../sim';
 import { lineFrom } from '../graph';
+import { CardBox, WireIn, drawWire, routeAll } from './wires';
 import { lineAdvice, lineSpot } from '../advice';
 import { GOALS, activeGoal, goalDeposit, goalFocus } from '../goals';
-import { GRID, Game, GNode, Wire, snap } from '../state';
+import { GRID, Game, GNode, MAX_PINS, PIN_GRID, Wire, cleanPins, snap } from '../state';
 import { anchorPt, cachedRect, el, invalidateLayout, setAttr, setClass, setHTML, setHidden, setStyle, setText, svgEl } from './dom';
 import {
-  Beacon, Flow, floater, flowPoint, fly, frameFx, invalidateFx, makeFlow, setBeacons, setFlowPath, setFlows,
+  Beacon, FLOW_SEGS, Flow, floater, flowPoint, fly, frameFx, invalidateFx, makeFlow, setBeacons, setFlowPts, setFlows,
 } from './fx';
 import {
-  Box, CARD_GAP, Card, Footprint, LEVEL_GAP, LEVEL_REACH, LevelCard, LevelEnd, LevelWire, Port, Pt, View, ZOOM, bestWindow, bezierAt, boxClear, boxUnion, buildSite, centreView,
+  Box, CARD_GAP, Card, Footprint, LEVEL_GAP, LEVEL_REACH, LevelCard, LevelEnd, LevelWire, Port, Pt, View, ZOOM, bestWindow, boxClear, boxUnion, buildSite, centreView,
   clearPoint, dockSpot, fadeColor, fitBox, fitZoom, fitsAt, frameBox, freeSpot as nearestSpot, heldRate, inPorts, levelCards, levelY, matColor, nodeSize, outPorts,
-  pathD, pinchView, roomFor,
+  pinchView, roomFor,
   segmentsCross, separate, siteFor, spotFree, wholeGain, wireEnds,
 } from './geom';
 import { isStarted, screenOpen } from './hud-screens';
@@ -41,9 +42,9 @@ import { tidy, tidyInput } from './layout';
 import { shortNum } from './panels';
 import { env } from './phone-env';
 import { diagnose, pillFor } from './status';
-import { revealOf, slotShown } from './reveal';
+import { WIRES_CARDS, revealOf, slotShown } from './reveal';
 import { traceOf } from '../flows';
-import { delegate, onGame, onPress, onSignal, select, signal, toast, touch, ui } from './ui';
+import { delegate, onGame, onPress, onSignal, select, setWireStyle, signal, toast, touch, ui } from './ui';
 
 let boardEl: HTMLElement;
 let worldEl: HTMLElement;
@@ -81,6 +82,8 @@ interface NodeRefs {
 interface WireRefs {
   g: SVGGElement; hit: SVGPathElement; glow: SVGPathElement; base: SVGPathElement; chip: HTMLElement; chipText: HTMLElement;
   a: Pt; b: Pt; flow: Flow;
+  /** The path it is drawn with now (see `routeWires`), and the handles of its pins, one a pin. */
+  d: string; pins: SVGCircleElement[];
   chipX: number; chipY: number; chipHw: number;
   /** No place on the wire where its chip would not cover a card. */
   chipOff: boolean;
@@ -149,6 +152,12 @@ const PORT_EDGE = 30;
 const WIRE_LONG = 100;
 /** Half the width of the band along a wire that selects it (28 px in all). */
 const WIRE_REACH = 14;
+/** A finger this close to a pin on a wire means the pin (a 36 px target; it comes before the wire it is on). */
+const PIN_REACH = 18;
+/** ...and a mouse pointer on the wire, this close. */
+const PIN_MOUSE = 10;
+/** A pin set from the inspector is brought into view with this much board round it (board pixels). */
+const PIN_ROOM = 60;
 /** A finger that just misses a card, by no more than this, still means the card (when nothing else is nearer). */
 const CARD_NEAR = 10;
 /** How far a finger may wander and still be a tap, and how far it must go before a node or a wire follows it. */
@@ -210,7 +219,11 @@ type Drag =
       /** The wires of the card that run dead straight where it is held now (see `levelWith`); none: it stands on the grid. */
       level?: number[];
       /** The card is one of a block (see `block`): the others that move with it, and where each stood when the drag began. */
-      others?: { id: number; x0: number; y0: number }[] }
+      others?: { id: number; x0: number; y0: number }[];
+      /** ...and the pins of the wires that run inside the block, which go with it, as they were then. */
+      pins0?: Map<number, Pt[]> }
+  /** A pin of a wire being moved: which one, and the wire's pins as they were when it was pressed. */
+  | { kind: 'pin'; wire: number; index: number; was: Pt[]; moved: boolean; sx: number; sy: number; slop: number }
   | WireDrag
   | { kind: 'wireIn'; to: number; mat: MatId | null; b: Pt; p: Pt; target: number | null; tp: Pt; blend: number; armed: boolean; sx: number; sy: number; slop: number }
   | { kind: 'wirePress'; wireId: number; sx: number; sy: number; slop: number; touch: boolean }
@@ -2003,8 +2016,8 @@ function expand(ev?: Event) {
 
 /** How long the cards take to glide to their new places, in ms. */
 const TIDY_MS = 400;
-/** Tidy is offered once there is this much on the board to tidy. */
-const TIDY_FROM = 6;
+/** Tidy is offered once there is this much on the board to tidy (and with it, the Wires button). */
+const TIDY_FROM = WIRES_CARDS;
 let tidyBtn: HTMLButtonElement | null = null;
 
 /**
@@ -2128,6 +2141,8 @@ function tidyAnswer(id: number, moves: Map<number, Pt>) {
       n.x = to.x;
       n.y = to.y;
     }
+    // (The cards the pins were set round have moved: the wires start again without them. The same undo step.)
+    dropPins(g);
     return 0;
   });
   for (const [nid, was] of from) {
@@ -2225,15 +2240,118 @@ function syncTidyControl() {
   const label = withKey('Tidy the board', 'T');
   setAttr(tidyBtn, 'aria-label', label);
   setAttr(tidyBtn, 'title', label);
+  syncWiresControl();
 }
 
-/** T tidies, wherever the board's other keys work (main.ts has those): not in a text field, the tech tree or a full-screen card. */
+// ----- cable management: the wire style, and pins -----
+
+let wiresBtn: HTMLButtonElement | null = null;
+const WIRES_ICON = {
+  curved: `<svg class="ic" viewBox="0 0 24 24" width="14" height="14" aria-hidden="true"><path d="M3 6c9 0 9 12 18 12"/></svg>`,
+  squared: `<svg class="ic" viewBox="0 0 24 24" width="14" height="14" aria-hidden="true"><path d="M3 6h7a2 2 0 0 1 2 2v8a2 2 0 0 0 2 2h7"/></svg>`,
+};
+
+/**
+ * Is the wire style on offer? With the rest of cable management (reveal.ts), and at any time for a player whose
+ * board is squared already: the style is kept between games, and there must be a way back from it.
+ */
+export const wiresShown = (): boolean => revealOf(ui.g).wires || ui.wireStyle !== 'curved';
+
+/** Switch between curved and squared wires. */
+export function toggleWires() {
+  setWireStyle(ui.wireStyle === 'curved' ? 'squared' : 'curved');
+  toast(ui.wireStyle === 'squared' ? 'Wires run <b>squared</b>: right angles, side by side.' : 'Wires run <b>curved</b>.', 'info', 2200);
+}
+
+/** The Wires button, beside Tidy in the zoom cluster and shown when Tidy is: it draws the style the board is in, and a press changes it. */
+function syncWiresControl() {
+  if (!wiresBtn) {
+    const zoom = document.getElementById('zoom');
+    if (!zoom || !zoom.firstElementChild || !tidyBtn) return;
+    wiresBtn = el<HTMLButtonElement>(`<button class="ibtn" data-testid="wires"></button>`);
+    zoom.insertBefore(wiresBtn, tidyBtn);
+    onPress(wiresBtn, toggleWires);
+  }
+  setHidden(wiresBtn, !wiresShown());
+  if (wiresBtn.dataset.style !== ui.wireStyle) {
+    wiresBtn.dataset.style = ui.wireStyle;
+    setHTML(wiresBtn, WIRES_ICON[ui.wireStyle]);
+  }
+  const label = withKey(`Wires: ${ui.wireStyle}. Press for ${ui.wireStyle === 'curved' ? 'squared' : 'curved'}`, 'W');
+  setAttr(wiresBtn, 'aria-label', label);
+  setAttr(wiresBtn, 'title', label);
+}
+
+/** How far along a wire's line (board pixels from its start) the point of it nearest to `p` lies. */
+function alongWire(f: Flow, p: Pt): number {
+  let best = Infinity, at = 0;
+  const pts = f.pts;
+  for (let i = 0; i + 3 < pts.length; i += 2) {
+    const ax = pts[i], ay = pts[i + 1];
+    const dx = pts[i + 2] - ax, dy = pts[i + 3] - ay;
+    const len = dx * dx + dy * dy || 1;
+    const t = Math.max(0, Math.min(1, ((p.x - ax) * dx + (p.y - ay) * dy) / len));
+    const d = Math.hypot(p.x - (ax + t * dx), p.y - (ay + t * dy));
+    if (d < best) {
+      best = d;
+      at = f.cum[i / 2] + t * (f.cum[i / 2 + 1] - f.cum[i / 2]);
+    }
+  }
+  return at;
+}
+
+/**
+ * Put a pin on a wire: at `at` (a double click there), or with none given in the middle of its longest stretch
+ * between pins (the inspector's button, a finger's way). The pin takes its place among the wire's others by how far
+ * along the wire it is. One undo step; the wire is selected, so the pin can be seen and dragged. False when the
+ * wire holds all the pins it can.
+ */
+export function pinWire(id: number, at?: Pt): boolean {
+  const g = ui.g;
+  const w = g.wires.find((x) => x.id === id);
+  const refs = wireEls.get(id);
+  if (!w || !refs) return false;
+  const pins = (w.pins ?? []).map((q) => ({ x: q.x, y: q.y }));
+  if (pins.length >= MAX_PINS) {
+    toast(`A wire holds ${MAX_PINS} pins at most.`, 'info');
+    return false;
+  }
+  const f = refs.flow;
+  const where = pins.map((q) => alongWire(f, q));
+  let p = at;
+  if (!p) {
+    const stops = [0, ...where, f.len].sort((x, y) => x - y);
+    let from = 0, gap = -1;
+    for (let i = 0; i + 1 < stops.length; i++) if (stops[i + 1] - stops[i] > gap) { gap = stops[i + 1] - stops[i]; from = stops[i]; }
+    p = flowPoint(f, from + gap / 2);
+  }
+  const s = alongWire(f, p);
+  let i = 0;
+  while (i < pins.length && where[i] < s) i++;
+  pins.splice(i, 0, { x: p.x, y: p.y });
+  const ok = setPins(g, id, pins);
+  select({ kind: 'wire', id });
+  // (Set from the inspector, the pin may be off the screen or under a phone's sheet: the camera brings it, with
+  // room round it for a finger, to where it can be seen and dragged.)
+  if (ok && !at) frameBoxes([{ x0: p.x - PIN_ROOM, y0: p.y - PIN_ROOM, x1: p.x + PIN_ROOM, y1: p.y + PIN_ROOM }]);
+  return ok;
+}
+
+/** Take a wire's pins off, all of them. One undo step. */
+export const unpinWire = (id: number): boolean => setPins(ui.g, id, []);
+
+/**
+ * T tidies and W changes how the wires are drawn, wherever the board's other keys work (main.ts has those): not in a
+ * text field, the tech tree or a full-screen card, and not before their buttons are there.
+ */
 function onTidyKey(e: KeyboardEvent) {
-  if (e.key.toLowerCase() !== 't' || e.ctrlKey || e.metaKey || e.altKey || e.repeat) return;
+  const key = e.key.toLowerCase();
+  if ((key !== 't' && key !== 'w') || e.ctrlKey || e.metaKey || e.altKey || e.repeat) return;
   const t = e.target as HTMLElement | null;
   if (t && (t.tagName === 'INPUT' || t.tagName === 'TEXTAREA')) return;
-  if (screenOpen() || ui.techOpen || !ui.g || ui.g.nodes.length < TIDY_FROM) return;
-  tidyBoard();
+  if (screenOpen() || ui.techOpen || !ui.g) return;
+  if (key === 't' && ui.g.nodes.length >= TIDY_FROM) tidyBoard();
+  if (key === 'w' && wiresShown()) toggleWires();
 }
 
 // ---------- structure: nodes ----------
@@ -2386,15 +2504,67 @@ function syncNodes(g: Game, fresh: boolean) {
 
 // ---------- structure: wires ----------
 
-function setWirePath(refs: WireRefs, a: Pt, b: Pt) {
-  const d = pathD(a, b);
-  refs.hit.setAttribute('d', d);
-  refs.glow.setAttribute('d', d);
-  refs.base.setAttribute('d', d);
-  refs.a = { x: a.x, y: a.y };
-  refs.b = { x: b.x, y: b.y };
-  setFlowPath(refs.flow, (t) => bezierAt(a, b, t));
+// How every wire runs is worked out for the whole board at once (wires.ts): curved or squared as the player has
+// chosen, through the pins a wire has, and squared wires in lanes beside each other. Whatever moves a card, makes or
+// cuts a wire, moves a pin or changes the style ends here, and only a wire whose line has changed is drawn again.
+
+/** The style the wires were last drawn in. */
+let drawnStyle = '';
+
+function routeWires(g: Game) {
+  const list: WireIn[] = [];
+  for (const w of g.wires) {
+    if (!wireEls.has(w.id)) continue;
+    const ends = drawnEnds(g, w);
+    if (ends) list.push({ id: w.id, from: w.from, to: w.to, a: ends.a, b: ends.b, pins: w.pins });
+  }
+  // (Squared wires choose their way round the cards: curved ones do not look.)
+  const cards: CardBox[] = [];
+  if (ui.wireStyle === 'squared') {
+    for (const n of g.nodes) {
+      const { w, h } = nodeSize(n);
+      const m = settling.get(n.id);
+      const x = n.x + (m?.ox ?? 0), y = n.y + (m?.oy ?? 0);
+      cards.push({ id: n.id, x0: x, y0: y, x1: x + w, y1: y + h });
+    }
+  }
+  drawnStyle = ui.wireStyle;
+  const drawn = routeAll(list, cards, ui.wireStyle, FLOW_SEGS);
+  const byId = new Map(g.wires.map((w) => [w.id, w]));
+  for (const w of list) {
+    const refs = wireEls.get(w.id)!;
+    const line = drawn.get(w.id);
+    if (!line) continue;
+    if (line.d !== refs.d) {
+      refs.d = line.d;
+      refs.hit.setAttribute('d', line.d);
+      refs.glow.setAttribute('d', line.d);
+      refs.base.setAttribute('d', line.d);
+      setFlowPts(refs.flow, line.pts);
+    }
+    refs.a = { x: w.a.x, y: w.a.y };
+    refs.b = { x: w.b.x, y: w.b.y };
+    syncPins(refs, byId.get(w.id)?.pins ?? []);
+  }
 }
+
+/** A wire's pins as handles on it: as many small discs as it has pins, each where its pin is. */
+function syncPins(refs: WireRefs, pins: Pt[]) {
+  while (refs.pins.length > pins.length) refs.pins.pop()!.remove();
+  while (refs.pins.length < pins.length) {
+    const c = svgEl('circle', { class: 'pin', r: '5', 'data-pin': String(refs.pins.length) }) as SVGCircleElement;
+    refs.g.appendChild(c);
+    refs.pins.push(c);
+  }
+  pins.forEach((q, k) => {
+    const c = refs.pins[k];
+    if (c.getAttribute('cx') !== String(q.x)) c.setAttribute('cx', String(q.x));
+    if (c.getAttribute('cy') !== String(q.y)) c.setAttribute('cy', String(q.y));
+  });
+}
+
+/** For effects that run along a wire: its line as it is drawn, as x, y pairs from start to end. null for a wire that is not on the board. */
+export const wireLine = (id: number): Float32Array | null => wireEls.get(id)?.flow.pts ?? null;
 
 function buildWire(w: Wire, a: Pt, b: Pt, fresh: boolean): WireRefs {
   const grp = svgEl('g', { class: 'wire stalled', 'data-id': String(w.id) });
@@ -2406,7 +2576,7 @@ function buildWire(w: Wire, a: Pt, b: Pt, fresh: boolean): WireRefs {
   // never alters the compositor's property trees.
   const chip = el(`<span class="chip stalled"><i class="mono"></i></span>`);
   const refs: WireRefs = {
-    g: grp, hit, glow, base, chip, chipText: chip.firstElementChild as HTMLElement, a, b,
+    g: grp, hit, glow, base, chip, chipText: chip.firstElementChild as HTMLElement, a, b, d: '', pins: [],
     // A wire that is there when the board loads starts full of dots; one the player just made starts empty.
     flow: makeFlow(fresh),
     chipX: NaN, chipY: NaN, chipHw: 24, chipOff: false, on: false, shown: false, dim: false,
@@ -2414,7 +2584,6 @@ function buildWire(w: Wire, a: Pt, b: Pt, fresh: boolean): WireRefs {
     cColor: '', cWidth: -9, cFlowing: false, cSat: false, cChip: '', dChip: '',
     sRate: -1, vRate: -1,
   };
-  setWirePath(refs, a, b);
   return refs;
 }
 
@@ -2433,8 +2602,6 @@ function syncWires(g: Game, fresh: boolean) {
       wireEls.set(w.id, made);
       if (!fresh) oneShot(made.g, 'new', 260);
       changed = true;
-    } else if (refs.a.x !== ends.a.x || refs.a.y !== ends.a.y || refs.b.x !== ends.b.x || refs.b.y !== ends.b.y) {
-      setWirePath(refs, ends.a, ends.b);
     }
   }
   if (wireEls.size !== seen.size) {
@@ -2446,6 +2613,7 @@ function syncWires(g: Game, fresh: boolean) {
       changed = true;
     }
   }
+  routeWires(g);
   if (changed) pushFlows();
 }
 
@@ -2776,6 +2944,12 @@ function syncTrace(fresh = false) {
 /** Selection, wire target and placing mode are classes on elements that already exist. */
 function syncUi() {
   syncTrace();
+  // (The player has switched how wires are drawn: every one of them is drawn again.)
+  if (drawnStyle && drawnStyle !== ui.wireStyle) {
+    routeWires(ui.g);
+    layoutWires();
+    syncWiresControl();
+  }
   const sel = ui.sel;
   const node = sel?.kind === 'node' ? sel.id : null;
   const wire = sel?.kind === 'wire' ? sel.id : null;
@@ -3249,12 +3423,7 @@ function stepSettle(dt: number) {
       done = true;
     } else refs.el.style.transform = `translate(${m.ox.toFixed(1)}px, ${m.oy.toFixed(1)}px)`;
   }
-  for (const w of g.wires) {
-    if (!done && !settling.has(w.from) && !settling.has(w.to)) continue;
-    const refs = wireEls.get(w.id);
-    const ends = drawnEnds(g, w);
-    if (refs && ends && (refs.a.x !== ends.a.x || refs.a.y !== ends.a.y || refs.b.x !== ends.b.x || refs.b.y !== ends.b.y)) setWirePath(refs, ends.a, ends.b);
-  }
+  routeWires(g);
   // Chips and what the dots must keep off are put right once everything has come to rest.
   if (!settling.size) layoutWires();
   else invalidateFx();
@@ -3649,7 +3818,7 @@ function drawTemp(d: Extract<Drag, { kind: 'wire' | 'wireIn' }>, dt: number) {
   const free = { x: d.p.x + (d.tp.x - d.p.x) * d.blend, y: d.p.y + (d.tp.y - d.p.y) * d.blend };
   const from = d.kind === 'wire' ? d.a : free;
   const to = d.kind === 'wire' ? free : d.b;
-  const path = pathD(from, to);
+  const path = drawWire(from, to, ui.wireStyle, 8).d;
   const key = path + goal;
   if (key === tempD) return;
   tempD = key;
@@ -3997,6 +4166,8 @@ type Hit =
   | { kind: 'in'; id: number; port: number; mat: MatId | null }
   | { kind: 'node'; id: number }
   | { kind: 'wire'; id: number }
+  /** A pin of a wire (`id` is the wire's). */
+  | { kind: 'pin'; id: number; index: number }
   | null;
 
 /**
@@ -4021,8 +4192,31 @@ function mouseHit(t: HTMLElement, p: Pt): Hit {
   // (A free deposit lies above the wires that cross it, and with a port armed a click on a wire is a click on the
   // board under it, as for a finger: see `touchHit`.)
   const wireEl = (t as Element).closest?.('g.wire') as SVGGElement | null;
+  const pinEl = (t as Element).closest?.('circle.pin') as SVGCircleElement | null;
+  if (wireEl && pinEl && !tapWire) return { kind: 'pin', id: Number(wireEl.dataset.id), index: Number(pinEl.dataset.pin) };
+  // (A pin is a small thing to hit: a pointer on the wire and this close to one of its pins means the pin.)
+  if (wireEl && !tapWire) {
+    const pin = pinNear(p, PIN_MOUSE / ui.view.k);
+    if (pin && pin.kind === 'pin' && pin.id === Number(wireEl.dataset.id)) return pin;
+  }
   if (wireEl && !tapWire && !depositAt(p)) return { kind: 'wire', id: Number(wireEl.dataset.id) };
   return null;
+}
+
+/** A pin within a finger's reach of a point (board pixels), the nearest. */
+function pinNear(p: Pt, reach: number): Hit {
+  let best: Hit = null;
+  let least = reach;
+  for (const w of ui.g.wires) {
+    (w.pins ?? []).forEach((q, index) => {
+      const d = Math.hypot(q.x - p.x, q.y - p.y);
+      if (d <= least) {
+        least = d;
+        best = { kind: 'pin', id: w.id, index };
+      }
+    });
+  }
+  return best;
 }
 
 /**
@@ -4082,6 +4276,9 @@ function touchHit(p: Pt): Hit {
   // would otherwise have nowhere left to be tapped (and so could never be cut). Right beside the
   // port, though, a tap is for the port: a long wire can be tapped further along. With a port armed a
   // wire is not something to tap at all: a tap on one is a tap on the board under it (see `tapEmpty`).
+  // (A pin on a wire comes before the wire it is on: it is the smaller thing, and the one that can be moved.)
+  const pin = tapWire ? null : pinNear(p, PIN_REACH / k);
+  if (pin) return pin;
   const w = tapWire ? null : wireNear(p, WIRE_REACH / k);
   if (w && !(out && dOut <= PORT_EDGE && (wireEls.get(w.id)?.flow.len ?? 0) * k >= WIRE_LONG)) return { kind: 'wire', id: w.id };
   if (out && dOut <= PORT_REACH) return { kind: 'reach', ...out };
@@ -4347,7 +4544,15 @@ function onDown(e: PointerEvent) {
     // One of a block: the rest go where it goes.
     if (block.size > 1 && block.has(n.id) && n.type !== 'well') {
       drag.others = [...block].filter((id) => id !== n.id).map((id) => nodeById(g, id)).filter((m): m is GNode => !!m && m.type !== 'well').map((m) => ({ id: m.id, x0: m.x, y0: m.y }));
+      const inside = new Set([n.id, ...drag.others.map((o) => o.id)]);
+      drag.pins0 = new Map(g.wires.filter((w) => w.pins?.length && inside.has(w.from) && inside.has(w.to)).map((w) => [w.id, w.pins!.map((q) => ({ x: q.x, y: q.y }))]));
     }
+    return;
+  }
+  if (hit?.kind === 'pin') {
+    const w = g.wires.find((x) => x.id === hit.id);
+    if (!w?.pins?.[hit.index]) return;
+    drag = { kind: 'pin', wire: hit.id, index: hit.index, was: w.pins.map((q) => ({ x: q.x, y: q.y })), moved: false, sx: e.clientX, sy: e.clientY, slop: touchy ? TOUCH_SLOP : MOUSE_SLOP };
     return;
   }
   if (hit?.kind === 'wire') {
@@ -4453,6 +4658,23 @@ function steer(cx: number, cy: number, hovering = false) {
         break;
       }
       if (pos.x !== n.x || pos.y !== n.y) carry(g, [n.id], pos.x - n.x, pos.y - n.y);
+      break;
+    }
+    case 'pin': {
+      const d = drag;
+      if (!d.moved && Math.hypot(cx - d.sx, cy - d.sy) < d.slop) break;
+      const pin = g.wires.find((x) => x.id === d.wire)?.pins?.[d.index];
+      if (!pin) break;
+      d.moved = true;
+      // A pin stands on its own grid, half the cards', inside the plot.
+      const x = Math.max(0, Math.min(g.board.w, Math.round(p.x / PIN_GRID) * PIN_GRID));
+      const y = Math.max(0, Math.min(g.board.h, Math.round(p.y / PIN_GRID) * PIN_GRID));
+      if (pin.x !== x || pin.y !== y) {
+        pin.x = x;
+        pin.y = y;
+        routeWires(g);
+        layoutWires();
+      }
       break;
     }
     case 'wirePress': {
@@ -4606,6 +4828,13 @@ function markLevel(d: Extract<Drag, { kind: 'node' }>, wires: number[]) {
 /** Give up on the gesture in progress. A node that was being moved goes back to where it started. */
 function abortDrag() {
   if (drag?.kind === 'node' && drag.moved) putBack(ui.g, drag);
+  if (drag?.kind === 'pin' && drag.moved) {
+    const d = drag;
+    const w = ui.g.wires.find((x) => x.id === d.wire);
+    if (w) w.pins = d.was.map((q) => ({ x: q.x, y: q.y }));
+    routeWires(ui.g);
+    layoutWires();
+  }
   endDrag();
 }
 
@@ -4621,14 +4850,8 @@ function redraw(g: Game, ids: number[], dragging = false) {
     refs.x = n.x;
     refs.y = n.y;
     if (dragging) refs.el.classList.add('dragging');
-    const fix = (w: Wire) => {
-      const wr = wireEls.get(w.id);
-      const ends = drawnEnds(g, w);
-      if (wr && ends) setWirePath(wr, ends.a, ends.b);
-    };
-    for (const w of gr.ins.get(id) ?? []) fix(w);
-    for (const port of gr.outs.get(id) ?? []) if (port) for (const w of port) fix(w);
   }
+  routeWires(g);
   layoutWires();
 }
 
@@ -4639,6 +4862,17 @@ function carry(g: Game, ids: number[], dx: number, dy: number) {
     if (!n) continue;
     n.x += dx;
     n.y += dy;
+  }
+  // (A wire that runs from one card of a block to another takes its pins with it.)
+  if (ids.length > 1) {
+    const inside = new Set(ids);
+    for (const w of g.wires) {
+      if (!w.pins || !inside.has(w.from) || !inside.has(w.to)) continue;
+      for (const q of w.pins) {
+        q.x += dx;
+        q.y += dy;
+      }
+    }
   }
   redraw(g, ids, true);
 }
@@ -4652,6 +4886,10 @@ function putBack(g: Game, d: Extract<Drag, { kind: 'node' }>) {
     n.x = o.x0;
     n.y = o.y0;
     ids.push(o.id);
+  }
+  for (const [wid, was] of d.pins0 ?? []) {
+    const w = g.wires.find((x) => x.id === wid);
+    if (w) w.pins = was.map((q) => ({ x: q.x, y: q.y }));
   }
   redraw(g, ids);
 }
@@ -4715,7 +4953,18 @@ function onDouble(e: MouseEvent) {
   if (over || ui.placing || radial || tapWire) return;
   // (The board holds the pointer while it is down, so the event names the board: what lies under the pointer is asked for.)
   const under = document.elementFromPoint(e.clientX, e.clientY) as HTMLElement | null;
-  const hit = under ? mouseHit(under, toWorld(e.clientX, e.clientY)) : null;
+  const at = toWorld(e.clientX, e.clientY);
+  const hit = under ? mouseHit(under, at) : null;
+  // On a pin: that pin comes off. On a wire: a pin goes on, there.
+  if (hit?.kind === 'pin') {
+    const w = ui.g.wires.find((x) => x.id === hit.id);
+    if (w) setPins(ui.g, w.id, (w.pins ?? []).filter((_, k) => k !== hit.index));
+    return;
+  }
+  if (hit?.kind === 'wire') {
+    if (revealOf(ui.g).wires) pinWire(hit.id, at);
+    return;
+  }
   if (hit?.kind !== 'node') return;
   const line = lineFrom(ui.g, hit.id);
   if (line.length > 1) setBlock(line);
@@ -4776,11 +5025,23 @@ function dropBlock(d: Extract<Drag, { kind: 'node' }>) {
     n.x = o.x0;
     n.y = o.y0;
   }
+  // (The pins that came along: where they are now is kept, and they too go back for the moment the step is taken.)
+  const pinsTo = new Map<number, Pt[]>();
+  for (const [wid, was] of d.pins0 ?? []) {
+    const w = g.wires.find((x) => x.id === wid);
+    if (!w) continue;
+    pinsTo.set(wid, cleanPins(w.pins, g.board));
+    w.pins = was.map((q) => ({ x: q.x, y: q.y }));
+  }
   act(g, () => {
     for (const [id, at] of to) {
       const n = nodeById(g, id)!;
       n.x = at.x;
       n.y = at.y;
+    }
+    for (const [wid, pins] of pinsTo) {
+      const w = g.wires.find((x) => x.id === wid);
+      if (w && pins.length) w.pins = pins;
     }
     return 0;
   });
@@ -4887,6 +5148,20 @@ function onUp(e: PointerEvent) {
       if (tapWire) disarm();
       select({ kind: 'wire', id: d.wireId });
       break;
+    case 'pin': {
+      // Let go: the wire's pins go back for a moment to what they were, so that the move is one undo step taken now.
+      const w = g.wires.find((x) => x.id === d.wire);
+      if (w && d.moved) {
+        const to = (w.pins ?? []).map((q) => ({ x: q.x, y: q.y }));
+        w.pins = d.was.map((q) => ({ x: q.x, y: q.y }));
+        if (!setPins(g, w.id, to)) {
+          routeWires(g);
+          layoutWires();
+        }
+      }
+      select({ kind: 'wire', id: d.wire });
+      break;
+    }
     case 'wire': {
       if (!d.armed) {
         // A tap on a port arms it; a tap on the armed port lets it go again.
@@ -5258,7 +5533,7 @@ function drawSite() {
     setStyle(siteEl, 'width', w + 'px');
     setStyle(siteEl, 'height', h + 'px');
     setHTML(siteEl, `${nodeIcon(o.type, 20)}<span>${esc(NODE_DEFS[o.type].name)}</span>`);
-    tempPath.setAttribute('d', r.dir === 'consume' ? pathD(r.a, end) : pathD(end, r.a));
+    tempPath.setAttribute('d', (r.dir === 'consume' ? drawWire(r.a, end, ui.wireStyle, 8) : drawWire(end, r.a, ui.wireStyle, 8)).d);
     tempPath.style.stroke = color;
     tempPath.classList.remove('snap');
     tempPath.classList.add('on');
@@ -5574,7 +5849,7 @@ export function pickRadial(i: number) {
  */
 export function cancelGesture(): boolean {
   const d = drag;
-  const busy = !!d && (d.kind === 'wire' || d.kind === 'wireIn' || d.kind === 'knife' || (d.kind === 'node' && d.moved));
+  const busy = !!d && (d.kind === 'wire' || d.kind === 'wireIn' || d.kind === 'knife' || ((d.kind === 'node' || d.kind === 'pin') && d.moved));
   // (With nothing else under way, Escape lets a block of cards go.)
   if (!radial && !busy && !tapWire && block.size) {
     clearBlock();
