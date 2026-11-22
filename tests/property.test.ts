@@ -22,7 +22,7 @@ import { expansionCost, nodeCostAt, nodeUnlocked, research, upgradeValue } from 
 import { GOALS } from '../src/goals';
 import { orderView } from '../src/orders';
 import { outPortCount, tick } from '../src/sim';
-import { Game, RouterMode, Snapshot, serialize, snapshot } from '../src/state';
+import { Game, RouterMode, Snapshot, cloneGame, deserialize, jsonCopy, serialize, snapshot } from '../src/state';
 import { fresh } from './helpers';
 
 function prng(seed: number) {
@@ -325,4 +325,82 @@ describe('credits are conserved by every sequence of edits, undo and redo', () =
     expect(lowest).toBeLessThan(5); // the runs really did scrape the bottom
     expect(refused).toBeGreaterThan(5);
   });
+});
+
+// A copy of the game for looking ahead is what saving it and loading the save would give (cloneGame). It is made
+// without writing the save out as text and reading it back, which was most of what a copy cost, and the adviser
+// makes them by the dozen. The two ways must give the same game, to the last key and the last sign of a zero.
+describe('a copy of the game made as data is the copy a save and a load would make', () => {
+  /** The same, as strictly as it can be asked: the same keys in the same order, and 0 is not -0. */
+  const same = (a: unknown, b: unknown, at = ''): string | null => {
+    if (Array.isArray(a) || Array.isArray(b)) {
+      if (!Array.isArray(a) || !Array.isArray(b) || a.length !== b.length) return `${at}: one is a list of another length`;
+      for (let i = 0; i < a.length; i++) {
+        const d = same(a[i], b[i], `${at}[${i}]`);
+        if (d) return d;
+      }
+      return null;
+    }
+    if (a && b && typeof a === 'object' && typeof b === 'object') {
+      const ka = Object.keys(a), kb = Object.keys(b);
+      if (ka.join('\n') !== kb.join('\n')) return `${at}: keys ${ka.join(',')} against ${kb.join(',')}`;
+      for (const k of ka) {
+        const d = same((a as Record<string, unknown>)[k], (b as Record<string, unknown>)[k], `${at}.${k}`);
+        if (d) return d;
+      }
+      return null;
+    }
+    return Object.is(a, b) ? null : `${at}: ${String(a)} against ${String(b)}`;
+  };
+  const viaText = (v: unknown) => JSON.parse(JSON.stringify(v));
+
+  it('jsonCopy gives what JSON gives, for everything JSON has a rule for', () => {
+    const odd = {
+      n: [0, -0, 1.5, -3, NaN, Infinity, -Infinity, 1e-320, Number.MAX_VALUE],
+      gone: undefined, none: null, yes: true, no: false, text: 'a "quoted" \u2028 line', empty: '',
+      fn: () => 1, list: [undefined, () => 1, null, [], {}, [[-0]], { a: undefined, b: -0 }],
+      nested: { z: 1, a: { y: [1, { x: NaN }] }, 10: 'ten', 2: 'two' },
+      bag: { glint: -1, murk: 0, nope: NaN },
+    };
+    // (A list with a gap in it, and a key that would otherwise set the object's prototype.)
+    const sparse: unknown[] = [1];
+    sparse[3] = 4;
+    const proto = JSON.parse('{"__proto__": {"a": 1}, "b": 2}');
+    for (const v of [odd, sparse, proto, [], {}, null, 0, -0, 'x', true, [[[]]], { a: { b: { c: [] } } }]) {
+      expect(same(jsonCopy(v), viaText(v))).toBe(null);
+    }
+    expect(Object.is((jsonCopy([-0]) as number[])[0], 0)).toBe(true);
+    // The copy shares nothing with what it was made from.
+    const src = { a: [{ b: 1 }] };
+    const copy = jsonCopy(src) as typeof src;
+    copy.a[0].b = 2;
+    expect(src.a[0].b).toBe(1);
+  });
+
+  it('cloneGame is deserialize(serialize(game)), at every stage of 12 random games, and the two copies play on alike', () => {
+    let checked = 0;
+    for (let seed = 1; seed <= 12; seed++) {
+      for (const steps of [40, 160, 400]) {
+        const { g } = play(seed, steps, 2500);
+        // (Something a save cannot hold, as a rate gone wrong would leave it: the copy must drop it as a load does.)
+        if (seed % 4 === 0 && g.wires[0]) g.wires[0].rate = NaN;
+        if (seed % 3 === 0 && g.nodes[0]) g.nodes[0].inb.glint = -1;
+        const a = cloneGame(g), b = deserialize(serialize(g));
+        expect(a && b).toBeTruthy();
+        const strip = (x: Game) => ({ ...x, events: [], savedAt: 0 });
+        expect(same(strip(a!), strip(b!)), `seed ${seed}, ${steps} steps`).toBe(null);
+        expect(a!.rev).toBe(b!.rev);
+        for (let i = 0; i < 400; i++) {
+          tick(a!, i % 3 ? 0.05 : 0.25);
+          tick(b!, i % 3 ? 0.05 : 0.25);
+        }
+        expect(same(strip(a!), strip(b!)), `seed ${seed}, ${steps} steps, played on`).toBe(null);
+        // And the game it was copied from has nothing of the copy's in it.
+        a!.nodes.forEach((n) => { n.x += 1000; n.inb.glint = 99; });
+        expect(g.nodes.every((n) => n.inb.glint !== 99)).toBe(true);
+        checked++;
+      }
+    }
+    expect(checked).toBe(36);
+  }, 120_000);
 });

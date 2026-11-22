@@ -397,9 +397,43 @@ export function serialize(g: Game): string {
   return toJson(g);
 }
 
-/** An independent copy of the game, exactly what saving and loading would give. The original is not touched (not even its save time). */
+/**
+ * A copy of plain data, exactly what writing it as JSON and reading it back gives, without the text in between:
+ * a number that is not finite comes out null and a minus zero as zero, a value that is not there (or is a function)
+ * is left out of an object and is null in a list, and keys keep their order. For data as a save holds it: no dates,
+ * no maps, nothing with a toJSON of its own.
+ */
+export function jsonCopy(v: unknown): unknown {
+  if (typeof v === 'number') return isFinite(v) ? v + 0 : null;
+  if (v === null || typeof v === 'string' || typeof v === 'boolean') return v;
+  if (typeof v !== 'object') return undefined;
+  if (Array.isArray(v)) {
+    const out = new Array(v.length);
+    for (let i = 0; i < v.length; i++) {
+      const x = jsonCopy(v[i]);
+      out[i] = x === undefined ? null : x;
+    }
+    return out;
+  }
+  const out: Record<string, unknown> = {};
+  for (const k of Object.keys(v)) {
+    const x = jsonCopy((v as Record<string, unknown>)[k]);
+    if (x === undefined) continue;
+    // (As JSON reads it: a key of its own, whatever it is called.)
+    if (k === '__proto__') Object.defineProperty(out, k, { value: x, enumerable: true, writable: true, configurable: true });
+    else out[k] = x;
+  }
+  return out;
+}
+
+/**
+ * An independent copy of the game, exactly what saving and loading would give. The original is not touched (not
+ * even its save time). Forecasts and the adviser make these by the dozen (src/forecast.ts), so the game is copied
+ * as data and checked as a save is, not written out as text and read back.
+ */
 export function cloneGame(g: Game): Game | null {
-  return deserialize(toJson(g));
+  const { rev, events, tickAcc, ...rest } = g;
+  return revive(jsonCopy(rest));
 }
 
 const num = (v: unknown, fallback: number) => (typeof v === 'number' && isFinite(v) ? v : fallback);
@@ -434,7 +468,18 @@ function loadOrder(o: Partial<Order> | null | undefined): Order | null {
 /** Load a save. Saves from before goals, orders and Flow load too: every missing field gets its new-game default. */
 export function deserialize(json: string): Game | null {
   try {
-    const raw = JSON.parse(json);
+    return revive(JSON.parse(json));
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * A game from what a save holds once it has been read (`raw` is the caller's to give away: parts of it end up in the
+ * game). Every field is checked and gets a sound value; null when it is not a save this version can read.
+ */
+function revive(raw: any): Game | null {
+  try {
     if (!raw || raw.v !== 1 || !Array.isArray(raw.nodes)) return null;
     const base = newGame();
     const g: Game = { ...base, ...raw, rev: 1, events: [], tickAcc: base.tickAcc };
