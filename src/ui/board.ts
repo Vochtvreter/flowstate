@@ -3441,17 +3441,11 @@ function stepSettle(dt: number) {
     const refs = nodeEls.get(id);
     if (u >= 1 || !refs) {
       settling.delete(id);
-      if (refs) {
-        refs.el.style.transform = '';
-        refs.el.classList.remove('gliding');
-      }
+      if (refs) refs.el.style.transform = '';
       done = true;
-    } else {
-      // Every frame sets where the card is drawn, and its wires are drawn to that place: the eased move a card has
-      // for being lifted (clean.css) would hold it back behind them, so it is off for as long as the card glides.
-      refs.el.classList.add('gliding');
-      refs.el.style.transform = `translate(${m.ox.toFixed(1)}px, ${m.oy.toFixed(1)}px)`;
-    }
+      // (Its wires are drawn to this very place at every frame: nothing in the styles may ease a card's transform,
+      // or it is left behind them. The lift under a finger is its `scale` for that reason: clean.css.)
+    } else refs.el.style.transform = `translate(${m.ox.toFixed(1)}px, ${m.oy.toFixed(1)}px)`;
   }
   routeWires(g);
   // Chips and what the dots must keep off are put right once everything has come to rest.
