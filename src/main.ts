@@ -5,7 +5,8 @@ import './styles/advice.css';
 import './styles/feel.css';
 import './styles/phone.css';
 import './styles/clean.css';
-import { clearHistory, cutWire, deleteNode, nodeById, redo, refundOf, undo } from './actions';
+import './styles/manage.css';
+import { clearHistory, cutWire, deleteNode, nodeById, redo, refundOf, removeClip, undo } from './actions';
 import { fmt, fmtTime, has, offlineCap } from './economy';
 import { offlineGains, tick } from './sim';
 import { clearSave, loadGame, newGame, saveGame } from './state';
@@ -306,6 +307,7 @@ function onKey(e: KeyboardEvent) {
         if (refund > 0) toast(`Refunded <b>${fmt(refund)}¢</b>`, 'good');
       }
     } else if (ui.sel?.kind === 'wire') cutWire(g, ui.sel.id);
+    else if (ui.sel?.kind === 'clip') removeClip(g, ui.sel.id);
     select(null);
     return renderPanels();
   }

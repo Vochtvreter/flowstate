@@ -359,6 +359,7 @@ Seven goals carry "while you wait" lines (`Goal.meanwhile`, a list: `Meanwhile[]
 | **Scale tools** | | | | |
 | S1 | Bulk Upgrade | goal 19 | L1 | "Upgrade all" button |
 | S3 | Auto-balance | 50β | S1, L4 | one-click Router weights |
+| S2 | Mobile Drills | 80α | L1 | a Drill can be moved like any card; its deposit goes with it |
 
 How the prices are meant to work:
 
@@ -368,6 +369,7 @@ How the prices are meant to work:
 - **Efficiency Tuning needs Assembly** (P1 and P4): it is priced in β, and before Assembly there is no β to pay with, so it only stood in the tree as something that could not be bought.
 - **Ore Deposits is the cheap one** because a fast player has nothing else to do while saving for it: above about 220α their hands are idle for more than a minute, which the plan does not allow before minute 10.
 - **Side techs are impulse buys.** Each is small next to the spine tech it competes with, so every kind of player picks them up along the way: α for what helps before the first Circuit (Lab Speed, Merger, Pipes Mk II: 150α together), β after it. Wider Demand is β for that reason: nothing sells over demand before the first Circuit, and at 200α it cost a fast player most of a minute there (it is hidden until the first surplus now). Luxury Buyers is the exception: dearer than Fabrication's β, so it comes after.
+- **Mobile Drills is 80α, behind Routing.** It is for the board and not for the line: a Drill can be moved, and nothing is made or sold any faster for it. It is priced as the side techs before the first Circuit are, and comes with Routing because that is when a board has grown enough for where its Drills stand to matter. A player who buys it puts Assembly off by 6% of its price. The pacing players leave it alone (`techSkip` in `tools/pacing.ts`: a scripted player lays nothing out), and with it in the tree every pacing target is still met; its price counts, as any open tech's does, in which kind of Data an order pays.
 - **γ does not exist before the first Phone,** so anything priced in γ is free-play content. The late Processing techs need all three kinds of Data, which keeps Tier 1 items worth studying to the end.
 
 ## The adviser

@@ -2,10 +2,10 @@ import { MatId, NodeType } from '../content';
 import { Game, GameEvent } from '../state';
 
 /**
- * What the panel beside the board (a phone's bottom sheet) is open on: a card, a wire, or the Flows list (`flows`,
- * whose id is not used). Whatever closes the inspector closes the Flows list too.
+ * What the panel beside the board (a phone's bottom sheet) is open on: a card, a wire, a clip, or the Flows list
+ * (`flows`, whose id is not used). Whatever closes the inspector closes the Flows list too.
  */
-export interface Selection { kind: 'node' | 'wire' | 'flows'; id: number }
+export interface Selection { kind: 'node' | 'wire' | 'clip' | 'flows'; id: number }
 
 export interface UIState {
   g: Game;

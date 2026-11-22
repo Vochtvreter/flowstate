@@ -12,19 +12,21 @@
 //    with the fewest corners that keeps clear of all of them. Wires that then share a line (those that turn before
 //    the same card, those that pass the same side of one) are set side by side, LANE_GAP apart, in the order in
 //    which the fewest cross: a ribbon, not a knot.
-//  - pins: points the player sets on a wire, up to MAX_PINS, kept with the save. A curved wire passes through each.
+//  - pins: the points a wire is set to run through, the player's clips (state.ts Clip: a clip may hold several wires),
+//    up to MAX_CLIPS a wire, kept with the save. A curved wire passes through each.
 //    A squared wire passes through each too: it runs level to the pin's upright and up or down through the pin, so
 //    one pin slides a wire's upright run to where the pin is and two take it round a card; and where a card is in
-//    the way of that, it finds its way from pin to pin as an unpinned wire does from port to port.
+//    the way of that, it finds its way from pin to pin as an unpinned wire does from port to port. Wires that share
+//    pins share lines, and are set side by side there as the others are: a bundle through the clip.
 //
 // What is returned is the SVG path and the line as n + 1 points, corners among them, which is what the dots travel
 // along and what a click, the knife and the rate chips are measured against (fx.ts, board.ts). Nothing here reads
 // the game: ends and cards are handed in. The rules of the game know nothing of any of it: a wire carries the same
 // whatever way it runs.
-import { MAX_PINS } from '../state';
+import { MAX_CLIPS } from '../state';
 import { Box, Pt, curve } from './geom';
 
-export { MAX_PINS };
+export { MAX_CLIPS };
 
 export type WireStyle = 'curved' | 'squared';
 export const WIRE_STYLES: WireStyle[] = ['curved', 'squared'];
@@ -532,7 +534,7 @@ function stretch(s: Pt, t: Pt, cards: Box[], came: number, port: boolean, key?: 
 }
 
 /** A wire has a stretch from its port to its first pin, one between each two pins, and one to the port it ends at: each is kept under its own number. */
-const STRETCHES = 8;
+const STRETCHES = 16;
 
 /**
  * A way for a squared wire from port a to port b that comes within CLEAR of no card: its corners, or null when there
@@ -753,7 +755,8 @@ function plain(a: Pt, b: Pt): Pt[][] {
  * routed together:
  *
  *  - a wire with pins goes through each of them: the plain way where that is clear of every card, else finding its
- *    way from pin to pin; it is the player's, and is not moved sideways afterwards;
+ *    way from pin to pin; it is the player's, and is moved sideways only for a wire it shares a pin with (wires
+ *    through one clip run as a bundle about it);
  *  - any other takes the first of its plain ways (one turn: before the card it ends at, after the one it leaves, half
  *    way; or out, round and back in) that comes within CLEAR of no card;
  *  - with a card in the way of every one of those, it finds the shortest way round the cards with the fewest corners
@@ -769,12 +772,19 @@ export function routeAll(wires: WireIn[], cards: CardBox[], style: WireStyle, n:
   }
   const routes = new Map<number, Pt[]>();
   const free: { net: string; v: Pt[] }[] = [];
+  const held: { net: string; v: Pt[] }[] = [];
+  // (How many wires run through each pin: a pin that holds more than one is a clip they share.)
+  const through = new Map<string, number>();
+  const key = (p: Pt) => `${r1(p.x)},${r1(p.y)}`;
+  for (const w of wires) for (const p of w.pins ?? []) through.set(key(p), (through.get(key(p)) ?? 0) + 1);
   for (const w of wires) {
     if (w.pins?.length) {
       // Through its pins the plain way (level to each pin's upright, up or down through the pin) where no card is
       // in the way of that; else it finds its way from pin to pin as any wire does from port to port.
-      const through = throughPins(w.a, w.b, w.pins);
-      routes.set(w.id, inWay(through, cards, w.from, w.to) === 0 ? through : wayRound(w.a, w.b, cards, w.id, w.pins) ?? through);
+      const plainWay = throughPins(w.a, w.b, w.pins);
+      const own = (inWay(plainWay, cards, w.from, w.to) === 0 ? plainWay : wayRound(w.a, w.b, cards, w.id, w.pins) ?? plainWay).map((p) => ({ x: p.x, y: p.y }));
+      routes.set(w.id, own);
+      if (w.pins.some((p) => (through.get(key(p)) ?? 0) > 1)) held.push({ net: `${w.from}:${r1(w.a.x)},${r1(w.a.y)}`, v: own });
       continue;
     }
     const tries = plain(w.a, w.b);
@@ -800,6 +810,10 @@ export function routeAll(wires: WireIn[], cards: CardBox[], style: WireStyle, n:
     free.push({ net: `${w.from}:${r1(w.a.x)},${r1(w.a.y)}`, v: own });
   }
   sideBySide(free, cards);
+  // Wires through pins are the player's, and are not moved aside for the wires that find their own way, nor for
+  // each other. Except those that share a pin (a clip that holds several wires): they would lie on one line there,
+  // and are set side by side as a bundle about it instead. A wire alone on its pins stays exactly where they put it.
+  if (held.length > 1) sideBySide(held, cards);
   for (const w of wires) out.set(w.id, drawSquared(routes.get(w.id) ?? [w.a, w.b], n));
   // (Ways kept for wires that are gone are let go, now and then.)
   if (kept.size > wires.length * 2 + 32) {

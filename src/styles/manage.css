@@ -1,0 +1,39 @@
+/* Loss, Drills that move, and clips. Loaded last. */
+
+/* ---------- loss ---------- */
+
+/* The inspector's bar for the whole of a machine's time: at work, waiting for an input, output backed up. */
+.bar.split { display: flex; gap: 1px; }
+.bar.split span { flex: none; border-radius: 0; min-width: 0; }
+.bar.split .work { background: #7aa2ff; }
+.bar.split .wait { background: #f87171; }
+.bar.split .back { background: #fbbf24; }
+.row.loss.on b { color: #fca5a5; }
+.row.cause { color: var(--muted); align-items: center; }
+.row.cause > span:first-child { display: inline-flex; align-items: center; gap: 6px; min-width: 0; }
+.row.cause .dot { flex: none; width: 7px; height: 7px; border-radius: 2px; background: #f87171; }
+.row.cause.back .dot { background: #fbbf24; }
+.row.cause .link { margin-left: 4px; }
+
+/* On a card, beside its rate: what it loses, in the colour of the cause. */
+.nl { font-style: normal; font-weight: 650; margin-left: 6px; color: #f87171; }
+.nl:empty { display: none; }
+.nl[data-why='back'] { color: #fbbf24; }
+
+/* ---------- clips ---------- */
+
+/* A clip: a ring on the board that wires are run through. Above the wires, under the cards. */
+g.clip { cursor: grab; }
+g.clip .chit { fill: transparent; stroke: none; pointer-events: all; }
+g.clip .cdot { fill: rgba(12, 18, 32, 0.6); stroke: #c9d3e8; stroke-width: 2px; pointer-events: none; transition: stroke 0.12s, fill 0.12s; }
+g.clip:hover .cdot { stroke: #fff; }
+/* With no wire through it: hollow and faint, so that a clip in use is told from one that waits. */
+g.clip.empty .cdot { fill: transparent; stroke-opacity: 0.6; stroke-dasharray: 3.2 2.6; }
+g.clip.sel .cdot { stroke: var(--sel); fill: rgba(22, 32, 58, 0.8); stroke-opacity: 1; }
+/* While a wire is in hand every clip is somewhere it can go; those it has been run through are lit. */
+#board.wiring g.clip .cdot { stroke: #fff; stroke-opacity: 0.9; }
+g.clip.via .cdot, #board.wiring g.clip.via .cdot { stroke: var(--sel); stroke-width: 3px; fill: var(--sel); fill-opacity: 0.35; stroke-opacity: 1; stroke-dasharray: none; }
+html[data-input='touch'] g.clip .cdot { stroke-width: 3px; }
+/* In the overview nothing so small is drawn, or pressed. */
+#board.ov #clips { display: none; }
+@media (prefers-reduced-motion: reduce) { g.clip .cdot { transition: none; } }

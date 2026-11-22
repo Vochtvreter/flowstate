@@ -637,7 +637,7 @@ function startBow() {
     for (const wire of gr.ins.get(id) ?? []) {
       const ends = wireEnds(g, wire);
       if (!ends || !depth.has(wire.from)) continue;
-      // (The wire as the board draws it, curved or squared, round its pins; the plain curve if it is not drawn.)
+      // (The wire as the board draws it, curved or squared, through its clips; the plain curve if it is not drawn.)
       let pts = wireLine(wire.id)?.slice();
       if (!pts) {
         pts = new Float32Array((BOW_SEGS + 1) * 2);

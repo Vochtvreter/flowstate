@@ -7,18 +7,20 @@
 // place when it is not, and holds off while the player is pressing or touch-scrolling the panel.
 import { DATA_COLORS, DATA_NAMES, DataTier, HOTBAR, MATERIALS, MatId, NODE_DEFS, NodeType, PIPES, RECIPES, RULES, TECHS, Tech, Track } from '../content';
 import {
-  autoBalance, canRedo, canUndo, cutWire, deleteNode, favour, favouredWire, materialsAt, nodeById, raisePriority,
-  recipesFor, redo, refundOf, setFilter, setMode, setRecipe, setWeight, undo, upgrade, upgradeAll, upgradeSaturatedWires, upgradeWire,
+  autoBalance, canRedo, canUndo, clipById, cutWire, deleteNode, drillsMove, emptyClips, favour, favouredWire, materialsAt, nodeById, raisePriority,
+  recipesFor, redo, refundOf, removeClip, removeEmptyClips, setFilter, setMode, setRecipe, setWeight, undo, unclipWire, upgrade, upgradeAll, upgradeSaturatedWires,
+  upgradeWire, wiresThrough,
 } from '../actions';
 import {
   TRACK_INFO, costText, cycleTime, dataYield, fmt, fmtInt, fmtRate, has, labRate, maxLevel, maxPipeTier,
   nodeCost, nodeUnlocked, recipeOf, techAvailable, trackAvailable, upgradeCost, wellRate,
 } from '../economy';
 import { activeGoal } from '../goals';
+import { lossOf } from '../loss';
 import { graph, isMachine, passCap } from '../sim';
-import { Game, GNode, MAX_PINS, RouterMode, Wire, nodeNoun } from '../state';
+import { Clip, Game, GNode, MAX_CLIPS, RouterMode, Wire, nodeNoun } from '../state';
 import { isMuted, setMuted } from './audio';
-import { boardRect, frameNodes, jumpTo, pinWire, startPlacing, fitView, toggleWires, unpinWire, wiresShown, zoomBy } from './board';
+import { boardRect, clipWire, frameNodes, jumpTo, startPlacing, fitView, toggleWires, wiresShown, zoomBy } from './board';
 import { marked, pressedMark, tendMark } from './advice-show';
 import { waitLine } from './advice-tip';
 import { Panel, cachedRect, el, invalidateLayout, makePanel, setAnchor, setAttr, setClass, setHTML, setHidden, setText } from './dom';
@@ -28,7 +30,7 @@ import { logoMark } from './hud-screens';
 import { PressWord, isTouch, withKey } from './hud-words';
 import { esc, icon, matGlyph, nodeIcon } from './icons';
 import { env } from './phone-env';
-import { bulkPlan, diagnose, limits, matName, starvedShort, victoryQuiet, wayOn } from './status';
+import { bulkPlan, diagnose, limits, lossCauses, matName, starvedShort, victoryQuiet, wayOn } from './status';
 import { metData, pricedInMet, readyCount, setCardWait, teasedSlot } from './tech';
 import { revealOf, slotShown } from './reveal';
 import { flowTroubles, flowsAction, flowsHtml, flowsOpen, toggleFlows } from './flows';
@@ -196,14 +198,23 @@ function inspectorAction(a: string, args: string[], openTech: (id?: string) => v
         setFilter(g, w.id, mats[(mats.indexOf(w.filter) + 1) % mats.length]);
       }
     } else if (a === 'autobal') autoBalance(g, n.id);
+  } else if (sel.kind === 'clip') {
+    if (a === 'clip-remove') {
+      removeClip(g, sel.id);
+      select(null);
+    } else if (a === 'clips-empty') {
+      const n = removeEmptyClips(g);
+      if (n) toast(`Took off ${n} empty clip${n > 1 ? 's' : ''}`, 'good');
+      select(null);
+    } else if (a === 'clipwire') select({ kind: 'wire', id: Number(args[0]) });
   } else {
     const w = g.wires.find((x) => x.id === sel.id);
     if (!w) return;
     if (a === 'wireup') { if (!upgradeWire(g, w.id)) toast('Not enough credits', 'bad'); }
     else if (a === 'wireall') { const c = upgradeSaturatedWires(g); toast(c ? `Upgraded ${c} wire${c > 1 ? 's' : ''}` : 'Nothing to upgrade, or not enough credits', c ? 'good' : 'bad'); }
     else if (a === 'cut') { cutWire(g, w.id); select(null); }
-    else if (a === 'pin') pinWire(w.id);
-    else if (a === 'unpin') unpinWire(w.id);
+    else if (a === 'clip') clipWire(w.id);
+    else if (a === 'unclip') unclipWire(g, w.id);
   }
 }
 
@@ -886,9 +897,37 @@ function flowSection(g: Game, n: GNode): string {
       <div class="bar"><span style="width:${pct(got / need)}%;background:${MATERIALS[m].color}"></span></div></div>`;
   }).join('');
   const outs = r.outputs.map(([m, q]) => `<div class="row sm"><span>Out · ${MATERIALS[m].name}</span><span class="mono"><b>${fmtRate((n.util * q) / T)}</b>/s</span></div>`).join('');
-  return `<div class="sec flow"><span class="lbl">Flow</span>${rows}${outs}
-    <div class="row sm"><span>Utilization</span><span class="mono"><b>${Math.round(n.util * 100)}%</b></span></div>
-    <div class="bar"><span style="width:${pct(n.util)}%;background:#7AA2FF"></span></div></div>`;
+  return `<div class="sec flow"><span class="lbl">Flow</span>${rows}${outs}${workRows(g, n)}</div>`;
+}
+
+/**
+ * Utilization, and beside it what utilization leaves: the loss. One bar for the whole of the machine's time, the part
+ * at work, the part spent waiting for an input and the part spent with its output backed up; under it the loss as a
+ * share and in items a second, and a line for each cause with the node to look at (src/loss.ts, lossCauses in
+ * status.ts). A Drill has the same rows under what it extracts.
+ */
+function workRows(g: Game, n: GNode): string {
+  const util = `<div class="row sm"><span>Utilization</span><span class="mono"><b>${Math.round(n.util * 100)}%</b></span></div>`;
+  const l = victoryQuiet(g) ? null : lossOf(n);
+  if (!l) return `${util}<div class="bar"><span style="width:${pct(n.util)}%;background:#7AA2FF"></span></div>`;
+  const causes = lossCauses(g, n, l);
+  const part = (kind: string) => causes.find((c) => c.kind === kind)?.share ?? 0;
+  // (The bar's three parts are rounded as the numbers beside them are, so that bar and numbers say the same.)
+  const lost = Math.round(l.share * 100);
+  const wait = Math.min(lost, Math.round(part('wait') * 100));
+  const back = l.settling ? 0 : Math.max(0, lost - wait);
+  const bar = `<div class="bar split" data-testid="work-bar"><span class="work" style="width:${100 - lost}%"></span>${
+    wait ? `<span class="wait" style="width:${wait}%"></span>` : ''}${back ? `<span class="back" style="width:${back}%"></span>` : ''}</div>`;
+  const amount = l.settling ? '<span class="muted">settling</span>'
+    : lost ? `<b>${lost}%</b> · ${fmtRate(l.rate)}/s` : '<span class="muted">none</span>';
+  const rows = l.settling ? '' : causes.map((c) => {
+    const share = c.kind === 'wait' ? wait : back;
+    if (!share) return '';
+    const show = c.node != null ? `<button class="link" data-act="jump:${c.node}" data-testid="loss-show-${c.kind}">Show</button>` : '';
+    return `<div class="row sm cause ${c.kind}" data-testid="loss-${c.kind}"><span><i class="dot"></i>${esc(c.text)}${show}</span><span class="mono">${share}%</span></div>`;
+  }).join('');
+  return `${util}${bar}
+    <div class="row sm loss${lost && !l.settling ? ' on' : ''}" data-testid="loss" data-loss="${l.settling ? '' : lost}"><span>Loss</span><span class="mono">${amount}</span></div>${rows}`;
 }
 
 /**
@@ -998,12 +1037,24 @@ function labSection(g: Game, n: GNode): string {
     <div class="note">${kinds}</div></div>`;
 }
 
+/**
+ * Under a Drill's flow, a word on where it stands: with Mobile Drills it can be moved, and how; before, that it stays
+ * on its deposit, with the way to the research once that can be done (and nothing while the tree is not yet about it).
+ */
+function drillNote(g: Game): string {
+  const t = TECHS.S2;
+  if (!t) return '';
+  if (drillsMove(g)) return `<div class="note" data-testid="drill-moves">${isTouch() ? 'Hold it, then drag, to move it' : 'Drag it to move it'}: its deposit goes along.</div>`;
+  if (!techAvailable(g, t)) return '';
+  return `<div class="note" data-testid="drill-stays">It stays on its deposit. <button class="link" data-act="tech:${t.id}">${esc(t.name)}</button> lets it move.</div>`;
+}
+
 function nodeInspector(g: Game, n: GNode): string {
   const def = NODE_DEFS[n.type];
   const title = n.type === 'well' && n.material ? `${MATERIALS[n.material].name} Drill` : def.name;
   let body = statusBlock(g, n);
   if (isMachine(n)) body += recipeSection(g, n) + flowSection(g, n);
-  else if (n.type === 'well') body += `<div class="sec flow"><span class="lbl">Flow</span><div class="row sm"><span>Extracting</span><span class="mono"><b>${fmtRate(n.rate)}</b> / ${fmtRate(wellRate(n))} /s</span></div><div class="bar"><span style="width:${pct(n.rate / wellRate(n))}%;background:${MATERIALS[n.material!].color}"></span></div></div>`;
+  else if (n.type === 'well') body += `<div class="sec flow"><span class="lbl">Flow</span><div class="row sm"><span>Extracting</span><span class="mono"><b>${fmtRate(n.rate)}</b> / ${fmtRate(wellRate(n))} /s</span></div>${workRows(g, n)}${drillNote(g)}</div>`;
   else if (n.type === 'router') body += routerSection(g, n);
   else if (n.type === 'market') body += marketSection(g, n);
   else if (n.type === 'lab') body += labSection(g, n);
@@ -1029,19 +1080,46 @@ function nodeInspector(g: Game, n: GNode): string {
 }
 
 /**
- * A wire's Route part: its pins. A pin is a point the wire is drawn through, set by the player to lead it round a card
- * or along a path of their own; it changes nothing about what the wire carries.
+ * A wire's Route part: its clips. A clip is a point on the board the wire is run through, set by the player to lead it
+ * round a card or along a path of their own; it changes nothing about what the wire carries. Other wires may be run
+ * through the same clip.
  */
 function routeSection(w: Wire): string {
-  const n = w.pins?.length ?? 0;
+  const n = w.clips?.length ?? 0;
   const how = n
-    ? isTouch() ? 'Drag a pin to bend the wire.' : 'Drag a pin to bend the wire. Double-click a pin to take it off.'
-    : isTouch() ? 'A pin is a point the wire runs through: add one, then drag it.' : 'A pin is a point the wire runs through. Double-click the wire to set one, then drag it.';
+    ? isTouch() ? 'Drag a clip to move the wire. Tap a clip to see what else runs through it.' : 'Drag a clip to move the wire. Double-click a clip to take it off.'
+    : isTouch() ? 'A clip holds the wire where you put it: add one, then drag it.' : 'A clip holds the wire where you put it. Double-click the wire to set one, then drag it.';
   return `<div class="sec route"><span class="lbl">Route</span>
-      <div class="row sm"><span>Pins</span><span class="mono"><b>${n}</b> / ${MAX_PINS}</span></div>
-      <div class="st-actions"><button class="ghostbtn" data-act="pin" data-testid="wire-pin"${n >= MAX_PINS ? ' disabled' : ''}>Add a pin</button>${
-        n ? `<button class="ghostbtn" data-act="unpin" data-testid="wire-unpin">Remove pin${n > 1 ? 's' : ''}</button>` : ''}</div>
+      <div class="row sm"><span>Clips</span><span class="mono"><b>${n}</b> / ${MAX_CLIPS}</span></div>
+      <div class="st-actions"><button class="ghostbtn" data-act="clip" data-testid="wire-clip"${n >= MAX_CLIPS ? ' disabled' : ''}>Add a clip</button>${
+        n ? `<button class="ghostbtn" data-act="unclip" data-testid="wire-unclip">Unclip the wire</button>` : ''}</div>
       <div class="note">${how}</div></div>`;
+}
+
+/**
+ * A clip's own panel: what runs through it, how to run more through it, and the way to take it off. (On a phone this
+ * is the only way to take one clip off: a finger has no double click.)
+ */
+function clipInspector(g: Game, c: Clip): string {
+  const wires = wiresThrough(g, c.id);
+  const rows = wires.map((w) => {
+    const from = nodeById(g, w.from), to = nodeById(g, w.to);
+    const mat = w.mat ?? materialsAt(g, w.from, w.port)[0] ?? null;
+    return `<div class="row sm" data-key="w${w.id}"><span>${mat ? matGlyph(mat, 12) + ' ' : ''}${from ? esc(nodeNoun(from)) : '?'} → ${to ? esc(nodeNoun(to)) : '?'}</span><button class="link" data-act="clipwire:${w.id}" aria-label="Show this wire">Show</button></div>`;
+  }).join('');
+  const how = isTouch()
+    ? 'To run a wire through it: tap a port, tap this clip, then tap where the wire goes. Drag the clip to move every wire in it.'
+    : 'To run a wire through it: draw the wire across it, or click a port, this clip, then where the wire goes. Drag the clip to move every wire in it.';
+  const empty = emptyClips(g).length;
+  return `<div class="sec head"><div class="hicon">${icon('clip', 22)}</div>
+      <div class="htxt"><h2>Clip</h2><p>${wires.length ? `${wires.length} wire${wires.length > 1 ? 's run' : ' runs'} through it` : 'No wire runs through it yet'}</p></div>
+      <button class="ibtn bare" data-act="close" aria-label="Close inspector">${icon('close', 16)}</button></div>
+    <div class="scroll">
+      ${rows ? `<div class="sec flow"><span class="lbl">Wires</span>${rows}</div>` : ''}
+      <div class="sec"><div class="note">${how}</div>${
+        !wires.length && empty > 1 ? `<div class="st-actions"><button class="ghostbtn" data-act="clips-empty" data-testid="clips-empty">Take off all ${empty} empty clips</button></div>` : ''}</div>
+    </div>
+    <div class="foot"><button class="fbtn danger" data-act="clip-remove" data-testid="clip-remove">Take the clip off</button></div>`;
 }
 
 function wireInspector(g: Game, w: Wire): string {
@@ -1079,6 +1157,9 @@ function renderInspector(force: boolean) {
   } else if (sel?.kind === 'wire') {
     const w = g.wires.find((x) => x.id === sel.id);
     if (w) html = wireInspector(g, w);
+  } else if (sel?.kind === 'clip') {
+    const c = clipById(g, sel.id);
+    if (c) html = clipInspector(g, c);
   } else if (sel?.kind === 'flows') html = flowsHtml(g);
   if (!html && sel) ui.sel = null;
   // Opening or closing changes the width of the stage, so cached screen positions are thrown away.

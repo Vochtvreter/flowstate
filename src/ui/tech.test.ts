@@ -33,7 +33,7 @@ describe('tech tree: what is shown', () => {
     expect(show(g)).toEqual({ P1: 'goal', R1: 'goal' });
   });
 
-  it('the first visit shows 6 of 29: owned, researchable, goal rewards, and one step ahead as silhouettes', () => {
+  it('the first visit shows 6 of 30: owned, researchable, goal rewards, and one step ahead as silhouettes', () => {
     const g = newGame();
     g.techs = ['P1', 'R1'];
     g.data.a = 47;
@@ -44,7 +44,7 @@ describe('tech tree: what is shown', () => {
       L1: 'goal',
       P3: 'veil',
     });
-    expect(Object.keys(TECHS)).toHaveLength(29);
+    expect(Object.keys(TECHS)).toHaveLength(30);
     // Nothing of Scale tools is visible and Commerce waits for the first surplus, so both are left out.
     const branches = new Set(techTiles(g).map((x) => x.t.branch));
     expect(BRANCHES.filter((b) => branches.has(b.id)).map((b) => b.id)).toEqual(['processing', 'logistics', 'research']);
