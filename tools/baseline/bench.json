@@ -1,0 +1,220 @@
+{
+  "node": "v22.23.5",
+  "boards": [
+    {
+      "name": "small",
+      "cards": 28,
+      "wires": 34,
+      "core": {
+        "tick": 31.847,
+        "tickBig": 21.358,
+        "clone": 0.423,
+        "stringify": 0.172,
+        "parse": 0.129,
+        "normalise": 0.08,
+        "saveBytes": 40229,
+        "forecast": 3.862,
+        "away": 32.237
+      },
+      "routing": {
+        "cold": 7.786,
+        "rest": 0.976,
+        "curved": 0.185,
+        "drag": {
+          "med": 1.059,
+          "p90": 1.988,
+          "max": 2.702,
+          "n": 60
+        },
+        "dragSearches": {
+          "med": 4,
+          "p90": 13,
+          "max": 18,
+          "n": 60
+        },
+        "drop": {
+          "med": 1.222,
+          "p90": 3.995,
+          "max": 5.307,
+          "n": 11
+        },
+        "tidyMoved": 18,
+        "tidy": {
+          "med": 1.294,
+          "p90": 2.731,
+          "max": 3.74,
+          "n": 25
+        },
+        "tidySearches": {
+          "med": 8,
+          "p90": 14,
+          "max": 17,
+          "n": 25
+        },
+        "dropOff": 1,
+        "tidyOff": 8
+      },
+      "verdicts": {
+        "ms": {
+          "med": 22.724,
+          "p90": 53.609,
+          "max": 178.499,
+          "n": 57
+        },
+        "copies": {
+          "med": 9,
+          "p90": 19,
+          "max": 19,
+          "n": 57
+        },
+        "ticks": {
+          "med": 720,
+          "p90": 1600,
+          "max": 7593,
+          "n": 57
+        }
+      },
+      "digest": {
+        "state": "8a1944136295129d",
+        "wires": "8501a55f532eff37"
+      }
+    },
+    {
+      "name": "medium",
+      "cards": 44,
+      "wires": 98,
+      "core": {
+        "tick": 33.554,
+        "tickBig": 50.781,
+        "clone": 1.359,
+        "stringify": 0.642,
+        "parse": 0.405,
+        "normalise": 0.663,
+        "saveBytes": 120564,
+        "forecast": 8.447,
+        "away": 80.076
+      },
+      "routing": {
+        "cold": 4.551,
+        "rest": 1.881,
+        "curved": 0.336,
+        "drag": {
+          "med": 3.851,
+          "p90": 9.752,
+          "max": 15.748,
+          "n": 60
+        },
+        "dragSearches": {
+          "med": 19,
+          "p90": 43,
+          "max": 50,
+          "n": 60
+        },
+        "drop": {
+          "med": 2.799,
+          "p90": 4.899,
+          "max": 6.003,
+          "n": 11
+        },
+        "tidyMoved": 33,
+        "tidy": {
+          "med": 3.539,
+          "p90": 11.513,
+          "max": 12.719,
+          "n": 25
+        },
+        "tidySearches": {
+          "med": 40,
+          "p90": 73,
+          "max": 85,
+          "n": 25
+        },
+        "dropOff": 3,
+        "tidyOff": 47
+      },
+      "verdicts": null,
+      "digest": {
+        "state": "38872c3764ec8ede",
+        "wires": "5e642ea0e7230cda"
+      }
+    },
+    {
+      "name": "large",
+      "cards": 59,
+      "wires": 106,
+      "core": {
+        "tick": 50.733,
+        "tickBig": 78.682,
+        "clone": 1.571,
+        "stringify": 0.654,
+        "parse": 0.7,
+        "normalise": 0.363,
+        "saveBytes": 119971,
+        "forecast": 11.04,
+        "away": 105.981
+      },
+      "routing": {
+        "cold": 3.232,
+        "rest": 2.4,
+        "curved": 0.551,
+        "drag": {
+          "med": 3.317,
+          "p90": 11.04,
+          "max": 13.863,
+          "n": 60
+        },
+        "dragSearches": {
+          "med": 12,
+          "p90": 47,
+          "max": 58,
+          "n": 60
+        },
+        "drop": {
+          "med": 2.797,
+          "p90": 7.918,
+          "max": 9.113,
+          "n": 11
+        },
+        "tidyMoved": 41,
+        "tidy": {
+          "med": 7.644,
+          "p90": 9.338,
+          "max": 14.606,
+          "n": 25
+        },
+        "tidySearches": {
+          "med": 54,
+          "p90": 56,
+          "max": 58,
+          "n": 25
+        },
+        "dropOff": 3,
+        "tidyOff": 59
+      },
+      "verdicts": {
+        "ms": {
+          "med": 52.882,
+          "p90": 154.675,
+          "max": 406.712,
+          "n": 118
+        },
+        "copies": {
+          "med": 11,
+          "p90": 15,
+          "max": 20,
+          "n": 118
+        },
+        "ticks": {
+          "med": 865,
+          "p90": 2262,
+          "max": 6712,
+          "n": 118
+        }
+      },
+      "digest": {
+        "state": "62ab64937cfc49a4",
+        "wires": "36890099941b636b"
+      }
+    }
+  ]
+}

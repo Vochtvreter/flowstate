@@ -2340,5 +2340,6 @@ export function playOnce(policy: string, seed: number): {
   return { lens: r.lens, checks: checks(r), tips: { offered: r.tipStats.offered, followed: r.tipStats.followed }, flowGoal: r.flowGoal?.seconds ?? null, nothing: r.nothing };
 }
 
-// From the command line (npm run pacing) this file is the program; a test that imports it only wants the exports.
-if (!process.env.VITEST) main();
+// From the command line (npm run pacing) this file is the program; a test or another tool (tools/bench.ts) that
+// imports it only wants the exports.
+if (!process.env.VITEST && process.argv.some((a) => /(^|[\\/])pacing\.ts$/.test(a))) main();

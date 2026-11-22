@@ -23,6 +23,9 @@ export interface Forecast {
 /** How long a forecast looks ahead, and how finely. The simulation gives the same totals at any step up to this size. */
 export const FORECAST = { seconds: 40, step: 0.25 };
 
+/** For measuring (tools/bench.ts) and for tests: copies made to look ahead, and ticks run in them, so far. */
+export const LOOKS = { copies: 0, ticks: 0 };
+
 /**
  * A copy of the game for looking ahead: nothing in it can reach the live game, and nothing done to it is
  * recorded in the player's undo history. The research queue is emptied and no new order is ever rolled (the
@@ -31,6 +34,7 @@ export const FORECAST = { seconds: 40, step: 0.25 };
 export function lookahead(g: Game): Game | null {
   const copy = cloneGame(g);
   if (!copy) return null;
+  LOOKS.copies++;
   markLookahead(copy);
   copy.queue = [];
   copy.paused = false;
@@ -44,6 +48,7 @@ export function measure(copy: Game, seconds: number, step = FORECAST.step): Fore
   const steps = Math.max(1, Math.round(seconds / step));
   for (let i = 0; i < steps; i++) {
     tick(copy, step);
+    LOOKS.ticks++;
     const acc = copy.tickAcc;
     out.credits += acc.credits;
     out.data.a += acc.data.a;

@@ -332,7 +332,7 @@ Several goals have a wait in them: Data to save for a research, credits for a ma
     actions.ts   every change a player can make, all undoable
     ui/          board, panels, tech tree, goal card, phone layout, sound, celebrations
   tests/         rules, exploits, saves, the adviser, the pacing targets
-  tools/         pacing.ts: the scripted players
+  tools/         pacing.ts: the scripted players; bench.ts and perf.mjs: what the game's work costs, and the page's frames
   ```
 - **Undo** keeps a snapshot of the board's structure and the credits spent for each step, up to 200.
 - **Tests:** `npm test` runs 578 tests, among them the pacing targets on four order sequences. `npm run pacing` plays six scripted players and checks each run against the pacing targets.

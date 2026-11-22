@@ -470,6 +470,11 @@ function inReach(s: Pt, t: Pt, reach: number, cards: Box[]): { by: Box[]; blocks
 interface Kept { h1: number; h2: number; reach: number; way: Pt[] | null }
 const kept = new Map<number, Kept>();
 
+/** Let go of every way that was kept: the next `routeAll` finds each anew, as a page that has just loaded does. For tests and for measuring. */
+export function forgetWays() {
+  kept.clear();
+}
+
 /** Two numbers that stand for the ports and the cards a search had to do with: the same again, and its answer is the same. */
 function mark(a: Pt, b: Pt, by: Box[], blocks: Box[], kind: number): [number, number] {
   let h1 = 2166136261, h2 = 0x9e3779b9;

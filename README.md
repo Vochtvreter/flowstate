@@ -106,6 +106,9 @@ src/ui/           board.ts (DOM cards, SVG wires, every gesture), fx.ts (canvas:
 src/styles/       hud, advice, feel, phone and tech styles (base styles in src/style.css)
 tests/            rules, saves, undo, adviser and pacing tests (interface unit tests sit beside src/ui/)
 tools/pacing.ts   the pacing tool: scripted players on the real rules (what-if numbers in pacing-profiles.ts)
+tools/bench.ts    what ticks, copies of the game, forecasts, the adviser and wire routing cost, on boards those players built
+tools/perf.mjs    frame times of the built page in headless Chromium on a processor slowed four times
+tools/baseline/   the numbers both gave before the work on speed, to compare against
 ```
 
 | Command | What it does |
@@ -114,4 +117,6 @@ tools/pacing.ts   the pacing tool: scripted players on the real rules (what-if n
 | `npm test` | All tests (Vitest), about two minutes |
 | `npm run pacing` | Six scripted players on order seeds 0–3, checked against the pacing targets; `-- --summary` for the tables only, more flags at the top of `tools/pacing.ts` |
 | `npm run baseline` | Prints the tests' own card player's time on each goal |
-| `npm run check:tools` | Type-checks the pacing tool |
+| `npm run bench` | Times the game's own work without a browser; `-- --digest` prints fingerprints that a change made only for speed must leave as they were; more at the top of `tools/bench.ts` |
+| `node tools/perf.mjs` | Times frames of a built page while a script pans, zooms, drags a card and tidies; needs Playwright and a build (the steps are at the top of the file) |
+| `npm run check:tools` | Type-checks the pacing tool and the bench |
