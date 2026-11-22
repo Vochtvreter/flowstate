@@ -2,7 +2,7 @@
 import { describe, expect, it } from 'vitest';
 import { Pt, bezierAt, pathD } from './geom';
 import {
-  CLEAR, CORNER, COUNT, CardBox, LANE_GAP, MAX_PINS, PASS_X, PASS_Y, STUB, WireIn, ahead, around, drawCurved, drawSquared, drawWire, forward, inWay, routeAll, spread,
+  CLEAR, CORNER, COUNT, CardBox, LANE_GAP, MAX_CLIPS, PASS_X, PASS_Y, STUB, WireIn, ahead, around, drawCurved, drawSquared, drawWire, forward, inWay, routeAll, spread,
   throughPins, wayRound,
 } from './wires';
 
@@ -127,7 +127,7 @@ describe('pins', () => {
     const past = throughPins(a, b, [pt(760, 200)]);
     expect(past.slice(-3)).toEqual([pt(700 - STUB, 200), pt(700 - STUB, 300), b]);
     expect(square(back) && square(past)).toBe(true);
-    expect(MAX_PINS).toBe(4);
+    expect(MAX_CLIPS).toBe(8);
   });
 });
 
@@ -403,6 +403,44 @@ describe('a way round cards', () => {
     const buried = [pt(520, 150)];
     const kept = cornersOf(routeAll([{ id: 1, from: 1, to: 9, a, b, pins: buried }], cards, 'squared', N).get(1)!.d);
     expect(kept).toEqual(throughPins(a, b, buried));
+  });
+
+  it('wires that share pins (one clip that holds them) run through them side by side as a bundle; a wire alone on its pins stays on them', () => {
+    const cards = [card(1, 100, 100), card(2, 100, 300), card(3, 100, 500), card(8, 900, 300), card(9, 900, 500)];
+    const pins = [pt(500, 60), pt(700, 200)];
+    const wires: WireIn[] = [
+      { id: 1, from: 1, to: 8, a: pt(272, 136), b: pt(900, 336), pins },
+      { id: 2, from: 2, to: 8, a: pt(272, 336), b: pt(900, 346), pins },
+      { id: 3, from: 3, to: 9, a: pt(272, 536), b: pt(900, 536), pins },
+      // On the same upright as the others, but through a pin of its own: it is not one of the bundle.
+      { id: 4, from: 3, to: 8, a: pt(272, 546), b: pt(900, 356), pins: [pt(500, 450)] },
+    ];
+    const drawn = routeAll(wires, cards, 'squared', N);
+    const v = wires.map((w) => cornersOf(drawn.get(w.id)!.d));
+    for (const line of v) expect(square(line)).toBe(true);
+    // The three that share the pins: where they run up the first pin's upright they stand LANE_GAP apart, about the pin.
+    const upright = (line: Pt[], near: number) => line.find((p, i) => i + 1 < line.length && Math.abs(p.x - line[i + 1].x) < 0.01 && Math.abs(p.x - near) <= 2 * LANE_GAP)!.x;
+    const first = [0, 1, 2].map((i) => upright(v[i], 500)).sort((p, q) => p - q);
+    expect(first[1] - first[0]).toBeCloseTo(LANE_GAP, 5);
+    expect(first[2] - first[1]).toBeCloseTo(LANE_GAP, 5);
+    expect(first[1]).toBeCloseTo(500, 5);
+    // ...and so along the level run between the two pins, about its height.
+    const level = [0, 1, 2].map((i) => v[i].find((p, k) => k + 1 < v[i].length && Math.abs(p.y - v[i][k + 1].y) < 0.01 && Math.abs(p.y - 60) <= 2 * LANE_GAP)!.y).sort((p, q) => p - q);
+    expect(level[2] - level[0]).toBeCloseTo(2 * LANE_GAP, 5);
+    expect((level[0] + level[2]) / 2).toBeCloseTo(60, 5);
+    // None of them doubles back on itself.
+    for (const line of v) {
+      for (let i = 0; i + 2 < line.length; i++) {
+        const d1 = pt(line[i + 1].x - line[i].x, line[i + 1].y - line[i].y), d2 = pt(line[i + 2].x - line[i + 1].x, line[i + 2].y - line[i + 1].y);
+        expect(d1.x * d2.x + d1.y * d2.y).toBeGreaterThanOrEqual(0);
+      }
+    }
+    // The wire with a pin of its own runs exactly through it, bundle or no bundle beside it.
+    expect(on(v[3], pt(500, 450))).toBe(true);
+    expect(v[3]).toEqual(throughPins(wires[3].a, wires[3].b, wires[3].pins!));
+    // Alone, a wire through the shared pins runs exactly through them too.
+    const alone = cornersOf(routeAll([wires[0]], cards, 'squared', N).get(1)!.d);
+    for (const p of pins) expect(on(alone, p)).toBe(true);
   });
 
   it('on boards with room between the cards, no wire passes behind a card or nearer to one than CLEAR, whatever goes where', () => {

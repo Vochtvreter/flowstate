@@ -236,7 +236,7 @@ const DEFAULT_POLICIES = ['mainline', 'greedy', 'newcomer', 'newcomer10', 'cardo
 export const CFG = {
   dt: 0.05, // the game's own step (20 ticks per second)
   thinkEvery: 0.5, // how often an idle player re-checks what they can afford
-  techSkip: ['R4'], // no effect inside one sitting (time away)
+  techSkip: ['R4', 'S2'], // no effect inside one sitting (time away), or on a player who lays nothing out (Mobile Drills)
   saturationFloor: 0.9, // do not push a line whose product already averages below this share of its full price
   labPerTier: true, // one Lab per Data tier
   efficiency: true, // buy Efficiency upgrades once Efficiency Tuning is researched

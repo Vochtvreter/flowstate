@@ -6,7 +6,10 @@ import {
   recipeOf, recipeUnlocked, trackAvailable, upgradeCost, upgradeValue,
 } from './economy';
 import { graph, isMachine, isPass, isSink, outPortCount } from './sim';
-import { Game, GNode, RouterMode, Snapshot, Wire, cleanPins, isLookahead, makeNode, makeWire, nodeNoun, noteEdit, restore, shelve, snap, snapshot } from './state';
+import {
+  Clip, Game, GNode, MAX_BOARD_CLIPS, MAX_CLIPS, RouterMode, Snapshot, Wire, cleanClipIds, clipSpot, isLookahead, makeNode, makeWire, nodeNoun, noteEdit, restore, shelve,
+  snap, snapshot,
+} from './state';
 
 export { claimGoal } from './goals';
 export { materialsAt, pickRecipe, recipesFor } from './economy';
@@ -304,31 +307,161 @@ export function setWeight(g: Game, wireId: number, weight: number): boolean {
   });
 }
 
+// ---------- clips ----------
+// Clips are the player's cable management (state.ts Clip): points on the board that wires are run through. Every
+// change to them is one undo step and costs nothing; no rule reads a clip, and a wire carries the same however it runs.
+
+export const clipById = (g: Game, id: number): Clip | null => g.clips.find((c) => c.id === id) ?? null;
+
+/** The clip that stands at a point (as clipSpot gives it), if any. */
+export const clipAt = (g: Game, x: number, y: number): Clip | null => g.clips.find((c) => c.x === x && c.y === y) ?? null;
+
+/** The wires that run through a clip. */
+export const wiresThrough = (g: Game, clipId: number): Wire[] => g.wires.filter((w) => !!w.clips?.includes(clipId));
+
+/** The clips no wire runs through. */
+export function emptyClips(g: Game): Clip[] {
+  const used = new Set<number>();
+  for (const w of g.wires) for (const id of w.clips ?? []) used.add(id);
+  return g.clips.filter((c) => !used.has(c.id));
+}
+
 /**
- * Set the pins a wire runs by (src/ui/wires.ts), or with an empty list take them all off. Only how the wire is
- * drawn: no rule reads a pin. One undo step; false when the wire is not there or nothing would change.
+ * Set up a clip on the board at a point (brought onto the clip grid, inside the plot). One undo step. Where a clip
+ * already stands on that point it is given back and nothing changes; null when the board holds all the clips it can.
  */
-export function setPins(g: Game, wireId: number, pins: { x: number; y: number }[]): boolean {
+export function addClip(g: Game, x: number, y: number): Clip | null {
+  const at = clipSpot(x, y, g.board);
+  const there = clipAt(g, at.x, at.y);
+  if (there) return there;
+  if (g.clips.length >= MAX_BOARD_CLIPS) return null;
+  let clip: Clip | null = null;
+  act(g, () => {
+    clip = { id: g.nextId++, x: at.x, y: at.y };
+    g.clips.push(clip);
+    return 0;
+  });
+  return clip;
+}
+
+/**
+ * Set the clips a wire runs through, in order from its start, or with an empty list take it out of all of them (the
+ * clips stay on the board). A clip that is not there is left out, and so is one named twice; MAX_CLIPS at most. One
+ * undo step; false when the wire is not there or nothing would change.
+ */
+export function setWireClips(g: Game, wireId: number, ids: number[]): boolean {
   const w = g.wires.find((x) => x.id === wireId);
   if (!w) return false;
-  const next = cleanPins(pins, g.board);
-  const was = w.pins ?? [];
-  if (next.length === was.length && next.every((p, i) => p.x === was[i].x && p.y === was[i].y)) return false;
+  const next = cleanClipIds(ids, (id) => !!clipById(g, id));
+  const was = w.clips ?? [];
+  if (next.length === was.length && next.every((id, i) => id === was[i])) return false;
   return act(g, () => {
-    if (next.length) w.pins = next;
-    else delete w.pins;
+    if (next.length) w.clips = next;
+    else delete w.clips;
     return 0;
   });
 }
 
-/** Take every pin off every wire, as part of a step that is already being taken (Tidy: the cards the pins were set round have moved). Returns how many wires had some. */
-export function dropPins(g: Game): number {
-  let n = 0;
+/**
+ * Run a wire through a clip at a point: the clip that stands there, or a new one. It takes place `index` among the
+ * wire's clips (0 is nearest the wire's start). One undo step. Null when the wire is not there, runs through all the
+ * clips it can or through that one already, or the board holds all the clips it can.
+ */
+export function clipWireAt(g: Game, wireId: number, x: number, y: number, index: number): Clip | null {
+  const w = g.wires.find((k) => k.id === wireId);
+  if (!w || (w.clips?.length ?? 0) >= MAX_CLIPS) return null;
+  const at = clipSpot(x, y, g.board);
+  const there = clipAt(g, at.x, at.y);
+  if (there ? w.clips?.includes(there.id) : g.clips.length >= MAX_BOARD_CLIPS) return null;
+  let clip: Clip | null = null;
+  act(g, () => {
+    clip = there ?? { id: g.nextId++, x: at.x, y: at.y };
+    if (!there) g.clips.push(clip);
+    const list = (w.clips ?? []).slice();
+    list.splice(Math.max(0, Math.min(list.length, index)), 0, clip.id);
+    w.clips = list;
+    return 0;
+  });
+  return clip;
+}
+
+/**
+ * Move a clip, and with it every wire that runs through it. Let go on a point where another clip stands, the two
+ * become one: the wires of both run through the one that stood there. One undo step; false when the clip is not
+ * there or does not move.
+ */
+export function moveClip(g: Game, clipId: number, x: number, y: number): boolean {
+  const c = clipById(g, clipId);
+  if (!c) return false;
+  const at = clipSpot(x, y, g.board);
+  if (at.x === c.x && at.y === c.y) return false;
+  const onto = clipAt(g, at.x, at.y);
+  return act(g, () => {
+    if (!onto) {
+      c.x = at.x;
+      c.y = at.y;
+      return 0;
+    }
+    g.clips = g.clips.filter((k) => k.id !== clipId);
+    for (const w of g.wires) {
+      if (!w.clips?.includes(clipId)) continue;
+      // (A wire that ran through both runs through the one that is left, once.)
+      w.clips = w.clips.map((id) => (id === clipId ? onto.id : id)).filter((id, i, all) => all.indexOf(id) === i);
+    }
+    return 0;
+  });
+}
+
+/** Take a clip off the board: every wire that ran through it runs without it. One undo step. */
+export function removeClip(g: Game, clipId: number): boolean {
+  if (!clipById(g, clipId)) return false;
+  return act(g, () => {
+    takeClips(g, new Set([clipId]));
+    return 0;
+  });
+}
+
+function takeClips(g: Game, ids: Set<number>) {
+  g.clips = g.clips.filter((c) => !ids.has(c.id));
   for (const w of g.wires) {
-    if (!w.pins?.length) continue;
-    delete w.pins;
-    n++;
+    if (!w.clips?.some((id) => ids.has(id))) continue;
+    const left = w.clips.filter((id) => !ids.has(id));
+    if (left.length) w.clips = left;
+    else delete w.clips;
   }
+}
+
+/**
+ * Take a wire out of its clips, all of them, and take off the board those of them that no other wire runs through
+ * (they were this wire's alone). One undo step; false for a wire that runs through none.
+ */
+export function unclipWire(g: Game, wireId: number): boolean {
+  const w = g.wires.find((x) => x.id === wireId);
+  if (!w?.clips?.length) return false;
+  const own = new Set(w.clips.filter((id) => !g.wires.some((o) => o !== w && o.clips?.includes(id))));
+  return act(g, () => {
+    delete w.clips;
+    takeClips(g, own);
+    return 0;
+  });
+}
+
+/** Take every clip that no wire runs through off the board. One undo step. Returns how many there were. */
+export function removeEmptyClips(g: Game): number {
+  const empty = emptyClips(g);
+  if (!empty.length) return 0;
+  act(g, () => {
+    takeClips(g, new Set(empty.map((c) => c.id)));
+    return 0;
+  });
+  return empty.length;
+}
+
+/** Take every clip off the board, as part of a step that is already being taken (Tidy: the cards the clips were set round have moved). Returns how many there were. */
+export function dropClips(g: Game): number {
+  const n = g.clips.length;
+  g.clips = [];
+  for (const w of g.wires) delete w.clips;
   return n;
 }
 
@@ -489,6 +622,24 @@ export function cutWires(g: Game, ids: number[]): boolean {
   });
 }
 
+/**
+ * Wire two machines and run the new wire through clips, as one undo step: a wire drawn out of a port by way of clips
+ * (board.ts). Null when the two cannot be wired; with no clips it is `connect`.
+ */
+export function connectThrough(g: Game, fromId: number, port: number, toId: number, clipIds: number[]): Wire | null {
+  if (!clipIds.length) return connect(g, fromId, port, toId);
+  if (!canConnect(g, fromId, port, toId)) return null;
+  let wire: Wire | null = null;
+  act(g, () => {
+    wire = connect(g, fromId, port, toId);
+    if (!wire) return false;
+    const ids = cleanClipIds(clipIds, (id) => !!clipById(g, id));
+    if (ids.length) wire.clips = ids;
+    return 0;
+  });
+  return wire;
+}
+
 export function upgradeWire(g: Game, id: number): boolean {
   const w = g.wires.find((x) => x.id === id);
   if (!w || w.tier >= maxPipeTier(g)) return false;
@@ -588,6 +739,25 @@ function grow(g: Game, cost: number) {
   g.board.expansions++;
   g.rev++;
   noteEdit(g, 'edit');
+}
+
+/** Can a Drill be moved? Only with Mobile Drills (S2): until then it stays on the deposit it was built on. */
+export const drillsMove = (g: Game) => has(g, 'S2');
+
+/** Can this card be moved about the board? Anything but a Drill, and a Drill too with Mobile Drills. */
+export const canMove = (g: Game, n: GNode) => n.type !== 'well' || drillsMove(g);
+
+/**
+ * A Drill stands on its deposit, so where a Drill has been moved its deposit has gone with it: delete the Drill and
+ * the deposit is free where the Drill last stood. Called for each card inside the step that moves it (the deposits
+ * are part of the undo step: state.ts snapshot).
+ */
+export function seatDeposit(g: Game, n: GNode) {
+  if (n.type !== 'well' || n.depositId == null) return;
+  const d = g.deposits.find((x) => x.id === n.depositId);
+  if (!d) return;
+  d.x = n.x;
+  d.y = n.y;
 }
 
 export const defOf = (n: GNode) => NODE_DEFS[n.type];

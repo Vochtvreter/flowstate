@@ -448,7 +448,11 @@ export function foldHint() {
 function hintLine(): string {
   const verb = PressWord();
   const armed = armedPort();
-  if (armed) return armed.mat ? `${verb} where the <b>${MATERIALS[armed.mat].name}</b> should go` : `${verb} where this wire should go`;
+  if (armed) {
+    // (Run through clips on its way, the wire says how many it has taken: a finger sees no wire in hand.)
+    const via = armed.via ? `, by ${armed.via} clip${armed.via > 1 ? 's' : ''}` : '';
+    return armed.mat ? `${verb} where the <b>${MATERIALS[armed.mat].name}</b> should go${via}` : `${verb} where this wire should go${via}`;
+  }
   const p = ui.placing;
   if (p) return p.type === 'well' ? `${verb} a deposit to place the <b>Drill</b>` : `${verb} the board to place the <b>${NODE_DEFS[p.type].name}</b>`;
   return '';

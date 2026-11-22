@@ -146,7 +146,7 @@ export const BRANCHES: { id: Branch; name: string; sub: string; rows: number }[]
   { id: 'logistics', name: 'Logistics', sub: 'Routing & pipes', rows: 3 },
   { id: 'commerce', name: 'Commerce', sub: 'Prices & demand', rows: 1 },
   { id: 'research', name: 'Research', sub: 'Labs & offline', rows: 2 },
-  { id: 'scale', name: 'Scale tools', sub: 'Big-factory help', rows: 1 },
+  { id: 'scale', name: 'Scale tools', sub: 'Big-factory help', rows: 2 },
 ];
 
 export interface Tech {
@@ -256,6 +256,9 @@ export const TECHS: Record<string, Tech> = Object.fromEntries([
   // Scale tools
   T('S1', 'Bulk Upgrade', 'scale', 1, 0, {}, ['L1'], 'Upgrade every node of the same kind with one click.', ['"Upgrade all" button'], { auto: 'Reward for the goal “Make your first Screen”' }),
   T('S3', 'Auto-balance', 'scale', 2, 0, { b: 50 }, ['S1', 'L4'], 'One click sets a Router\'s weights to match what each destination can actually use.', ['Router: Auto-balance']),
+  // (For the board, not the line: priced as the side techs before the first Circuit are, and behind Routing, which
+  // is when a board has grown enough for where its Drills stand to matter.)
+  T('S2', 'Mobile Drills', 'scale', 1, 1, { a: 80 }, ['L1'], 'A Drill can be moved like any other card, and its deposit goes with it. Set your sources down where the line needs them.', ['Drills can be dragged', 'Drills move in a block of cards']),
 ].map((t) => [t.id, t]));
 
 export const TECH_IDS = Object.keys(TECHS);

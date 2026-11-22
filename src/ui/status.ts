@@ -6,6 +6,7 @@ import { MATERIALS, MatId, NODE_DEFS, NodeType, Track } from '../content';
 import { materialsAt } from '../actions';
 import { labRate, maxLevel, pipeCap, recipeOf, trackAvailable, upgradeCost } from '../economy';
 import { activeGoal, goalAge, goalFocus } from '../goals';
+import { Loss } from '../loss';
 import { graph, isMachine, isPass } from '../sim';
 import { Game, GNode } from '../state';
 import { freePlay } from './hud-screens';
@@ -328,6 +329,49 @@ export function wayOn(g: Game, n: GNode, dx: Diagnosis = diagnose(g, n)): WayOn 
   const d = found.find((x) => flatOut(g, x) || waitsFor(x) != null) ?? found[0];
   const waits = waitsFor(d);
   return waits != null || flatOut(g, d) ? { node: d.id, speed: false, waits } : { node: d.id, speed: false, waits: null, room: true };
+}
+
+// ---------- loss: why, and where to look ----------
+// What a Drill or machine loses is worked out from the game alone (src/loss.ts): the share of its time, the items a
+// second, and how much of it went on waiting for an input and how much on a backed-up output. Here each of those two
+// is given its words and the node to look at: the source that brings too little, or what stands full downstream.
+
+export interface LossCause {
+  /** `wait`: it waited for an input. `back`: its output had nowhere to go. */
+  kind: 'wait' | 'back';
+  /** The share of the node's time lost to this, 0 to 1. */
+  share: number;
+  text: string;
+  /** The node to show for it: the Drill or machine the input comes from, or the one downstream that takes no more. Null with none to name. */
+  node: number | null;
+}
+
+/** The causes of a node's loss, the larger first; none for a node that loses nothing or is still settling. */
+export function lossCauses(g: Game, n: GNode, l: Loss): LossCause[] {
+  const out: LossCause[] = [];
+  if (l.starved > 0) {
+    const from = l.missing ? supplier(g, n.id, l.missing) : null;
+    out.push({ kind: 'wait', share: l.starved, text: l.missing ? `Waiting for ${matName(l.missing)}` : 'Waiting for an input', node: from?.id ?? null });
+  }
+  if (l.blocked > 0) {
+    const mat = l.blockedOn;
+    const port = n.type === 'well' || !mat ? 0 : Math.max(0, recipeOf(n)?.outputs.findIndex((o) => o[0] === mat) ?? 0);
+    const wires = graph(g).outs.get(n.id)?.[port] ?? [];
+    let node: number | null = null;
+    let text = mat ? `${matName(mat)} backed up` : 'Output backed up';
+    if (!wires.length) text = mat ? `${matName(mat)} has no exit` : 'An output has no exit';
+    else {
+      node = troubledDownstream(g, n.id, port);
+      if (node == null && mat) {
+        const found = consumers(g, n.id, port, mat, [], new Set());
+        node = (found.find((d) => flatOut(g, d)) ?? found[0])?.id ?? null;
+        // (Nothing downstream with room on its wire: a wire that carries all it can is what holds it.)
+        if (node == null && wires.some((w) => w.rate >= pipeCap(w.tier) * WIRE_FULL)) text = `${matName(mat)} backed up: a wire is full`;
+      }
+    }
+    out.push({ kind: 'back', share: l.blocked, text, node });
+  }
+  return out.sort((p, q) => q.share - p.share);
 }
 
 // ---------- "Upgrade all": what one press would buy ----------

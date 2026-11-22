@@ -46,7 +46,7 @@ The game has exactly two progression systems, each with **its own currency** so 
 | Currency | **Credits** ¢ — earned by selling at Markets | **Data** (α, β, γ) — earned by feeding items to a Lab |
 | Answers | "How *much* can I build?" | "What *kinds* of things can I build?" |
 | Buys | Nodes, node upgrades, wire tiers, board space | Materials, recipes, node types, Router modes, scale tools |
-| Curve | Exponential per-type costs (endless) | Finite, hand-authored tree of 29 techs |
+| Curve | Exponential per-type costs (endless) | Finite, hand-authored tree of 30 techs |
 
 ### 3.1 Board progression (credits)
 
@@ -67,7 +67,7 @@ A hand-authored tree with five branches (full list in [CONTENT.md](./CONTENT.md#
 - **Logistics** — the Router with its Ratio mode, Priority and Filter modes, Merger, Silo, wire tiers.
 - **Commerce** — Market Lens (price gauges), Wider Demand, Luxury Buyers, Exports. Hidden until something first sells over its demand. *Contracts are not built.*
 - **Research** — Lab Speed, Deep Analysis, Long Absence (hidden until the demo ends).
-- **Scale tools** — Bulk Upgrade, Auto-balance. *Blueprints are not built.*
+- **Scale tools** — Bulk Upgrade, Auto-balance, Mobile Drills (a Drill is moved like any card, and its deposit goes with it). *Blueprints are not built.*
 
 **Data comes in three kinds.** A Lab turns a raw item into 1 α, a refined one into 3 α (Tar, a byproduct: 1 α), a Tier 2 item into 5 β and a Tier 3 item into 8 γ. Later techs cost β and γ, so you can't skip a tier by grinding raw Sand. This is the natural "gate" that pushes the player up the material chain.
 
@@ -129,6 +129,7 @@ Kept deliberately simple, deterministic and free of the DOM, so it is unit-teste
 
   A new or rewired node gets a few seconds' grace before anything is reported. The interface calls a machine starved only when it works less than 60% of the time (averaged over 3 seconds, cleared at 65%). Above that it is "short", which the inspector says in amber.
 - **Utilization** = share of time Working, smoothed over about 3 seconds. Shown as the ring around each node's icon.
+- **Loss** = what utilization leaves, for a Drill or a machine: the share of its time it did not work, the items a second of its first output that went unmade for it, and why: the part spent waiting for an input (Starved) and the part with its output backed up (Blocked), as the simulation already keeps them. It is a reading and nothing else (`src/loss.ts`): no rule reads it. A card shows it beside its rate from 5%, in the colour of the larger cause; the inspector splits it by cause and points at the node to look at. It answers what utilization alone does not: whether a machine at 70% is held back from behind (more supply, or a faster source) or from ahead (more demand, a second consumer, a bigger wire).
 
 ### 5.1 Time away
 
@@ -222,9 +223,9 @@ This is the most important section. The editor *is* the game. Sizes, layouts and
 | Delete | `Del` or `Backspace`, or Delete in the inspector. Always full refund, except for a node from a save of the earlier public version, which refunds no more than was paid for it. The last Drill cannot be deleted. | Delete in the inspector. |
 | Undo / redo | `Ctrl+Z` / `Ctrl+Shift+Z` or `Ctrl+Y`. Restores credits. Up to 200 steps, back to the last goal claimed. | Undo button; Redo in the gear menu. |
 | Duplicate | `Ctrl+D`: another node of the same type and recipe to place, at the normal price. | Duplicate in the inspector. |
-| Inspect | Click a node or wire → inspector with recipe, in/out rates, utilization, upgrades, and what is wrong with a one-press fix ("Receiving 0.80 of 1.00 Ore/s", with an "Upgrade source · 50¢" button). Hovering shows the rates on its wires. | Tap → the inspector as a bottom sheet. |
+| Inspect | Click a node or wire → inspector with recipe, in/out rates, utilization and loss (how much, and whether it waits for an input or is backed up), upgrades, and what is wrong with a one-press fix ("Receiving 0.80 of 1.00 Ore/s", with an "Upgrade source · 50¢" button). Hovering shows the rates on its wires. | Tap → the inspector as a bottom sheet. |
 | Camera | Wheel zooms; drag empty board (or middle or right drag) pans; `F` fits; `T` tidies. | Pinch zooms; drag empty board pans; Fit and Tidy buttons. |
-| Cables | `W` or the Wires button: squared or curved wires. Double-click a wire to pin it, drag the pin, double-click the pin to take it off. | Wires in the gear menu; Add a pin in a wire's sheet, then drag the pin. |
+| Cables | `W` or the Wires button: squared or curved wires. Double-click a wire to clip it, or the empty board to set up a clip; drag a clip; draw a wire across clips to run it through them; double-click a clip to take it off. | Wires in the gear menu; Add a clip in a wire's sheet, then drag it; tap a port, clips, then a card to run a wire through them; a clip's sheet takes it off. |
 | Other keys | `1`–`9`, `0` build bar or menu option · `R` tech tree · `P` pause · `Esc` backs out | |
 
 *Not built:* box-select, a block of cards for a finger, named groups or frames round a line, copy/paste of a selection, a trash target, a grid toggle, right-drag cutting, a node tooltip on hover.
@@ -236,8 +237,8 @@ This is the most important section. The editor *is* the game. Sizes, layouts and
 - **Placement:** a machine built from the menu stands in the outline the menu shows while it is open. That is centred on the point the player chose (or the nearest point inside the plot and clear) when it has room there. Otherwise it is the nearest free spot, preferring, within about 100 px, one with air round it, one the player can see whole, one on the near side of other cards from its port, and one whose new wire passes behind no card.
 - **Level:** cards stand on a 20 px grid and their ports do not (a card with one port has it 36 px down, one with two 31 and 61, a small card 30), so a wire between two cards of different shapes never ran straight. A card that is dragged within 9 px of the height at which one of its wires would be a straight line comes level by itself: the wire lights up, a soft click says so, and the card stays there, a few pixels off the grid, when it is let go.
 - **Block:** several cards can be put in a block and moved as one (§7.1): the way to set a whole line in a row, or to make room for one, without a drag a card.
-- **Tidy** (`T`, from six nodes): lays the whole board out again so that no wire runs behind a card it does not end at, and wires are short and cross little. Then cards come level as under the hand, where that takes under half a grid step. Drills stay on their deposits, the cards glide to their places, and one undo puts everything back. *The layout does not set cards in rows:* on two boards played by the card, Tidy left 2 of 22 and 4 of 34 wires straight. A row is made by hand.
-- **Cable management** (from six nodes): how a wire runs is the player's to arrange, and never part of the rules. Wires are drawn squared, or curved if the player prefers. Squared: right angles that find their own way round the cards (the shortest with the fewest corners that keeps clear of every card, found again as cards move), with a track of its own for each wire where several share a line. A wire can be given up to four pins, points it is drawn through, to lead it along a path of the player's own; between pins a squared wire still goes round cards. The style is a setting of the browser; pins are part of the board (saved, undone, moved with a block, taken off by Tidy). *Squared wires go round cards, not round each other:* they still cross, and a wire with no way round a card passes behind it.
+- **Tidy** (`T`, from six nodes): lays the whole board out again so that no wire runs behind a card it does not end at, and wires are short and cross little. Then cards come level as under the hand, where that takes under half a grid step. Drills stay where they stand, the cards glide to their places, and one undo puts everything back. *The layout does not set cards in rows:* on two boards played by the card, Tidy left 2 of 22 and 4 of 34 wires straight. A row is made by hand.
+- **Cable management** (from six nodes): how a wire runs is the player's to arrange, and never part of the rules. Wires are drawn squared, or curved if the player prefers. Squared: right angles that find their own way round the cards (the shortest with the fewest corners that keeps clear of every card, found again as cards move), with a track of its own for each wire where several share a line. Clips are the player's own routing: points on the board that wires are run through (up to eight a wire), set on a wire or on the empty board, dragged, and shared, so that several wires through the same clips run as one bundle and are moved by moving the clips. A new wire is run through clips as it is drawn. Between clips a squared wire still goes round cards. The style is a setting of the browser; clips are part of the board (saved, undone, moved with a block, left standing when a wire is cut, taken off by Tidy). *Squared wires go round cards, not round each other:* they still cross, and a wire with no way round a card passes behind it.
 - *Not built:* a ratio hint while placing ("needs 2.0/s Sand · 1.4/s spare upstream").
 
 ### 7.3 Readability

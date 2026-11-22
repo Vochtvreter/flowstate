@@ -71,6 +71,7 @@ const ICONS = {
   lock: `<rect x="5" y="11" width="14" height="9" rx="2" class="ic"/><path d="M8 11V8a4 4 0 0 1 8 0v3" class="ic"/>`,
   plus: `<path d="M12 5v14M5 12h14" class="ic"/>`,
   minus: `<path d="M5 12h14" class="ic"/>`,
+  clip: `<path d="M2.5 12h5.5M16 12h5.5" class="ic"/><circle cx="12" cy="12" r="4" class="ic"/>`,
   fit: `<path d="M4 9V4h5M20 9V4h-5M4 15v5h5M20 15v5h-5" class="ic"/>`,
   trash: `<path d="M4 7h16M9 7V4h6v3M6 7l1 13h10l1-13" class="ic"/>`,
   warn: `<path d="M12 3l10 18H2zM12 10v5M12 18v.5" class="ic"/>`,

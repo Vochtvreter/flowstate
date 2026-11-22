@@ -90,8 +90,8 @@ describe('start simple: the first screen is a Drill, a Market and one sentence',
     expect(g.nodes.length).toBe(6);
     expect(revealOf(g).wires).toBe(true);
     const few = at('second-well');
-    const [drill, market] = few.nodes;
-    few.wires.push({ id: 1, from: drill.id, port: 0, to: market.id, tier: 0, rate: 0, paid: 0, pins: [{ x: 300, y: 200 }] } as Game['wires'][number]);
+    expect(revealOf(few).wires).toBe(false);
+    few.clips.push({ id: 900, x: 300, y: 200 });
     expect(revealOf(few).wires).toBe(true);
   });
 });
