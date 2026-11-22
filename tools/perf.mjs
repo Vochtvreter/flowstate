@@ -5,7 +5,7 @@
  *   npm run bench -- --digest --save=<board.json>
  *   node tools/perf.mjs --url=http://localhost:4173/ --save=<board.json> [--json=<out.json>]
  *
- *   other flags: --only=drag,tidy     only these scenarios (rest, pan, zoom, drag, tidy, place, toasts)
+ *   other flags: --only=drag,tidy     only these scenarios (rest, pan, zoom, first, drag, hub, tidy, place, toasts)
  *                --rates=1,4          the processor slow-downs to measure at (4 is the page's budget)
  *                --sizes=desktop      only this window (desktop: 1440x900 with a mouse; phone: 390x844 with fingers)
  *                --noProfile          skip the pass that says where the time goes
@@ -17,7 +17,10 @@
  *   rest    nothing is touched
  *   pan     the board is dragged across and back (middle button; one finger)
  *   zoom    the wheel out and in again (a pinch)
- *   drag    the card with the most wires is carried round a square, let go, and glides to rest
+ *   first   the first drag after the page has loaded: a card with a handful of wires is carried round a square,
+ *           let go, and glides to rest. The browser has not yet made fast code of the routing, and it shows
+ *   drag    the same drag once the card has been round twice already: what carrying a card costs for the rest of a sitting
+ *   hub     that, with the card that has the most wires (late in a game, a Market that half the board sells to)
  *   tidy    Tidy: every card it moves glides to its new place at once
  *   place   a card picked from the build bar is carried over the board (mouse only)
  *   toasts  three toasts are up while nothing else happens
@@ -103,25 +106,28 @@ async function stage(page) {
   });
 }
 
-async function busiest(page) {
-  const id = await page.evaluate(() => {
+/** A card to carry: the one with the most wires (`hub`), or one with as many as cards usually have. Not a Drill: those stay on their deposits. */
+async function cardToCarry(page, hub) {
+  const id = await page.evaluate((most) => {
     const g = window.flowstate.ui.g;
     const deg = new Map();
     for (const w of g.wires) {
       deg.set(w.from, (deg.get(w.from) ?? 0) + 1);
       deg.set(w.to, (deg.get(w.to) ?? 0) + 1);
     }
-    const n = g.nodes.filter((x) => x.type !== 'well').sort((a, b) => (deg.get(b.id) ?? 0) - (deg.get(a.id) ?? 0) || a.id - b.id)[0];
+    const list = g.nodes.filter((x) => x.type !== 'well' && (deg.get(x.id) ?? 0) >= 2).sort((a, b) => (deg.get(b.id) ?? 0) - (deg.get(a.id) ?? 0) || a.id - b.id);
+    const n = list[most ? 0 : Math.floor(list.length / 2)];
     window.flowstate.view.frame([n.id]);
     return n.id;
-  });
+  }, hub);
   await page.waitForTimeout(900);
   const at = await page.evaluate((nid) => {
     const r = document.querySelector(`.node[data-id="${nid}"]`).getBoundingClientRect();
     // (On its name, clear of the ports at its sides.)
     return { x: r.left + r.width / 2, y: r.top + Math.min(18, r.height / 3) };
   }, id);
-  return { id, at };
+  const wires = await page.evaluate((nid) => window.flowstate.ui.g.wires.filter((w) => w.from === nid || w.to === nid).length, id);
+  return { id, at, wires };
 }
 
 // ---------- hands ----------
@@ -171,6 +177,29 @@ function hands(s) {
 const line = (n, dx, dy) => Array.from({ length: n }, () => [dx, dy]);
 const square = (n, d) => [...line(n, d, 0), ...line(n, 0, d), ...line(n, -d, 0), ...line(n, 0, -d)];
 
+/** A card carried round a square, let go a little off the grid, and left to glide to rest; `laps` times round first, unmeasured. */
+const carry = (hub, laps) => {
+  const round = async (s, card) => {
+    // (A finger has to rest on a card before it lifts: board.ts, HOLD_MS.)
+    await hands(s).drag(card.at, [...square(18, s.touch ? 8 : 12), [5, 3]], { hold: 320 });
+    await frames(s.page, 30);
+  };
+  return {
+    before: async (s) => {
+      const card = await cardToCarry(s.page, hub);
+      for (let i = 0; i < laps; i++) {
+        await round(s, card);
+        // (Back where it was picked up, for the next lap to start from the same place.)
+        await hands(s).drag({ x: card.at.x + 5, y: card.at.y + 3 }, [[-5, -3]], { hold: 320 });
+        await frames(s.page, 30);
+      }
+      return { card };
+    },
+    run: async (s, { card }) => round(s, card),
+    after: async (s, { card }) => ({ wires: card.wires, carried: await s.page.evaluate(() => document.querySelectorAll('.node.dragging').length === 0) }),
+  };
+};
+
 // ---------- scenarios ----------
 // `before` gets the page ready (not measured); `run` is what is measured.
 
@@ -203,20 +232,9 @@ const SCENARIOS = {
       await frames(s.page, 20);
     },
   },
-  drag: {
-    before: async (s) => {
-      const card = await busiest(s.page);
-      return { card, was: await s.page.evaluate(() => window.flowstate.ui.g.edits?.length ?? 0) };
-    },
-    run: async (s, { card }) => {
-      // (A finger has to rest on a card before it lifts: board.ts, HOLD_MS.)
-      await hands(s).drag(card.at, square(18, s.touch ? 8 : 12), { hold: 320 });
-      // ...and the card glides the rest of the way to the grid.
-      await frames(s.page, 30);
-    },
-    // (The square ends where it began, so the card is back in its place: that it was carried shows in the routing.)
-    after: async (s) => ({ carried: await s.page.evaluate(() => document.querySelectorAll('.node.dragging').length === 0) }),
-  },
+  first: carry(false, 0),
+  drag: carry(false, 2),
+  hub: carry(true, 2),
   tidy: {
     before: async (s) => {
       await s.page.evaluate(() => window.flowstate.view.fit());

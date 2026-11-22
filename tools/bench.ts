@@ -7,6 +7,7 @@
  *                                        every wire's line at rest. A change that is only meant to make the game
  *                                        faster must leave the state fingerprints as they were
  *   npm run bench -- --save=<file>       write the large board as a save, for tools/perf.mjs to load in a browser
+ *                                        (--board=medium or small for one of the others)
  *   npm run bench -- --noVerdicts        skip the adviser (the slowest part to measure)
  *
  * DOM-free, like tools/pacing.ts, whose players build the boards: the newcomer's finished demo (small), and the
@@ -329,8 +330,9 @@ function main() {
   const list = boards(!flag('digest') && !flag('noVerdicts'));
   const save = opt('save');
   if (save) {
-    writeFileSync(save, serialize(list[2].g));
-    console.log(`The large board is in ${save}.`);
+    const board = list.find((b) => b.name === (opt('board') ?? 'large')) ?? list[2];
+    writeFileSync(save, serialize(board.g));
+    console.log(`The ${board.name} board is in ${save}.`);
   }
   if (flag('digest')) {
     for (const b of list) {
@@ -352,10 +354,10 @@ function main() {
   });
 
   console.log('\nTHE GAME ITSELF (ms; a tick in microseconds)');
-  console.log('board    cards wires   tick  tick@0.5   copy (stringify + parse + check)   save kB   forecast   time away');
+  console.log('board    cards wires   tick  tick@0.5   copy (a save: write + read + check)   save kB   forecast   time away');
   for (const b of out) {
     const c = b.core;
-    console.log(`${b.name.padEnd(8)} ${pad(b.cards, 5)} ${pad(b.wires, 5)} ${pad(c.tick.toFixed(1), 6)} ${pad(c.tickBig.toFixed(1), 9)}   ${pad(ms(c.clone), 5)} (${ms(c.stringify)} + ${ms(c.parse)} + ${ms(c.normalise)})`.padEnd(69)
+    console.log(`${b.name.padEnd(8)} ${pad(b.cards, 5)} ${pad(b.wires, 5)} ${pad(c.tick.toFixed(1), 6)} ${pad(c.tickBig.toFixed(1), 9)}   ${pad(ms(c.clone), 5)} (${ms(c.stringify)} + ${ms(c.parse)} + ${ms(c.normalise)})`.padEnd(71)
       + `${pad((c.saveBytes / 1024).toFixed(0), 7)} ${pad(ms(c.forecast), 10)} ${pad(ms(c.away), 11)}`);
   }
   console.log('\nADVISER VERDICTS over the whole game (median / 9 in 10 / worst)');
