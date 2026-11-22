@@ -466,28 +466,87 @@ function inReach(s: Pt, t: Pt, reach: number, cards: Box[]): { by: Box[]; blocks
   return { by, blocks };
 }
 
-/** A way that was found, kept for as long as nothing it has to do with has moved (see `wayRound`). */
-interface Kept { h1: number; h2: number; reach: number; way: Pt[] | null }
-const kept = new Map<number, Kept>();
+// ---------- what has moved since a wire was last looked at ----------
 
-/** Let go of every way that was kept: the next `routeAll` finds each anew, as a page that has just loaded does. For tests and for measuring. */
-export function forgetWays() {
-  kept.clear();
+// A board is routed afresh at every step of a drag and at every frame of a glide, and most of its wires are nowhere
+// near the card that is moving. So what was worked out for a wire is kept with the patch of the board it had to do
+// with, and each time the cards are looked at, those that stand elsewhere than they did are noted. A wire whose ends
+// are where they were, and in whose patch nothing has moved since, would come out as it did: it is given that again.
+// Nothing is rounded: a card that has moved by a hair has moved, so a board at rest is always drawn as a board that
+// has just been loaded is, whatever came before.
+
+/** The cards as they stood at the last look (x0, y0, x1, y1 of each). */
+let stood = new Float64Array(0);
+let stoodCount = 0;
+/** How often the cards have been looked at. */
+let looks = 0;
+/** The boxes that changed at a look (where a card was, and where it is now), for the last few looks at which any did. */
+const moves: { look: number; boxes: number[] }[] = [];
+const MOVES = 12;
+/** What was last seen before this look cannot be told to be untouched: the moves since are no longer all on record. */
+let forgotten = 0;
+/** routeAll looks at the cards once for all its wires; a way asked for on its own (`wayRound`) looks for itself. */
+let routing = false;
+
+function look(cards: Box[]) {
+  looks++;
+  const n = cards.length;
+  const boxes: number[] = [];
+  const both = Math.min(n, stoodCount);
+  for (let i = 0; i < both; i++) {
+    const c = cards[i], k = i * 4;
+    if (stood[k] === c.x0 && stood[k + 1] === c.y0 && stood[k + 2] === c.x1 && stood[k + 3] === c.y1) continue;
+    boxes.push(stood[k], stood[k + 1], stood[k + 2], stood[k + 3], c.x0, c.y0, c.x1, c.y1);
+  }
+  for (let i = both; i < stoodCount; i++) boxes.push(stood[i * 4], stood[i * 4 + 1], stood[i * 4 + 2], stood[i * 4 + 3]);
+  for (let i = both; i < n; i++) boxes.push(cards[i].x0, cards[i].y0, cards[i].x1, cards[i].y1);
+  if (stood.length < n * 4) stood = new Float64Array(Math.max(n * 4, stood.length * 2, 256));
+  for (let i = 0; i < n; i++) {
+    const c = cards[i], k = i * 4;
+    stood[k] = c.x0;
+    stood[k + 1] = c.y0;
+    stood[k + 2] = c.x1;
+    stood[k + 3] = c.y1;
+  }
+  stoodCount = n;
+  if (!boxes.length) return;
+  moves.push({ look: looks, boxes });
+  if (moves.length > MOVES) forgotten = moves.shift()!.look;
 }
 
-/** Two numbers that stand for the ports and the cards a search had to do with: the same again, and its answer is the same. */
-function mark(a: Pt, b: Pt, by: Box[], blocks: Box[], kind: number): [number, number] {
-  let h1 = 2166136261, h2 = 0x9e3779b9;
-  const mix = (v: number) => {
-    const k = Math.round(v * 4) | 0;
-    h1 = Math.imul(h1 ^ k, 16777619);
-    h2 = Math.imul(h2 + k, 0x85ebca6b) ^ (h2 >>> 13);
-  };
-  mix(kind); mix(a.x); mix(a.y); mix(b.x); mix(b.y); mix(by.length);
-  for (const c of by) { mix(c.x0); mix(c.y0); mix(c.x1); mix(c.y1); }
-  mix(blocks.length);
-  if (blocks !== by) for (const c of blocks) { mix(c.x0); mix(c.y0); mix(c.x1); mix(c.y1); }
-  return [h1, h2];
+/** Has no card moved into, out of or within a patch of the board (grown by `gx` and `gy`) since the look numbered `seen`? */
+function untouched(seen: number, x0: number, y0: number, x1: number, y1: number, gx: number, gy: number): boolean {
+  if (seen < forgotten) return false;
+  for (let k = moves.length - 1; k >= 0 && moves[k].look > seen; k--) {
+    const b = moves[k].boxes;
+    for (let i = 0; i < b.length; i += 4) {
+      if (b[i + 2] + gx > x0 && b[i] - gx < x1 && b[i + 3] + gy > y0 && b[i + 1] - gy < y1) return false;
+    }
+  }
+  return true;
+}
+
+/**
+ * A stretch that was found, kept for as long as its ends and every card the search had to do with stand where they
+ * stood (see `stretch`): the ends, how it set out and what it ends at, the patch whose cards gave the search its
+ * lines and the wider one whose cards those lines pass, and the look it was last good at.
+ */
+interface Kept {
+  sx: number; sy: number; tx: number; ty: number; kind: number;
+  x0: number; y0: number; x1: number; y1: number;
+  gx0: number; gy0: number; gx1: number; gy1: number;
+  seen: number; way: Pt[] | null;
+}
+const kept = new Map<number, Kept>();
+
+/** Let go of everything that was kept: the next `routeAll` works every wire out anew, as a page that has just loaded does. For tests and for measuring. */
+export function forgetWays() {
+  kept.clear();
+  plains.clear();
+  drawn.clear();
+  moves.length = 0;
+  stoodCount = 0;
+  forgotten = looks;
 }
 
 /**
@@ -496,23 +555,23 @@ function mark(a: Pt, b: Pt, by: Box[], blocks: Box[], kind: number): [number, nu
  * board is not held up by the rest of it. (`came` and `port`: see `search`.)
  *
  * With `key`, the stretch is kept: asked again while its ends and every card the search had to do with stand where
- * they stood, it is given back without looking again. A board is routed afresh at every step of a drag, and most of
- * its wires are nowhere near the card that is moving.
+ * they stood, it is given back without looking again.
  */
 function stretch(s: Pt, t: Pt, cards: Box[], came: number, port: boolean, key?: number): Pt[] | null {
   const kind = (came + 1) * 2 + (port ? 1 : 0);
   const old = key == null ? undefined : kept.get(key);
-  if (old) {
-    const { by, blocks } = inReach(s, t, old.reach, cards);
-    const [h1, h2] = mark(s, t, by, blocks, kind);
-    if (h1 === old.h1 && h2 === old.h2) {
-      COUNT.kept++;
-      return old.way && old.way.map((p) => ({ x: p.x, y: p.y }));
-    }
+  if (old && old.sx === s.x && old.sy === s.y && old.tx === t.x && old.ty === t.y && old.kind === kind
+    // (A card counts for the search's lines when it comes within PASS of the patch, its edge included: a pixel more is on the safe side.)
+    && untouched(old.seen, old.x0, old.y0, old.x1, old.y1, PASS_X + 1, PASS_Y + 1)
+    && untouched(old.seen, old.gx0, old.gy0, old.gx1, old.gy1, CLEAR, CLEAR)) {
+    old.seen = looks;
+    COUNT.kept++;
+    return old.way && old.way.map((p) => ({ x: p.x, y: p.y }));
   }
   const direct = Math.abs(s.x - t.x) + Math.abs(s.y - t.y);
-  let way: Pt[] | null = null, used = Infinity, by: Box[] = cards, blocks: Box[] = cards;
+  let way: Pt[] | null = null, used = Infinity, by: Box[] = cards;
   for (const reach of REACH) {
+    let blocks: Box[];
     ({ by, blocks } = inReach(s, t, reach, cards));
     const xs = lines([s.x, t.x], by.flatMap((c) => [c.x0 - PASS_X, c.x1 + PASS_X]));
     const ys = lines([s.y, t.y], by.flatMap((c) => [c.y0 - PASS_Y, c.y1 + PASS_Y]));
@@ -530,8 +589,19 @@ function stretch(s: Pt, t: Pt, cards: Box[], came: number, port: boolean, key?: 
     if (all) break;
   }
   if (key != null) {
-    const [h1, h2] = mark(s, t, by, blocks, kind);
-    kept.set(key, { h1, h2, reach: used, way: way && way.map((p) => ({ x: p.x, y: p.y })) });
+    // The two patches of `inReach`, as it worked them out for the reach that was used.
+    const x0 = Math.min(s.x, t.x) - used, x1 = Math.max(s.x, t.x) + used, y0 = Math.min(s.y, t.y) - used, y1 = Math.max(s.y, t.y) + used;
+    let gx0 = Math.min(s.x, t.x), gx1 = Math.max(s.x, t.x), gy0 = Math.min(s.y, t.y), gy1 = Math.max(s.y, t.y);
+    for (const c of by) {
+      gx0 = Math.min(gx0, c.x0 - PASS_X);
+      gx1 = Math.max(gx1, c.x1 + PASS_X);
+      gy0 = Math.min(gy0, c.y0 - PASS_Y);
+      gy1 = Math.max(gy1, c.y1 + PASS_Y);
+    }
+    kept.set(key, {
+      sx: s.x, sy: s.y, tx: t.x, ty: t.y, kind, x0, y0, x1, y1, gx0, gy0, gx1, gy1,
+      seen: looks, way: way && way.map((p) => ({ x: p.x, y: p.y })),
+    });
   }
   return way;
 }
@@ -546,6 +616,7 @@ const STRETCHES = 8;
  * keeping what was found (see `stretch`).
  */
 export function wayRound(a: Pt, b: Pt, cards: Box[], id?: number, pins: Pt[] = []): Pt[] | null {
+  if (!routing && id != null) look(cards);
   const s = stubEnd(a, 1, cards), t = stubEnd(b, -1, cards);
   if (!s || !t) return null;
   const stops = [s, ...pins, t];
@@ -772,46 +843,115 @@ export function routeAll(wires: WireIn[], cards: CardBox[], style: WireStyle, n:
     for (const w of wires) out.set(w.id, drawCurved(w.a, w.b, w.pins ?? [], n));
     return out;
   }
-  const routes = new Map<number, Pt[]>();
-  const free: { net: string; v: Pt[] }[] = [];
-  for (const w of wires) {
-    if (w.pins?.length) {
-      // Through its pins the plain way (level to each pin's upright, up or down through the pin) where no card is
-      // in the way of that; else it finds its way from pin to pin as any wire does from port to port.
-      const through = throughPins(w.a, w.b, w.pins);
-      routes.set(w.id, inWay(through, cards, w.from, w.to) === 0 ? through : wayRound(w.a, w.b, cards, w.id, w.pins) ?? through);
-      continue;
-    }
-    const tries = plain(w.a, w.b);
-    // (The first way of a wire to a card close ahead turns in the gap between its own two cards, however narrow:
-    // those two are not in its way.)
-    const between = !ahead(w.a, w.b) && w.b.x - w.a.x >= NEAR;
-    let v = tries.find((r, i) => inWay(r, between && i === 0 ? cards.filter((c) => c.id !== w.from && c.id !== w.to) : cards, w.from, w.to) === 0)
-      ?? wayRound(w.a, w.b, cards, w.id);
-    if (!v) {
-      // No way at all: the plain way that passes behind the fewest cards (its own two among them).
-      let least = Infinity;
-      for (const r of tries) {
-        const k = inWay(r, cards, w.from, w.to, -1);
-        if (k < least) {
-          least = k;
-          v = r;
-        }
+  look(cards);
+  routing = true;
+  try {
+    const routes = new Map<number, Pt[]>();
+    const free: { net: string; v: Pt[] }[] = [];
+    for (const w of wires) {
+      if (w.pins?.length) {
+        // Through its pins the plain way (level to each pin's upright, up or down through the pin) where no card is
+        // in the way of that; else it finds its way from pin to pin as any wire does from port to port.
+        const through = throughPins(w.a, w.b, w.pins);
+        routes.set(w.id, inWay(through, cards, w.from, w.to) === 0 ? through : wayRound(w.a, w.b, cards, w.id, w.pins) ?? through);
+        continue;
       }
+      const p = plainWay(w, cards);
+      // No plain way is clear: round the cards; and with no way at all, the plain way behind the fewest of them.
+      const v = p.clear ?? wayRound(w.a, w.b, cards, w.id) ?? (p.least ??= leastBehind(w, cards));
+      // (Its own copy of the corners: they are moved where they stand when wires are set side by side.)
+      const own = v.map((q) => ({ x: q.x, y: q.y }));
+      routes.set(w.id, own);
+      free.push({ net: p.net, v: own });
     }
-    // (Its own copy of the corners: they are moved where they stand when wires are set side by side.)
-    const own = (v ?? [w.a, w.b]).map((p) => ({ x: p.x, y: p.y }));
-    routes.set(w.id, own);
-    free.push({ net: `${w.from}:${r1(w.a.x)},${r1(w.a.y)}`, v: own });
-  }
-  sideBySide(free, cards);
-  for (const w of wires) out.set(w.id, drawSquared(routes.get(w.id) ?? [w.a, w.b], n));
-  // (Ways kept for wires that are gone are let go, now and then.)
-  if (kept.size > wires.length * 2 + 32) {
-    const here = new Set(wires.map((w) => w.id));
-    for (const key of kept.keys()) if (!here.has(Math.floor(key / STRETCHES))) kept.delete(key);
+    sideBySide(free, cards);
+    for (const w of wires) out.set(w.id, drawnOnce(w.id, routes.get(w.id) ?? [w.a, w.b], n));
+    // (What was kept for wires that are gone is let go, now and then.)
+    if (kept.size > wires.length * 2 + 32 || plains.size > wires.length * 2 + 32 || drawn.size > wires.length * 2 + 32) {
+      const here = new Set(wires.map((w) => w.id));
+      for (const key of kept.keys()) if (!here.has(Math.floor(key / STRETCHES))) kept.delete(key);
+      for (const id of plains.keys()) if (!here.has(id)) plains.delete(id);
+      for (const id of drawn.keys()) if (!here.has(id)) drawn.delete(id);
+    }
+  } finally {
+    routing = false;
   }
   return out;
+}
+
+/**
+ * What a wire with no pins was last given of its plain ways: the first that is clear of every card, or none. Kept
+ * while its ends are where they were and no card has moved where those ways run (see `untouched`).
+ */
+interface Plain {
+  ax: number; ay: number; bx: number; by: number; from: number; to: number;
+  /** All its plain ways lie in this patch. */
+  x0: number; y0: number; x1: number; y1: number;
+  seen: number;
+  clear: Pt[] | null;
+  /** With no plain way clear and no way round either: the plain way behind the fewest cards. Worked out when it is first wanted. */
+  least: Pt[] | null;
+  /** Wires out of one port are one net (see `sideBySide`). */
+  net: string;
+}
+const plains = new Map<number, Plain>();
+
+function plainWay(w: WireIn, cards: CardBox[]): Plain {
+  const a = w.a, b = w.b;
+  const old = plains.get(w.id);
+  if (old && old.ax === a.x && old.ay === a.y && old.bx === b.x && old.by === b.y && old.from === w.from && old.to === w.to
+    && untouched(old.seen, old.x0, old.y0, old.x1, old.y1, CLEAR, CLEAR)) {
+    old.seen = looks;
+    return old;
+  }
+  const tries = plain(a, b);
+  let x0 = Infinity, y0 = Infinity, x1 = -Infinity, y1 = -Infinity;
+  for (const r of tries) {
+    for (const q of r) {
+      x0 = Math.min(x0, q.x);
+      x1 = Math.max(x1, q.x);
+      y0 = Math.min(y0, q.y);
+      y1 = Math.max(y1, q.y);
+    }
+  }
+  // (The first way of a wire to a card close ahead turns in the gap between its own two cards, however narrow:
+  // those two are not in its way.)
+  const between = !ahead(a, b) && b.x - a.x >= NEAR;
+  const clear = tries.find((r, i) => inWay(r, between && i === 0 ? cards.filter((c) => c.id !== w.from && c.id !== w.to) : cards, w.from, w.to) === 0) ?? null;
+  const p: Plain = { ax: a.x, ay: a.y, bx: b.x, by: b.y, from: w.from, to: w.to, x0, y0, x1, y1, seen: looks, clear, least: null, net: `${w.from}:${r1(a.x)},${r1(a.y)}` };
+  plains.set(w.id, p);
+  return p;
+}
+
+/** The plain way of a wire that passes behind the fewest cards (its own two among them). */
+function leastBehind(w: WireIn, cards: CardBox[]): Pt[] {
+  let least = Infinity, v: Pt[] = [w.a, w.b];
+  for (const r of plain(w.a, w.b)) {
+    const k = inWay(r, cards, w.from, w.to, -1);
+    if (k < least) {
+      least = k;
+      v = r;
+    }
+  }
+  return v;
+}
+
+/** A wire as it was last drawn, with the corners it was drawn from: the same corners again, and it is the same line. */
+const drawn = new Map<number, { at: number[]; n: number; line: Drawn }>();
+
+/** `drawSquared`, but a wire whose corners are where they were is given the line it was drawn as (not to be changed by the caller). */
+function drawnOnce(id: number, corners: Pt[], n: number): Drawn {
+  const old = drawn.get(id);
+  if (old && old.n === n && old.at.length === corners.length * 2) {
+    let same = true;
+    for (let i = 0; i < corners.length && same; i++) same = old.at[i * 2] === corners[i].x && old.at[i * 2 + 1] === corners[i].y;
+    if (same) return old.line;
+  }
+  const at: number[] = [];
+  for (const q of corners) at.push(q.x, q.y);
+  const line = drawSquared(corners, n);
+  drawn.set(id, { at, n, line });
+  return line;
 }
 
 /** One wire with no board round it: the one being drawn out of a port, a preview. */

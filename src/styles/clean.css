@@ -449,6 +449,8 @@ button.fav:hover { background: rgba(255, 255, 255, 0.16); }
 /* Held under a finger, a card lifts before it moves (board.ts, HOLD_MS). */
 .node { transition: transform 0.12s ease-out; }
 .node.lift { transform: scale(1.06); z-index: 6; box-shadow: 0 0 0 2px var(--sel), 0 16px 34px rgba(0, 0, 0, 0.55); }
+/* A card gliding to its place is put where it belongs at every frame, with its wires (board.ts, stepSettle): easing that as well would leave it behind them. */
+.node.gliding { transition: none; }
 @media (prefers-reduced-motion: reduce) { .node { transition: none; } }
 
 /* ----- wires at rest ----- */
