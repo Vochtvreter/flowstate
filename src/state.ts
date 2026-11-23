@@ -124,6 +124,11 @@ export interface GoalReward extends Reward {
   techs?: string[];
   /** A feature switched on: Orders, the Flow meter, or the end of the demo. */
   unlock?: Unlock;
+  /**
+   * Techs this goal opens for research (Tech.locked in src/content.ts): they are not granted, they can be bought
+   * with Data from now on. A goal that has the player grow a line opens the next step of the Processing spine.
+   */
+  opens?: string[];
 }
 
 /** The one active order (see src/orders.ts): "deliver `need` of `mat`", counted from sales at any Market. */
@@ -207,6 +212,17 @@ export interface Game {
   data: Record<DataTier, number>;
   techs: string[];
   queue: string[];
+  /**
+   * Techs a goal has opened for research (GoalReward.opens): a tech marked `locked` in src/content.ts can be bought
+   * only once it is listed here. Re-applied from the claimed goals on load (repairChain in src/goals.ts), so a save
+   * from before this field has what its place in the chain gives it.
+   */
+  opened: string[];
+  /**
+   * Which goal chain the index in `goal` counts along (CHAIN in src/goals.ts). A save without it is from the
+   * chain of 22 goals (chain 1), and its index is carried over by the goal's id the first time the chain is looked at.
+   */
+  chain: number;
   made: Partial<Record<MatId, boolean>>;
   sold: Bag;
   soldRate: Bag;
@@ -395,7 +411,7 @@ export function newGame(): Game {
     board: { w: 1240, h: 760, expansions: 0 },
     credits: 0, lifetime: 0,
     data: { a: 0, b: 0, g: 0 },
-    techs: [], queue: [],
+    techs: [], queue: [], opened: [], chain: 2,
     // The starting Drill is already extracting Sand, so it is not announced as a new material.
     made: { glint: true }, sold: {}, soldRate: {},
     paused: false, time: 0, savedAt: Date.now(),
@@ -598,6 +614,10 @@ export function deserialize(json: string): Game | null {
     const known = (list: unknown) => [...new Set(Array.isArray(list) ? list : [])].filter((id) => typeof id === 'string' && !!TECHS[id]) as string[];
     g.techs = known(g.techs);
     g.queue = known(g.queue).filter((id) => !g.techs.includes(id));
+    g.opened = known(raw.opened);
+    // The chain the goal index counts along: a save from before the chain of growth goals has none (it is chain 1),
+    // and is carried over by src/goals.ts (migrateChain) the first time its goal is looked at.
+    g.chain = typeof raw.chain === 'number' && isFinite(raw.chain) ? raw.chain : 1;
     // Nested objects are rebuilt field by field so that later additions get defaults too.
     const stats = newStats();
     for (const k of Object.keys(stats) as (keyof Stats)[]) {

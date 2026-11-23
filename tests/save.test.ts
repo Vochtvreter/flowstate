@@ -3,7 +3,7 @@ import { claimGoal, claimOrder, connect, deleteNode, placeNode, upgrade } from '
 import { advice, applyAdvice, lineAdvice } from '../src/advice';
 import { RULES, TECHS } from '../src/content';
 import { endDemo, endStats, offlineCap, research, techAvailable, techHidden } from '../src/economy';
-import { GOALS, activeGoal, goalById, goalView } from '../src/goals';
+import { CHAIN, GOALS, activeGoal, goalById, goalView } from '../src/goals';
 import { startOrders } from '../src/orders';
 import { offlineGains } from '../src/sim';
 import { Game, cloneGame, deserialize, newGame, serialize } from '../src/state';
@@ -158,7 +158,7 @@ describe('the end of the demo (2.7)', () => {
     expect(take(g, 'demo-end').length).toBe(0);
     expect(g.stats.firstLensAt).toBe(at);
     // Claiming the Phone goal later does not end the demo a second time.
-    g.goal = { i: 21, ready: false };
+    g.goal = { i: GOALS.findIndex((x) => x.id === 'make-lens'), ready: false };
     run(g, 0.1);
     expect(activeGoal(g)!.id).toBe('make-lens');
     expect(claimGoal(g)).toBe(true);
@@ -254,10 +254,11 @@ describe('loading saves', () => {
       claimed.push(activeGoal(g)!.id);
       claimGoal(g);
     }
-    expect(claimed).toEqual([
-      'wire-market', 'second-well', 'wire-all-wells', 'build-refiner', 'sell-shard', 'upgrade-well', 'feed-lab', 'research-murk',
-    ]);
-    expect(activeGoal(g)!.id).toBe('make-ink');
+    // (It has one Refiner: the first of the growth goals, "Make 1 Glass a second", is where it has something to do.
+    // What it owns from further on, the Lab and Oil Deposits, it keeps.)
+    expect(claimed).toEqual(['wire-market', 'second-well', 'wire-all-wells', 'build-refiner', 'sell-shard']);
+    expect(activeGoal(g)!.id).toBe('grow-shard');
+    expect(g.techs).toEqual(expect.arrayContaining(['R1', 'P2']));
     expect(take(g, 'milestone').length).toBe(0); // materials made before the save are not announced again
     run(g, 30);
     expect(g.credits).toBeGreaterThan(321.5);
@@ -493,16 +494,68 @@ describe('damaged and old saves cannot poison the game', () => {
     expect(g.data.a).toBeGreaterThan(10);
   });
 
+  it('a save from the chain before the growth goals lands on the same card, or the nearest one that still exists', () => {
+    // The chain as the build before wrote its saves: 22 goals to the Phone and four in free play, and no `chain` field.
+    const before = ['wire-market', 'second-well', 'wire-all-wells', 'build-refiner', 'sell-shard', 'upgrade-well', 'feed-lab', 'research-murk', 'make-ink',
+      'silt-exit', 'make-spark', 'first-order', 'route-lab', 'expand', 'make-glyph', 'hold-flow', 'study-glyph', 'make-mist', 'make-prism', 'bulk-upgrade',
+      'build-fabricator', 'make-lens', 'make-clay', 'make-coil', 'make-dynamo', 'make-paradox'];
+    // Three cards are gone. "Speed up a Drill" is the second Glass goal now; the Router and the land are no card's
+    // to ask for, and the next goal that still stands after them is the Flow goal.
+    const now: Record<string, string> = { 'upgrade-well': 'tune-shard', 'route-lab': 'hold-flow', expand: 'hold-flow' };
+    const load = (i: number, ready = false) => {
+      const g = deserialize(JSON.stringify({ ...oldSave(), queue: [], goal: { i, ready } }))!;
+      expect(g.chain).toBe(1);
+      run(g, 0.05);
+      expect(g.chain).toBe(CHAIN);
+      return g;
+    };
+    before.forEach((id, i) => {
+      const g = load(i);
+      expect(GOALS[g.goal.i].id, id).toBe(now[id] ?? id);
+      // The seconds on the card start from the load, not from the save's clock for a card that was another one.
+      expect(g.goalAt).toMatchObject({ i: g.goal.i });
+      // No reward of an earlier goal is paid again: what the goals before it unlock is unlocked, and that is all.
+      expect(g.stats.fromGoals, id).toBe(0);
+      expect(g.credits, id).toBeCloseTo(321.5, 0);
+      expect(g.data.a, id).toBeCloseTo(60, 0);
+    });
+    // A goal that was ready to claim stays ready, where it is the same goal. One that became another goal is asked again.
+    expect(load(before.indexOf('first-order'), true).goal.ready).toBe(true);
+    expect(load(before.indexOf('upgrade-well'), true).goal).toMatchObject({ i: GOALS.findIndex((x) => x.id === 'tune-shard'), ready: false });
+    // A finished chain is a finished chain.
+    const done = load(before.length);
+    expect(done.goal.i).toBe(GOALS.length);
+    expect(activeGoal(done)).toBeNull();
+    // What the growth goals before the card open for research is open: a save on "Make your first Circuit" that had
+    // not researched Assembly yet can research it, and its Ore Deposits stays researched.
+    const circuit = deserialize(JSON.stringify({ ...oldSave(), queue: [], techs: ['P1', 'R1', 'P2', 'P3'], goal: { i: before.indexOf('make-glyph'), ready: false } }))!;
+    expect(techAvailable(circuit, TECHS.P4)).toBe(false);
+    run(circuit, 0.05);
+    expect(circuit.opened).toEqual(['P3', 'P4']);
+    expect(techAvailable(circuit, TECHS.P4)).toBe(true);
+    expect(techAvailable(circuit, TECHS.P5)).toBe(false); // Quartz waits for "Make 0.6 Circuits a second", two cards on
+    // A save of this build is left where it is: the same index means the same card.
+    const mine = newGame();
+    mine.goal = { i: GOALS.findIndex((x) => x.id === 'grow-ink'), ready: false };
+    const again = deserialize(serialize(mine))!;
+    run(again, 0.05);
+    expect(GOALS[again.goal.i].id).toBe('grow-ink');
+    expect(again.chain).toBe(CHAIN);
+  });
+
   it('a save further down the chain than its unlocks is repaired on the first tick', () => {
     // "Goal 17" with no Flow meter could never finish "Hold 75% Flow"; with no Router, never "Route more to a Lab".
-    const raw = { ...oldSave(), goal: { i: GOALS.findIndex((x) => x.id === 'hold-flow'), ready: false }, techs: [] };
+    const raw = { ...oldSave(), chain: CHAIN, goal: { i: GOALS.findIndex((x) => x.id === 'hold-flow'), ready: false }, techs: [] };
     const g = deserialize(JSON.stringify(raw))!;
     expect(g.flowOn).toBe(false);
+    expect(g.opened).toEqual([]);
     run(g, 0.05);
     expect(g.flowOn).toBe(true);
     expect(g.ordersOn).toBe(true);
     expect(g.order).not.toBeNull();
-    expect([...g.techs].sort()).toEqual(['L1', 'P1', 'R1']); // Market Lens is no longer a goal's to give
+    expect([...g.techs].sort()).toEqual(['P1', 'R1']); // Market Lens is no longer a goal's to give, nor Routing
+    // ...and what the goals before it open for research is open: "Make 1 Plastic a second" opens Ore Deposits.
+    expect(g.opened).toEqual(['P3']);
     expect(g.ended).toBe(false); // nothing beyond the goals already claimed
     expect(g.credits).toBeCloseTo(321.5, 0); // and no reward is paid again
     expect(g.stats.fromGoals).toBe(0);
@@ -524,7 +577,7 @@ describe('damaged and old saves cannot poison the game', () => {
       delete raw.flowNear;
       return deserialize(JSON.stringify(raw))!;
     };
-    // 1. Saved in the wait for Ore Deposits with a tip on the card, and the card's own line ("study the Plastic") not done.
+    // 1. Saved in the wait for Ore Deposits with a tip on the card.
     const g = rich();
     g.techs = ['P1', 'R1', 'P2'];
     g.credits = 300;
@@ -542,8 +595,7 @@ describe('damaged and old saves cannot poison the game', () => {
     run(g, 40);
     const pending = advice(g)!;
     expect(pending.text.mouse).toBe('Place a Drill on the free Sand deposit (13¢), wired to the Lab: 1 α each.');
-    const step = lineAdvice(g)!;
-    expect(step.text.mouse).toBe('Wire the Refiner\'s Plastic port to the Lab: Plastic is 3 α each in a Lab.');
+    expect(lineAdvice(g)).toBeNull(); // (this card has no line of its own)
     const loaded = older(g);
     expect(loaded.edits).toEqual([]);
     run(loaded, 1);
@@ -551,16 +603,8 @@ describe('damaged and old saves cannot poison the game', () => {
     const again = advice(loaded)!;
     expect(again.text).toEqual(pending.text);
     expect(again.saves!).toBeGreaterThanOrEqual(15);
-    // So is the card's own line for this goal, and its next step (which the tip never repeats).
-    expect(goalView(loaded)!.meanwhile).toEqual({ text: 'Study Plastic as well as selling it: in a Lab each is worth 3 α.', done: false, step: 1, of: 2 });
-    const stepAgain = lineAdvice(loaded)!;
-    expect(stepAgain.text).toEqual(step.text);
-    expect(stepAgain.wire).toEqual(step.wire);
-    expect(applyAdvice(loaded, stepAgain)).toBe(true);
-    // Done. (The card's second line, a Lab for a Sand Drill that only sells, does not apply here: this board has
-    // no such Drill. So the first stays on the card, ticked.)
-    expect(goalView(loaded)!.meanwhile).toMatchObject({ done: true, step: 1, of: 2 });
-    expect(lineAdvice(loaded)).toBeNull();
+    expect(goalView(loaded)!.meanwhile).toBeUndefined();
+    expect(applyAdvice(loaded, again)).toBe(true);
     expect(advice(loaded)).toBeNull(); // and now the adviser keeps quiet for a while, like in any game
     run(loaded, 300);
     expect(loaded.data.a).toBeGreaterThan(TECHS.P3.cost.a!);

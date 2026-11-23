@@ -2,7 +2,7 @@ import { describe, expect, it } from 'vitest';
 import { claimGoal, connect, cutWire, expandBoard, favour, placeNode, redo, setMode, setWeight, undo, upgrade, upgradeAll } from '../src/actions';
 import { MATERIALS, RECIPES, RULES, TECHS } from '../src/content';
 import { has, nodeCost, research } from '../src/economy';
-import { GOALS, MAIN_GOALS, activeGoal, goalAge, goalById, goalDeposit, goalView, recipeFeeds, rewardText, routerFavoursLab } from '../src/goals';
+import { GOALS, MAIN_GOALS, activeGoal, goalAge, goalById, goalDeposit, goalView, rateNoun, recipeFeeds, rewardText, routerFavoursLab } from '../src/goals';
 import { Game, deserialize, serialize } from '../src/state';
 import { fresh, market, rich, run, take, well } from './helpers';
 
@@ -14,35 +14,90 @@ function at(g: Game, id: string) {
 }
 
 describe('goal chain: the table (2.4)', () => {
-  it('has the 22 goals of the plan, in order, then four free-play goals', () => {
-    expect(MAIN_GOALS).toBe(22);
-    expect(GOALS.map((x) => x.title).slice(0, 22)).toEqual([
+  it('has 25 goals, in order, then four free-play goals: a growth goal stands before each new chapter', () => {
+    expect(MAIN_GOALS).toBe(25);
+    expect(GOALS.map((x) => x.title).slice(0, 25)).toEqual([
       'Sell your Sand',
       'Dig up more Sand',
       'Sell that Sand too',
       'Turn Sand into Glass',
       'Sell your first Glass',
-      'Speed up a Drill',
+      'Make 1 Glass a second',
+      'Make 1.2 Glass a second',
       'Study Glass in a Lab',
       'Open up the Oil deposit',
       'Turn Oil into Plastic',
       'Give the Tar somewhere to go',
-      'Make and sell Copper',
       'Fill your first order',
-      'Route more to a Lab than to the Market',
-      'Open up more land',
-      'Make your first Circuit',
+      'Make 1 Plastic a second',
+      'Make and sell Copper',
       'Hold 95% Flow for 10 seconds',
+      'Make 1 Copper a second',
+      'Make your first Circuit',
       'Study Circuits for β',
+      'Make 0.6 Circuits a second',
       'Make and sell Silicon',
       'Make your first Screen',
       'Speed up every Drill at once',
+      'Make 0.5 Screens a second',
       'Build a Fabricator',
       'Make your first Phone',
     ]);
-    expect(GOALS.slice(22).map((x) => x.id)).toEqual(['make-clay', 'make-coil', 'make-dynamo', 'make-paradox']);
-    expect(GOALS.slice(0, 22).every((x) => !x.free)).toBe(true);
-    expect(GOALS.slice(22).every((x) => x.free)).toBe(true);
+    expect(GOALS.slice(25).map((x) => x.id)).toEqual(['make-clay', 'make-coil', 'make-dynamo', 'make-paradox']);
+    expect(GOALS.slice(0, 25).every((x) => !x.free)).toBe(true);
+    expect(GOALS.slice(25).every((x) => x.free)).toBe(true);
+  });
+
+  it('new things come one chapter at a time: each step of the spine is locked until the growth goal before it is claimed', () => {
+    // The growth goals, what each asks for, and what its claim brings: the Lab, then a step of the spine opened for research.
+    const growth = GOALS.filter((x) => x.meanwhile?.some((l) => l.grow)).map((x) => {
+      const grow = x.meanwhile!.find((l) => l.grow)!.grow!;
+      return [x.id, grow.mat, grow.rate, x.reward.techs ?? x.reward.opens] as const;
+    });
+    expect(growth).toEqual([
+      ['grow-shard', 'shard', 1, undefined],
+      ['tune-shard', 'shard', 1.2, ['R1']],
+      ['grow-ink', 'ink', 1, ['P3']],
+      ['grow-spark', 'spark', 1, ['P4']],
+      ['grow-glyph', 'glyph', 0.6, ['P5']],
+      ['grow-prism', 'prism', 0.5, ['P7']],
+    ]);
+    // A growth goal's title is its rate, worded as its card's count, its celebration and the tech tree word it:
+    // what is poured has no plural ("1.2 Glass"), what is counted by the piece has ("0.6 Circuits").
+    for (const x of GOALS) {
+      const grow = x.meanwhile?.find((l) => l.grow)?.grow;
+      if (!grow) continue;
+      expect(x.title).toBe(`Make ${grow.rate} ${rateNoun(grow.mat, grow.rate)} a second`);
+      const g = fresh();
+      at(g, x.id);
+      expect(goalView(g)!.progress![2]).toBe(`${rateNoun(grow.mat, grow.rate)} a second`);
+    }
+    expect([rateNoun('shard', 1.2), rateNoun('glyph', 0.6), rateNoun('glyph', 1), rateNoun('prism', 0.5), rateNoun('glint', 2)]).toEqual(['Glass', 'Circuits', 'Circuit', 'Screens', 'Sand']);
+    // Every locked tech is opened by exactly one goal, and the goal that asks for its research comes straight after.
+    const locked = Object.values(TECHS).filter((t) => t.locked).map((t) => t.id);
+    expect(locked).toEqual(['P3', 'P4', 'P5', 'P7']);
+    for (const id of locked) {
+      const opens = GOALS.filter((x) => x.reward.opens?.includes(id));
+      expect(opens.length, id).toBe(1);
+      const next = GOALS[GOALS.indexOf(opens[0]) + 1];
+      expect(next.hint.mouse, id).toContain(`Research ${TECHS[id].name}`);
+      // ...and the claim pays at least half of what that research costs in α: a lock, then a wait for Data, would be two walls.
+      expect(opens[0].reward.a ?? 0, id).toBeGreaterThanOrEqual((TECHS[id].cost.a ?? 0) / 2);
+    }
+    // No growth goal asks for more than the Markets buy at full price: a player who goes a little past the card is not
+    // met by the surplus price for it.
+    for (const [id, mat, rate] of growth) expect(rate, id).toBeLessThanOrEqual(0.85 * MATERIALS[mat].demand);
+    // Until the goal is claimed the research cannot be bought, whatever Data is in hand; from then on it can.
+    const g = fresh();
+    g.techs = ['P1', 'R1', 'P2'];
+    g.data = { a: 1e6, b: 1e6, g: 1e6 };
+    expect(research(g, 'P3')).toBe(false);
+    at(g, 'grow-ink');
+    g.goal.ready = true;
+    expect(claimGoal(g)).toBe(true);
+    expect(g.opened).toEqual(['P3']);
+    expect(take(g, 'goal-claimed')[0].text).toBe('Make 1 Plastic a second: opens Ore Deposits + 120α');
+    expect(research(g, 'P3')).toBe(true);
   });
 
   it('gives every goal a unique id and a hint for mouse and for touch', () => {
@@ -60,24 +115,36 @@ describe('goal chain: the table (2.4)', () => {
     expect(reward('wire-market')).toEqual({ credits: 12 });
     expect(reward('second-well')).toEqual({ credits: 10 });
     expect(reward('wire-all-wells')).toEqual({ credits: 50, techs: ['P1'] });
-    expect(reward('sell-shard')).toEqual({ credits: 70, techs: ['R1'] });
-    expect(reward('upgrade-well')).toEqual({ credits: 50 });
-    expect(reward('feed-lab')).toEqual({ a: 15 });
-    expect(reward('make-spark')).toEqual({ a: 25, unlock: 'orders' });
-    expect(reward('first-order')).toEqual({ credits: 200, techs: ['L1'] });
-    expect(reward('make-glyph')).toEqual({ credits: 150, unlock: 'flow' });
+    expect(reward('sell-shard')).toEqual({ credits: 70 });
+    expect(reward('grow-shard')).toEqual({ credits: 125 });
+    expect(reward('tune-shard')).toEqual({ credits: 100, techs: ['R1'] });
+    expect(reward('feed-lab')).toEqual({ a: 20 });
+    expect(reward('silt-exit')).toEqual({ a: 20, unlock: 'orders' });
+    expect(reward('first-order')).toEqual({ credits: 200 });
+    expect(reward('grow-ink')).toEqual({ a: 120, opens: ['P3'] });
+    expect(reward('make-spark')).toEqual({ a: 25, unlock: 'flow' });
     expect(reward('hold-flow')).toEqual({ credits: 150 });
+    expect(reward('grow-spark')).toEqual({ a: 400, opens: ['P4'] });
+    expect(reward('make-glyph')).toEqual({ credits: 150 });
+    expect(reward('grow-glyph')).toEqual({ a: 600, opens: ['P5'] });
+    expect(reward('grow-prism')).toEqual({ a: 400, opens: ['P7'] });
     expect(reward('make-prism')).toEqual({ credits: 600, b: 40, techs: ['S1'] });
     expect(reward('bulk-upgrade')).toEqual({ credits: 1200, b: 60 });
     expect(reward('build-fabricator')).toEqual({ b: 40 });
     expect(reward('make-lens')).toEqual({ unlock: 'end' });
     expect(rewardText(reward('wire-all-wells'))).toBe('Refining + 50¢');
-    expect(rewardText(reward('make-spark'))).toBe('Orders + 25α');
+    expect(rewardText(reward('make-spark'))).toBe('Flow meter + 25α');
+    expect(rewardText(reward('silt-exit'))).toBe('Orders + 20α');
+    expect(rewardText(reward('grow-spark'))).toBe('opens Assembly + 400α');
     expect(rewardText(reward('make-prism'))).toBe('Bulk Upgrade + 600¢ + 40β');
   });
 
-  it('flags six goals as big celebrations (the seventh is the first Flow State): a peak every three to four minutes', () => {
-    expect(GOALS.filter((x) => x.big).map((x) => x.id)).toEqual(['sell-shard', 'feed-lab', 'make-spark', 'make-glyph', 'make-prism', 'make-lens']);
+  it('flags the firsts and the growth goals that open something as big celebrations: a peak every minute or two', () => {
+    // The six firsts (Glass, Data, Copper, Circuit, Screen, Phone), and the five growth goals whose claim brings the
+    // next chapter: a line the player has widened is a peak of its own. (The twelfth is the first Flow State.)
+    expect(GOALS.filter((x) => x.big).map((x) => x.id)).toEqual([
+      'sell-shard', 'tune-shard', 'feed-lab', 'grow-ink', 'make-spark', 'grow-spark', 'make-glyph', 'grow-glyph', 'make-prism', 'grow-prism', 'make-lens',
+    ]);
     // None of them is a free-play goal, and the card's view says the same as the table.
     for (const goal of GOALS) {
       if (goal.big) expect(goal.free, goal.id).toBeFalsy();
@@ -87,7 +154,7 @@ describe('goal chain: the table (2.4)', () => {
     }
   });
 
-  it('the first Copper and the first Screen carry the big flag on their claim, with Orders and the reward as before', () => {
+  it('the first Copper and the first Screen carry the big flag on their claim, with the Flow meter and the reward', () => {
     for (const [id, mat] of [['make-spark', 'spark'], ['make-prism', 'prism']] as const) {
       const g = fresh();
       g.goal = { i: GOALS.findIndex((x) => x.id === id), ready: false };
@@ -102,7 +169,7 @@ describe('goal chain: the table (2.4)', () => {
       expect(ev.length).toBe(1);
       expect(ev[0]).toMatchObject({ goal: id, big: true, reward: goalById(id)!.reward });
       if (id === 'make-spark') {
-        expect(g.ordersOn).toBe(true);
+        expect(g.flowOn).toBe(true);
         expect(g.data.a - before.a).toBe(25);
       } else {
         expect(g.credits - before.credits).toBe(600);
@@ -114,9 +181,13 @@ describe('goal chain: the table (2.4)', () => {
     expect(goalById('make-mist')!.big).toBeFalsy();
   });
 
-  it('is the only way to get Refining, Lab, Routing and Bulk Upgrade', () => {
+  it('is the only way to get Refining, Lab and Bulk Upgrade', () => {
+    // (Routing was one of them, with a card that had the player build a Router. It is a research now, 50α behind
+    // Oil Deposits, for whoever wants one.)
     const granted = GOALS.flatMap((x) => x.reward.techs ?? []).sort();
-    expect(granted).toEqual(['L1', 'P1', 'R1', 'S1']);
+    expect(granted).toEqual(['P1', 'R1', 'S1']);
+    expect(TECHS.L1).toMatchObject({ cost: { a: 50 }, requires: ['R1', 'P2'] });
+    expect(TECHS.L1.auto).toBeUndefined();
     // The one other tech that cannot be bought is Market Lens: it comes with the first sale over demand (tests/rules.test.ts).
     const auto = Object.values(TECHS).filter((t) => t.auto).map((t) => t.id).sort();
     expect(auto).toEqual(['C1', ...granted]);
@@ -203,13 +274,23 @@ describe('goal chain: ready, claim, skip ahead', () => {
     expect(claimGoal(g)).toBe(true);
     const ev = take(g, 'goal-claimed')[0];
     expect(ev.big).toBe(true);
-    expect(ev.reward.techs).toEqual(['R1']);
+    // The Lab is not the first Glass's any more: it comes with the second growth goal, "Make 1.2 Glass a second".
+    expect(ev.reward.techs).toBeUndefined();
+    expect(has(g, 'R1')).toBe(false);
+    at(g, 'tune-shard');
+    g.goal.ready = true;
+    expect(claimGoal(g)).toBe(true);
+    const lab = take(g, 'goal-claimed')[0];
+    expect(lab.big).toBe(true);
+    expect(lab.reward.techs).toEqual(['R1']);
     expect(has(g, 'R1')).toBe(true);
   });
 
   it('hands over Bulk Upgrade with the first Screen, and the next card asks for one press of it, before the Fabricator has to be saved for', () => {
     expect(indexOf('make-prism')).toBe(indexOf('bulk-upgrade') - 1);
-    expect(indexOf('bulk-upgrade')).toBe(indexOf('build-fabricator') - 1);
+    // (Then the Screen line is widened, "Make 0.5 Screens a second", and its claim opens Fabrication.)
+    expect(indexOf('bulk-upgrade')).toBe(indexOf('grow-prism') - 1);
+    expect(indexOf('grow-prism')).toBe(indexOf('build-fabricator') - 1);
     const g = rich();
     g.techs = ['P1', 'R1', 'L1', 'C1', 'P4', 'P5'];
     g.credits = 1000;
@@ -321,27 +402,32 @@ describe('goal chain: ready, claim, skip ahead', () => {
 
   it('unlocks Orders, the Flow meter and the end of the demo', () => {
     const g = rich();
+    // Orders come with the Tar goal: two refined things are selling by then.
+    at(g, 'silt-exit');
+    run(g, 0.1);
+    expect(g.ordersOn).toBe(false);
+    g.goal.ready = true;
+    expect(claimGoal(g)).toBe(true);
+    expect(g.ordersOn).toBe(true);
+    expect(g.order).not.toBeNull();
+    expect(g.data.a).toBe(20);
+    expect(take(g, 'unlock').map((e) => e.what)).toEqual(['orders']);
+    expect(take(g, 'order-new').length).toBe(1);
+
+    // The Flow meter comes with the first Copper sold: its Ore Drill is too slow for its Refiner, which is the
+    // next card's lesson.
     at(g, 'make-spark');
     g.made.spark = true;
     run(g, 0.1);
     expect(g.goal.ready).toBe(false); // made, but not sold yet: the card's last gesture is the sale
     g.sold.spark = 1;
     run(g, 0.1);
-    expect(g.ordersOn).toBe(false);
-    expect(claimGoal(g)).toBe(true);
-    expect(g.ordersOn).toBe(true);
-    expect(g.order).not.toBeNull();
-    expect(g.data.a).toBe(25);
-    expect(take(g, 'unlock').map((e) => e.what)).toEqual(['orders']);
-    expect(take(g, 'order-new').length).toBe(1);
-
-    at(g, 'make-glyph');
-    g.made.glyph = true;
-    run(g, 0.1);
     expect(g.flowOn).toBe(false);
     expect(claimGoal(g)).toBe(true);
     expect(g.flowOn).toBe(true);
+    expect(g.data.a).toBe(20 + 25);
     expect(take(g, 'unlock').map((e) => e.what)).toEqual(['flow']);
+    expect(activeGoal(g)!.id).toBe('hold-flow');
 
     at(g, 'make-lens');
     g.made.lens = true;
@@ -392,10 +478,10 @@ describe('goal chain: conditions and progress', () => {
     const g = fresh();
     const mouse = goalView(g)!;
     expect(mouse.number).toBe(1);
-    expect(mouse.total).toBe(22);
+    expect(mouse.total).toBe(25);
     expect(mouse.hint).toMatch(/Drag/);
     expect(goalView(g, true)!.hint).toMatch(/Tap/);
-    g.goal = { i: 22, ready: false };
+    g.goal = { i: MAIN_GOALS, ready: false };
     const free = goalView(g)!;
     expect(free.free).toBe(true);
     expect(free.number).toBe(1);
@@ -433,9 +519,10 @@ describe('goal chain: conditions and progress', () => {
     expect(g.goal.ready).toBe(true);
   });
 
-  it('"Route more to a Lab than to the Market" needs a Router that favours the Lab', () => {
+  it('a Router favours the Lab when its settings send more there than to the Market', () => {
+    // (A card asked for this, "Route more to a Lab than to the Market". Routing is a research and no card now; the
+    // adviser still reads the setting: a Router turned toward a Lab is never turned away from it by a tip.)
     const g = rich();
-    at(g, 'route-lab');
     const router = placeNode(g, 'router', 400, 100)!;
     const lab = placeNode(g, 'lab', 700, 100)!;
     connect(g, well(g).id, 0, router.id);
@@ -451,43 +538,13 @@ describe('goal chain: conditions and progress', () => {
     expect(routerFavoursLab(g)).toBe(true);
     setMode(g, router.id, 'priority');
     expect(routerFavoursLab(g)).toBe(false); // the Market wire comes first
-    run(g, 0.1);
-    expect(g.goal.ready).toBe(false);
     setMode(g, router.id, 'ratio');
-    // (Judged by what the Router's own wires carry, which takes a few seconds to show the new setting.)
-    run(g, 8);
-    expect(g.goal.ready).toBe(true);
-  });
-
-  it('"Route more to a Lab than to the Market" is judged by what the Router sends: a Router set toward a full Lab that spills to the Market does not count', () => {
-    const g = rich();
-    g.techs = ['P1', 'R1', 'L1'];
-    const m = market(g);
-    // The Lab is full with raw Sand from a Drill of its own; Glass comes through the Router.
-    const w2 = placeNode(g, 'well', 0, 0, { depositId: 2 })!;
-    const lab = placeNode(g, 'lab', 900, 100)!;
-    connect(g, w2.id, 0, lab.id);
-    upgrade(g, w2.id, 'speed');
-    const shard = placeNode(g, 'refiner', 400, 300, { recipe: 'shard' })!;
-    connect(g, well(g).id, 0, shard.id);
-    const router = placeNode(g, 'router', 600, 300)!;
-    connect(g, shard.id, 0, router.id);
-    const toLab = connect(g, router.id, 0, lab.id)!;
-    connect(g, router.id, 0, m.id);
-    run(g, 10); // (a player takes a few seconds between the wires and the press)
-    g.goal = { i: GOALS.findIndex((x) => x.id === 'route-lab'), ready: false };
+    expect(routerFavoursLab(g)).toBe(true);
+    // One press does the same.
+    setWeight(g, toLab.id, 1);
+    expect(routerFavoursLab(g)).toBe(false);
     expect(favour(g, router.id, toLab.id)).toBe(true);
-    run(g, 20);
-    const sent = (to: number) => g.wires.filter((w) => w.from === router.id && w.to === to).reduce((s, w) => s + w.rate, 0);
-    expect(routerFavoursLab(g)).toBe(true); // set toward the Lab...
-    expect(sent(m.id)).toBeGreaterThan(sent(lab.id)); // ...and more goes to the Market all the same
-    expect(g.goal.ready).toBe(false);
-    // A Lab with room: the same Router now sends more to it, and the goal is met.
-    const roomy = placeNode(g, 'lab', 900, 400)!;
-    cutWire(g, toLab.id);
-    favour(g, router.id, connect(g, router.id, 0, roomy.id)!.id);
-    run(g, 10);
-    expect(g.goal.ready).toBe(true);
+    expect(routerFavoursLab(g)).toBe(true);
   });
 
   it('every card that has the player make something new says to sell it', () => {
@@ -508,10 +565,10 @@ describe('goal chain: conditions and progress', () => {
   it('the Assembler cards say where to build from, and name the Market before the wire that completes the goal', () => {
     // The goal completes with the first Circuit (or Screen), and a card that is ready shows Claim and no hint. With
     // the Market last in the sentence, the gesture still to come was the sale, and it was the one left out.
-    expect(goalById('make-glyph')!.hint.mouse).toBe('Research Assembly, build an Assembler from the Refiner\'s Plastic port, wire it to the Market, then wire Copper into it to make a Circuit.');
+    expect(goalById('make-glyph')!.hint.mouse).toBe('Research Assembly, build an Assembler from a Refiner\'s Plastic port, wire it to the Market, then wire Copper into it to make a Circuit.');
     expect(goalById('make-prism')!.hint.mouse).toBe('Build another Assembler from the Silicon Refiner\'s port, wire it to the Market, then wire Glass into it to make a Screen.');
     expect(goalById('build-fabricator')!.hint.mouse).toBe('Research Fabrication, then save up and build a Fabricator from the Screen Assembler\'s port: orders and a high Flow get you there faster.');
-    const longest = (touch: boolean) => Math.max(...['silt-exit', 'route-lab'].map((id) => [...(touch ? goalById(id)!.hint.touch : goalById(id)!.hint.mouse)].length));
+    const longest = (touch: boolean) => Math.max(...['silt-exit', 'grow-spark'].map((id) => [...(touch ? goalById(id)!.hint.touch : goalById(id)!.hint.mouse)].length));
     for (const id of ['make-glyph', 'make-prism', 'build-fabricator']) {
       const hint = goalById(id)!.hint;
       expect(hint.touch, id).toBe(hint.mouse); // nothing in them names a click, a drag or a tap
@@ -581,14 +638,14 @@ describe('goal chain: conditions and progress', () => {
     // Each also names what the credits are for, as a card would (waitInfo(g).name passes it on).
     expect(step('make-glyph')).toEqual({ tech: 'P4', then: nodeCost(g, 'assembler'), thenWhat: 'the Assembler' });
     g.techs.push('P4');
-    expect(step('make-glyph')).toEqual({ credits: 600, what: 'the Assembler' });
+    expect(step('make-glyph')).toEqual({ credits: 1200, what: 'the Assembler' });
     expect(step('make-mist')).toEqual({ tech: 'P5', then: nodeCost(g, 'well') + nodeCost(g, 'refiner'), thenWhat: 'the Drill and the Refiner' });
     g.techs.push('P5');
-    expect(step('build-fabricator')).toEqual({ tech: 'P7', then: 5000, thenWhat: 'the Fabricator' });
+    expect(step('build-fabricator')).toEqual({ tech: 'P7', then: 8500, thenWhat: 'the Fabricator' });
     // What the card shows is still the Data for the research.
-    expect(activeGoal(g)!.progress!(g)).toEqual([0, 720, 'α']);
+    expect(activeGoal(g)!.progress!(g)).toEqual([0, 600, 'α']);
     g.techs.push('P7');
-    expect(step('build-fabricator')).toEqual({ credits: 5000, what: 'the Fabricator' });
+    expect(step('build-fabricator')).toEqual({ credits: 8500, what: 'the Fabricator' });
     // A research with nothing to buy after it carries no price.
     g.techs = ['P1', 'R1'];
     expect(step('research-murk')).toEqual({ tech: 'P2' });
@@ -604,18 +661,13 @@ describe('goal chain: conditions and progress', () => {
     expect(activeGoal(g)!.done(g)).toBe(true);
   });
 
-  it('"Hold 95% Flow" reads the hold timer, and "Open up more land" the expansion count', () => {
+  it('"Hold 95% Flow" reads the hold timer', () => {
     const g = rich();
     at(g, 'hold-flow');
     g.flowHold = 4;
     expect(goalView(g)!.progress).toEqual([4, 10, 's']);
     expect(activeGoal(g)!.done(g)).toBe(false);
     g.flowHold = 10;
-    expect(activeGoal(g)!.done(g)).toBe(true);
-
-    at(g, 'expand');
-    expect(activeGoal(g)!.done(g)).toBe(false);
-    expect(expandBoard(g)).toBe(true);
     expect(activeGoal(g)!.done(g)).toBe(true);
   });
 });
@@ -637,7 +689,7 @@ function flowBoard(wells: number, starved: number): Game {
     connect(g, r.id, 0, m.id);
   }
   run(g, 40);
-  g.flowOn = true; // the meter is unlocked now, as the Circuit goal's reward does it
+  g.flowOn = true; // the meter is unlocked now, as the Copper goal's reward does it
   g.events = [];
   at(g, 'hold-flow');
   return g;
@@ -844,8 +896,8 @@ describe('"Hold 95% Flow": the bar, and the valve for a board nobody can fix', (
 
   it('the time on the goal is counted from its claim, survives a save, and starts afresh in a save from before the valve', () => {
     const g = flowBoard(8, 1);
-    at(g, 'make-glyph');
-    g.made.glyph = true;
+    at(g, 'make-spark');
+    g.sold.spark = 1;
     run(g, 0.1);
     expect(claimGoal(g)).toBe(true); // "Hold 95% Flow" becomes the goal now
     expect(activeGoal(g)!.id).toBe('hold-flow');
@@ -932,9 +984,9 @@ describe('the card says what to bring about and why, and keeps the gesture for w
     h.techs = ['P1', 'R1'];
     h.credits = 1000;
     at(h, 'feed-lab');
-    expect(goalView(h)!.hint).toBe('Drag from the Refiner\'s port into empty space and pick Lab.');
+    expect(goalView(h)!.hint).toBe('Drag from a Refiner\'s port into empty space and pick Lab.');
     placeNode(h, 'lab', 700, 300);
-    expect(goalView(h)!.hint).toBe('Drag from the Refiner\'s port to the Lab.');
+    expect(goalView(h)!.hint).toBe('Drag from a Refiner\'s port to the Lab.');
     // The words other parts of the game read for what they name are the goal's own, whatever the board.
     expect(goalById('build-refiner')!.hint.mouse).toContain('pick Refiner');
   });
@@ -1041,18 +1093,36 @@ describe('goal chain: the first minutes, played for real', () => {
     claim('build-refiner');
     connect(g, r.id, 0, m.id);
     run(g, 6);
-    claim('sell-shard'); // the Lab + 70¢
+    claim('sell-shard'); // +70¢ buys the second Refiner at once
+    expect(has(g, 'R1')).toBe(false);
+    // "Make 1 Glass a second": a Refiner for the Drill that only sells. The card counts what the Refiners turn out.
+    expect(goalView(g)!.progress).toEqual([expect.any(Number), 1, 'Glass a second']);
+    const r2 = placeNode(g, 'refiner', 400, 260, { recipe: 'shard' })!;
+    expect(r2).not.toBeNull();
+    connect(g, w2.id, 0, r2.id);
+    connect(g, r2.id, 0, m.id);
+    run(g, 1);
+    expect(g.goal.ready).toBe(false); // a Refiner just built has made nothing yet
+    run(g, 19);
+    claim('grow-shard'); // +125¢ buys the four levels of Speed the next card's own way takes
+    // "Make 1.2 Glass a second": Speed on a Refiner alone leaves it waiting for Sand...
+    for (const n of [r, r2]) expect(upgrade(g, n.id, 'speed')).toBe(true);
+    run(g, 20);
+    expect(g.goal.ready).toBe(false);
+    expect(goalView(g)!.progress![0]).toBeLessThan(1.1);
+    // ...and Speed on the Drills that feed them gets there.
+    for (const n of [w1, w2]) expect(upgrade(g, n.id, 'speed')).toBe(true);
+    run(g, 20);
+    expect(goalView(g)).toMatchObject({ ready: true });
+    claim('tune-shard'); // the Lab + 100¢
     expect(has(g, 'R1')).toBe(true);
-    expect(upgrade(g, w1.id, 'speed')).toBe(true);
-    run(g, 0.5);
-    claim('upgrade-well');
     const lab = placeNode(g, 'lab', 700, 100)!;
     expect(lab, `a Lab costs 100¢, have ${g.credits.toFixed(1)}¢`).not.toBeNull();
     connect(g, r.id, 0, lab.id);
     run(g, 6);
-    claim('feed-lab'); // +15α
-    expect(g.time).toBeLessThan(30); // no waiting anywhere so far
-    // The first research is the first real wait: Oil Deposits costs 45α.
+    claim('feed-lab'); // +20α
+    expect(g.time).toBeLessThan(90); // no waiting anywhere so far, but for the two rates to show
+    // The first research is the first real wait: Oil Deposits costs 40α.
     expect(research(g, 'P2')).toBe(false);
     let waited = 0;
     while (!research(g, 'P2') && waited < 180) {
@@ -1060,12 +1130,12 @@ describe('goal chain: the first minutes, played for real', () => {
       waited++;
     }
     expect(has(g, 'P2')).toBe(true);
-    expect(waited).toBeLessThan(90);
+    expect(waited).toBeLessThan(60);
     run(g, 0.1);
     claim('research-murk');
-    expect(g.stats.fromGoals).toBe(12 + 10 + 50 + 20 + 70 + 50 + 40);
-    expect(g.stats.nodesBuilt).toBe(3);
-    expect(g.stats.wiresMade).toBe(5);
+    expect(g.stats.fromGoals).toBe(12 + 10 + 50 + 20 + 70 + 125 + 100 + 40);
+    expect(g.stats.nodesBuilt).toBe(4);
+    expect(g.stats.wiresMade).toBe(7);
   });
 });
 

@@ -105,21 +105,6 @@ function hint(g: Game): boolean {
   const mk = by((n) => n.type === 'market')!;
   const lab = by((n) => n.type === 'lab');
   switch (id) {
-    case 'route-lab': {
-      const spark = by((n) => n.recipe === 'spark')!;
-      let r = by((n) => n.type === 'router');
-      if (!r) {
-        if (g.credits < nodeCost(g, 'router')) return false;
-        r = placeNode(g, 'router', spark.x + 120, spark.y + 60)!;
-        connect(g, spark.id, 0, r.id);
-        connect(g, r.id, 0, lab!.id);
-        connect(g, r.id, 0, mk.id);
-        return true;
-      }
-      const w = g.wires.find((x) => x.from === r!.id && x.to === lab!.id);
-      return !!w && favour(g, r.id, w.id);
-    }
-    case 'expand': return expandBoard(g);
     case 'study-glyph': {
       const a = by((n) => n.recipe === 'glyph')!;
       return !g.wires.some((w) => w.from === a.id && w.to === lab!.id) && !!connect(g, a.id, 0, lab!.id);

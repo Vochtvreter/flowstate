@@ -15,7 +15,7 @@
 // bow and all, stays until the summary screen opens 6.5 s after the Phone is made, and leaves with it.
 import { DATA_COLORS, MATERIALS, MatId, NODE_DEFS, NodeType, RULES, TECHS } from '../content';
 import { recipeOf } from '../economy';
-import { GOALS } from '../goals';
+import { GOALS, rateNoun } from '../goals';
 import { graph, isMachine } from '../sim';
 import { GNode, GoalReward } from '../state';
 import { boardRect, fitView, frameNodes, toClient, wireLine } from './board';
@@ -319,6 +319,9 @@ export function openedText(r: GoalReward): string {
   if (r.unlock === 'orders') parts.push('Orders unlocked');
   if (r.unlock === 'flow') parts.push('Flow meter unlocked');
   if (r.unlock === 'end') parts.push('Demo complete');
+  // (A tech the claim opens for research: it is not unlocked yet, it can be researched.)
+  const opens = (r.opens ?? []).map((id) => TECHS[id]?.name).filter((n): n is string => !!n);
+  if (opens.length) parts.push(`${list(opens)} can be researched`);
   const pay: string[] = [];
   if (r.credits) pay.push(`+${r.credits}¢`);
   if (r.a) pay.push(`+${r.a}α`);
@@ -326,7 +329,7 @@ export function openedText(r: GoalReward): string {
   if (r.g) pay.push(`+${r.g}γ`);
   if (pay.length) parts.push(pay.join(' '));
   // Data on its own means nothing yet to someone who has just met it: say where it goes.
-  if (!techs.length && !r.unlock && !r.credits && (r.a || r.b || r.g)) parts.push('spend it in the Tech tree');
+  if (!techs.length && !opens.length && !r.unlock && !r.credits && (r.a || r.b || r.g)) parts.push('spend it in the Tech tree');
   return parts.join(' · ');
 }
 
@@ -388,6 +391,16 @@ export function celebrateGoal(goalId: string, reward: GoalReward) {
       // (A Phone made in an earlier session: no summary is on its way, so the card keeps its own time.)
       return lensCard(reduced() ? 4500 : 2600, false);
     default: {
+      // A growth goal ("Make 1 Plastic a second"): the line the player has widened or tuned, under the thing it
+      // makes, in that thing's colour. Its title is the rate that was reached; the line says what the claim opens.
+      const grow = GOALS.find((x) => x.id === goalId)?.meanwhile?.find((l) => l.grow)?.grow;
+      if (grow) {
+        const m = MATERIALS[grow.mat];
+        return start({
+          kind: 'shard', title: `${grow.rate} ${rateNoun(grow.mat, grow.rate)} a second`, line,
+          glyph: matGlyph(grow.mat, 64), color: m.color, life: 1700, show: sparks(24, 1.5, 'hexagon'), reward, payAt: 680,
+        });
+      }
       // A big goal this file has not met: celebrate it at the smallest size, with the goal's own words
       // (the Glass's fanfare and sparks, in gold, under a star).
       const goal = GOALS.find((x) => x.id === goalId);

@@ -39,7 +39,7 @@ import { claimOrder, orderView } from '../orders';
 import { graph } from '../sim';
 import { Game, GNode, GoalReward, Reward, nodeNoun } from '../state';
 import { initAdviser, pollAdviser } from './advice-client';
-import { WaitLine, announceTips, lineHtml, lineShown, resetTips, showLine, showTip, tendCard, tipHtml, tipShown, waitLine } from './advice-tip';
+import { WaitLine, announceTips, lineHtml, lineShown, resetTips, setHowOpen, showLine, showTip, tendCard, tipHtml, tipShown, waitLine } from './advice-tip';
 import { tendFocus, tendMark } from './advice-show';
 import { jumpTo } from './board';
 import { Panel, anchorPt, makePanel, setAnchor, setAttr, setClass, setHidden, setStyle } from './dom';
@@ -256,6 +256,8 @@ function rewardChips(r: GoalReward | Reward): string {
   if (gr.unlock === 'orders') out.push(`<span class="rw new">Orders</span>`);
   if (gr.unlock === 'flow') out.push(`<span class="rw new">Flow meter</span>`);
   if (gr.unlock === 'end') out.push(`<span class="rw new">Demo complete</span>`);
+  // A tech the claim opens for research (not granted: it is bought with Data, and the claim pays most of it).
+  for (const id of gr.opens ?? []) out.push(`<span class="rw new" data-testid="reward-opens">${icon('tree', 11)}Opens ${esc(TECHS[id]?.name ?? id)}</span>`);
   if (r.credits) out.push(`<span class="rw mono" style="--c:#FFC857">${fmt(r.credits)}¢</span>`);
   for (const k of ['a', 'b', 'g'] as DataTier[]) {
     if (r[k]) out.push(`<span class="rw mono" style="--c:${DATA_COLORS[k]}">${fmt(r[k]!)}${DATA_NAMES[k]}</span>`);
@@ -301,8 +303,13 @@ function progressHtml(p: GoalProgress, name?: string): string {
     const text = cur <= 0 ? `Hold it for <b class="mono">${target}s</b>` : `<b class="mono">${left}s</b> to go`;
     return `${bar(share, '#7AA2FF')}<span class="gc-num">${text}</span>`;
   }
+  // A rate (a growth goal: "0.5 / 1 Glass a second"): to two places, not floored to a whole number.
+  if (unit.endsWith(' a second')) return `${bar(share, '#7AA2FF')}<span class="gc-num" data-testid="goal-rate"><b class="mono">${rateText(cur)} / ${rateText(target)}</b> ${esc(unit)}</span>`;
   return `${bar(share, '#7AA2FF')}<span class="gc-num"><b class="mono">${fmt(Math.floor(cur))} / ${fmt(target)}</b> ${esc(unit)}</span>`;
 }
+
+/** A rate as the card writes it: "1", "0.5", "1.18". */
+const rateText = (v: number) => String(Math.round(v * 100) / 100);
 
 /**
  * The progress line during a wait, as the adviser sees the wait: what is really being saved for (which can
@@ -457,6 +464,8 @@ function tendHow(g: Game, v: GoalView, waiting: boolean) {
 
 /** For scripts: what the card is saying under its title. */
 export const cardSaying = (g: Game): 'why' | 'how' => (howGoal === g.goal.i ? 'how' : 'why');
+// (A growth goal's line, one way to its rate, is kept with the how: advice-tip.ts asks here whether it is out.)
+setHowOpen((g) => howGoal === g.goal.i);
 
 /**
  * A recipe as the card draws it: "2 Sand → Glass", each thing with its picture. Where several things are put

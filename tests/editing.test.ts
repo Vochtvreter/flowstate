@@ -303,21 +303,18 @@ describe('Favour: the one-press Router preset', () => {
     expect(router.mode).toBe('even'); // none of that touched anything
   });
 
-  it('is what goal 13 asks for: one press on the Lab\'s wire completes "Route more to a Lab than to the Market"', () => {
+  it('one press on the Lab\'s wire turns the Router toward the Lab: more of what passes is studied than sold', () => {
+    // (A goal card asked for exactly this, "Route more to a Lab than to the Market". The Router is a research of
+    // its own now and no card: the press does what it did.)
     const { g, router, toLab, toMarket } = routed();
-    g.goal = { i: GOALS.findIndex((x) => x.id === 'route-lab'), ready: false };
     run(g, 1);
     expect(routerFavoursLab(g)).toBe(false);
     expect(favour(g, router.id, toMarket.id)).toBe(true); // the wrong wire does not count
     run(g, 0.1);
-    expect(g.goal.ready).toBe(false);
+    expect(routerFavoursLab(g)).toBe(false);
     expect(favour(g, router.id, toLab.id)).toBe(true);
-    // (Done once the Router's own wires show more going to the Lab: their rates take a few seconds to settle.)
+    expect(routerFavoursLab(g)).toBe(true);
     run(g, 8);
-    expect(g.goal.ready).toBe(true);
-    const hint = goalById('route-lab')!.hint;
-    expect(hint.mouse).toContain('press Favour on the Lab\'s wire');
-    expect(hint.touch).toContain('tap Favour on the Lab\'s wire');
-    expect(hint.mouse).not.toMatch(/ratio/i);
+    expect(toLab.rate).toBeGreaterThan(toMarket.rate);
   });
 });

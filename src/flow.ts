@@ -22,6 +22,13 @@ export const countsForFlow = (g: Game, n: GNode) => isProducer(n) && g.time - n.
 
 export const isFlowing = (n: GNode) => n.util >= F.flowing;
 
+/**
+ * Is a Drill or machine on the board that is too young for the "hold Flow" goal (RULES.flow.holdAge: it does not
+ * count yet, or still runs on what stood in its feeder's buffer when it was built)? While there is, the seconds of
+ * that goal stand still, and its card does not tick "everything flows".
+ */
+export const flowUnsettled = (g: Game) => g.nodes.some((n) => isProducer(n) && g.time - n.born < F.holdAge && reachesUse(g, n));
+
 /** The Drills and machines that count toward Flow right now. */
 export function flowProducers(g: Game): GNode[] {
   return g.nodes.filter((n) => countsForFlow(g, n));
@@ -100,10 +107,13 @@ export function updateFlow(g: Game, dt: number) {
     g.flowNear2 = 0;
     return;
   }
-  // The smoothed value creeps up on its target, so allow half a percent.
-  g.flowHold = g.flow >= F.holdShare - 0.005 ? g.flowHold + dt : 0;
-  g.flowNear = producers > 0 && g.flow >= nearShare(producers) - 0.005 ? g.flowNear + dt : 0;
-  g.flowNear2 = producers > 0 && g.flow >= nearShare(producers, 2) - 0.005 ? (g.flowNear2 ?? 0) + dt : 0;
+  // The smoothed value creeps up on its target, so allow half a percent. The seconds of the "hold Flow" goal stand
+  // still while a Drill or machine just built is too young to be judged (RULES.flow.holdAge): what is held has to
+  // be the whole board, as it runs once its buffers have settled.
+  const held = flowUnsettled(g) ? 0 : dt;
+  g.flowHold = g.flow >= F.holdShare - 0.005 ? g.flowHold + held : 0;
+  g.flowNear = producers > 0 && g.flow >= nearShare(producers) - 0.005 ? g.flowNear + held : 0;
+  g.flowNear2 = producers > 0 && g.flow >= nearShare(producers, 2) - 0.005 ? (g.flowNear2 ?? 0) + held : 0;
   if (producers >= F.stateProducers && flowing === producers) {
     const before = g.flowStreak;
     g.flowStreak += dt;
