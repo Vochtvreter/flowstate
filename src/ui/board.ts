@@ -3598,6 +3598,8 @@ function stepSettle(dt: number) {
       settling.delete(id);
       if (refs) refs.el.style.transform = '';
       done = true;
+      // (Its wires are drawn to this very place at every frame: nothing in the styles may ease a card's transform,
+      // or it is left behind them. The lift under a finger is its `scale` for that reason: clean.css.)
     } else refs.el.style.transform = `translate(${m.ox.toFixed(1)}px, ${m.oy.toFixed(1)}px)`;
   }
   routeWires(g);

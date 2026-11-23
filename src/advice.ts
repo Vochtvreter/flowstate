@@ -53,7 +53,7 @@ import {
   techAvailable, trackAvailable, upgradeCost, valueOf, wellRate,
 } from './economy';
 import { countsForFlow, isFlowing } from './flow';
-import { Forecast, forecast, lookahead } from './forecast';
+import { Forecast, LOOKS, forecast, lookahead } from './forecast';
 import { GROW_SLACK, Meanwhile, TuneLabs, TuneLevel, activeGoal, flowFix, goalAge, lensMaker, making, meanwhileAt, meanwhileOf, outrun, rateNoun, refineNext } from './goals';
 import { graph, isMachine, isPass } from './graph';
 import { claimOrder, orderReachesMarket, ordersWorth } from './orders';
@@ -1030,6 +1030,7 @@ function flowCands(g: Game): Cand[] {
   const watch = lookahead(g);
   for (let t = 0; watch && t < ADVICE.flowWatch; t += ADVICE.step) {
     tick(watch, ADVICE.step);
+    LOOKS.ticks++;
     for (const n of watch.nodes) {
       if (!countsForFlow(watch, n)) continue;
       const was = seen.get(n.id);
@@ -1259,6 +1260,7 @@ function tryOut(copy: Game, w: Wait, seconds: number, step = ADVICE.step): Outco
   const ahead = ordersAhead(copy, w);
   for (let t = step; t <= seconds + 1e-9; t += step) {
     tick(copy, step);
+    LOOKS.ticks++;
     if (copy.order?.ready) claimOrder(copy);
     if (ahead) ordersPay(copy, ahead, step);
     if (over(copy, w, need)) return { t, score: t };
@@ -1353,6 +1355,7 @@ function flowsSteadily(copy: Game, id: number): boolean {
   if (!flows(copy, id)) return false;
   for (let t = 0; t < ADVICE.flowWatch; t += ADVICE.step) {
     tick(copy, ADVICE.step);
+    LOOKS.ticks++;
     if (!flows(copy, id)) return false;
   }
   return true;

@@ -2,8 +2,8 @@
 import { describe, expect, it } from 'vitest';
 import { Pt, bezierAt, pathD } from './geom';
 import {
-  CLEAR, CORNER, COUNT, CardBox, LANE_GAP, MAX_CLIPS, PASS_X, PASS_Y, STUB, WireIn, ahead, around, drawCurved, drawSquared, drawWire, forward, inWay, routeAll, spread,
-  throughPins, wayRound,
+  CLEAR, CORNER, COUNT, CardBox, LANE_GAP, MAX_CLIPS, PASS_X, PASS_Y, STUB, WireIn, ahead, around, drawCurved, drawSquared, drawWire, forgetWays, forward, inWay, routeAll,
+  spread, throughPins, wayRound,
 } from './wires';
 
 const N = 28;
@@ -487,5 +487,185 @@ describe('a way round cards', () => {
         expect(v[v.length - 2].x, say).toBeLessThan(w.b.x);
       }
     }
+  });
+});
+
+// A board is routed again at every step of a drag and every frame of a glide, and what was worked out for a wire is
+// kept while nothing it has to do with has moved (wires.ts, "what has moved since a wire was last looked at"). That
+// must never show: whatever the board went through to get where it is, it is drawn as a page that has just loaded
+// it draws it. (It did show once: after a glide some wires rested on a line found for the board a fraction of a
+// pixel before it came to rest, and moved when the page was loaded again.)
+describe('what is kept from one look at the board to the next never changes how it is drawn', () => {
+  interface Wired { id: number; from: number; to: number; ay: number; by: number; pins?: Pt[] }
+  interface Shot { wires: WireIn[]; cards: CardBox[] }
+  const card = (id: number, x: number, y: number, w = 172, h = 72): CardBox => ({ id, x0: x, y0: y, x1: x + w, y1: y + h });
+
+  /** A board that things happen to, and how it stood after each of them. */
+  function story(seed: number): Shot[] {
+    let s = seed * 104729;
+    const rnd = () => ((s = (s * 1664525 + 1013904223) >>> 0) / 4294967296);
+    const pick = <T>(v: T[]) => v[Math.floor(rnd() * v.length)];
+    const cards: CardBox[] = [];
+    let nextCard = 1, nextWire = 1;
+    const addCard = () => {
+      const x = 60 + Math.round(rnd() * 60) * 20, y = 60 + Math.round(rnd() * 40) * 20;
+      cards.push(card(nextCard++, x, y, 172, rnd() < 0.3 ? 92 : 72));
+    };
+    for (let i = 0; i < 16; i++) addCard();
+    let wired: Wired[] = [];
+    const addWire = () => {
+      const from = pick(cards), to = pick(cards);
+      if (from === to) return;
+      wired.push({ id: nextWire++, from: from.id, to: to.id, ay: rnd() < 0.5 ? 36 : 31, by: rnd() < 0.5 ? 36 : 61 });
+    };
+    for (let i = 0; i < 28; i++) addWire();
+    // From the start two wires run through one pin (a clip that holds both), and a third through one of its own.
+    const clip = pt(Math.round(rnd() * 120) * 10, Math.round(rnd() * 80) * 10);
+    wired[0].pins = [{ ...clip }];
+    wired[1].pins = [{ ...clip }];
+    wired[2].pins = [pt(Math.round(rnd() * 120) * 10, Math.round(rnd() * 80) * 10)];
+    const shots: Shot[] = [];
+    const move = (c: CardBox, dx: number, dy: number) => {
+      c.x0 += dx;
+      c.x1 += dx;
+      c.y0 += dy;
+      c.y1 += dy;
+    };
+    const shoot = () => {
+      const at = new Map(cards.map((c) => [c.id, c]));
+      shots.push({
+        cards: cards.map((c) => ({ ...c })),
+        wires: wired.filter((w) => at.has(w.from) && at.has(w.to)).map((w) => {
+          const f = at.get(w.from)!, t = at.get(w.to)!;
+          return { id: w.id, from: w.from, to: w.to, a: pt(f.x1, f.y0 + w.ay), b: pt(t.x0, t.y0 + w.by), ...(w.pins ? { pins: w.pins.map((q) => ({ ...q })) } : {}) };
+        }),
+      });
+    };
+    /** Cards glide home from where they were let go, a frame at a time (board.ts, stepSettle), and come to rest. */
+    const glide = (from: Map<CardBox, Pt>, frames: number) => {
+      let was = new Map<CardBox, Pt>([...from.keys()].map((c) => [c, pt(0, 0)]));
+      for (let f = 1; f <= frames; f++) {
+        const u = f / frames, e = 1 - (1 - u) * (1 - u) * (1 - u);
+        const now = new Map<CardBox, Pt>();
+        for (const [c, off] of from) {
+          const o = f === frames ? pt(0, 0) : pt(off.x * (1 - e), off.y * (1 - e));
+          move(c, o.x - was.get(c)!.x, o.y - was.get(c)!.y);
+          now.set(c, o);
+        }
+        was = now;
+        shoot();
+      }
+    };
+    shoot();
+    for (let step = 0; step < 14; step++) {
+      const what = rnd();
+      if (what < 0.3) {
+        // A card is carried a few grid steps one way, then another.
+        const c = pick(cards);
+        for (let leg = 0; leg < 2; leg++) {
+          const [dx, dy] = pick([[20, 0], [-20, 0], [0, 20], [0, -20]]);
+          for (let k = 0; k < 4; k++) {
+            move(c, dx, dy);
+            shoot();
+          }
+        }
+      } else if (what < 0.5) {
+        // Let go off the grid: it glides the rest of the way.
+        const c = pick(cards);
+        const off = pt(Math.round((rnd() - 0.5) * 36), Math.round((rnd() - 0.5) * 36));
+        const x = c.x0, y = c.y0;
+        glide(new Map([[c, off]]), 7);
+        expect(c.x0).toBeCloseTo(x, 9);
+        expect(c.y0).toBeCloseTo(y, 9);
+        // (To rest means to rest: on whole pixels, where it was let go to.)
+        move(c, x - c.x0, y - c.y0);
+        shoot();
+      } else if (what < 0.62) {
+        // Tidy: many cards glide to new places at once.
+        const from = new Map<CardBox, Pt>();
+        const home = new Map<CardBox, Pt>();
+        for (const c of cards) {
+          if (rnd() < 0.5) continue;
+          const d = pt(Math.round((rnd() - 0.5) * 20) * 20, Math.round((rnd() - 0.5) * 12) * 20);
+          move(c, d.x, d.y);
+          home.set(c, pt(c.x0, c.y0));
+          from.set(c, pt(-d.x, -d.y));
+        }
+        glide(from, 9);
+        for (const [c, h] of home) move(c, h.x - c.x0, h.y - c.y0);
+        shoot();
+      } else if (what < 0.7) addCard();
+      else if (what < 0.78 && cards.length > 6) cards.splice(Math.floor(rnd() * cards.length), 1);
+      else if (what < 0.86) addWire();
+      else if (what < 0.9 && wired.length > 8) wired = wired.filter((w) => w !== pick(wired));
+      else if (what < 0.98) {
+        // A pin is set on a wire, or the one it has is moved; or the wire is run through a pin another already has
+        // (a clip that holds several: they are set side by side about it).
+        const w = pick(wired);
+        const held = wired.filter((o) => o !== w && o.pins?.length);
+        w.pins = held.length && rnd() < 0.5 ? pick(held).pins!.map((q) => ({ ...q })) : [pt(Math.round(rnd() * 150) * 10, Math.round(rnd() * 90) * 10)];
+      }
+      // (...and sometimes nothing at all happens between two looks.)
+      shoot();
+    }
+    return shots;
+  }
+
+  const lines = (shot: Shot) => [...routeAll(shot.wires, shot.cards, 'squared', N)].map(([id, line]) => ({ id, d: line.d, pts: line.pts.map((q) => [q.x, q.y]) }));
+
+  it('at every step of a board\'s story it is drawn as a board that was only just loaded: cards carried, let go, tidied, built and taken away', () => {
+    let kept = 0, fresh = 0, steps = 0, shared = 0;
+    for (let seed = 1; seed <= 14; seed++) {
+      const shots = story(seed);
+      // (How often two wires ran through one pin: the stories must have that in them.)
+      for (const shot of shots) {
+        const at = new Set<string>();
+        for (const w of shot.wires) for (const q of w.pins ?? []) {
+          if (at.has(`${q.x},${q.y}`)) shared++;
+          at.add(`${q.x},${q.y}`);
+        }
+      }
+      forgetWays();
+      const s0 = COUNT.searches;
+      const going = shots.map((shot) => lines(shot));
+      kept += COUNT.searches - s0;
+      const s1 = COUNT.searches;
+      shots.forEach((shot, i) => {
+        forgetWays();
+        expect(going[i], `seed ${seed}, step ${i}`).toEqual(lines(shot));
+      });
+      fresh += COUNT.searches - s1;
+      steps += shots.length;
+    }
+    expect(steps).toBeGreaterThan(600);
+    expect(shared).toBeGreaterThan(50);
+    // (And it is worth keeping: far fewer ways are looked for than when every look starts from nothing.)
+    expect(fresh).toBeGreaterThan(2000);
+    expect(kept).toBeLessThan(fresh * 0.8);
+  });
+
+  it('a line that was drawn is given again while its wire has not changed, and anew when it has', () => {
+    forgetWays();
+    const cards = [card(1, 100, 120), card(2, 500, 120), card(9, 900, 120), card(7, 3000, 2000)];
+    const wires: WireIn[] = [{ id: 1, from: 1, to: 9, a: pt(272, 156), b: pt(900, 156) }, { id: 2, from: 2, to: 9, a: pt(672, 151), b: pt(900, 181) }];
+    const first = routeAll(wires, cards, 'squared', N);
+    const before = { ...COUNT };
+    const again = routeAll(wires, cards, 'squared', N);
+    expect(again.get(1)).toBe(first.get(1));
+    expect(again.get(2)).toBe(first.get(2));
+    expect(COUNT.searches).toBe(before.searches);
+    // A card far from both moves: nothing is looked for, nothing is drawn again.
+    cards[3] = card(7, 3040, 2000);
+    const far = routeAll(wires, cards, 'squared', N);
+    expect(far.get(1)).toBe(first.get(1));
+    expect(COUNT.searches).toBe(before.searches);
+    // The card in the first wire's way moves: that wire is looked for again.
+    cards[1] = card(2, 500, 150);
+    wires[1] = { ...wires[1], a: pt(672, 181) };
+    const moved = routeAll(wires, cards, 'squared', N);
+    expect(COUNT.searches).toBeGreaterThan(before.searches);
+    expect(moved.get(1)!.d).not.toBe(first.get(1)!.d);
+    forgetWays();
+    expect([...routeAll(wires, cards, 'squared', N)].map(([, x]) => x.d)).toEqual([...moved].map(([, x]) => x.d));
   });
 });
