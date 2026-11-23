@@ -258,6 +258,12 @@ export const CFG = {
    */
   skipLines: [] as string[],
   lineDelay: 0,
+  /**
+   * Seconds a card player looks at a growth goal's card ("Make 1 Glass a second") before asking it how: the card
+   * keeps that goal's line, one way to its rate, with the how. Once a goal; after that its steps are followed as
+   * they come. (--wayDelay; the fast players know the way and do not wait.)
+   */
+  wayDelay: 12,
   tipEvery: 1,
   tipFirst: 1,
   /** For tests: called when a card player is about to make the first gesture of one of a goal's "while you wait" lines, with the game as it stands. */
@@ -281,9 +287,18 @@ export const TARGETS = {
     firstResearchBy: 150,
     /** An action available at least this often in the first two minutes. */
     earlyIdleMax: 10,
-    glyph: [360, 480] as [number, number],
-    /** 14:00–18:00 (the first Phone for the card players came down to 17:30–21:00: the pacing rule, at `cardonly` below). */
-    lens: [840, 1080] as [number, number],
+    /**
+     * 6:00–10:00. (It was 6:00–8:00 when Assembly's price in α was what stood before the first Circuit. Now the
+     * goals that have the player widen the Plastic and the Copper line stand there, and Assembly opens with the
+     * claim of the last of them: the player who buys every side tech on sight arrives with less α than it costs.)
+     */
+    glyph: [360, 600] as [number, number],
+    /**
+     * 14:00–19:00. (The upper end was 18:00. The player who buys every side tech on sight now pays for it at the
+     * growth goals' claims, which pay two thirds of the research they open and no more: that player waits for the
+     * rest, and comes in up to half a minute later than the one who saves for the spine.)
+     */
+    lens: [840, 1140] as [number, number],
     /** No more than this long on "Build a Fabricator". */
     fabricatorMax: 300,
     /** No dead stretch over 60 s before 10:00, none over 120 s before the first Phone. */
@@ -308,19 +323,21 @@ export const TARGETS = {
     goalMax: 300,
   },
   /**
-   * The newcomer who never follows a tip: the cards and their "while you wait" lines alone. The pacing rule is
-   * set for this player: where a later first Phone would cost waits with nothing to do in them, the waits are
-   * kept short. So the first Phone between 17:30 and 21:00, with something to do in it: no stretch of nothing to
-   * do (Bot.nothing) over a minute, no goal with more than 75 s of nothing to do in all,
-   * nothing to do for no more than 30% of the time to the first Phone, and nothing sold over its demand before it
-   * (the first surplus is a moment of free play).
+   * The newcomer who never follows a tip: the cards and their lines alone. The pacing rule is set for this
+   * player: where a later first Phone would cost waits with nothing to do in them, the waits are kept short. So
+   * the first Phone between 17:30 and 21:00, with something to do in it: no stretch of nothing to do (Bot.nothing)
+   * over 50 s, no goal with more than 90 s of nothing to do in all, nothing to do for no more than 25% of the time
+   * to the first Phone, and nothing sold over its demand before it (the first surplus is a moment of free play).
+   * (With the chain of growth goals the research waits are gone: a claim that opens a research pays for it. The
+   * share came down from 30% and the stretch from a minute; the one long wait left is the save for the Fabricator,
+   * three minutes with a tune-up in it, and the limit for one goal went up from 75 s for that.)
    */
   cardonly: {
     lens: [1050, 1260] as [number, number],
     goalMax: 360,
-    nothingStretch: 60,
-    nothingShare: 0.3,
-    nothingGoal: 75,
+    nothingStretch: 50,
+    nothingShare: 0.25,
+    nothingGoal: 90,
   },
   /** The newcomer who reads no line, only the hints and the tips: slower, never stranded. */
   nolines: {
@@ -476,6 +493,8 @@ export class Bot {
   tipPassed = '';
   /** --lineDelay: the goal whose "while you wait" line is showing, and since when. */
   lineSeen: { goal: number; t: number } | null = null;
+  /** The growth goal whose card this player is looking at, and since when (CFG.wayDelay). */
+  waySeen: { goal: number; t: number } | null = null;
   /** Stretches of waiting with nothing the card asks and no tip on offer. */
   tiplessSince: number | null = null;
   tipless: { from: number; to: number; goal: number; why: string; trials: string[] }[] = [];
@@ -1140,9 +1159,6 @@ export class Bot {
       case 'wire-all-wells': return wireIf(g.nodes.find((n) => n.type === 'well' && !this.outs(n).length) ?? null, 0, market);
       case 'build-refiner': return firstWell && !this.maker('shard') ? from(firstWell, 0, 'refiner', 'shard') : null;
       case 'sell-shard': return wireIf(this.maker('shard'), 0, market);
-      case 'upgrade-well': return firstWell && {
-        cls: 'new', kind: 'upgrade', cost: upgradeCost(firstWell, 'speed'), label: `card: upgrade ${this.name(firstWell)} speed`, run: () => upgrade(g, firstWell.id, 'speed'),
-      };
       case 'feed-lab': {
         const shard = this.maker('shard');
         if (!shard) return null;
@@ -1162,16 +1178,6 @@ export class Bot {
         const w = g.nodes.find((n) => n.type === 'well' && n.lv.speed < maxLevel(g, 'speed'));
         return w ? { cls: 'new', kind: 'upgrade', bulk: true, cost: upgradeCost(w, 'speed'), label: 'card: press Upgrade all on the Drills\' Speed', run: () => upgradeAll(g, 'well', 'speed') > 0 } : null;
       }
-      case 'route-lab': {
-        const router = g.nodes.find((n) => n.type === 'router') ?? null;
-        const spark = this.maker('spark');
-        if (!router) return spark && from(spark, 0, 'router'); // "Build a Router from the Copper Refiner's port...
-        const step = wireIf(router, 0, lab) ?? wireIf(router, 0, market);
-        if (step || routerFavoursLab(g) || !lab) return step;
-        const toLab = this.outs(router).find((w) => w.to === lab.id)!;
-        return { cls: 'fix', kind: 'route', cost: 0, label: 'card: press Favour on the Router\'s wire to the Lab', run: () => favour(g, router.id, toLab.id) };
-      }
-      case 'expand': return { cls: 'new', kind: 'expand', cost: expansionCost(g), label: 'card: expand the board', run: () => expandBoard(g) };
       case 'make-glyph': {
         if (!has(g, 'P4')) return study('P4');
         const a = this.maker('glyph');
@@ -1203,7 +1209,9 @@ export class Bot {
         const fed = (m: MatId) => this.ins(f).some((w) => materialsAt(g, w.from, w.port).includes(m));
         return (fed('prism') ? null : wireIf(this.maker('prism'), 0, f)) ?? (fed('glyph') ? null : wireIf(this.maker('glyph'), 0, f));
       }
-      default: return null; // 'hold-flow': the card says where to look; what to do there is the adviser's
+      // 'hold-flow': the card says where to look; what to do there is its line's. A growth goal ("Make 1 Glass a
+      // second"): the card gives a rate, and one way to it in its line (lineStep).
+      default: return null;
     }
   }
 
@@ -1231,16 +1239,25 @@ export class Bot {
 
   lineStep(): Want | null {
     const g = this.g;
-    const line = CFG.meanwhile && this.P.lines !== false ? meanwhileOf(g) : null;
+    const shown = meanwhileOf(g);
+    // A growth goal's line is the how of its card, not something to do while waiting: every player reads it, the one
+    // who reads no "while you wait" line too. (It cannot be skipped either: the chain would stop there.)
+    const way = !!shown?.way;
+    const line = way || (CFG.meanwhile && this.P.lines !== false) ? shown : null;
     const goal = activeGoal(g);
-    if (!line || !goal || line.done(g) || CFG.skipLines.includes(goal.id) || CFG.skipLines.includes(line.id)) return null;
+    if (!line || !goal || line.done(g) || (!way && (CFG.skipLines.includes(goal.id) || CFG.skipLines.includes(line.id)))) return null;
     // --lineDelay: a person who reads the line late.
-    if (CFG.lineDelay > 0 && (this.lineSeen?.goal !== g.goal.i || g.time - this.lineSeen.t < CFG.lineDelay)) return null;
+    if (!way && CFG.lineDelay > 0 && (this.lineSeen?.goal !== g.goal.i || g.time - this.lineSeen.t < CFG.lineDelay)) return null;
+    // A card player takes a moment over a growth card before asking it how (once a goal).
+    if (way && this.P.card) {
+      if (this.waySeen?.goal !== g.goal.i) this.waySeen = { goal: g.goal.i, t: g.time };
+      if (g.time - this.waySeen.t < CFG.wayDelay) return null;
+    }
     const a = lineAdvice(g);
     if (!a) return null;
     const kind: Kind = a.expand ? 'expand' : a.research ? 'research' : a.cut ? 'cut' : a.upgrade ? 'upgrade' : a.build ? 'build' : 'wire';
     return {
-      cls: a.build || a.expand ? 'new' : 'fix', kind, cost: a.cost ?? 0, label: `card, meanwhile (${line.id}): ${a.text.mouse}`,
+      cls: a.build || a.expand ? 'new' : 'fix', kind, cost: a.cost ?? 0, label: `card, ${way ? 'one way' : 'meanwhile'} (${line.id}): ${a.text.mouse}`,
       run: () => {
         if (!applyAdvice(g, a)) return false;
         if (a.build) this.noteNode(a.build as NodeType, a.recipe ?? null);
@@ -1416,6 +1433,12 @@ export class Bot {
     const can = (w: Want) => !w.locked && w.cost <= g.credits + 1e-6;
     const fix = wants.find((w) => w.cls === 'fix' && can(w));
     if (fix) return fix;
+    // A growth goal is on the card ("Make 1 Glass a second"): a player who knows the game goes for its rate by the
+    // card's own way, and puts nothing else before it but what is free. (The next research is locked until it is claimed.)
+    if (!g.goal.ready && meanwhileOf(g)?.way) {
+      const step = this.lineStep();
+      if (step && can(step)) return step;
+    }
     const news = wants.filter((w) => w.cls === 'new').sort((a, b) => a.cost - b.cost);
     const novel = news.find((w) => w.novel && can(w));
     if (novel) return novel;
@@ -2253,6 +2276,7 @@ function main() {
     }
     else if (k === 'skipLine' && v) CFG.skipLines = v.split(',');
     else if (k === 'lineDelay' && v) CFG.lineDelay = Number(v);
+    else if (k === 'wayDelay' && v) CFG.wayDelay = Number(v);
     else if (k === 'tipDelay' && v) {
       for (const pol of Object.values(POLICIES)) if (pol.card) pol.tipDelay = Number(v);
     } else if (k === 'tipEvery' && v) {
@@ -2287,7 +2311,7 @@ function main() {
   const what = [
     profileName !== 'current' ? `profile "${profileName}": ${profile.describe}` : '', ...overrides.map((o) => `--set=${o}`),
     CFG.bulk ? '' : '--noBulk', CFG.tips ? '' : '--noTips', CFG.meanwhile ? '' : '--noMeanwhile',
-    ...process.argv.slice(2).filter((a) => /^--(skipLine|lineDelay|tipDelay|tipEvery|hands|minShare|lineReserve|lineHold|claimDelay)=/.test(a)),
+    ...process.argv.slice(2).filter((a) => /^--(skipLine|lineDelay|wayDelay|tipDelay|tipEvery|hands|minShare|lineReserve|lineHold|claimDelay)=/.test(a)),
   ].filter(Boolean).join('  ');
   const play = (p: Policy, s: number) => {
     const bot = new Bot(p, s, minutes ?? (p.card ? CFG.minutesCard : p.fast ? CFG.minutesFast : CFG.minutesSlow));

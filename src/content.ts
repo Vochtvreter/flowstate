@@ -45,11 +45,11 @@ export const MATERIALS: Record<MatId, Material> = {
   ink: { id: 'ink', name: 'Plastic', tier: 1, value: 4, demand: 1.2, color: '#6F93FF' },
   // A by-product is poor study material: 1 α, not the 3 α of a refined item (three Tar make one Rubber, which is worth 3 α).
   silt: { id: 'silt', name: 'Tar', tier: 1, value: 0.5, demand: 0.5, color: '#C2C8D2', study: 1 },
-  spark: { id: 'spark', name: 'Copper', tier: 1, value: 6, demand: 1, color: '#FF5A4E' },
+  spark: { id: 'spark', name: 'Copper', tier: 1, value: 6, demand: 1.3, color: '#FF5A4E' },
   mist: { id: 'mist', name: 'Silicon', tier: 1, value: 6, demand: 1, color: '#3FD6B5' },
   clay: { id: 'clay', name: 'Rubber', tier: 1, value: 3, demand: 0.8, color: '#C08A5B' },
   prism: { id: 'prism', name: 'Screen', tier: 2, value: 24, demand: 0.6, color: '#E0C3FF' },
-  glyph: { id: 'glyph', name: 'Circuit', tier: 2, value: 20, demand: 0.6, color: '#FF5ACD' },
+  glyph: { id: 'glyph', name: 'Circuit', tier: 2, value: 20, demand: 0.8, color: '#FF5ACD' },
   coil: { id: 'coil', name: 'Cable', tier: 2, value: 22, demand: 0.5, color: '#E59A57' },
   lens: { id: 'lens', name: 'Phone', tier: 3, value: 130, demand: 0.25, color: '#FFFFFF' },
   dynamo: { id: 'dynamo', name: 'Laptop', tier: 3, value: 180, demand: 0.2, color: '#4FC3FF' },
@@ -107,8 +107,8 @@ export interface NodeDef {
 export const NODE_DEFS: Record<NodeType, NodeDef> = {
   well: { type: 'well', name: 'Drill', base: 10, growth: 1.15, tracks: ['speed'], verb: 'extract', blurb: 'Brings up a raw material. Must sit on a deposit.' },
   refiner: { type: 'refiner', name: 'Refiner', base: 50, growth: 1.15, tech: 'P1', tracks: ['speed', 'eff', 'buffer'], verb: 'refine', blurb: 'Turns one material into a better one.' },
-  assembler: { type: 'assembler', name: 'Assembler', base: 600, growth: 2.5, tech: 'P4', tracks: ['speed', 'eff', 'buffer'], verb: 'assemble', blurb: 'Puts two things together.' },
-  fabricator: { type: 'fabricator', name: 'Fabricator', base: 5000, growth: 1.15, tech: 'P7', tracks: ['speed', 'eff', 'buffer'], verb: 'fabricate', blurb: 'Puts up to three things together.' },
+  assembler: { type: 'assembler', name: 'Assembler', base: 1200, growth: 1.5, tech: 'P4', tracks: ['speed', 'eff', 'buffer'], verb: 'assemble', blurb: 'Puts two things together.' },
+  fabricator: { type: 'fabricator', name: 'Fabricator', base: 8500, growth: 1.15, tech: 'P7', tracks: ['speed', 'eff', 'buffer'], verb: 'fabricate', blurb: 'Puts up to three things together.' },
   router: { type: 'router', name: 'Router', base: 25, growth: 1.1, tech: 'L1', tracks: [], verb: 'split', blurb: 'Splits a stream by ratio, priority or filter.' },
   merger: { type: 'merger', name: 'Merger', base: 25, growth: 1.1, tech: 'L2', tracks: [], verb: 'merge', blurb: 'A junction: many wires in, one stream out.' },
   silo: { type: 'silo', name: 'Silo', base: 200, growth: 1.2, tech: 'L5', tracks: ['buffer'], verb: 'store', blurb: 'A big buffer that smooths bursts.' },
@@ -168,12 +168,18 @@ export interface Tech {
    * (g.seenSurplus), or the save already owns Market Lens from before that rule (demandShown in src/economy.ts).
    */
   needsSurplus?: boolean;
+  /**
+   * Not researchable until a goal has opened it (GoalReward.opens in src/goals.ts, kept in Game.opened): the
+   * Processing spine comes one step at a time, each after the player has grown what the step before gave them
+   * ("Make 1 Plastic a second" opens Ore Deposits). The tree shows it, with its price, and says which goal opens it.
+   */
+  locked?: boolean;
 }
 
 const T = (
   id: string, name: string, branch: Branch, col: number, row: number,
   cost: Partial<Record<DataTier, number>>, requires: string[], desc: string, unlocks: string[],
-  extra: Pick<Tech, 'auto' | 'needsEnd' | 'needsSurplus'> = {},
+  extra: Pick<Tech, 'auto' | 'needsEnd' | 'needsSurplus' | 'locked'> = {},
 ): Tech => ({ id, name, branch, col, row, cost, requires, desc, unlocks, ...extra });
 
 /**
@@ -223,19 +229,19 @@ export const TECHS: Record<string, Tech> = Object.fromEntries([
   // Processing
   T('P1', 'Refining', 'processing', 0, 0, {}, [], 'Your first machine. It melts Sand into Glass, which sells for more.', ['Refiner', 'Recipe: 2 Sand → Glass'], { auto: 'Reward for the goal “Sell that Sand too”' }),
   T('P2', 'Oil Deposits', 'processing', 1, 0, { a: 40 }, ['R1'], 'Drill for Oil and refine it into Plastic. That leaves Tar behind, so you also get the Dump to take it away.', ['Oil Drills', 'Recipe: 2 Oil → Plastic + Tar', 'Dump node']),
-  T('P3', 'Ore Deposits', 'processing', 2, 0, { a: 195 }, ['P2'], 'Drill for Ore and refine it into Copper.', ['Ore Drills', 'Recipe: 2 Ore → Copper']),
-  T('P4', 'Assembly', 'processing', 3, 0, { a: 1325 }, ['P3'], 'Machines with two inputs. Plastic and Copper make a Circuit, your first assembled part and the source of β Data.', ['Assembler', 'Recipe: Plastic + Copper → Circuit']),
-  T('P5', 'Quartz Deposits', 'processing', 4, 0, { a: 1875 }, ['P4'], 'Drill for Quartz, refine it into Silicon, and put Silicon and Glass together into a Screen.', ['Quartz Drills', 'Recipe: 2 Quartz → Silicon', 'Recipe: 2 Glass + Silicon → Screen']),
-  T('P7', 'Fabrication', 'processing', 5, 0, { a: 720, b: 100 }, ['P5'], 'Machines with three inputs. A Screen and two Circuits become a Phone, your first finished product and the source of γ Data.', ['Fabricator', 'Recipe: Screen + 2 Circuit → Phone']),
-  T('P9', 'Robot', 'processing', 6, 0, { a: 2800, b: 250, g: 450 }, ['P8'], 'The capstone. A Phone for a brain, a Laptop for a body and raw Quartz for eyes: a Robot.', ['Recipe: Phone + Laptop + 4 Quartz → Robot']),
+  T('P3', 'Ore Deposits', 'processing', 2, 0, { a: 195 }, ['P2'], 'Drill for Ore and refine it into Copper.', ['Ore Drills', 'Recipe: 2 Ore → Copper'], { locked: true }),
+  T('P4', 'Assembly', 'processing', 3, 0, { a: 600 }, ['P3'], 'Machines with two inputs. Plastic and Copper make a Circuit, your first assembled part and the source of β Data.', ['Assembler', 'Recipe: Plastic + Copper → Circuit'], { locked: true }),
+  T('P5', 'Quartz Deposits', 'processing', 4, 0, { a: 900 }, ['P4'], 'Drill for Quartz, refine it into Silicon, and put Silicon and Glass together into a Screen.', ['Quartz Drills', 'Recipe: 2 Quartz → Silicon', 'Recipe: 2 Glass + Silicon → Screen'], { locked: true }),
+  T('P7', 'Fabrication', 'processing', 5, 0, { a: 600, b: 100 }, ['P5'], 'Machines with three inputs. A Screen and two Circuits become a Phone, your first finished product and the source of γ Data.', ['Fabricator', 'Recipe: Screen + 2 Circuit → Phone'], { locked: true }),
+  T('P9', 'Robot', 'processing', 6, 0, { a: 8000, b: 250, g: 450 }, ['P8'], 'The capstone. A Phone for a brain, a Laptop for a body and raw Quartz for eyes: a Robot.', ['Recipe: Phone + Laptop + 4 Quartz → Robot']),
   // (Behind Assembly, not just Refining: it is priced in β, and Assembly is what brings the first β. Researchable
   // from the first visit to the tree, it sat there for ten minutes with "no β yet".)
   T('U1', 'Efficiency Tuning', 'processing', 1, 1, { b: 40 }, ['P1', 'P4'], 'A new upgrade track for machines: some crafts consume no inputs.', ['Efficiency upgrades on machines']),
   T('U2', 'Overclock', 'processing', 2, 1, { g: 60 }, ['U1'], 'Raises the level cap on Speed upgrades from 10 to 25.', ['Speed level cap 25']),
   T('P6', 'Reclamation', 'processing', 4, 1, { a: 300, g: 25 }, ['P4'], 'Turn Tar, the waste of your Plastic line, into Rubber, and wrap Copper in it to make Cable.', ['Recipe: 3 Tar → Rubber', 'Recipe: Copper + 2 Rubber → Cable']),
-  T('P8', 'Laptop', 'processing', 5, 1, { a: 1200, b: 300, g: 100 }, ['P6', 'P7'], 'Two Cables, a Circuit and a Screen make a Laptop.', ['Recipe: 2 Cable + Circuit + Screen → Laptop']),
+  T('P8', 'Laptop', 'processing', 5, 1, { a: 3500, b: 300, g: 100 }, ['P6', 'P7'], 'Two Cables, a Circuit and a Screen make a Laptop.', ['Recipe: 2 Cable + Circuit + Screen → Laptop']),
   // Logistics
-  T('L1', 'Routing', 'logistics', 1, 0, {}, ['R1'], 'A Router splits one stream across several wires by weight, when an even split is not what you want.', ['Router node', 'Ratio mode'], { auto: 'Reward for the goal “Fill your first order”' }),
+  T('L1', 'Routing', 'logistics', 1, 0, { a: 50 }, ['R1', 'P2'], 'A Router splits one stream across several wires by weight, when an even split is not what you want.', ['Router node', 'Ratio mode']),
   T('L3', 'Pipes Mk II', 'logistics', 2, 0, { a: 60 }, ['L1'], 'Wires can be upgraded to carry 8 items per second.', ['Mk II wires (8/s)']),
   T('L7', 'Pipes Mk III', 'logistics', 3, 0, { b: 60 }, ['L3'], 'Wires can be upgraded to carry 16 items per second.', ['Mk III wires (16/s)']),
   T('L8', 'Pipes Mk IV', 'logistics', 4, 0, { g: 150 }, ['L7'], 'Wires can be upgraded to carry 32 items per second.', ['Mk IV wires (32/s)']),
@@ -249,16 +255,17 @@ export const TECHS: Record<string, Tech> = Object.fromEntries([
   T('C4', 'Luxury Buyers', 'commerce', 3, 0, { b: 300 }, ['C2'], 'Assembled parts and finished products sell for 25% more.', ['+25% value on parts and products'], { needsSurplus: true }),
   T('C5', 'Exports', 'commerce', 4, 0, { g: 80 }, ['C4'], 'Markets buy twice as much of everything at full price.', ['+100% demand, all materials'], { needsSurplus: true }),
   // Research
-  T('R1', 'Lab', 'research', 0, 0, {}, [], 'Send items to a Lab instead of a Market to earn Data, the currency of this tree.', ['Lab node', 'Tech tree'], { auto: 'Reward for the goal “Sell your first Glass”' }),
+  T('R1', 'Lab', 'research', 0, 0, {}, [], 'Send items to a Lab instead of a Market to earn Data, the currency of this tree.', ['Lab node', 'Tech tree'], { auto: 'Reward for the goal “Make 1.2 Glass a second”' }),
   T('R2', 'Lab Speed', 'research', 1, 0, { a: 50 }, ['R1'], 'Labs study items twice as fast.', ['Labs 2× speed']),
   T('R3', 'Deep Analysis', 'research', 2, 0, { b: 80 }, ['R2'], 'Every item studied yields 50% more Data.', ['+50% Data per item']),
   T('R4', 'Long Absence', 'research', 1, 1, { a: 210 }, ['R1'], 'Your supply line keeps earning for up to 8 hours while you are away, instead of 2.', ['Offline cap 2h → 8h'], { needsEnd: true }),
   // Scale tools
-  T('S1', 'Bulk Upgrade', 'scale', 1, 0, {}, ['L1'], 'Upgrade every node of the same kind with one click.', ['"Upgrade all" button'], { auto: 'Reward for the goal “Make your first Screen”' }),
+  T('S1', 'Bulk Upgrade', 'scale', 1, 0, {}, ['P4'], 'Upgrade every node of the same kind with one click.', ['"Upgrade all" button'], { auto: 'Reward for the goal “Make your first Screen”' }),
   T('S3', 'Auto-balance', 'scale', 2, 0, { b: 50 }, ['S1', 'L4'], 'One click sets a Router\'s weights to match what each destination can actually use.', ['Router: Auto-balance']),
-  // (For the board, not the line: priced as the side techs before the first Circuit are, and behind Routing, which
-  // is when a board has grown enough for where its Drills stand to matter.)
-  T('S2', 'Mobile Drills', 'scale', 1, 1, { a: 80 }, ['L1'], 'A Drill can be moved like any other card, and its deposit goes with it. Set your sources down where the line needs them.', ['Drills can be dragged', 'Drills move in a block of cards']),
+  // (For the board, not the line: priced as the side techs before the first Circuit are, and behind Ore Deposits:
+  // by then the board has its first new plot, and where its Drills stand begins to matter. It hung on Routing while
+  // Routing was a goal's reward.)
+  T('S2', 'Mobile Drills', 'scale', 1, 1, { a: 80 }, ['P3'], 'A Drill can be moved like any other card, and its deposit goes with it. Set your sources down where the line needs them.', ['Drills can be dragged', 'Drills move in a block of cards']),
 ].map((t) => [t.id, t]));
 
 export const TECH_IDS = Object.keys(TECHS);
@@ -382,6 +389,14 @@ export const RULES = {
     /** ...for this many seconds. */
     holdSeconds: 10,
     /**
+     * ...on a board whose every Drill and machine is at least this old. The meter comes with the first Copper,
+     * a quarter of a minute after its Ore Drill, which is too slow for its Refiner: the goal's lesson. But a Refiner
+     * just built runs flat out for its first half minute on what stood in its Drill's buffer, and counts from
+     * `minAge`: the goal was met before the shortage showed. So while anything that will count is younger than this,
+     * the seconds of the goal stand still, and its card does not tick "everything flows".
+     */
+    holdAge: 40,
+    /**
      * The goal's valve. Once the goal has been on the card for this many seconds it also passes with all but
      * one producer flowing, held for the same `holdSeconds`. The bar stays where it is for everyone who can
      * reach it; the valve is for a board with one producer nobody can get flowing (a machine starved through
@@ -503,8 +518,8 @@ export const RULES = {
     step: 0.1,
   },
 
-  /** Board expansion number n (0-based) costs base × growth^n: 200, 500, 1,250, 3,125... */
-  expansion: { base: 200, growth: 2.5 },
+  /** Board expansion number n (0-based) costs base × growth^n: 360, 900, 2,250, 5,625... */
+  expansion: { base: 360, growth: 2.5 },
 
   /**
    * Upgrades. Level L of a track (0-based) costs its first-level price × growth^L; the tables give the

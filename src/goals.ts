@@ -5,11 +5,18 @@
 // reward (event 'goal-claimed'), moves on, and checks the next goal at once, so a goal the player has
 // already met is ready the moment it is reached. Rewards are not undoable.
 //
-// Reward sizes are in the GOALS table below, tuned with `npm run pacing`. Four techs are goal rewards and
-// cannot be bought: Refining, Lab, Routing and Bulk Upgrade. (Market Lens used to come with the first order;
-// it now arrives by itself the first time something sells over its demand, see noteSurplus in src/sim.ts.)
-// Through "Study Glass in a Lab" the credits paid so far always cover the next purchase the card asks for
-// (tests/playthrough.test.ts).
+// Reward sizes are in the GOALS table below, tuned with `npm run pacing`. Three techs are goal rewards and
+// cannot be bought: Refining, Lab and Bulk Upgrade. (Routing was one, with a card after it that had the player
+// build a Router; it is a research of its own now. Market Lens used to come with the first order; it now arrives
+// by itself the first time something sells over its demand, see noteSurplus in src/sim.ts.)
+// Through "Study Glass in a Lab" the credits paid so far always cover the next purchase the card asks for, the
+// steps of the two growth goals' own way included (tests/playthrough.test.ts).
+//
+// New things come slowly, and each is earned by growing what came before it. Between the chapters stand growth
+// goals ("Make 1 Glass a second": growth() below), met by any way that brings the rate up, and the steps of the
+// Processing spine (Ore Deposits, Assembly, Quartz Deposits) stay locked in the tech tree until the growth goal
+// before them is claimed (Tech.locked, GoalReward.opens). The claim pays the α the research costs, or most of it:
+// a lock and then a wait for Data would be two walls.
 //
 // A card says what to bring about and why (Goal.title, Goal.why): "Turn Sand into Glass. Two Sand sell for 2¢;
 // melted into one Glass they sell for 3¢." It does not say where to click. A player who knows why a wire is wanted
@@ -21,21 +28,21 @@
 // to sell it, in its title or its why and in its how (Plastic, Copper, Circuit, Silicon, Screen): a player who is
 // never told leaves their dearest goods unsold and their machines blocked, and cannot pay for the Fabricator.
 //
-// The four goals with a long wait also carry a "while you wait" line (Goal.meanwhile): the one move that
-// shortens that wait most for a player who does only what the cards say. The card is the channel every
-// player obeys, so the structural advice lives there and not in the adviser's tips (src/advice.ts), which
-// nobody is sure to follow. How the lines were chosen is in docs/CONTENT.md ("While you wait").
-import { EXPANSION_DEPOSITS, MATERIALS, MatId, NODE_DEFS, NodeType, RECIPES, RULES, Recipe, TECHS } from './content';
+// Some goals also carry a line (Goal.meanwhile): on a goal with a wait, the one move that shortens that wait most
+// for a player who does only what the cards say; on a growth goal, one way to its rate, a step at a time. The card
+// is the channel every player obeys, so the structural advice lives there and not in the adviser's tips
+// (src/advice.ts), which nobody is sure to follow. docs/CONTENT.md has them ("While you wait").
+import { MATERIALS, MatId, NODE_DEFS, NodeType, RECIPES, RULES, Recipe, TECHS } from './content';
 import {
-  cycleTime, demandRate, endDemo, expansionCost, grantTech, has, labRate, maxLevel, nodeCost, nodeCount, nodeUnlocked, pickRecipe, recipeOf, trackAvailable,
+  cycleTime, demandRate, endDemo, grantTech, has, labRate, maxLevel, nodeCost, nodeCount, nodeUnlocked, pickRecipe, recipeOf, trackAvailable,
   upgradeCost, valueOf, wellRate,
 } from './economy';
-import { countsForFlow, isFlowing, nearShare } from './flow';
+import { countsForFlow, flowUnsettled, isFlowing, nearShare } from './flow';
 import { graph, isMachine, isPass } from './graph';
 import { startOrders } from './orders';
 import { Game, GNode, GoalReward, Wire, isLookahead, nodeNoun } from './state';
-import { clearHistory } from './actions';
-import { flowLineWords, lineFocus, lineHeld, lineSpot, tuneLineWords, tuneState, waitKind } from './advice';
+import { clearHistory, freeDeposits } from './actions';
+import { flowLineWords, growLineWords, lineFocus, lineHeld, tuneLineWords, tuneState, waitKind } from './advice';
 
 /** [current, target, unit]. Unit '¢' means "saving up credits"; 'α' / 'β' / 'γ' mean saving up Data. */
 export type GoalProgress = [current: number, target: number, unit: string];
@@ -123,6 +130,13 @@ export interface Meanwhile {
    */
   required?: boolean;
   /**
+   * The line of a growth goal ("Make 1 Glass a second"): the material and the rate the goal asks for. Its next step
+   * is worked out from the board (growNext in src/advice.ts): one way to get there, a gesture at a time. It is not
+   * the only way: whatever brings the rate up counts, and the card labels the line "One way" (`way`).
+   */
+  grow?: { mat: MatId; rate: number; tune?: boolean };
+  way?: boolean;
+  /**
    * The line is only worth saying while its steps pay (the Fabricator card's tune-up: tuneState in src/advice.ts):
    * once it does not apply it does not come back. So the card's count ("1 of 2") leaves it out unless it applies now
    * or has been shown; a line without this is counted from the start, because it may still come.
@@ -145,6 +159,55 @@ const outWires = (g: Game, n: GNode, port?: number) => {
 const inWires = (g: Game, n: GNode) => graph(g).ins.get(n.id)?.length ?? 0;
 /** A node of this kind stands with nothing wired into it (placed from the build bar, not built from a port). */
 const unfed = (g: Game, type: NodeType) => g.nodes.some((n) => n.type === type && inWires(g, n) === 0);
+
+/**
+ * Items of a material made a second right now. For each machine that makes it, the lesser of two readings:
+ *  - what it turns out flat out, times the share of its time it is at work (its utilisation, smoothed over a few
+ *    seconds). This never reads above what the machine can do and does not jump when a wire is added;
+ *  - what leaves its port, by the rates of the wires there (measured over whole deliveries: the Flows panel reads
+ *    the same). This does not jump when the machine is given a level of Speed.
+ * Each alone overshoots for a few seconds after one kind of change: a third Refiner wired to a Drill that cannot
+ * feed it made the wires read 1.7 a second on a board that makes 1.1, and a level of Speed on a Refiner whose Drill
+ * cannot keep up reads as more Glass until its utilisation has come down. A growth goal is met once and stays met,
+ * so it is judged by the reading that is not fooled. Settled, the two agree.
+ */
+export function making(g: Game, m: MatId): number {
+  const c = graph(g);
+  let sum = 0;
+  for (const n of g.nodes) {
+    let port = 0;
+    let flat = 0;
+    if (n.type === 'well') {
+      if (n.material !== m) continue;
+      flat = wellRate(n);
+    } else {
+      const r = isMachine(n) ? recipeOf(n) : null;
+      port = r ? r.outputs.findIndex((o) => o[0] === m) : -1;
+      if (!r || port < 0) continue;
+      flat = r.outputs[port][1] / cycleTime(n, r);
+    }
+    let leaves = 0;
+    for (const w of c.outs.get(n.id)?.[port] ?? []) leaves += w.rate;
+    sum += Math.min(flat * n.util, leaves);
+  }
+  return sum;
+}
+
+/**
+ * A growth goal is met from this share under its rate. Utilisation creeps up on its value and stops a hair short;
+ * and two Glass lines with one level of Speed on each Refiner and each Drill make 1.18 a second, which is what
+ * "Make 1.2 Glass a second" is there to teach.
+ */
+export const GROW_SLACK = 0.03;
+
+/** Is this much of the material being made a second? */
+export const makes = (g: Game, m: MatId, rate: number) => making(g, m) >= rate * (1 - GROW_SLACK);
+
+/** A growth goal's count: what is made a second, to two places, and the rate asked for ("0.5 / 1 Glass a second"). */
+const makingProgress = (g: Game, m: MatId, rate: number): GoalProgress => {
+  const now = making(g, m);
+  return [makes(g, m, rate) ? rate : Math.min(rate, Math.floor(now * 100 + 1e-6) / 100), rate, `${MATERIALS[m].name} a second`];
+};
 
 /** "Saving up": credits toward a price. */
 const saving = (g: Game, cost: number): GoalProgress => [Math.min(g.credits, cost), cost, '¢'];
@@ -222,59 +285,6 @@ function carries(g: Game, w: Wire, m: MatId, seen = new Set<number>()): boolean 
  */
 const studyWires = (g: Game, m: MatId) => g.wires.filter((w) => typeOf(g, w.to) === 'lab' && carries(g, w, m));
 
-/**
- * Drills with a Lab of their own: pairs of a Drill and a Lab that studies what Drills give it and nothing else,
- * each Drill and each Lab counted once. Such a pair is 1 α a second for good. (A Drill wired into a Lab that
- * also studies Glass or Circuit does not count: it takes their place. Nor does one Drill wired into two Labs
- * count twice: it has no more to give the second than the first leaves over.) With `on`, only Drills standing
- * on those deposits count.
- */
-export function wellLabs(g: Game, on?: Set<number>): number {
-  const c = graph(g);
-  /** For each Lab fed by Drills alone: those Drills (on the deposits asked about). */
-  const labs: number[][] = [];
-  for (const n of g.nodes) {
-    const fed = n.type === 'lab' ? c.ins.get(n.id) ?? [] : [];
-    if (!(fed.length > 0 && fed.every((w) => c.byId.get(w.from)?.type === 'well'))) continue;
-    const wells = fed.filter((w) => !on || on.has(c.byId.get(w.from)?.depositId ?? -1)).map((w) => w.from);
-    if (wells.length) labs.push(wells);
-  }
-  if (labs.length < 2) return labs.length;
-  // The most Labs that can each be given a Drill of their own: a Lab takes a free Drill, or one whose Lab can take another.
-  const labOf = new Map<number, number>();
-  const give = (lab: number, tried: Set<number>): boolean => {
-    for (const well of labs[lab]) {
-      if (tried.has(well)) continue;
-      tried.add(well);
-      const other = labOf.get(well);
-      if (other == null || give(other, tried)) {
-        labOf.set(well, lab);
-        return true;
-      }
-    }
-    return false;
-  };
-  let pairs = 0;
-  labs.forEach((_, lab) => {
-    if (give(lab, new Set())) pairs++;
-  });
-  return pairs;
-}
-
-/**
- * The deposits that came with the board's expansion number `from` (0-based: 1 is the second expansion) and
- * every later one. Expansions add their deposits at the end of g.deposits, EXPANSION_DEPOSITS[i] for the i-th.
- */
-export function depositsFrom(g: Game, from: number): Set<number> {
-  let n = 0;
-  for (let i = from; i < g.board.expansions; i++) n += EXPANSION_DEPOSITS[i % EXPANSION_DEPOSITS.length].length;
-  return new Set(n > 0 ? g.deposits.slice(-n).map((d) => d.id) : []);
-}
-
-/** Is there a deposit with no Drill on it that the player could put one on, or a Drill that has not been wired to anything yet? */
-const wellToPlace = (g: Game) => g.deposits.some((d) => has(g, MATERIALS[d.mat].tech) && !g.nodes.some((n) => n.depositId === d.id))
-  || g.nodes.some((n) => n.type === 'well' && outWires(g, n) === 0);
-
 /** Can what leaves this port reach a Lab: straight, or through Routers, Mergers and Silos? */
 function reachesLab(g: Game, from: number, port: number, seen = new Set<number>()): boolean {
   const c = graph(g);
@@ -289,13 +299,6 @@ function reachesLab(g: Game, from: number, port: number, seen = new Set<number>(
   }
   return false;
 }
-
-/** A Sand Drill that feeds no machine: one a Refiner could be built from. */
-export const rawGlintWell = (g: Game) =>
-  g.nodes.find((n) => n.type === 'well' && n.material === 'glint' && !(graph(g).outs.get(n.id)?.[0] ?? []).some((w) => { const t = graph(g).byId.get(w.to); return !!t && isMachine(t); })) ?? null;
-
-/** Does the player hold the Data a tech costs (or the tech itself)? */
-const dataFor = (g: Game, id: string, tier: 'a' | 'b' | 'g') => has(g, id) || g.data[tier] >= (TECHS[id].cost[tier] ?? 0);
 
 /** β the goals between here and "Build a Fabricator" still pay (counted toward Fabrication's β). */
 const betaToCome = (g: Game) => {
@@ -331,32 +334,6 @@ function routerFavours(g: Game, n: GNode): boolean {
 /** A Router in use that sends more to a Lab than to a Market: a bigger ratio weight, or an earlier priority slot. */
 export function routerFavoursLab(g: Game): boolean {
   return g.nodes.some((n) => n.type === 'router' && inWires(g, n) > 0 && routerFavours(g, n));
-}
-
-/**
- * "Route more to a Lab than to the Market", judged by what the Router really sends: a Router that favours a
- * Lab (routerFavoursLab) whose own wires into Markets do not carry more than its own wires into Labs. A Router
- * set toward a Lab that is full spills to the Market, and then the goal is not met: it used to be, and the card
- * said "more to a Lab" while more went to the Market. (A Router that nothing passes through yet, because the
- * machines on the same port take it all, is judged by how it is set.)
- */
-export function routerSendsLab(g: Game): boolean {
-  if (!routerFavoursLab(g)) return false;
-  const c = graph(g);
-  for (const n of g.nodes) {
-    if (n.type !== 'router' || !inWires(g, n)) continue;
-    const wires = c.outs.get(n.id)?.[0] ?? [];
-    const to = (w: Wire) => c.byId.get(w.to)?.type;
-    if (!wires.some((w) => to(w) === 'lab') || !wires.some((w) => to(w) === 'market')) continue;
-    let lab = 0;
-    let market = 0;
-    for (const w of wires) {
-      if (to(w) === 'lab') lab += w.rate;
-      else if (to(w) === 'market') market += w.rate;
-    }
-    if (market <= lab + 1e-3 && routerFavours(g, n)) return true;
-  }
-  return false;
 }
 
 /**
@@ -478,28 +455,6 @@ const cheapestWellSpeed = (g: Game) => {
 const hint = (mouse: string, touch: string = mouse) => ({ mouse, touch });
 
 /**
- * The pairs of "a Drill and a Lab of its own" in the strict sense: a Lab fed by Drills alone, whose Drills send
- * nothing anywhere else. For each: its Drills, its Lab, what the pair studies a second now and at no Speed at
- * all, and whether a level of Speed has raised it (`sped`). "Buy Speed on each Drill with a Lab of its own,
- * and on that Lab when it is full" is done when every pair is sped.
- */
-export function ownPairs(g: Game): { lab: GNode; wells: GNode[]; rate: number; base: number; sped: boolean }[] {
-  const c = graph(g);
-  const out: { lab: GNode; wells: GNode[]; rate: number; base: number; sped: boolean }[] = [];
-  for (const lab of g.nodes) {
-    const fed = lab.type === 'lab' ? c.ins.get(lab.id) ?? [] : [];
-    const wells = fed.map((w) => c.byId.get(w.from)!).filter((n) => n?.type === 'well');
-    if (!fed.length || wells.length !== fed.length) continue;
-    if (!wells.every((w) => (c.outs.get(w.id) ?? []).flat().every((x) => x.to === lab.id))) continue;
-    const give = (lv: number | null) => wells.reduce((s, w) => s + wellRate(lv == null ? w : { ...w, lv: { ...w.lv, speed: lv } }), 0);
-    const take = (lv: number | null) => labRate(g, lv == null ? lab : { ...lab, lv: { ...lab.lv, speed: lv } });
-    const rate = Math.min(give(null), take(null));
-    const base = Math.min(give(0), take(0));
-    out.push({ lab, wells, rate, base, sped: rate > base + 1e-6 });
-  }
-  return out;
-}
-/**
  * "You have the β you need: cut the wire from the Circuit Assembler to the Lab." Goal 17 had the player study
  * Circuit. Fabrication's β is in hand once that and the rewards of goals 19 and 20 are counted, and from then on
  * every Circuit in a Lab is 20¢ not earned toward the Screen Assembler and the Fabricator. This is the one place
@@ -514,34 +469,6 @@ const CUT_GLYPH: Meanwhile = {
   done: (g) => studyWires(g, 'glyph').length === 0,
   when: (g) => sellGlyphNow(g),
   cuts: (g) => (sellGlyphNow(g) ? studyWires(g, 'glyph').map((w) => w.id) : []),
-};
-
-const GLINT_LAB: Meanwhile = {
-  id: 'glint-lab',
-  text: hint('Build a Lab from the port of the Sand Drill that only sells: studied Sand is 1 α each.'),
-  done: (g) => g.nodes.some((n) => n.type === 'well' && n.material === 'glint' && reachesLab(g, n.id, 0)),
-  when: (g) => has(g, 'R1') && (g.nodes.some((n) => n.type === 'well' && n.material === 'glint' && reachesLab(g, n.id, 0)) || !!rawGlintWell(g)),
-};
-
-/**
- * "Expand the board again and give both new deposits a Drill and a Lab of its own": the second expansion, on
- * "Make your first Circuit" once the first one's deposits have theirs, and on "Make and sell Silicon" for
- * whatever of it is still to do (the credits for the Assembler come first: see lineAdvice). It says "Expand"
- * only while the expansion is its next step: once the board has grown, or wherever a deposit is waiting (a
- * Circuit card that ended between the expansion and its pairs), it reads "Give each free deposit a Drill and a Lab of
- * its own." (It used to say "Expand the board again" on the Silicon card, where its Show me then pointed at a Lab
- * and a free deposit, and the line was ticked with no expansion made.)
- */
-const EXPAND_LABS: Meanwhile = {
-  id: 'expand-labs',
-  text: hint('Expand the board again and give both new deposits a Drill and a Lab of its own.'),
-  say: (g) => {
-    const spot = lineSpot(g);
-    return spot && 'expand' in spot ? null : hint('Give each free deposit a Drill and a Lab of its own.');
-  },
-  // Two such pairs on the second expansion's deposits, or five in all.
-  done: (g) => wellLabs(g, depositsFrom(g, 1)) >= 2 || wellLabs(g) >= 5,
-  when: (g) => has(g, 'R1'),
 };
 
 /**
@@ -619,33 +546,27 @@ function findOutrun(g: Game): { labs: TuneLabs | null; level: TuneLevel | null }
   return { labs, level };
 }
 
-/** Does this Drill send what it gives to Labs and nowhere else? */
+/** Does this Drill send what it gives to Labs and nowhere else, or to nothing at all (one that has just been placed)? */
 const feedsLabsOnly = (g: Game, n: GNode) => {
   const ws = graph(g).outs.get(n.id)?.[0] ?? [];
-  return n.type === 'well' && !!n.material && ws.length > 0 && ws.every((w) => typeOf(g, w.to) === 'lab');
+  return n.type === 'well' && !!n.material && ws.every((w) => typeOf(g, w.to) === 'lab');
 };
 
-/** Refiners built on a Drill that a Lab studies too: what the Fabricator card's tune-up has the player build. */
-export function turnedRefiners(g: Game): GNode[] {
-  const c = graph(g);
-  return g.nodes.filter((n) => n.type === 'refiner' && !!recipeOf(n) && (c.ins.get(n.id) ?? []).some((w) => {
-    const from = c.byId.get(w.from);
-    return !!from && from.type === 'well' && (c.outs.get(from.id)?.[0] ?? []).some((x) => typeOf(g, x.to) === 'lab');
-  }));
-}
-
 /**
- * The next gesture of "build a Refiner from a Drill that only feeds a Lab, and sell its goods", looking at the
- * board only. First what a Refiner built that way still lacks: its product wired to the Market (`sell`), then a
- * Dump for a by-product (`dump`: the Tar of a Plastic Refiner). Then the next Drill (`well`): one that sends what it
- * gives to Labs and nowhere else, for which a Refiner has a recipe, which gives at least what keeps that Refiner
- * flowing, and whose product the Markets would still buy at full price (so nothing here ever sells over demand).
- * The dearest product first. `gives` is that product, in items a second. null when there is nothing (more) to do.
+ * The next gesture of "one more line of something that sells", looking at the board only. First what a Refiner
+ * still lacks: its product wired to the Market (`sell`), then a Dump for a by-product (`dump`: the Tar of a Plastic
+ * Refiner). Then the next Drill (`well`): one that feeds no machine and sells nothing (it sends what it gives to Labs
+ * and nowhere else, or has just been placed), for which a Refiner has a recipe, which gives at least what keeps that
+ * Refiner flowing, and whose product the Markets would still buy at full price (so nothing here ever sells over
+ * demand). The dearest product first. Then, by the same test, a deposit that stands free (`deposit`): a Drill there,
+ * and the Refiner follows as a `well` step. `gives` is the product, in items a second. null when there is nothing
+ * (more) to do.
  */
 export type RefineStep =
   | { sell: GNode; port: number; mat: MatId; market: GNode }
   | { dump: GNode; port: number; mat: MatId }
-  | { well: GNode; recipe: Recipe; out: MatId; gives: number };
+  | { well: GNode; recipe: Recipe; out: MatId; gives: number }
+  | { deposit: number; raw: MatId; recipe: Recipe; out: MatId; gives: number };
 
 export function refineNext(g: Game): RefineStep | null {
   const m = readsAt(g);
@@ -657,7 +578,8 @@ function findRefine(g: Game): RefineStep | null {
   const c = graph(g);
   const market = g.nodes.find((x) => x.type === 'market') ?? null;
   if (!market || !nodeUnlocked(g, 'refiner')) return null;
-  for (const n of turnedRefiners(g)) {
+  for (const n of g.nodes) {
+    if (n.type !== 'refiner' || !recipeOf(n) || !(c.ins.get(n.id) ?? []).length) continue;
     const outs = recipeOf(n)!.outputs;
     for (let port = 0; port < outs.length; port++) {
       const mat = outs[port][0];
@@ -666,20 +588,31 @@ function findRefine(g: Game): RefineStep | null {
       if (nodeUnlocked(g, 'void')) return { dump: n, port, mat };
     }
   }
+  /** A Refiner on a Drill of this raw material that brings up `rate` a second: what it would make, if it would flow and its product still sells at full price. */
+  const line = (raw: MatId, rate: number): { recipe: Recipe; out: MatId; gives: number } | null => {
+    const recipe = pickRecipe(g, 'refiner', [raw]);
+    if (!recipe || recipe.inputs.length !== 1) return null;
+    const takes = recipe.inputs[0][1] / recipe.time;
+    if (rate < RULES.flow.flowing * takes) return null;
+    const [out, qty] = recipe.outputs[0];
+    const gives = (Math.min(rate, takes) / recipe.inputs[0][1]) * qty;
+    return (g.soldRate[out] ?? 0) + gives > demandRate(g, out) ? null : { recipe, out, gives };
+  };
+  const worth = (x: { out: MatId; gives: number }) => x.gives * valueOf(g, x.out);
   let best: { well: GNode; recipe: Recipe; out: MatId; gives: number } | null = null;
   for (const n of g.nodes) {
     if (!feedsLabsOnly(g, n)) continue;
-    const recipe = pickRecipe(g, 'refiner', [n.material!]);
-    if (!recipe || recipe.inputs.length !== 1) continue;
-    const takes = recipe.inputs[0][1] / recipe.time;
-    const rate = wellRate(n);
-    if (rate < RULES.flow.flowing * takes) continue;
-    const [out, qty] = recipe.outputs[0];
-    const gives = (Math.min(rate, takes) / recipe.inputs[0][1]) * qty;
-    if ((g.soldRate[out] ?? 0) + gives > demandRate(g, out)) continue;
-    if (!best || gives * valueOf(g, out) > best.gives * valueOf(g, best.out) + 1e-9) best = { well: n, recipe, out, gives };
+    const l = line(n.material!, wellRate(n));
+    if (l && (!best || worth(l) > worth(best) + 1e-9)) best = { well: n, ...l };
   }
-  return best;
+  if (best) return best;
+  // A deposit that stands free: a Drill there (as it comes, with no Speed), and its Refiner after it.
+  let spot: { deposit: number; raw: MatId; recipe: Recipe; out: MatId; gives: number } | null = null;
+  for (const d of freeDeposits(g)) {
+    const l = line(d.mat, wellRate({ material: d.mat, lv: { speed: 0 } } as GNode));
+    if (l && (!spot || worth(l) > worth(spot) + 1e-9)) spot = { deposit: d.id, raw: d.mat, ...l };
+  }
+  return spot;
 }
 
 /** The Fabricator still has to be saved for: none stands, and its price is not in hand. */
@@ -692,11 +625,12 @@ const savingForFabricator = (g: Game) => count(g, 'fabricator') === 0 && g.credi
  *    at once: a Drill that feeds one machine and nothing else now makes more than that machine takes, stands blocked
  *    a fifth of the time, and Flow (which every sale is paid by) is down. A level of Speed on the machine puts it
  *    right (outrun); where it is Labs that a Drill outruns, and Lab Speed is not researched, that research does.
- *  - "You have enough α: build a Refiner from a Drill that only feeds a Lab, and sell its goods." Fabrication is the
- *    last research of the demo and its α is in hand: a Drill that a Lab studies earns nothing toward the Fabricator.
- *    A Refiner built from its port takes what it needs first (machines are fed before Labs), the Lab keeps the
- *    rest, and the Copper, Plastic or Glass is sold: nothing raw, and nothing over its demand (refineNext). Its product
- *    is wired to the Market, and a Plastic Refiner's Tar gets a Dump.
+ *  - "Place a Drill on the free Sand deposit (27¢), then build a Refiner from it." One more line of something that
+ *    still sells at full price: the plots the growth goals had the player buy brought deposits nobody has used, and
+ *    a Drill and a Refiner there pay for themselves inside this wait. So does a Refiner on a Drill that only feeds a
+ *    Lab (Fabrication is the last research of the demo and its α is in hand: machines are fed before Labs, and the
+ *    Lab keeps the rest). Nothing raw is sold, and nothing over its demand (refineNext). The product is wired to
+ *    the Market, and a Plastic Refiner's Tar gets a Dump.
  * A step that costs credits is only on the card while what it brings in pays its price back before the Fabricator
  * can be bought (tuneState in src/advice.ts): one that would make the Fabricator later is not said. When no step
  * is left that pays, the line is ticked if the player has done some of it, and leaves the card if not; it does not
@@ -796,7 +730,28 @@ function flowGoalView(g: Game): FlowGoalView {
 
 // ---------- the chain ----------
 
-/** Ordered goals: 22 for the demo, then free play. */
+/**
+ * A growth goal: "Make `rate` of a material a second". Between two new things the card asks for more of what the
+ * player already makes, as a rate, and whatever brings the rate up counts: more Drills, more machines, Speed, more
+ * land. Its line is one way there, a gesture at a time, worked out from the board (growNext in src/advice.ts): the
+ * card keeps it with the how, for whoever asks or has not got anywhere for a while. `tune`: the way it offers is
+ * Speed, not more land (the goal that brings upgrades in).
+ */
+function growth(id: string, mat: MatId, rate: number, words: string, tune = false): Pick<Goal, 'done' | 'progress' | 'meanwhile'> {
+  const line: Meanwhile = {
+    id, way: true, grow: { mat, rate, ...(tune ? { tune: true } : {}) },
+    text: hint(words),
+    say: growLineWords,
+    done: (g) => makes(g, mat, rate),
+  };
+  return { done: (g) => makes(g, mat, rate), progress: (g) => makingProgress(g, mat, rate), meanwhile: [line] };
+}
+
+/**
+ * Ordered goals: 25 for the demo, then free play. A new thing arrives only after the player has grown what they
+ * have: the goals built by growth() stand between the chapters, and the claim of one opens the next step of the
+ * Processing spine for research (GoalReward.opens).
+ */
 export const GOALS: Goal[] = [
   {
     id: 'wire-market', title: 'Sell your Sand',
@@ -845,34 +800,50 @@ export const GOALS: Goal[] = [
       'Tap the Refiner\'s port, then tap the Market so its Glass gets sold.',
     ),
     done: (g) => (g.sold.shard ?? 0) >= 1,
-    reward: { credits: 70, techs: ['R1'] },
+    reward: { credits: 70 },
     big: true,
   },
   {
-    id: 'upgrade-well', title: 'Speed up a Drill',
-    why: 'Every machine can be made better. A faster Drill brings up more Sand: the Refiner takes what it needs, the rest is sold.',
+    // The first growth goal: before anything new arrives, the line the player has is made wider. One Refiner takes
+    // one Drill's Sand, and the second Drill still sells its Sand raw: a Refiner on it is the whole of the goal.
+    id: 'grow-shard', title: 'Make 1 Glass a second',
+    why: 'One Refiner makes a Glass every two seconds, and half your Sand still sells raw. A second Refiner doubles your Glass.',
     hint: hint(
-      'Click a Drill and buy a Speed upgrade.',
-      'Tap a Drill and buy a Speed upgrade.',
+      'Drag from the port of the Drill that only sells into empty space, pick Refiner, and wire the new Refiner to the Market.',
+      'Tap the port of the Drill that only sells, tap an empty spot, pick Refiner, and wire the new Refiner to the Market.',
     ),
-    done: (g) => g.nodes.some((n) => n.type === 'well' && n.lv.speed >= 1),
-    ...buying((g) => {
-      const well = g.nodes.find((n) => n.type === 'well');
-      return well ? price(upgradeCost(well, 'speed'), 'the Speed upgrade') : null;
-    }),
-    reward: { credits: 50 },
+    ...growth('grow-shard', 'shard', 1, 'More Refiners, each with Sand of its own: any way that gets you there counts.'),
+    // (Enough for the four levels of Speed the next card's own way takes: through the Lab, what the goals have paid
+    // covers what the cards ask the player to buy, whatever has been sold. tests/playthrough.test.ts.)
+    reward: { credits: 125 },
+  },
+  {
+    // Then the same line is made faster: this is where upgrades come in (a card's inspector lists them from here on:
+    // src/ui/reveal.ts). It was a card of its own, "Speed up a Drill", straight after the first Glass: the Drill
+    // then brought up more than its Refiner took, and nothing the player was looking at moved. Here Speed is the
+    // way to a number, and both halves of the lesson are in it: a faster Refiner waits for Sand, a faster Drill for
+    // its Refiner. The Lab comes with the claim: the first new thing after the Refiner, and it has been earned.
+    id: 'tune-shard', title: 'Make 1.2 Glass a second',
+    why: 'Every machine can be made faster. But a faster Refiner needs more Sand, and a faster Drill needs a Refiner that keeps up.',
+    hint: hint(
+      'Click a Refiner and buy Speed, then buy Speed on the Drill that feeds it. Do the same for the other pair.',
+      'Tap a Refiner and buy Speed, then buy Speed on the Drill that feeds it. Do the same for the other pair.',
+    ),
+    ...growth('tune-shard', 'shard', 1.2, 'Faster Refiners, and faster Drills to feed them: any way that gets you there counts.', true),
+    reward: { credits: 100, techs: ['R1'] },
+    big: true,
   },
   {
     id: 'feed-lab', title: 'Study Glass in a Lab',
     why: 'A Lab studies what it is given and turns it into Data instead of credits. Data is what new technology is bought with.',
     hint: hint(
-      'Drag from the Refiner\'s port into empty space and pick Lab.',
-      'Tap the Refiner\'s port, tap an empty spot and pick Lab.',
+      'Drag from a Refiner\'s port into empty space and pick Lab.',
+      'Tap a Refiner\'s port, tap an empty spot and pick Lab.',
     ),
-    howNow: (g) => (unfed(g, 'lab') ? hint('Drag from the Refiner\'s port to the Lab.', 'Tap the Refiner\'s port, then tap the Lab.') : null),
+    howNow: (g) => (unfed(g, 'lab') ? hint('Drag from a Refiner\'s port to the Lab.', 'Tap a Refiner\'s port, then tap the Lab.') : null),
     done: (g) => g.data.a > 0,
     ...buying((g) => (count(g, 'lab') ? null : price(nodeCost(g, 'lab'), THE.lab))),
-    reward: { a: 15 },
+    reward: { a: 20 },
     big: true,
   },
   {
@@ -904,7 +875,36 @@ export const GOALS: Goal[] = [
       'Wire the Refiner\'s Plastic port to the Market, then tap its Tar port, tap an empty spot and pick Dump.',
     ),
     done: siltHandled,
-    reward: { a: 20 },
+    // Orders come with it: two refined things are selling now, and the next card is the first order.
+    reward: { a: 20, unlock: 'orders' },
+  },
+  {
+    id: 'first-order', title: 'Fill your first order',
+    why: 'Buyers ask for things you already sell. Deliver what an order asks for and it pays extra, in credits and in Data.',
+    hint: hint(
+      'An order counts items sold at any Market: send enough of what it asks for there, then click Claim on the order.',
+      'An order counts items sold at any Market: send enough of what it asks for there, then tap Claim on the order.',
+    ),
+    done: (g) => g.stats.ordersFilled >= 1,
+    progress: (g) => (g.order ? [Math.floor(g.order.got + 1e-9), g.order.need, MATERIALS[g.order.mat].name] : null),
+    // Credits for what the next card asks the player to buy: the board's first expansion. (Routing used to come with
+    // it, and a card after it that had the player build a Router: the Router is a research of its own now, for
+    // whoever wants one. It used to pay Market Lens before that: price gauges for a rule that does not bite yet.)
+    reward: { credits: 200 },
+  },
+  {
+    // Land comes in where it is wanted: the one Oil deposit is in use, and the board's first new plot brings another
+    // (and a Sand deposit, for whoever wants a third Glass line). It was a card of its own, "Open up more land",
+    // five goals after the Oil: a plot bought because the card said so. The claim opens Ore Deposits for research.
+    id: 'grow-ink', title: 'Make 1 Plastic a second',
+    why: 'Your one Oil deposit is in use. A new plot of land brings another, and room for a second line beside the first.',
+    hint: hint(
+      'Click Expand board at the edge of the map. Put a Drill on the new Oil deposit, build a Refiner from its port, sell the Plastic and dump the Tar.',
+      'Tap Expand board at the edge of the map. Put a Drill on the new Oil deposit, build a Refiner from its port, sell the Plastic and dump the Tar.',
+    ),
+    ...growth('grow-ink', 'ink', 1, 'More Oil, more Refiners or faster ones: any way that gets you there counts.'),
+    reward: { a: 120, opens: ['P3'] },
+    big: true,
   },
   {
     id: 'make-spark', title: 'Make and sell Copper',
@@ -916,89 +916,10 @@ export const GOALS: Goal[] = [
     // what is selling, the Copper most of all) waited on a Copper nobody sold.
     done: (g) => (g.sold.spark ?? 0) >= 1,
     ...buying((g) => rawLine(g, 'P3', 'ember', 'spark')),
-    // The first long wait for α, and the Lab studies only half the Glass. Plastic is the dearest thing on the board.
-    // Then the credits that pile up meanwhile: the second Sand Drill sells raw Sand at 1¢, and a Refiner of its
-    // own with a Lab of its own turns it into Glass studied for 3 α. (Into the Lab the player has, it would fill
-    // that Lab and leave no room for the Copper and the Circuit the next cards send there.)
-    meanwhile: [
-      {
-        id: 'ink-lab',
-        // (An outcome, as the cards are: its Show me acts the wire out.)
-        text: hint('Study Plastic as well as selling it: in a Lab each is worth 3 α.'),
-        done: (g) => studyWires(g, 'ink').length > 0,
-        when: (g) => count(g, 'lab') > 0 && g.nodes.some((n) => n.recipe === 'ink'),
-      },
-      GLINT_LAB,
-    ],
-    reward: { a: 25, unlock: 'orders' },
-    big: true,
-  },
-  {
-    id: 'first-order', title: 'Fill your first order',
-    why: 'Buyers ask for things you already sell. Deliver what an order asks for and it pays extra, in credits and in Data.',
-    hint: hint(
-      'An order counts items sold at any Market: send enough of what it asks for there, then click Claim on the order.',
-      'An order counts items sold at any Market: send enough of what it asks for there, then tap Claim on the order.',
-    ),
-    done: (g) => g.stats.ordersFilled >= 1,
-    progress: (g) => (g.order ? [Math.floor(g.order.got + 1e-9), g.order.need, MATERIALS[g.order.mat].name] : null),
-    // Routing, and credits for what the next two cards ask the player to buy with it: a Router and the board's
-    // first expansion. (It used to pay Market Lens: price gauges for a rule that does not bite before the Phone.)
-    reward: { credits: 200, techs: ['L1'] },
-  },
-  {
-    id: 'route-lab', title: 'Route more to a Lab than to the Market',
-    why: 'Sold, a thing earns credits; studied, it earns Data. A Router splits a stream, and you set how much goes each way.',
-    // The Copper Refiner by name: Copper is the one refined material nothing studies yet (Glass has the Lab of
-    // goal 7, Plastic the "while you wait" line of goal 11), so that is where a Router toward a Lab pays.
-    hint: hint(
-      'Build a Router from the Copper Refiner\'s port and wire it to a Lab and to a Market, then select the Router and press Favour on the Lab\'s wire.',
-      'Build a Router from the Copper Refiner\'s port and wire it to a Lab and to a Market, then tap the Router and tap Favour on the Lab\'s wire.',
-    ),
-    // Judged by what the Router sends, not only by how it is set: a Router turned toward a full Lab spills to the
-    // Market, and the card said "more to a Lab" while more went to the Market.
-    done: routerSendsLab,
-    ...buying((g) => (count(g, 'router') ? null : price(nodeCost(g, 'router'), THE.router))),
-    reward: { a: 30 },
-  },
-  {
-    id: 'expand', title: 'Open up more land',
-    why: 'Your deposits are nearly all in use. A new plot of land brings new ones, and room to build.',
-    hint: hint(
-      'Click Expand board at the edge of the map to reveal new deposits.',
-      'Tap Expand board at the edge of the map to reveal new deposits.',
-    ),
-    done: (g) => g.board.expansions >= 1,
-    ...buying((g) => price(expansionCost(g), 'the expansion')),
-    reward: { credits: 60 },
-  },
-  {
-    id: 'make-glyph', title: 'Make your first Circuit',
-    why: `A Circuit is Plastic and Copper put together, and sells for ${MATERIALS.glyph.value}¢. That takes an Assembler: a machine with two inputs.`,
-    recipe: 'glyph',
-    // Where the Assembler is built from is said: dragged out of the Plastic port it arrives wired, set to Circuit.
-    // The Market comes before the Copper: the goal completes with the first Circuit, the card then shows Claim
-    // and no hint, and a player who had still to "sell its Circuit" never read that again (the Circuit sat
-    // unsold until a tip said so, six minutes on).
-    hint: hint('Research Assembly, build an Assembler from the Refiner\'s Plastic port, wire it to the Market, then wire Copper into it to make a Circuit.'),
-    done: (g) => made(g, 'glyph'),
-    ...buying((g) => techThenNode(g, 'P4', 'assembler', 'glyph')),
-    // The board has just grown by two deposits. A Drill with a Lab of its own is 1 α a second for good: wired
-    // into the Lab the player already has it would only push the dearer Glass and Plastic (and later Circuit) aside.
-    // Both deposits: with one pair this wait was still four and a half minutes for a player who gets no tip.
-    // Then the board grows again (the second expansion, 500¢, which the credits saved meanwhile pay for) and
-    // its two deposits get the same: two more α a second, where an upgrade would give a quarter.
-    meanwhile: [
-      {
-        id: 'well-labs',
-        text: hint('Give each new deposit a Drill and a Lab built from its port: each pair is 1 α a second.'),
-        // Two such pairs on the first expansion's deposits, or three in all (the Sand Drill of the Copper card's line is one).
-        done: (g) => wellLabs(g, depositsFrom(g, 0)) >= 2 || wellLabs(g) >= 3,
-        when: (g) => wellLabs(g, depositsFrom(g, 0)) >= 2 || wellLabs(g) >= 3 || wellToPlace(g),
-      },
-      EXPAND_LABS,
-    ],
-    reward: { credits: 150, unlock: 'flow' },
+    // The Flow meter comes with it. An Ore Drill brings up less than a Sand Drill does (0.8 a second), so the Copper
+    // Refiner built on it runs short from its first second: the one producer on the board that does not run flat
+    // out, and what the next card is about.
+    reward: { a: 25, unlock: 'flow' },
     big: true,
   },
   {
@@ -1022,11 +943,40 @@ export const GOALS: Goal[] = [
           'Tap the Flow ring to find what holds Flow back, and give it what it lacks.',
         ),
         say: flowLineWords,
-        done: (g) => { const f = flowCount(g); return f.of > 0 && f.running === f.of; },
-        when: (g) => { const f = flowCount(g); return (f.of > 0 && f.running === f.of) || !!flowFix(g); },
+        // (Not while something just built is still to count: the meter comes with the first Copper, a quarter of a
+        // minute after its Ore Drill, and the line stood ticked until that Drill counted and was found too slow.)
+        done: (g) => { const f = flowCount(g); return f.of > 0 && f.running === f.of && !flowUnsettled(g); },
+        when: (g) => { const f = flowCount(g); return (f.of > 0 && f.running === f.of && !flowUnsettled(g)) || !!flowFix(g); },
       },
     ],
     reward: { credits: 150 },
+  },
+  {
+    // The Copper line, doubled: a second plot (it brings an Ore deposit), a second Drill and Refiner. The new Ore
+    // Drill is as slow as the first was, and this time no card names the fix: the player has done it once, on the
+    // Flow card, and the Refiner says what it is short of. The claim opens Assembly.
+    id: 'grow-spark', title: 'Make 1 Copper a second',
+    why: 'A Circuit will take a Copper each, and one Refiner makes one every two seconds. A second Ore line doubles it.',
+    hint: hint(
+      'Expand the board again for a second Ore deposit, build a Drill and a Refiner there and sell the Copper. An Ore Drill needs Speed to keep a Refiner busy.',
+    ),
+    ...growth('grow-spark', 'spark', 1, 'More Ore, more Refiners or faster ones: any way that gets you there counts.'),
+    reward: { a: 400, opens: ['P4'] },
+    big: true,
+  },
+  {
+    id: 'make-glyph', title: 'Make your first Circuit',
+    why: `A Circuit is Plastic and Copper put together, and sells for ${MATERIALS.glyph.value}¢. That takes an Assembler: a machine with two inputs.`,
+    recipe: 'glyph',
+    // Where the Assembler is built from is said: dragged out of the Plastic port it arrives wired, set to Circuit.
+    // The Market comes before the Copper: the goal completes with the first Circuit, the card then shows Claim
+    // and no hint, and a player who had still to "sell its Circuit" never read that again (the Circuit sat
+    // unsold until a tip said so, six minutes on).
+    hint: hint('Research Assembly, build an Assembler from a Refiner\'s Plastic port, wire it to the Market, then wire Copper into it to make a Circuit.'),
+    done: (g) => made(g, 'glyph'),
+    ...buying((g) => techThenNode(g, 'P4', 'assembler', 'glyph')),
+    reward: { credits: 150 },
+    big: true,
   },
   {
     id: 'study-glyph', title: 'Study Circuits for β',
@@ -1040,6 +990,19 @@ export const GOALS: Goal[] = [
     reward: { a: 50 },
   },
   {
+    // The one growth goal with two ways that cost about the same: a second Assembler on the second Plastic line (it
+    // is what the two lines of Plastic and of Copper were widened for), or four levels of Speed on the first.
+    // The claim opens Quartz Deposits.
+    id: 'grow-glyph', title: 'Make 0.6 Circuits a second',
+    why: 'A Phone will take two Circuits. A second Assembler doubles what you make; Speed on the one you have gets there too.',
+    hint: hint(
+      'Build a second Assembler from the other Refiner\'s Plastic port, wire it to the Market and wire Copper into it. Or buy Speed on the first, four times.',
+    ),
+    ...growth('grow-glyph', 'glyph', 0.6, 'More Assemblers or faster ones: any way that gets you there counts.'),
+    reward: { a: 600, opens: ['P5'] },
+    big: true,
+  },
+  {
     id: 'make-mist', title: 'Make and sell Silicon',
     why: 'Silicon is refined from Quartz, the last deposit to open. Silicon and Glass together make a Screen.',
     recipe: 'mist',
@@ -1047,38 +1010,11 @@ export const GOALS: Goal[] = [
     // On the first Silicon sold, for the same reason as "Make and sell Copper".
     done: (g) => (g.sold.mist ?? 0) >= 1,
     ...buying((g) => rawLine(g, 'P5', 'breeze', 'mist')),
-    // The dearest research so far, and the Assembler now takes most of the Plastic and Copper the Lab was studying.
-    meanwhile: [
-      // What was left of it on "Make your first Circuit", where the credits for the Assembler come first.
-      // (A third expansion here was tried: its Oil deposit needs a Lab of 400¢ more, the research often came
-      // first, and the line's 1,250¢ then bought a plot that nothing stood on.)
-      EXPAND_LABS,
-      // Then a level of Speed on each Drill with a Lab of its own, and on that Lab where the Lab is what holds the
-      // pair back: the pair studies a quarter more. By hand, a press each: the card after next hands over the
-      // button that does a kind at once.
-      {
-        id: 'speed-pairs',
-        text: hint('Buy Speed on each Drill with a Lab of its own, and on that Lab when it is full.'),
-        done: (g) => { const p = ownPairs(g); return p.length > 0 && p.every((x) => x.sped); },
-        when: (g) => ownPairs(g).length >= 2,
-      },
-      // Then Lab Speed and Deep Analysis: every Lab gives half as much again, for the rest of this wait and every
-      // one after it. The β it costs comes from the Circuit the card before had the player study; the Speed line comes
-      // first so that it is in hand by then. (A fast player buys Deep Analysis too, but after Quartz Deposits: this
-      // line is what the card-following player has instead of that player's upgrades. It is there for the pacing
-      // rule: see the tech prices in src/content.ts.)
-      {
-        id: 'deep-analysis',
-        text: hint('Research Lab Speed, then Deep Analysis: every item studied gives half as much Data again.'),
-        done: (g) => has(g, 'R3'),
-        when: (g) => has(g, 'R1'),
-      },
-    ],
     reward: { a: 50 },
   },
   {
     id: 'make-prism', title: 'Make your first Screen',
-    why: `A Screen is two Glass and one Silicon, and sells for ${MATERIALS.prism.value}¢: a second Assembler, fed by two of your lines.`,
+    why: `A Screen is two Glass and one Silicon, and sells for ${MATERIALS.prism.value}¢: another Assembler, fed by two of your lines.`,
     recipe: 'prism',
     // The Market before the Glass, for the same reason as on "Make your first Circuit".
     hint: hint('Build another Assembler from the Silicon Refiner\'s port, wire it to the Market, then wire Glass into it to make a Screen.'),
@@ -1104,6 +1040,19 @@ export const GOALS: Goal[] = [
     done: bulkSince,
     ...buying((g) => (isFinite(cheapestWellSpeed(g)) ? price(cheapestWellSpeed(g), 'the upgrade') : null)),
     reward: { credits: 1200, b: 60 },
+  },
+  {
+    // The last growth goal, and the Screen line's: a second Screen Assembler, which the Glass has been there for
+    // since "Make 1.2 Glass a second" and the Silicon since the press of Upgrade all (a Quartz Drill is as slow as
+    // an Ore Drill, and the card before has just put that right). The claim opens Fabrication.
+    id: 'grow-prism', title: 'Make 0.5 Screens a second',
+    why: 'One Assembler makes a Screen every four seconds, and your Glass and Silicon would do for two. A Phone will take a Screen.',
+    hint: hint(
+      'Build a second Assembler from a Glass Refiner\'s port, wire it to the Market and wire Silicon into it. Or buy Speed on the first, and feed it.',
+    ),
+    ...growth('grow-prism', 'prism', 0.5, 'More Assemblers or faster ones, and the Glass and Silicon to feed them: any way counts.'),
+    reward: { a: 400, opens: ['P7'] },
+    big: true,
   },
   {
     id: 'build-fabricator', title: 'Build a Fabricator',
@@ -1205,7 +1154,10 @@ export const MAIN_GOALS = GOALS.filter((x) => !x.free).length;
 export const goalById = (id: string) => GOALS.find((x) => x.id === id) ?? null;
 
 /** The active goal, or null when every goal has been claimed. */
-export const activeGoal = (g: Game): Goal | null => GOALS[g.goal.i] ?? null;
+export function activeGoal(g: Game): Goal | null {
+  if (g.chain !== CHAIN) migrateChain(g);
+  return GOALS[g.goal.i] ?? null;
+}
 
 export interface GoalView {
   goal: Goal;
@@ -1253,6 +1205,8 @@ export interface GoalView {
   meanwhile?: {
     text: string; done: boolean; step?: number; of?: number;
     required?: boolean;
+    /** A growth goal's line (Meanwhile.way): one way to its rate, not the only one. The card says "One way", and keeps it with the how. */
+    way?: boolean;
     held?: { cost: number; sym: '¢' | 'α' | 'β' | 'γ'; eta: number };
   };
   /**
@@ -1299,6 +1253,7 @@ function lineView(g: Game, at: { line: Meanwhile; step: number; of: number }, to
     text: lineText(g, at.line, touch), done,
     ...(at.of > 1 ? { step: at.step, of: at.of } : {}),
     ...(at.line.required ? { required: true } : {}),
+    ...(at.line.way ? { way: true } : {}),
     ...(held ? { held } : {}),
   };
 }
@@ -1435,7 +1390,7 @@ function hintFocus(g: Game, id: string): number[] {
   switch (id) {
     case 'wire-market': return ids(wells[0], market);
     case 'wire-all-wells': return ids(wells.find((n) => outWires(g, n) === 0), market);
-    case 'build-refiner': case 'upgrade-well': case 'bulk-upgrade': return ids(wells[0]);
+    case 'build-refiner': case 'bulk-upgrade': return ids(wells[0]);
     case 'sell-shard': return ids(maker('shard'), market);
     case 'feed-lab': return ids(maker('shard'));
     case 'make-ink': return rawLine('P2', 'murk', 'ink');
@@ -1449,10 +1404,6 @@ function hintFocus(g: Game, id: string): number[] {
       if (!o || o.ready) return [];
       const n = g.nodes.find((x) => recipeOf(x)?.outputs.some((out) => out[0] === o.mat) && !sells(x, recipeOf(x)!.outputs.findIndex((out) => out[0] === o.mat)));
       return n ? ids(n, market) : [];
-    }
-    case 'route-lab': {
-      const router = g.nodes.find((n) => n.type === 'router');
-      return router ? ids(router, lab, market) : ids(maker('spark'));
     }
     case 'make-glyph': return assemble('P4', 'glyph', 'ink', 'spark');
     case 'hold-flow': {
@@ -1486,6 +1437,7 @@ export function rewardText(r: GoalReward): string {
   if (r.unlock === 'orders') parts.push('Orders');
   if (r.unlock === 'flow') parts.push('Flow meter');
   if (r.unlock === 'end') parts.push('Demo complete');
+  for (const id of r.opens ?? []) parts.push(`opens ${TECHS[id]?.name ?? id}`);
   if (r.credits) parts.push(`${r.credits}¢`);
   if (r.a) parts.push(`${r.a}α`);
   if (r.b) parts.push(`${r.b}β`);
@@ -1498,6 +1450,11 @@ export function rewardText(r: GoalReward): string {
 /** Grant the techs and switch on the feature a goal's reward carries. Safe to repeat: whatever is already there is left alone. */
 function applyUnlocks(g: Game, r: GoalReward) {
   for (const id of r.techs ?? []) grantTech(g, id);
+  for (const id of r.opens ?? []) {
+    if (!TECHS[id] || g.opened.includes(id)) continue;
+    g.opened.push(id);
+    g.rev++;
+  }
   if (r.unlock === 'orders' && !g.ordersOn) {
     g.ordersOn = true;
     g.events.push({ kind: 'unlock', what: 'orders', text: 'Orders unlocked.' });
@@ -1506,6 +1463,42 @@ function applyUnlocks(g: Game, r: GoalReward) {
     g.flowOn = true;
     g.events.push({ kind: 'unlock', what: 'flow', text: 'Flow meter unlocked: the more of your line runs flat out, the better your prices.' });
   } else if (r.unlock === 'end') endDemo(g);
+}
+
+/**
+ * The chain a game's goal index counts along (Game.chain). Chain 1 was 22 goals with one Refiner of each kind all
+ * the way to the Phone; this one has growth goals between its chapters, and three cards fewer: upgrades are met in
+ * "Make 1.2 Glass a second", land in "Make 1 Plastic a second", and the Router is a research and no card.
+ */
+export const CHAIN = 2;
+/** The goals of chain 1, in order: what the index of a save without Game.chain counts along. */
+const CHAIN_1 = [
+  'wire-market', 'second-well', 'wire-all-wells', 'build-refiner', 'sell-shard', 'upgrade-well', 'feed-lab', 'research-murk', 'make-ink', 'silt-exit',
+  'make-spark', 'first-order', 'route-lab', 'expand', 'make-glyph', 'hold-flow', 'study-glyph', 'make-mist', 'make-prism', 'bulk-upgrade',
+  'build-fabricator', 'make-lens', 'make-clay', 'make-coil', 'make-dynamo', 'make-paradox',
+];
+/** Where a save standing on a card this chain no longer has is picked up. */
+const CHAIN_1_NOW: Record<string, string> = { 'upgrade-well': 'tune-shard', 'route-lab': 'hold-flow', expand: 'hold-flow' };
+
+/**
+ * Carry a save from an earlier chain over to this one, once: its goal is found by its id, so the player stands on
+ * the card they stood on (one whose card is gone, on the nearest one after it). The growth goals that lie before
+ * that card are not asked of them: what those goals unlock comes with the save's place (repairChain). A goal further
+ * on that the save has met already is ready the moment it is reached, as always.
+ */
+export function migrateChain(g: Game) {
+  if (g.chain === CHAIN) return;
+  if (g.chain == null || g.chain === 1) {
+    // (Past the end of that chain: every goal was claimed, and every goal of this one counts as claimed.)
+    const old: string | undefined = CHAIN_1[g.goal.i];
+    const id = old == null ? null : CHAIN_1_NOW[old] ?? old;
+    const at = id == null ? -1 : GOALS.findIndex((x) => x.id === id);
+    const t = g.goalAt && g.goalAt.i === g.goal.i ? g.goalAt.t : g.time;
+    // A card that was ready stays ready only where it is the same card.
+    g.goal = { i: at < 0 ? GOALS.length : at, ready: g.goal.ready && at >= 0 && id === old };
+    g.goalAt = { i: g.goal.i, t };
+  }
+  g.chain = CHAIN;
 }
 
 /** The game second at which each game's list of lines done when the goal came up (Game.goalAt.had) was last looked through. */
@@ -1520,6 +1513,8 @@ const unlocksChecked = new WeakMap<Game, number>();
  * says "goal 17" without the Flow meter (which goal 16 could then never finish) or without the Router.
  */
 function repairChain(g: Game) {
+  migrateChain(g);
+  if (!Array.isArray(g.opened)) g.opened = [];
   if (g.goal.i > GOALS.length) g.goal = { i: GOALS.length, ready: false };
   // Since when this goal has been the active one: set here for a save without it, or a goal set by hand. With it,
   // which of its lines are done already (in a save from before that was kept, too: what is done when the save is
@@ -1565,6 +1560,7 @@ export function tickGoal(g: Game) {
 
 /** Pay out the ready goal and move to the next one. Returns false when there is nothing to claim. */
 export function claimGoal(g: Game): boolean {
+  if (g.chain !== CHAIN) migrateChain(g);
   const goal = GOALS[g.goal.i];
   if (!goal || !g.goal.ready) return false;
   const r = goal.reward;

@@ -55,11 +55,13 @@ export function valveWords(slack: number, short: number): string {
 }
 
 /**
- * The goal's line, as its label says it: "Next step" when it is the goal's own requirement (goal 22's wires into the
- * Fabricator: GoalView.meanwhile.required), with no count; otherwise "While you wait", with "· 2 of 3" where the goal has
- * more than one line. Plain text (the card sets the count in a span of its own).
+ * The goal's line, as its label says it: "Next step" when it is the goal's own requirement (the last goal's wires into
+ * the Fabricator: GoalView.meanwhile.required), with no count; "One way" for a growth goal's line (GoalView.meanwhile.way:
+ * one way to its rate, and not the only one), with no count either; otherwise "While you wait", with "· 2 of 3" where
+ * the goal has more than one line. Plain text (the card sets the count in a span of its own).
  */
-export function lineLabel(step: number, of: number, required: boolean): { label: string; count: string } {
+export function lineLabel(step: number, of: number, required: boolean, way = false): { label: string; count: string } {
+  if (way) return { label: 'One way', count: '' };
   if (required) return { label: 'Next step', count: '' };
   return { label: 'While you wait', count: of > 1 ? ` · ${step} of ${of}` : '' };
 }

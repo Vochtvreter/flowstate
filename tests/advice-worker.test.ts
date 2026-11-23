@@ -12,7 +12,7 @@ import { Advice, advice, adviceQuiet, applyAdvice, waitInfo, waitKind } from '..
 import { connect, cutWire, upgrade } from '../src/actions';
 import { RULES } from '../src/content';
 import { research } from '../src/economy';
-import { activeGoal } from '../src/goals';
+import { GOALS, activeGoal } from '../src/goals';
 import { Game, cloneGame } from '../src/state';
 import { AdviceAnswer, answer } from '../src/ui/advice-core';
 import { boardKey, builtRev } from '../src/ui/advice-client';
@@ -26,15 +26,18 @@ const said = (a: Advice | null) => (a ? { text: a.text, saves: a.saves, eta: a.e
 
 /**
  * Boards from the scripted newcomer's run: one every `every` seconds of waiting. With `lines` false the
- * player ignores the cards' "while you wait" lines; the adviser then has far more to say (it offers a
- * card-follower two tips a run), which is what these tests need boards for.
+ * player ignores the cards' "while you wait" lines. With `poor` it has spent its Data elsewhere before every
+ * research: the claims of the growth goals pay most of what they open, so the player who keeps that Data has no
+ * research to wait for and the adviser nothing to say (it offers a card-follower no tip in a run). The one who
+ * spent it waits for Data four times, and those waits are what the adviser has tips for: the boards these tests need.
  */
-function boards(every: number, lines = true): Game[] {
+function boards(every: number, lines = true, poor = true): Game[] {
   const out: Game[] = [];
   let n = 0;
   playByTheCard({
     tips: true,
     meanwhile: lines,
+    poor,
     onIdle: (g) => {
       if (!waitKind(g) || n++ % every) return;
       const copy = cloneGame(g)!;
@@ -45,8 +48,10 @@ function boards(every: number, lines = true): Game[] {
   return out;
 }
 
-const real = boards(12);
-const loose = boards(5, false);
+const real = boards(8);
+const loose = boards(8, false);
+// The player who kept its Data: its waits are for credits (the Screen's Assembler, the Fabricator).
+const plain = boards(8, true, false);
 
 describe('the adviser through its worker code', () => {
 
@@ -74,9 +79,12 @@ describe('the adviser through its worker code', () => {
   });
 
   test('followed second by second, it keeps and changes its verdicts exactly as on the live game', () => {
-    // A long Data wait, a credits wait and the Flow goal, each from the moment the newcomer starts waiting.
+    // Two long Data waits, a credits wait and the Flow goal, each from the moment the newcomer starts waiting.
     // (The Flow goal of the player who follows the lines is short: the waits of the one who reads none stand in.)
-    const starts = ['make-glyph', 'build-fabricator', 'hold-flow', 'make-mist'].map((id) => [...real, ...loose].find((g) => waitKind(g) && idOf(g) === id)!);
+    const starts = [
+      ...['make-glyph', 'hold-flow', 'make-mist'].map((id) => [...real, ...loose].find((g) => waitKind(g) && idOf(g) === id)!),
+      plain.find((g) => waitKind(g) === 'credits' && idOf(g) === 'build-fabricator')!,
+    ];
     let id = 1000;
     let kept = 0, fresh = 0;
     for (const start of starts) {
@@ -161,16 +169,16 @@ describe('what the adviser remembers, through its worker code', () => {
   });
 
   test('a tip is said once on an untouched board; an adviser handed a new game each time would say it again and again', () => {
-    // The newcomer who follows tips and no lines, a minute and a half into the wait for Quartz Deposits (order seed
-    // 3): two tips come and go there, and without the adviser's memory they come back again and again. (It was a
-    // minute into the wait for Assembly, on seed 1, with an earlier build's prices and Labs.)
+    // The newcomer who follows tips and no lines and has spent its Data elsewhere, 20 seconds into the wait for
+    // Quartz Deposits (order seed 1): two tips come and go there, and without the adviser's memory they come back
+    // again and again. (The player who kept the Data its growth goals paid has no such wait.)
     let n = 0;
     let board: Game | null = null;
     playByTheCard({
-      tips: true, seed: 3, meanwhile: false,
+      tips: true, seed: 1, meanwhile: false, poor: true,
       onIdle: (g) => {
         if (board || !waitKind(g) || activeGoal(g)!.id !== 'make-mist') return;
-        if (++n === 90) { board = cloneGame(g)!; board.rev = g.rev; }
+        if (++n === 20) { board = cloneGame(g)!; board.rev = g.rev; }
       },
     });
     expect(board).not.toBeNull();
@@ -199,7 +207,7 @@ describe('what the adviser remembers, through its worker code', () => {
 
   test('"the wait will not end without it" arrives as Infinity, a number, after the copy there and the copy back', () => {
     // Saving for the Fabricator with every wire into a Market cut: nothing is sold, the wait would never end.
-    const g = cloneGame(real.find((x) => waitKind(x) === 'credits' && idOf(x) === 'build-fabricator')!)!;
+    const g = cloneGame(plain.find((x) => waitKind(x) === 'credits' && idOf(x) === 'build-fabricator')!)!;
     const markets = new Set(g.nodes.filter((x) => x.type === 'market').map((x) => x.id));
     for (const w of g.wires.filter((x) => markets.has(x.to)).map((x) => x.id)) expect(cutWire(g, w)).toBe(true);
     g.edits = [];
@@ -217,9 +225,7 @@ describe('what the adviser remembers, through its worker code', () => {
   });
 });
 
-const idOf = (g: Game) => ['wire-market', 'second-well', 'wire-all-wells', 'build-refiner', 'sell-shard', 'upgrade-well', 'feed-lab', 'research-murk', 'make-ink',
-  'silt-exit', 'make-spark', 'first-order', 'route-lab', 'expand', 'make-glyph', 'hold-flow', 'study-glyph', 'make-mist', 'make-prism', 'bulk-upgrade',
-  'build-fabricator', 'make-lens'][g.goal.i];
+const idOf = (g: Game) => GOALS[g.goal.i]?.id;
 
 describe('what counts as "the board changed" for a tip', () => {
   test('moving or merely touching a node does not; building, wiring, upgrading and researching do', () => {

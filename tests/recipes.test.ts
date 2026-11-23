@@ -64,8 +64,8 @@ describe('a machine takes the recipe that fits what it is fed', () => {
 
 describe('Robot', () => {
   it('costs 250β: free play\'s last research is not a 37-minute save of the Data it has least of', () => {
-    // (Its α went from 2,500 to 2,800 when the fast players' first Phone came sooner: their first Robot stays
-    // after 24:00.)
-    expect(TECHS.P9.cost).toEqual({ a: 2800, b: 250, g: 450 });
+    // (Its α went from 2,500 to 2,800 when the fast players' first Phone came sooner, and to 8,000 when the spine's
+    // α came down with the growth goals, whose claims pay most of it: their first Robot stays after 24:00.)
+    expect(TECHS.P9.cost).toEqual({ a: 8000, b: 250, g: 450 });
   });
 });

@@ -968,7 +968,7 @@ function openView() {
   const place = goalPlace(g);
   if (place) return go(fitTarget(place, true, 1));
   const spot = lineSpot(g);
-  if ((spot && 'expand' in spot) || (activeGoal(g)?.id === 'expand' && !g.goal.ready)) {
+  if (spot && 'expand' in spot) {
     const w = EXPAND_W * 1.4, mid = g.board.w / 2;
     return go(fitTarget({ x0: mid - w, y0: g.board.h - 200, x1: mid + w, y1: g.board.h + 18 + EXPAND_H + 12 }, true, floor));
   }
@@ -1450,7 +1450,7 @@ const ex = {
 };
 
 /** The goal that first asks for the expansion: before it the button is not shown (it would compete with the first steps). */
-const EXPAND_GOAL = GOALS.findIndex((x) => x.id === 'expand');
+const EXPAND_GOAL = GOALS.findIndex((x) => x.id === 'grow-ink');
 
 /**
  * Whether the button is on the board at all: from the goal "Open up more land" on (or once the board has been
@@ -1469,14 +1469,14 @@ function expandShown(g: Game): boolean {
 const expandQuiet = () => !!tapWire || !!ui.placing || !!radial || (!!drag && (drag.kind === 'wire' || drag.kind === 'wireIn'));
 
 /**
- * The goal card is asking for the expansion: the goal is "Open up more land", or the next step of the
- * goal's "while you wait" line is to expand (which the line only asks for when it can be paid for).
+ * The goal card is asking for the expansion: the next step of the goal's line is to expand (a growth goal whose
+ * deposits are all in use: "Make 1 Plastic a second"), which the line only asks for when it can be paid for.
  */
 function expandAsked(g: Game): boolean {
   const goal = activeGoal(g);
   // (A goal that is done and waiting to be claimed asks for nothing more.)
   if (!goal || g.goal.ready) return false;
-  return goal.id === 'expand' || (!!goal.meanwhile && !!lineAdvice(g)?.expand);
+  return !!goal.meanwhile && !!lineAdvice(g)?.expand;
 }
 
 /** What the button's surroundings depend on that can be read without reading layout: when it changes, they are measured again. */
@@ -3809,7 +3809,7 @@ function showDeposits(tapped?: number) {
 }
 
 /** The first goal that needs the inspector ("Speed up a Drill"). */
-const INSPECT_FROM = GOALS.findIndex((x) => x.id === 'upgrade-well');
+const INSPECT_FROM = GOALS.findIndex((x) => x.id === 'tune-shard');
 
 /** A stage this wide (with the inspector's room counted in) has space for the inspector beside the board. */
 const INSPECT_WIDE = 1200;

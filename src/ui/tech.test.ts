@@ -2,10 +2,12 @@
 // These run without a browser: techTiles() and goalTech() only read the game.
 import { describe, expect, it } from 'vitest';
 import { BRANCHES, TECHS } from '../content';
-import { research, techAvailable, techHidden } from '../economy';
+import { claimGoal } from '../actions';
+import { research, techAvailable, techGated, techHidden, techLocked } from '../economy';
 import { GOALS } from '../goals';
-import { Game, newGame } from '../state';
-import { Tile, delayText, goalDelay, goalSaving, goalTech, readyCount, setCardWait, teasedSlot, techTiles } from './tech';
+import { Game, deserialize, newGame, serialize } from '../state';
+import { Tile, delayText, goalDelay, goalSaving, goalTech, openedBy, readyCount, setCardWait, teasedSlot, techTiles } from './tech';
+import { run as play } from '../../tests/helpers';
 
 const show = (g: Game) => Object.fromEntries(techTiles(g).map((x) => [x.t.id, x.veiled ? 'veil' : x.state]));
 const ids = (g: Game) => techTiles(g).map((x) => x.t.id).sort();
@@ -23,7 +25,9 @@ function allowed(g: Game): string[] {
   const met = (k: 'a' | 'b' | 'g') => k === 'a' || g.data[k] > 0 || g.dataRate[k] > 0 || g.techs.some((id) => (TECHS[id]?.cost[k] ?? 0) > 0);
   const all = Object.values(TECHS).filter((t) => !techHidden(g, t) && (g.techs.includes(t.id) || (['a', 'b', 'g'] as const).every((k) => !t.cost[k] || met(k))));
   const own = (id: string) => g.techs.includes(id);
-  const full = new Set(all.filter((t) => own(t.id) || techAvailable(g, t) || (!t.auto && g.queue.includes(t.id))).map((t) => t.id));
+  // (In full as well: a tech that waits only for a goal to open it. It is locked, and its requirements are owned.)
+  const gated = (t: (typeof all)[number]) => !!t.locked && !own(t.id) && !g.opened.includes(t.id) && t.requires.every(own);
+  const full = new Set(all.filter((t) => own(t.id) || techAvailable(g, t) || gated(t) || (!t.auto && g.queue.includes(t.id))).map((t) => t.id));
   return all.filter((t) => full.has(t.id) || t.requires.every((r) => full.has(r))).map((t) => t.id).sort();
 }
 
@@ -37,11 +41,12 @@ describe('tech tree: what is shown', () => {
     const g = newGame();
     g.techs = ['P1', 'R1'];
     g.data.a = 47;
-    // (Deep Analysis, one step behind Lab Speed, is priced in β: it stays out until the player has met β.)
+    // (Deep Analysis, one step behind Lab Speed, is priced in β: it stays out until the player has met β. Routing
+    // is a research now, one step behind Oil Deposits: a silhouette, as Ore Deposits is.)
     expect(show(g)).toEqual({
       P1: 'own', R1: 'own',
       P2: 'rdy', R2: 'sav',
-      L1: 'goal',
+      L1: 'veil',
       P3: 'veil',
     });
     expect(Object.keys(TECHS)).toHaveLength(30);
@@ -63,9 +68,12 @@ describe('tech tree: what is shown', () => {
     g.techs = ['P1', 'R1'];
     meetAll(g);
     for (const id of ['L3', 'L4', 'L2', 'S1', 'C2']) expect(byId(g, id)).toBeUndefined();
-    g.techs.push('L1', 'C1');
-    for (const id of ['L3', 'L4', 'L2', 'S1', 'C2']) expect(byId(g, id)?.veiled).toBe(false);
-    // Bulk Upgrade is itself a goal reward ("Make your first Screen"): it says so, and Auto-balance behind it stays out.
+    g.techs.push('P2', 'L1', 'C1');
+    for (const id of ['L3', 'L4', 'L2', 'C2']) expect(byId(g, id)?.veiled).toBe(false);
+    // Bulk Upgrade is itself a goal reward ("Make your first Screen"), behind Assembly: once that is owned it says
+    // which goal it comes from, and Auto-balance behind it stays out.
+    expect(byId(g, 'S1')).toBeUndefined();
+    g.techs.push('P3', 'P4');
     expect(byId(g, 'S1')?.state).toBe('goal');
     expect(byId(g, 'S3')).toBeUndefined();
     // Once that goal has paid it out, Auto-balance is one step ahead: it still needs Priority Routing.
@@ -126,8 +134,9 @@ describe('tech tree: what is shown', () => {
       for (let step = 0; step < 40; step++) {
         g.data = { a: 1e9, b: 1e9, g: 1e9 };
         const open = Object.values(TECHS).filter((t) => techAvailable(g, t));
-        // Goal rewards arrive at some point too.
-        if (rnd() < 0.2) for (const id of ['L1', 'C1']) if (!g.techs.includes(id)) g.techs.push(id);
+        // Goal rewards arrive at some point too, and goals open the steps of the spine for research.
+        if (rnd() < 0.2) for (const id of ['S1', 'C1']) if (!g.techs.includes(id)) g.techs.push(id);
+        if (rnd() < 0.3) for (const id of ['P3', 'P4', 'P5', 'P7']) if (!g.opened.includes(id)) g.opened.push(id);
         if (!open.length) break;
         research(g, open[Math.floor(rnd() * open.length)].id);
         const now = ids(g);
@@ -225,6 +234,78 @@ describe('build bar: the one locked slot on show', () => {
         expect(s.tech.name).not.toMatch(/[0-9¢αβγ]/);
       }
     }
+  });
+});
+
+describe('tech tree: a step of the spine that waits for a growth goal', () => {
+  const growInk = GOALS.findIndex((x) => x.id === 'grow-ink');
+  const on = () => {
+    const g = newGame();
+    g.goal = { i: growInk, ready: false };
+    g.techs = ['P1', 'R1', 'P2'];
+    return g;
+  };
+
+  it('the four locked techs are the spine after Oil, each opened by the growth goal before the card that asks for it', () => {
+    const locked = Object.values(TECHS).filter((t) => t.locked).map((t) => t.id);
+    expect(locked).toEqual(['P3', 'P4', 'P5', 'P7']);
+    expect(locked.map((id) => GOALS.find((x) => x.reward.opens?.includes(id))!.id)).toEqual(['grow-ink', 'grow-spark', 'grow-glyph', 'grow-prism']);
+    expect(locked.map((id) => openedBy(TECHS[id]))).toEqual(['Make 1 Plastic a second', 'Make 1 Copper a second', 'Make 0.6 Circuits a second', 'Make 0.5 Screens a second']);
+    expect(openedBy(TECHS.P2)).toBe('');
+  });
+
+  it('it is shown in full, with its price and the goal it waits for, and cannot be researched however much Data there is', () => {
+    const g = on();
+    g.data.a = 5000;
+    expect(techLocked(g, TECHS.P3)).toBe(true);
+    expect(techGated(g, TECHS.P3)).toBe(true);
+    expect(techAvailable(g, TECHS.P3)).toBe(false);
+    const tile = byId(g, 'P3')!;
+    expect(tile).toMatchObject({ state: 'lck', veiled: false, gate: 'Make 1 Plastic a second' });
+    expect(tile.needs).toEqual([]);
+    expect(research(g, 'P3')).toBe(false);
+    expect(g.data.a).toBe(5000);
+    // What stands behind it stays a silhouette, and names it; it is not said to wait for a goal itself.
+    expect(byId(g, 'P4')).toMatchObject({ veiled: true });
+    expect(byId(g, 'P4')!.gate).toBeUndefined();
+    // Locked with a requirement missing: an ordinary lock, the requirement is what the tile names.
+    expect(techGated(g, TECHS.P4)).toBe(false);
+    expect(techLocked(g, TECHS.P4)).toBe(true);
+    // Not a locked one: Routing can be researched as soon as Oil Deposits is in.
+    expect(techAvailable(g, TECHS.L1)).toBe(true);
+    expect(byId(g, 'L1')!.gate).toBeUndefined();
+  });
+
+  it('claiming the goal opens it: researchable at once, and a queued one is researched on the next tick', () => {
+    const g = on();
+    g.queue.push('P3');
+    g.data.a = 500;
+    play(g, 1);
+    expect(g.techs).not.toContain('P3'); // queued, affordable, locked: it waits
+    expect(g.queue).toEqual(['P3']);
+    g.goal.ready = true;
+    expect(claimGoal(g)).toBe(true);
+    expect(g.opened).toEqual(['P3']);
+    expect(techLocked(g, TECHS.P3)).toBe(false);
+    expect(byId(g, 'P3')).toMatchObject({ state: 'rdy', veiled: false });
+    expect(byId(g, 'P3')!.gate).toBeUndefined();
+    play(g, 0.1);
+    expect(g.techs).toContain('P3');
+    expect(g.queue).toEqual([]);
+    // Owned, a lock means nothing any more; and Assembly, the next one, now waits for its own goal and nothing else.
+    expect(techLocked(g, TECHS.P3)).toBe(false);
+    expect(byId(g, 'P4')).toMatchObject({ state: 'lck', veiled: false, gate: 'Make 1 Copper a second' });
+  });
+
+  it('a save without the list of opened techs loads with none open, and a game that owns one never loses it', () => {
+    const g = on();
+    g.techs.push('P3');
+    const raw = JSON.parse(serialize(g));
+    delete raw.opened;
+    const loaded = deserialize(JSON.stringify(raw))!;
+    expect(loaded.opened).toEqual([]);
+    expect(loaded.techs).toContain('P3');
+    expect(byId(loaded, 'P3')).toMatchObject({ state: 'own' });
   });
 });
 
@@ -331,7 +412,7 @@ describe('tech tree: the goal\'s wait', () => {
   });
 
   it('puts nothing off while the goal waits longer for the credits its step needs after the research (goal 21)', () => {
-    // "Research Fabrication, then save up and build a Fabricator": Fabrication's 720α come well before the 5,000¢.
+    // "Research Fabrication, then save up and build a Fabricator": Fabrication's 600α come well before the 8,500¢.
     const at21 = (credits: number, creditRate: number) => {
       const g = newGame();
       g.goal = { i: GOALS.findIndex((x) => x.id === 'build-fabricator'), ready: false };
@@ -346,7 +427,7 @@ describe('tech tree: the goal\'s wait', () => {
     };
     const slow = at21(1000, 9);
     expect(goalSaving(slow)?.tech?.id).toBe('P7');
-    expect(goalSaving(slow)?.then).toBe(5000);
+    expect(goalSaving(slow)?.then).toBe(8500);
     // 50α for Lab Speed puts Fabrication's α off by about 14 s, but the Fabricator's credits are 7 min away.
     expect(goalDelay(slow, TECHS.R2)).toBeNull();
     expect(byId(slow, 'R2')).toMatchObject({ state: 'rdy', slows: false });
@@ -358,7 +439,7 @@ describe('tech tree: the goal\'s wait', () => {
       setCardWait(() => null);
     }
     // With the credits nearly in, the α is what the goal waits for: Lab Speed puts it off again.
-    const rich = at21(4790, 9);
+    const rich = at21(8490, 9);
     expect(goalDelay(rich, TECHS.R2)!.seconds).toBeCloseTo(50 / 3.68, 1);
     // No credits coming in at all says nothing about when: the Data alone is counted, as before.
     expect(goalDelay(at21(1000, 0), TECHS.R2)!.seconds).toBeCloseTo(50 / 3.68, 1);

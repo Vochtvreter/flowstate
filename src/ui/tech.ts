@@ -21,9 +21,9 @@
 // the card's own words and numbers (waitLine, from the adviser), warns on any other tech that would spend the
 // same Data, and the top bar's "N ready" leaves those out (readyCount).
 import { lineAdvice } from '../advice';
-import { BRANCHES, Branch, DATA_COLORS, DATA_NAMES, DataTier, NODE_DEFS, NodeType, TECHS, Tech } from '../content';
-import { fmtInt, fmtRate, readyTechs, research, techAffordable, techAvailable, techEta, techHidden, techProgress } from '../economy';
-import { GOALS, activeGoal, claimGoal } from '../goals';
+import { BRANCHES, Branch, DATA_COLORS, DATA_NAMES, DataTier, MATERIALS, NODE_DEFS, NodeType, TECHS, Tech } from '../content';
+import { fmtInt, fmtRate, readyTechs, research, techAffordable, techAvailable, techEta, techGated, techHidden, techProgress } from '../economy';
+import { GOALS, GROW_SLACK, activeGoal, claimGoal, making } from '../goals';
 import { Game } from '../state';
 import { Panel, makePanel, setClass } from './dom';
 import { UNCOVER_DELAY, coverFor, endingShown } from './hud-screens';
@@ -56,6 +56,11 @@ export interface Tile {
   queued: boolean;
   /** Researching it would spend Data the goal on the card is saving up (goalDelay). */
   slows: boolean;
+  /**
+   * Its requirements are owned, and a goal has still to open it (Tech.locked): the title of that goal. The tile is
+   * shown in full, price and all, and says which goal it waits for.
+   */
+  gate?: string;
 }
 
 const TIERS: DataTier[] = ['a', 'b', 'g'];
@@ -93,8 +98,10 @@ export function techTiles(g: Game): Tile[] {
   const all = Object.values(TECHS).filter((t) => !techHidden(g, t) && (g.techs.includes(t.id) || t.id === want || pricedInMet(g, t)));
   const owned = (id: string) => g.techs.includes(id);
   const full = new Set<string>();
+  /** Waiting for a goal to open it, and for nothing else. */
+  const gated = (t: Tech) => techGated(g, t);
   for (const t of all) {
-    if (owned(t.id) || techAvailable(g, t) || (!t.auto && g.queue.includes(t.id))) full.add(t.id);
+    if (owned(t.id) || techAvailable(g, t) || gated(t) || (!t.auto && g.queue.includes(t.id))) full.add(t.id);
   }
   const out: Tile[] = [];
   for (const t of all) {
@@ -111,7 +118,8 @@ export function techTiles(g: Game): Tile[] {
     }
     const needs = t.requires.filter((r) => !owned(r) && TECHS[r]).map((r) => TECHS[r]);
     const slows = (state === 'rdy' || state === 'sav') && !!goalDelay(g, t);
-    out.push({ t, state, veiled, needs, queued: state !== 'own' && g.queue.includes(t.id), slows });
+    const gate = state === 'lck' && gated(t) ? openedBy(t) : '';
+    out.push({ t, state, veiled, needs, queued: state !== 'own' && g.queue.includes(t.id), slows, ...(gate ? { gate } : {}) });
   }
   return out;
 }
@@ -270,8 +278,9 @@ const SPINE: NodeType[] = ['refiner', 'assembler', 'fabricator'];
 
 /**
  * The one locked slot the build bar shows, as a dim silhouette with what unlocks it: the next machine of the
- * spine that is still locked, once what unlocks it is in sight. That is when its research can be done now (the
- * tree shows it in full), or when the goal on the card asks for that research or pays it out as its reward
+ * spine that is still locked, once what unlocks it is in sight. That is when its research can be done now or
+ * waits only for a goal to open it (the tree shows it in full), or when the goal on the card asks for that research
+ * or pays it out as its reward
  * (the card names it). Everything else that is locked stays out of the bar until the player has it.
  * `goal` = it comes with a goal and cannot be researched: there is nothing to open in the tree for it.
  */
@@ -280,7 +289,8 @@ export function teasedSlot(g: Game): { type: NodeType; tech: Tech; goal: boolean
   const tech = type ? TECHS[NODE_DEFS[type].tech ?? ''] : null;
   if (!type || !tech) return null;
   const reward = !!GOALS[g.goal.i]?.reward.techs?.includes(tech.id);
-  if (reward || techAvailable(g, tech) || goalTech(g) === tech.id) return { type, tech, goal: !!tech.auto };
+  // (In sight as well: a research that only waits for a goal to open it. The tree shows it in full.)
+  if (reward || techAvailable(g, tech) || techGated(g, tech) || goalTech(g) === tech.id) return { type, tech, goal: !!tech.auto };
   return null;
 }
 
@@ -320,8 +330,27 @@ const costHtml = (t: Tech) => TIERS.filter((k) => t.cost[k]).map((k) => dataHtml
 /** "A", "A and B", "A, B and C". */
 const listText = (names: string[]) => (names.length <= 1 ? names.join('') : `${names.slice(0, -1).join(', ')} and ${names[names.length - 1]}`);
 
+/** The title of the goal that opens this tech for research (GoalReward.opens), or '' when none does. */
+export function openedBy(t: Tech): string {
+  return GOALS.find((x) => x.reward.opens?.includes(t.id))?.title ?? '';
+}
+
+/**
+ * Where the player stands on the goal that opens this tech, when that goal is a rate ("Make 1 Plastic a second"):
+ * "You make 0.5 a second now." '' for any other goal, and once the rate is there.
+ */
+function gateNow(g: Game, t: Tech): string {
+  const grow = GOALS.find((x) => x.reward.opens?.includes(t.id))?.meanwhile?.find((l) => l.grow)?.grow;
+  if (!grow) return '';
+  const now = making(g, grow.mat);
+  if (now >= grow.rate * (1 - GROW_SLACK)) return '';
+  return `You make ${Math.round(now * 100) / 100} ${MATERIALS[grow.mat].name} a second now. `;
+}
+
 /** "Research Oil Deposits first". A requirement that is a goal reward is earned, not researched. */
 function needsText(x: Tile): string {
+  // (All it waits for is a goal: the card's own words for it, so that the two can be matched.)
+  if (x.gate) return `Opens with “${x.gate}”`;
   if (!x.needs.length) return 'Not available yet';
   return `${x.needs.every((n) => !n.auto) ? 'Research' : 'Earn'} ${listText(x.needs.map((n) => n.name))} first`;
 }
@@ -808,6 +837,12 @@ function detailHtml(g: Game, x: Tile | undefined, want: string | null): string {
     body += `<div class="gnote">${glyph(FLAG, 18)}<div><b>From a goal: ${esc(goalTitle(t))}</b>`
       + `<span>${mine ? 'This is your goal right now. ' : ''}You get it when you claim that goal. It cannot be bought.</span></div></div>`;
   } else {
+    if (x.gate) {
+      // Waiting for a goal, and for nothing else: what it will cost is shown, and what has to come first is said.
+      const mine = !!GOALS[g.goal.i]?.reward.opens?.includes(t.id);
+      body += `<div class="gnote" data-testid="tech-gate">${glyph(FLAG, 18)}<div><b>Opens with a goal: ${esc(x.gate)}</b>`
+        + `<span>${mine ? 'This is your goal right now. ' : ''}${esc(gateNow(g, t))}Grow what you have first: once that goal is claimed, this can be researched.</span></div></div>`;
+    }
     // The price sits with the button, pinned to the foot: what it costs, what you have, Research.
     const dry = x.state === 'sav' ? dryTier(g, t) : null;
     if (x.state !== 'rdy') {

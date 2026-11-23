@@ -16,10 +16,10 @@
 // Used by tests/playthrough.test.ts (every goal can be done; how long each takes) and tests/advice.test.ts
 // (real game states to check tips against).
 import { expect } from 'vitest';
-import { claimGoal, claimOrder, connect, expandBoard, favour, placeNode, upgrade, upgradeAll } from '../src/actions';
+import { claimGoal, claimOrder, connect, placeNode, upgradeAll } from '../src/actions';
 import { Advice, advice, applyAdvice, lineAdvice } from '../src/advice';
 import { NodeType, RECIPES, TECHS } from '../src/content';
-import { expansionCost, nodeCost, research, techAffordable, upgradeCost } from '../src/economy';
+import { nodeCost, research, techAffordable, upgradeCost } from '../src/economy';
 import { activeGoal, goalById, meanwhileOf } from '../src/goals';
 import { Game, GNode } from '../src/state';
 import { fresh, market, run, well } from './helpers';
@@ -38,14 +38,20 @@ export interface CardOptions {
   /** Moves the order generator, like the pacing bot's seed. 0 is the sequence every new game starts with. */
   seed?: number;
   /**
-   * 'always': wires whatever an order asks for to the Market whenever it is not (the card of goals 12 and 20 says
-   * to). 'asked': only while one of those two goals is on the card; at other times that is left to the tips.
+   * 'always': wires whatever an order asks for to the Market whenever it is not (the card of "Fill your first order"
+   * says to). 'asked': only while that goal is on the card; at other times that is left to the tips.
    */
   tendOrders?: 'always' | 'asked';
   /** Called once a second while the player has nothing to do but wait, before a "while you wait" line or a tip is acted on. */
   onIdle?: (g: Game) => void;
   /** Seconds one wait may take before the run fails: longer than this is a wall. */
   wall?: number;
+  /**
+   * Has spent their α elsewhere (on side techs, say): each research the card asks for finds none in hand, and has
+   * to be waited for. The claim of a growth goal pays most of what the research it opens costs, so the player who
+   * keeps their Data meets no such wait; this one does, and those waits are where the adviser has something to say.
+   */
+  poor?: boolean;
 }
 
 export interface GoalTime {
@@ -147,8 +153,10 @@ export function playByTheCard(opts: CardOptions = {}): CardRun {
     tickSurplus();
     tendOrder();
     opts.onIdle?.(g);
-    // The card's "while you wait" line comes before any tip: it is on the card.
-    const line = opts.meanwhile === false ? null : meanwhileOf(g);
+    // The card's "while you wait" line comes before any tip: it is on the card. (A growth goal's line is the how of
+    // its card, one way to its rate: the player who reads no "while you wait" line reads that one too.)
+    const shown = meanwhileOf(g);
+    const line = opts.meanwhile === false && !shown?.way ? null : shown;
     if (line && !line.done(g) && !g.goal.ready) {
       const before = g.rev;
       if (followMeanwhile(g, lines)) {
@@ -218,12 +226,13 @@ export function playByTheCard(opts: CardOptions = {}): CardRun {
     return n;
   };
   const study = (id: string) => {
+    if (opts.poor) g.data.a = 0;
     wait(`${id === 'P7' ? 'α and β' : 'α'} for ${TECHS[id].name}`, () => techAffordable(g, TECHS[id]));
     act();
     expect(research(g, id)).toBe(true);
   };
 
-  // 1–7: the opening.
+  // 1–5: the opening.
   const w1 = well(g);
   wire(w1, m);
   claim('wire-market');
@@ -235,13 +244,13 @@ export function playByTheCard(opts: CardOptions = {}): CardRun {
   claim('build-refiner');
   wire(shard, m);
   claim('sell-shard');
-  wait('credits for a Drill upgrade', () => g.credits >= upgradeCost(w1, 'speed'));
-  act();
-  expect(upgrade(g, w1.id, 'speed')).toBe(true);
-  claim('upgrade-well');
+  // 6–7: the Glass line widened, then tuned. A growth goal gives a rate; its line is one way there, a step at a
+  // time, and this player takes it as it comes (idle() follows it while the goal is not ready).
+  claim('grow-shard');
+  claim('tune-shard');
+  // 8–12: the Lab, Oil, Tar, the first order.
   const lab = from(shard, 'lab');
   claim('feed-lab');
-  // 8–11: Oil, Tar, Ore.
   study('P2');
   claim('research-murk');
   const ink = from(buy('well', { depositId: 3 }), 'refiner');
@@ -251,35 +260,28 @@ export function playByTheCard(opts: CardOptions = {}): CardRun {
   from(ink, 'void', 1); // "...then pick Dump for the Tar"
   claim('silt-exit');
   if (opts.studyAll) wire(ink, lab);
+  claim('first-order');
+  // 13–16: more land and a second Plastic line; Ore, Flow, a second Copper line.
+  claim('grow-ink');
   study('P3');
   const spark = from(buy('well', { depositId: 4 }), 'refiner');
   expect(spark.recipe).toBe('spark');
   wire(spark, m); // "...and sell the Copper"
   claim('make-spark');
   if (opts.studyAll) wire(spark, lab);
-  // 12–14: orders, the Router, the board.
-  claim('first-order');
-  const router = from(spark, 'router'); // "Build a Router from the Copper Refiner's port..."
-  wire(router, lab); // "...and wire it to a Lab and to a Market..."
-  wire(router, m);
-  act();
-  favour(g, router.id, g.wires.find((w) => w.from === router.id && w.to === lab.id)!.id); // "...then press Favour on the Lab's wire"
-  claim('route-lab');
-  wait('credits to expand the board', () => g.credits >= expansionCost(g));
-  act();
-  expect(expandBoard(g)).toBe(true);
-  claim('expand');
-  // 15–17: Circuit, Flow, β.
+  claim('hold-flow');
+  claim('grow-spark');
+  // 17–19: Circuit, β, a second Assembler.
   study('P4');
-  const glyph = from(ink, 'assembler'); // "...build an Assembler from the Refiner's Plastic port..."
+  const glyph = from(ink, 'assembler'); // "...build an Assembler from a Refiner's Plastic port..."
   expect(glyph.recipe).toBe('glyph');
   wire(glyph, m); // "...wire it to the Market..."
   wire(spark, glyph); // "...then wire Copper into it to make Circuit"
   claim('make-glyph');
-  claim('hold-flow');
   wire(glyph, lab); // "Drag from the Assembler's port to a Lab"
   claim('study-glyph');
-  // 18–20: Silicon, Screen, Upgrade all.
+  claim('grow-glyph');
+  // 20–23: Silicon, Screen, Upgrade all, a second Screen Assembler.
   study('P5');
   const mist = from(buy('well', { depositId: 5 }), 'refiner');
   expect(mist.recipe).toBe('mist');
@@ -291,12 +293,13 @@ export function playByTheCard(opts: CardOptions = {}): CardRun {
   wire(prism, m); // "...wire it to the Market..."
   wire(shard, prism); // "...then wire Glass into it to make Screen (two for every Silicon)"
   claim('make-prism');
-  wait('credits for Upgrade all', () => g.credits >= upgradeCost(g.nodes.find((n) => n.type === 'well')!, 'speed'));
+  wait('credits for Upgrade all', () => g.credits >= upgradeCost(g.nodes.filter((n) => n.type === 'well').sort((a, b) => upgradeCost(a, 'speed') - upgradeCost(b, 'speed'))[0], 'speed'));
   act();
   bulkLevels = upgradeAll(g, 'well', 'speed'); // "Select a Drill and press Upgrade all beside Speed"
   expect(bulkLevels).toBeGreaterThan(0);
   claim('bulk-upgrade');
-  // 21–22: the Fabricator and the Phone.
+  claim('grow-prism');
+  // 24–25: the Fabricator and the Phone.
   study('P7');
   const fab = from(prism, 'fabricator'); // "...then save up and build a Fabricator from the Screen Assembler's port"
   expect(fab.recipe).toBe('lens');

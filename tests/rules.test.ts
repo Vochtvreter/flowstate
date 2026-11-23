@@ -18,44 +18,45 @@ describe('numbers (2.6)', () => {
 
   it('Glass is lime; machine and tech prices are the ones tuned with the pacing bot', () => {
     expect(MATERIALS.shard.color).toBe('#B8F26B');
-    expect(NODE_DEFS.assembler.base).toBe(600);
-    // (It was 7,250¢ in an earlier build: the card player's longest wait, two minutes of nothing to do before the
-    // Phone. The fast players are the floor: their first Phone stays after 14:00. Then 4,800¢; 5,000¢ since the
-    // Fabricator card's lines have the player earn more while saving for it: the card player's first Phone stays
-    // after 17:30.)
-    expect(NODE_DEFS.fabricator.base).toBe(5000);
-    // The second Assembler (Screen) is a purchase in its own right: 1,500¢, so that part of what the Fabricator
-    // used to ask for is paid before the Fabricator goal begins. The other machines grow gently.
-    expect([0, 1, 2].map((n) => nodeCostAt('assembler', n))).toEqual([600, 1500, 3750]);
-    expect([0, 1].map((n) => nodeCostAt('fabricator', n))).toEqual([5000, 5750]);
+    expect(NODE_DEFS.assembler.base).toBe(1200);
+    // (It was 7,250¢ in an earlier build, then 4,800¢ and 5,000¢: with one Refiner of each kind a card player earned
+    // about 20¢ a second by then. With the lines the growth goals have the player widen it is twice that, and the
+    // Fabricator is the one long save of the demo: about three minutes, with a tune-up in them.)
+    expect(NODE_DEFS.fabricator.base).toBe(8500);
+    // Four Assemblers stand by the first Phone (two for Circuit, two for Screen: the growth goals ask for the second
+    // of each), so the price grows gently: at ×2.5 the fourth would have been 18,750¢.
+    expect([0, 1, 2, 3].map((n) => nodeCostAt('assembler', n))).toEqual([1200, 1800, 2700, 4050]);
+    expect([0, 1].map((n) => nodeCostAt('fabricator', n))).toEqual([8500, 9775]);
     expect([0, 1, 2].map((n) => nodeCostAt('refiner', n))).toEqual([50, 57, 66]);
-    // A Lab of its own for every Drill is what the cards' lines build, five or six of them: Labs grow gently
-    // (×1.1; ×1.3 made the sixth 371¢, kept back for the Assembler while Assembly was minutes away).
     expect([0, 1, 2, 3, 4, 5].map((n) => nodeCostAt('lab', n))).toEqual([100, 110, 121, 133, 146, 161]);
-    // The Processing spine the goal chain asks for.
-    expect(TECHS.P2.cost).toEqual({ a: 40 }); // a player who claims at once waits under 30 s on goal 8
-    expect(TECHS.P3.cost).toEqual({ a: 195 }); // the card player's wait for it, under a minute
-    // (Assembly and Quartz Deposits went up when the cards' lines came to turn the credits a card player used to
-    // leave idle into α; they were tuned again with the cheaper Labs and the Deep Analysis line.)
-    expect(TECHS.P4.cost).toEqual({ a: 1325 });
-    expect(TECHS.P5.cost).toEqual({ a: 1875 });
-    expect(TECHS.P7.cost).toEqual({ a: 720, b: 100 }); // lower than the curve: the card players' last wait is for credits, not for α
+    // The Processing spine the goal chain asks for. Each step after Oil opens with the claim of a growth goal, and
+    // that claim pays most of its α: a lock and then a wait for Data would be two walls.
+    expect(TECHS.P2.cost).toEqual({ a: 40 }); // a player who claims at once waits under 30 s for it
+    expect(TECHS.P3.cost).toEqual({ a: 195 });
+    expect(TECHS.P4.cost).toEqual({ a: 600 });
+    expect(TECHS.P5.cost).toEqual({ a: 900 });
+    expect(TECHS.P7.cost).toEqual({ a: 600, b: 100 });
+    for (const id of ['P3', 'P4', 'P5', 'P7']) expect(TECHS[id].locked, id).toBe(true);
+    expect(TECHS.P2.locked).toBeFalsy(); // Oil waits for the Lab, which is itself the reward of a growth goal
     // Free play needs all three kinds of Data, and Reclamation cannot be had before the first Phone.
     expect(TECHS.P6.cost).toEqual({ a: 300, g: 25 });
-    expect(TECHS.P8.cost).toEqual({ a: 1200, b: 300, g: 100 });
-    // β is what free play has least of: at 500 it was a 37-minute wait. Its α keeps a fast player's first Robot after 24:00.
-    expect(TECHS.P9.cost).toEqual({ a: 2800, b: 250, g: 450 });
+    // (Their α went up when the spine's came down: a fast player arrives with the α the spine no longer takes, and
+    // the first Robot stays after 24:00.)
+    expect(TECHS.P8.cost).toEqual({ a: 3500, b: 300, g: 100 });
+    // β is what free play has least of: at 500 it was a 37-minute wait.
+    expect(TECHS.P9.cost).toEqual({ a: 8000, b: 250, g: 450 });
   });
 
   it('side techs are impulse buys: none costs more than a third of the spine tech it competes with', () => {
-    // Before the first Circuit only α exists, and every α side tech is small next to Assembly: together they
-    // cost less than a seventh of it. (Wider Demand used to be among them at 200 α; nothing sells over
-    // demand that early, and an expert who bought it on impulse reached Circuit most of a minute later.)
-    for (const id of ['R2', 'L2', 'L3']) {
+    // Before the first Circuit only α exists, and every α side tech is small next to Assembly: the four of them
+    // together cost a third of it. (Routing is one of them now: a research for whoever wants a Router, where it was
+    // a goal's reward with a card after it. Wider Demand used to be among them at 200 α; nothing sells over demand
+    // that early, and an expert who bought it on impulse reached Circuit most of a minute later.)
+    for (const id of ['R2', 'L1', 'L2', 'L3']) {
       expect(Object.keys(TECHS[id].cost), id).toEqual(['a']);
       expect(TECHS[id].cost.a!, id).toBeLessThanOrEqual(0.35 * TECHS.P4.cost.a!);
     }
-    expect(['R2', 'L2', 'L3'].reduce((sum, id) => sum + TECHS[id].cost.a!, 0)).toBeLessThan(TECHS.P4.cost.a! / 7);
+    expect(['R2', 'L1', 'L2', 'L3'].reduce((sum, id) => sum + TECHS[id].cost.a!, 0)).toBeLessThanOrEqual(TECHS.P4.cost.a! / 3);
     // After it, the β side techs are either small next to Fabrication's β price or dearer than it.
     for (const id of ['L5', 'L4', 'L6', 'U1', 'S3', 'L7', 'R3', 'C2', 'C4']) {
       expect(Object.keys(TECHS[id].cost), id).toEqual(['b']);
@@ -97,13 +98,15 @@ describe('numbers (2.6)', () => {
     expect(MAT_IDS.filter((m) => MATERIALS[m].study != null)).toEqual(['silt']);
   });
 
-  it('prices board expansions at 200 × 2.5ⁿ', () => {
+  it('prices board expansions at 360 × 2.5ⁿ', () => {
+    // (200 × 2.5ⁿ before the growth goals: land is what a player who knows the game is short of credits for, and its
+    // price is what keeps that player's first Circuit after 6:00. The card player has it in hand both times.)
     const g = fresh();
-    expect(expansionCost(g)).toBe(200);
+    expect(expansionCost(g)).toBe(360);
     g.board.expansions = 1;
-    expect(expansionCost(g)).toBe(500);
+    expect(expansionCost(g)).toBe(900);
     g.board.expansions = 2;
-    expect(expansionCost(g)).toBe(1250);
+    expect(expansionCost(g)).toBe(2250);
   });
 
   it('prices Speed upgrades per node type, growing 1.6× per level', () => {
@@ -915,7 +918,13 @@ describe('Flow (2.3)', () => {
     expect(RULES.flow.holdShare).toBe(0.95);
     const { g, wells } = humming();
     g.flowOn = true;
-    run(g, 40);
+    // The count begins once the whole board is old enough to be judged (RULES.flow.holdAge): a machine just built
+    // runs for a while on what stood in its feeder's buffer.
+    expect(RULES.flow.holdAge).toBe(40);
+    run(g, 32);
+    expect(g.flow).toBeGreaterThan(0.95);
+    expect(g.flowHold).toBe(0);
+    run(g, 23);
     expect(g.flowHold).toBeGreaterThan(10);
     // One of six producers backs up: 83% is not enough any more...
     const stall = (id: number, y: number) => {

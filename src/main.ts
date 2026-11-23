@@ -8,6 +8,7 @@ import './styles/clean.css';
 import './styles/manage.css';
 import { clearHistory, cutWire, deleteNode, nodeById, redo, refundOf, removeClip, undo } from './actions';
 import { fmt, fmtTime, has, offlineCap } from './economy';
+import { migrateChain } from './goals';
 import { offlineGains, tick } from './sim';
 import { clearSave, loadGame, newGame, saveGame } from './state';
 import {
@@ -86,6 +87,8 @@ function begin() {
 
 function boot() {
   const loaded = loadGame();
+  // (A save from the chain of 22 goals is carried over to this one before anything reads its goal: src/goals.ts.)
+  if (loaded) migrateChain(loaded);
   ui.g = loaded ?? newGame();
   resumedFrom = loaded ? loaded.savedAt : null;
   initToasts($('toasts'));

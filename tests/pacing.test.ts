@@ -24,14 +24,16 @@ describe('pacing: every target holds on order seeds 0 to 3', () => {
           expect(tips, `seed ${seed}`).toEqual({ offered: 0, followed: 0 });
           // The Flow goal's line names the fix (Speed on the Ore Drill): done long before the valve (90 s).
           expect(flowGoal, `seed ${seed}: seconds on the Flow goal`).not.toBeNull();
-          expect(flowGoal!, `seed ${seed}: seconds on the Flow goal`).toBeLessThanOrEqual(45);
+          expect(flowGoal!, `seed ${seed}: seconds on the Flow goal`).toBeLessThanOrEqual(60);
           // The pacing rule: where a later first Phone would cost waits with nothing to do in them, the waits are
           // kept short. Its limits for this player (also among the checks below).
-          expect(nothing.longest, `seed ${seed}: longest stretch with nothing to do`).toBeLessThanOrEqual(60);
-          expect(nothing.share, `seed ${seed}: share of nothing to do`).toBeLessThanOrEqual(0.3);
-          for (const [i, s] of Object.entries(nothing.perGoal)) expect(s, `seed ${seed}: nothing to do on goal ${Number(i) + 1}`).toBeLessThanOrEqual(75);
-          // Goal 8 (Oil Deposits, minute 2) has no line: its wait stays short.
-          expect(nothing.perGoal[GOALS.findIndex((x) => x.id === 'research-murk')] ?? 0, `seed ${seed}: goal 8`).toBeLessThanOrEqual(30);
+          expect(nothing.longest, `seed ${seed}: longest stretch with nothing to do`).toBeLessThanOrEqual(50);
+          expect(nothing.share, `seed ${seed}: share of nothing to do`).toBeLessThanOrEqual(0.25);
+          for (const [i, s] of Object.entries(nothing.perGoal)) expect(s, `seed ${seed}: nothing to do on goal ${Number(i) + 1}`).toBeLessThanOrEqual(90);
+          // The first research (Oil Deposits) has no line: its wait stays short. And no research after it is a wait
+          // at all: each opens with the claim of a growth goal, which pays most of it.
+          expect(nothing.perGoal[GOALS.findIndex((x) => x.id === 'research-murk')] ?? 0, `seed ${seed}: Oil Deposits`).toBeLessThanOrEqual(30);
+          for (const id of ['make-spark', 'make-glyph', 'make-mist']) expect(nothing.perGoal[GOALS.findIndex((x) => x.id === id)] ?? 0, `seed ${seed}: ${id}`).toBeLessThanOrEqual(15);
         }
         // The newcomer takes the tips there are; the cards' lines now carry the moves tips used to, so there are
         // few or none (it is offered no more than a handful).
@@ -44,10 +46,10 @@ describe('pacing: every target holds on order seeds 0 to 3', () => {
   }
 
   it('the targets are the ones in docs/CONTENT.md', () => {
-    // Fast: the first Phone no sooner than 14:00 (it was 14:30; it came down so that the card players' waits could
-    // be kept short, under the pacing rule).
+    // Fast: the first Circuit between 6:00 and 10:00 (the growth goals stand before it now, not Assembly's price),
+    // the first Phone between 14:00 and 19:00, the Robot not before 24:00.
     expect(TARGETS.fast).toMatchObject({
-      firstMachineBy: 45, labBy: 90, firstResearchBy: 150, earlyIdleMax: 10, glyph: [360, 480], lens: [840, 1080], fabricatorMax: 300,
+      firstMachineBy: 45, labBy: 90, firstResearchBy: 150, earlyIdleMax: 10, glyph: [360, 600], lens: [840, 1140], fabricatorMax: 300,
       deadBefore10: 60, deadBeforeLens: 120, contentUntil: 1440, paradoxBy: 1800,
     });
     // The newcomer: first Phone between 17:30 and 21:00 (it follows no tip: the same game as the card-only player),
@@ -55,10 +57,11 @@ describe('pacing: every target holds on order seeds 0 to 3', () => {
     expect(TARGETS.newcomer).toEqual({ lens: [1050, 1260], goalMax: 240, fabricatorMax: 240 });
     expect(TARGETS.newcomer10).toEqual({ lensBy: 1440, goalMax: 300 });
     // Never following a tip (the player the pacing rule is set for): Phone between 17:30 and 21:00, no goal over 360 s,
-    // never a minute with nothing to do, no goal with more than 75 s of it in all, and nothing to do for at most 30%
-    // of the time to the Phone. Nothing is sold over its demand before the Phone either (a check of its own).
-    expect(TARGETS.cardonly).toEqual({ lens: [1050, 1260], goalMax: 360, nothingStretch: 60, nothingShare: 0.3, nothingGoal: 75 });
-    // Reading no line, following the tips: slower, never stranded: Phone by 30:00.
+    // never 50 s with nothing to do, no goal with more than 90 s of it in all (the save for the Fabricator), and
+    // nothing to do for at most a quarter of the time to the Phone. Nothing is sold over its demand before the Phone
+    // either (a check of its own).
+    expect(TARGETS.cardonly).toEqual({ lens: [1050, 1260], goalMax: 360, nothingStretch: 50, nothingShare: 0.25, nothingGoal: 90 });
+    // Reading no "while you wait" line, following the tips: slower, never stranded: Phone by 30:00.
     expect(TARGETS.nolines).toEqual({ lensBy: 1800 });
     expect(TARGETS.earnedShare).toBe(0.65);
     expect(POLICIES.cardonly).toMatchObject({ card: true, tips: false, claimDelay: [8, 16] });

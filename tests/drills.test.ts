@@ -7,17 +7,19 @@ import { deserialize, serialize } from '../src/state';
 import { fresh, market, rich, well } from './helpers';
 
 describe('Mobile Drills: research that lets a Drill be moved', () => {
-  it('is a side tech behind Routing, priced in α, bought and not handed out', () => {
+  it('is a side tech behind Ore Deposits, priced in α, bought and not handed out', () => {
+    // (It hung on Routing while Routing was a goal's reward. Routing is a research for whoever wants a Router now;
+    // by Ore Deposits the board has its first new plot, and where the Drills stand begins to matter.)
     const t = TECHS.S2;
     expect(t.name).toBe('Mobile Drills');
-    expect(t.requires).toEqual(['L1']);
+    expect(t.requires).toEqual(['P3']);
     expect(t.cost).toEqual({ a: 80 });
     expect(t.auto).toBeUndefined();
     const g = fresh();
     g.data.a = 1000;
     expect(techAvailable(g, t)).toBe(false);
     expect(research(g, 'S2')).toBe(false);
-    g.techs.push('L1');
+    g.techs.push('P3');
     expect(techAvailable(g, t)).toBe(true);
     expect(research(g, 'S2')).toBe(true);
     expect(g.data.a).toBe(920);

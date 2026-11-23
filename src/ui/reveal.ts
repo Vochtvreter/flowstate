@@ -4,15 +4,17 @@
 // credits, the goal card, sound and the menu. Everything else arrives with the goal that first gives it a use, so
 // that what is new on screen is always what the card is talking about:
 //
-//   goal 2  "Dig up more Sand"       the Drill's slot in the build bar; Undo and Redo
-//   goal 4  "Turn Sand into Glass"   the zoom buttons and Fit; the Delete tip; Duplicate and Delete in a card's
-//                                    inspector
-//   goal 6  "Speed up a Drill"       the Market's slot (or as soon as a second Market can be paid for); upgrades in
-//                                    a card's inspector (Duplicate and Delete are there from goal 4)
-//   the Lab (goal 5's reward)        locked deposits say "needs research": until then they are outlines with a lock
-//   goal 9  "Turn Oil into Plastic"  the minimap (or once the board holds eight cards); the Flows button: with
-//                                    a second raw material there is something to compare
-//   goal 14 "Open up more land"      the plot's label, "Board · 1 plot"
+//   goal 2  "Dig up more Sand"         the Drill's slot in the build bar; Undo and Redo
+//   goal 4  "Turn Sand into Glass"     the zoom buttons and Fit; the Delete tip; Duplicate and Delete in a card's
+//                                      inspector
+//   goal 6  "Make 1 Glass a second"    the Flows button: the first goal that is a rate, and the list has that rate
+//   goal 7  "Make 1.2 Glass a second"  the Market's slot (or as soon as a second Market can be paid for); upgrades
+//                                      in a card's inspector (Duplicate and Delete are there from goal 4): this is
+//                                      the goal Speed is the way to
+//   the Lab (goal 7's reward)          locked deposits say "needs research": until then they are outlines with a lock
+//   goal 10 "Turn Oil into Plastic"    the minimap (or once the board holds eight cards)
+//   goal 13 "Make 1 Plastic a second"  the Expand button and the plot's label, "Board · 1 plot": the one Oil
+//                                      deposit is in use, and the next plot brings another
 //   six cards on the board           cable management, with Tidy: the Wires button (curved or squared), and clips
 //                                    (a wire's Route part in its inspector, a double click on a wire or on the board)
 //
@@ -30,11 +32,11 @@ const FROM = {
   undo: at('second-well'),
   zoom: at('build-refiner'),
   trash: at('build-refiner'),
-  marketSlot: at('upgrade-well'),
-  upgrades: at('upgrade-well'),
+  marketSlot: at('tune-shard'),
+  upgrades: at('tune-shard'),
   minimap: at('make-ink'),
-  flows: at('make-ink'),
-  plot: at('expand'),
+  flows: at('grow-shard'),
+  plot: at('grow-ink'),
 };
 /** The minimap also comes once the board holds this many cards, whatever the goal. */
 const MINIMAP_CARDS = 8;
