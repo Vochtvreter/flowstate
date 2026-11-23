@@ -14,7 +14,7 @@
  * (RULES.orders = {...}): modules in src/ keep references to the originals.
  */
 import { DataTier, MATERIALS, MatId, NODE_DEFS, NodeType, RULES, TECHS } from '../src/content';
-import { goalById } from '../src/goals';
+import { GOALS, goalById } from '../src/goals';
 import { GoalReward } from '../src/state';
 
 export interface Profile {
@@ -101,11 +101,7 @@ export const PROFILES: Record<string, Profile> = {
   'no-rewards': {
     describe: 'Goals keep their tech grants and unlocks but pay no credits and no Data.',
     apply() {
-      for (const id of [
-        'wire-market', 'second-well', 'wire-all-wells', 'build-refiner', 'sell-shard', 'upgrade-well', 'feed-lab', 'research-murk',
-        'make-ink', 'silt-exit', 'make-spark', 'first-order', 'route-lab', 'expand', 'make-glyph', 'hold-flow', 'study-glyph',
-        'make-mist', 'make-prism', 'bulk-upgrade', 'build-fabricator', 'make-lens',
-      ]) reward(id, { credits: 0, a: 0, b: 0, g: 0 });
+      for (const goal of GOALS.filter((x) => !x.free)) reward(goal.id, { credits: 0, a: 0, b: 0, g: 0 });
     },
   },
 

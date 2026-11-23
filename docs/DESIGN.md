@@ -46,11 +46,11 @@ The game has exactly two progression systems, each with **its own currency** so 
 | Currency | **Credits** ¢ — earned by selling at Markets | **Data** (α, β, γ) — earned by feeding items to a Lab |
 | Answers | "How *much* can I build?" | "What *kinds* of things can I build?" |
 | Buys | Nodes, node upgrades, wire tiers, board space | Materials, recipes, node types, Router modes, scale tools |
-| Curve | Exponential per-type costs (endless) | Finite, hand-authored tree of 29 techs |
+| Curve | Exponential per-type costs (endless) | Finite, hand-authored tree of 30 techs |
 
 ### 3.1 Board progression (credits)
 
-- **Buying nodes.** Each node type has its own escalating price: `cost = base × growth^owned`. Growth is between ×1.10 and ×1.50, except for the Assembler at ×2.5. The first Market and every Dump are free. Deleting a node refunds what it would cost to buy back, so there is no buy/sell exploit and delete-then-rebuild nets to zero.
+- **Buying nodes.** Each node type has its own escalating price: `cost = base × growth^owned`. Growth is between ×1.10 and ×1.50 (the Assembler, at ×1.5, is the steepest: the growth goals ask for a second one of each kind). The first Market and every Dump are free. Deleting a node refunds what it would cost to buy back, so there is no buy/sell exploit and delete-then-rebuild nets to zero.
 - **Upgrading nodes.** Up to three tracks; level L costs `first level × 1.6^(L−1)`:
   - **Speed** — −15% craft time per level for a machine, +25% rate for a Drill or a Lab. 10 levels (25 with Overclock).
   - **Efficiency** (machines, needs Efficiency Tuning) — every 6th craft uses no inputs, then every 5th, 4th, 3rd. 4 levels.
@@ -67,11 +67,11 @@ A hand-authored tree with five branches (full list in [CONTENT.md](./CONTENT.md#
 - **Logistics** — the Router with its Ratio mode, Priority and Filter modes, Merger, Silo, wire tiers.
 - **Commerce** — Market Lens (price gauges), Wider Demand, Luxury Buyers, Exports. Hidden until something first sells over its demand. *Contracts are not built.*
 - **Research** — Lab Speed, Deep Analysis, Long Absence (hidden until the demo ends).
-- **Scale tools** — Bulk Upgrade, Auto-balance. *Blueprints are not built.*
+- **Scale tools** — Bulk Upgrade, Auto-balance, Mobile Drills (a Drill is moved like any card, and its deposit goes with it). *Blueprints are not built.*
 
 **Data comes in three kinds.** A Lab turns a raw item into 1 α, a refined one into 3 α (Tar, a byproduct: 1 α), a Tier 2 item into 5 β and a Tier 3 item into 8 γ. Later techs cost β and γ, so you can't skip a tier by grinding raw Sand. This is the natural "gate" that pushes the player up the material chain.
 
-Five techs cannot be bought. Refining, Lab, Routing and Bulk Upgrade are goal rewards, and Market Lens is granted the first time something sells over its demand.
+Four techs cannot be bought. Refining, Lab and Bulk Upgrade are goal rewards, and Market Lens is granted the first time something sells over its demand. Four more cannot be bought *yet*: Ore Deposits, Assembly, Quartz Deposits and Fabrication, the steps of the Processing spine, are locked until the growth goal before each is claimed (§9). The tree shows a locked step in full, with its price and the goal it waits for ("Opens with “Make 1 Plastic a second”"), and the claim pays most of that price.
 
 The tree shows only what is owned, what can be researched now, and one step beyond that as locked outlines. A tech priced in a kind of Data the player has not had yet stays hidden. A tech can be marked "Research it for me when ready".
 
@@ -129,6 +129,7 @@ Kept deliberately simple, deterministic and free of the DOM, so it is unit-teste
 
   A new or rewired node gets a few seconds' grace before anything is reported. The interface calls a machine starved only when it works less than 60% of the time (averaged over 3 seconds, cleared at 65%). Above that it is "short", which the inspector says in amber.
 - **Utilization** = share of time Working, smoothed over about 3 seconds. Shown as the ring around each node's icon.
+- **Loss** = what utilization leaves, for a Drill or a machine: the share of its time it did not work, the items a second of its first output that went unmade for it, and why: the part spent waiting for an input (Starved) and the part with its output backed up (Blocked), as the simulation already keeps them. It is a reading and nothing else (`src/loss.ts`): no rule reads it. A card shows it beside its rate from 5%, in the colour of the larger cause; the inspector splits it by cause and points at the node to look at. It answers what utilization alone does not: whether a machine at 70% is held back from behind (more supply, or a faster source) or from ahead (more demand, a second consumer, a bigger wire).
 
 ### 5.1 Time away
 
@@ -150,17 +151,17 @@ Kept deliberately simple, deterministic and free of the DOM, so it is unit-teste
 
 - Each material has a **demand** rate. Markets buy it at full price up to that rate; anything beyond sells at a flat 25%. Unused demand is banked for 8 seconds, so a machine that delivers in bursts is still paid in full. Demand is counted across all Markets together.
 - Wider Demand multiplies every demand by 1.5 and Exports by 2. Luxury Buyers adds 25% to the value of T2 and T3.
-- **Demand stays out of sight until it bites.** The first time a material sells over its demand for 3 seconds, the game says so once, grants Market Lens (a gauge per material in the Market's inspector) and reveals the Commerce branch. Scripted players who follow the goal cards never get there before the first Phone; the fast ones, who upgrade on their own, do in 13 of 30 runs.
+- **Demand stays out of sight until it bites.** The first time a material sells over its demand for 3 seconds, the game says so once, grants Market Lens (a gauge per material in the Market's inspector) and reveals the Commerce branch. Scripted players who follow the goal cards never get there before the first Phone (every growth goal's rate is under the demand for its material); the fast ones, who buy Speed on two lines of everything, get there at five to eight minutes.
 
 Effect: flooding the Markets with one product stops paying, so diversifying and climbing tiers is the better move.
 
 ### 6.2 Sell vs. study
 
-Every item can go to a Market (credits) or a Lab (Data). Routing that split is the player's core strategic dial. Goal 13 teaches it with a Router and one press of Favour.
+Every item can go to a Market (credits) or a Lab (Data). Routing that split is the player's core strategic dial. A wire from any port into a Lab does it by the piece; a Router (Routing, a research of 50α once Oil Deposits is in) sets how much goes each way, with one press of Favour. No goal asks for a Router: the cards have the player study Glass, then Circuits, and leave the rest to them.
 
 ### 6.3 Flow
 
-The game's namesake, unlocked by goal 15.
+The game's namesake, unlocked by goal 14 ("Make and sell Copper"): an Ore Drill brings up 0.8 a second and its Refiner wants 1, so the first thing the meter shows a player is a machine of their own that is short, with one cheap fix.
 
 - **Counted:** Drills and machines that are at least 20 seconds old and whose output can reach a Market or a Lab along some path of wires. A machine just built does not lower Flow, and six Drills into a Dump are not a supply line.
 - A counted producer is **flowing** at 90% utilization or more. **Flow** is the share that is flowing, smoothed over 3 seconds.
@@ -185,19 +186,21 @@ Measured with scripted players on the real rules (`npm run pacing`, 15 order seq
 
 | Scripted player | First Phone |
 |---|---|
-| Knows the game, one action every 3–4 s | 14:30–15:39 |
-| Does only what the goal card says, 6 s an action, claims 8–16 s after Claim lights | 17:36–18:11 |
-| The same at 10 s an action | 19:43–20:22 |
-| The same at 6 s, but claims at once (1–3 s) | 16:15–16:40 |
-| Reads the hints and the tips, never a "while you wait" line | 22:25–29:26 |
+| Knows the game, one action every 3–4 s | 14:43–17:37 |
+| Does only what the goal card says, 6 s an action, claims 8–16 s after Claim lights | 17:54–18:44 |
+| The same at 10 s an action | 21:15–22:02 |
+| Reads the hows and the growth goals' lines, never a "while you wait" line | 19:45–20:25 |
 
-The fast players make the first Circuit at 7:04–7:45 and the Robot, the last free-play goal, at 24:17–27:55.
+The fast players make the first Circuit at 6:25–8:53 and the Robot, the last free-play goal, at 24:02–29:11.
+
+**Where the time goes.** For the card follower on the first order sequence, the six growth goals take 5:45 of the 18:33 to the last claim: a little under a third of the demo is spent widening and tuning what is already there. The first new material after Sand (Oil) comes at about four minutes, Copper at seven and a half, the first Circuit at ten, the first Screen at thirteen.
 
 **Waiting.** "Nothing to do" means free hands, no goal or order to claim, and no step of the card's line that can be done now.
 
-- The card follower who claims 8–16 s late has nothing to do for 23–27% of the time to the first Phone, never for more than 58 seconds at a stretch. The build is tuned for this player.
-- The one who claims at once has nothing to do for 34–37% of it. "Make your first Circuit" holds 81–105 seconds of that, in stretches of up to 42. This was accepted for the pitch build: cheaper prices would let the fast players finish in under 14 minutes.
-- "Build a Fabricator", the last wait, held 83–104 seconds of it earlier. Its card now has a tune-up to do while saving (§9.1), and 42–52 seconds are left, never more than 41 at a stretch.
+- The card follower who claims 8–16 s late has nothing to do for 13–16% of the time to the first Phone, never for more than 45 seconds at a stretch. The build is tuned for this player (the limits: a quarter of the time, 50 seconds at a stretch, 90 on one goal).
+- No research after the first is waited for: each step of the spine opens with the claim of a growth goal, which pays most of it.
+- "Build a Fabricator" is the one long wait: about three minutes on the card, 54–80 seconds of them with nothing to do. Its card has a tune-up to do while saving (§9.1).
+- A growth goal has several answers and a scripted player has one, the card's own line. What a person does with "Make 1 Plastic a second" has not been watched.
 
 More in [CONTENT.md](./CONTENT.md#where-the-pacing-lands).
 
@@ -222,9 +225,9 @@ This is the most important section. The editor *is* the game. Sizes, layouts and
 | Delete | `Del` or `Backspace`, or Delete in the inspector. Always full refund, except for a node from a save of the earlier public version, which refunds no more than was paid for it. The last Drill cannot be deleted. | Delete in the inspector. |
 | Undo / redo | `Ctrl+Z` / `Ctrl+Shift+Z` or `Ctrl+Y`. Restores credits. Up to 200 steps, back to the last goal claimed. | Undo button; Redo in the gear menu. |
 | Duplicate | `Ctrl+D`: another node of the same type and recipe to place, at the normal price. | Duplicate in the inspector. |
-| Inspect | Click a node or wire → inspector with recipe, in/out rates, utilization, upgrades, and what is wrong with a one-press fix ("Receiving 0.80 of 1.00 Ore/s", with an "Upgrade source · 50¢" button). Hovering shows the rates on its wires. | Tap → the inspector as a bottom sheet. |
+| Inspect | Click a node or wire → inspector with recipe, in/out rates, utilization and loss (how much, and whether it waits for an input or is backed up), upgrades, and what is wrong with a one-press fix ("Receiving 0.80 of 1.00 Ore/s", with an "Upgrade source · 50¢" button). Hovering shows the rates on its wires. | Tap → the inspector as a bottom sheet. |
 | Camera | Wheel zooms; drag empty board (or middle or right drag) pans; `F` fits; `T` tidies. | Pinch zooms; drag empty board pans; Fit and Tidy buttons. |
-| Cables | `W` or the Wires button: squared or curved wires. Double-click a wire to pin it, drag the pin, double-click the pin to take it off. | Wires in the gear menu; Add a pin in a wire's sheet, then drag the pin. |
+| Cables | `W` or the Wires button: squared or curved wires. Double-click a wire to clip it, or the empty board to set up a clip; drag a clip; draw a wire across clips to run it through them; double-click a clip to take it off. | Wires in the gear menu; Add a clip in a wire's sheet, then drag it; tap a port, clips, then a card to run a wire through them; a clip's sheet takes it off. |
 | Other keys | `1`–`9`, `0` build bar or menu option · `R` tech tree · `P` pause · `Esc` backs out | |
 
 *Not built:* box-select, a block of cards for a finger, named groups or frames round a line, copy/paste of a selection, a trash target, a grid toggle, right-drag cutting, a node tooltip on hover.
@@ -236,8 +239,8 @@ This is the most important section. The editor *is* the game. Sizes, layouts and
 - **Placement:** a machine built from the menu stands in the outline the menu shows while it is open. That is centred on the point the player chose (or the nearest point inside the plot and clear) when it has room there. Otherwise it is the nearest free spot, preferring, within about 100 px, one with air round it, one the player can see whole, one on the near side of other cards from its port, and one whose new wire passes behind no card.
 - **Level:** cards stand on a 20 px grid and their ports do not (a card with one port has it 36 px down, one with two 31 and 61, a small card 30), so a wire between two cards of different shapes never ran straight. A card that is dragged within 9 px of the height at which one of its wires would be a straight line comes level by itself: the wire lights up, a soft click says so, and the card stays there, a few pixels off the grid, when it is let go.
 - **Block:** several cards can be put in a block and moved as one (§7.1): the way to set a whole line in a row, or to make room for one, without a drag a card.
-- **Tidy** (`T`, from six nodes): lays the whole board out again so that no wire runs behind a card it does not end at, and wires are short and cross little. Then cards come level as under the hand, where that takes under half a grid step. Drills stay on their deposits, the cards glide to their places, and one undo puts everything back. *The layout does not set cards in rows:* on two boards played by the card, Tidy left 2 of 22 and 4 of 34 wires straight. A row is made by hand.
-- **Cable management** (from six nodes): how a wire runs is the player's to arrange, and never part of the rules. Wires are drawn squared, or curved if the player prefers. Squared: right angles that find their own way round the cards (the shortest with the fewest corners that keeps clear of every card, found again as cards move), with a track of its own for each wire where several share a line. A wire can be given up to four pins, points it is drawn through, to lead it along a path of the player's own; between pins a squared wire still goes round cards. The style is a setting of the browser; pins are part of the board (saved, undone, moved with a block, taken off by Tidy). *Squared wires go round cards, not round each other:* they still cross, and a wire with no way round a card passes behind it.
+- **Tidy** (`T`, from six nodes): lays the whole board out again so that no wire runs behind a card it does not end at, and wires are short and cross little. Then cards come level as under the hand, where that takes under half a grid step. Drills stay where they stand, the cards glide to their places, and one undo puts everything back. *The layout does not set cards in rows:* on two boards played by the card, Tidy left 2 of 22 and 4 of 34 wires straight. A row is made by hand.
+- **Cable management** (from six nodes): how a wire runs is the player's to arrange, and never part of the rules. Wires are drawn squared, or curved if the player prefers. Squared: right angles that find their own way round the cards (the shortest with the fewest corners that keeps clear of every card, found again as cards move), with a track of its own for each wire where several share a line. Clips are the player's own routing: points on the board that wires are run through (up to eight a wire), set on a wire or on the empty board, dragged, and shared, so that several wires through the same clips run as one bundle and are moved by moving the clips. A new wire is run through clips as it is drawn. Between clips a squared wire still goes round cards. The style is a setting of the browser; clips are part of the board (saved, undone, moved with a block, left standing when a wire is cut, taken off by Tidy). *Squared wires go round cards, not round each other:* they still cross, and a wire with no way round a card passes behind it.
 - *Not built:* a ratio hint while placing ("needs 2.0/s Sand · 1.4/s spare upstream").
 
 ### 7.3 Readability
@@ -273,22 +276,30 @@ This is the most important section. The editor *is* the game. Sizes, layouts and
 One goal at a time, on a card: a title, a sentence or two, progress, and the reward.
 
 **A card says what to bring about and why, not where to click.** The title is an outcome in the game's world ("Sell your Sand", "Turn Sand into Glass"), and the sentence under it is the why: "Two Sand sell for 2¢. Melted into one Glass they sell for 3¢. A Refiner does the melting." It names no gesture, so it is the same for a mouse and a finger. A goal about a recipe has it drawn on the card, and where several things are put together each input is ticked as it is wired in. A player who knows why a wire is wanted finds where it goes: the port without a wire pulses, and the machine says what it lacks. The gesture, worded for the pointer in use ("Drag from a Drill's port into empty space, let go, and pick Refiner."), is behind the card's **How?** button, and comes out by itself once the goal has been within reach for 20 seconds with the board left alone. Sent away with **Why?**, it does not come back on that goal. The how follows the board: with a Refiner already placed from the build bar and fed by nothing, it names the wire into it, not a second Refiner. *Whether a newcomer finds the first wire from the why alone, and whether 20 seconds is the right wait, has not been tried with a person.*
- A goal completes when its condition holds, at once if the player got there early, and then waits for one press on **Claim**. Rewards are credits, Data, techs and features. 22 goals lead to the first Phone (table in [CONTENT.md](./CONTENT.md#goal-chain)):
+ A goal completes when its condition holds, at once if the player got there early, and then waits for one press on **Claim**. Rewards are credits, Data, techs and features. 25 goals lead to the first Phone (table in [CONTENT.md](./CONTENT.md#goal-chain)).
+
+**A new thing arrives only after the player has grown what they have.** The chain alternates. A *chapter* brings something new (a machine, a material, a tool) and its cards say what to do with it. A *growth goal* then asks for a rate of what the chapter brought, "Make 1 Plastic a second", and leaves the way to the player: another Drill, another machine, Speed, more land. The card shows the rate as it stands ("0.5 / 1 Plastic a second"), its why says what holds the line back, and its how names one route. The next step of the tech tree's spine stays locked until the growth goal is claimed, and the claim pays most of it, so the player does not wait for Data after being told to grow: they claim, research, and the next chapter begins.
 
 | Goals | The player… | Lesson, and what it unlocks |
 |---|---|---|
 | 1–3 | sells the Sand, digs up more, sells that too | wiring, the build bar, fan-in → Refining |
-| 4–5 | turns Sand into Glass, sells the Glass | build-from-wire → the Lab ★ |
-| 6–7 | speeds up a Drill, studies Glass in a Lab | the inspector, sell vs. study ★ |
-| 8–11 | opens up the Oil deposit, turns Oil into Plastic, gives the Tar somewhere to go, makes and sells Copper | the tech tree, byproducts, a machine that is full → Orders ★ |
-| 12–14 | fills an order, routes more to a Lab than to the Market, opens up more land | orders, the Router, expansion → Routing |
-| 15–17 | makes a Circuit, holds 95% Flow for 10 seconds, studies Circuits for β | two inputs ★, Flow, Data tiers |
-| 18–20 | makes Silicon, makes a Screen, speeds up every Drill at once | a cross-line recipe ★, Bulk Upgrade |
-| 21–22 | builds a Fabricator, makes the first Phone | saving for a big buy; the end of the demo ★ |
+| 4–5 | turns Sand into Glass, sells the Glass | build-from-wire ★ |
+| **6–7** | **makes 1 Glass a second, then 1.2** | a second line; Speed, and that a faster machine needs a faster feeder → the Lab ★ |
+| 8–12 | studies Glass in a Lab, opens up the Oil deposit, turns Oil into Plastic, gives the Tar somewhere to go, fills an order | sell vs. study ★, the tech tree, byproducts, a machine that is full, orders |
+| **13** | **makes 1 Plastic a second** | land: the one Oil deposit is in use → Ore Deposits can be researched ★ |
+| 14–15 | makes and sells Copper, holds 95% Flow for 10 seconds | a slower Drill ★, Flow |
+| **16** | **makes 1 Copper a second** | a second expansion, Speed on the Ore Drills → Assembly can be researched ★ |
+| 17–18 | makes a Circuit, studies Circuits for β | two inputs ★, Data tiers |
+| **19** | **makes 0.6 Circuits a second** | a second Assembler, or Speed on the first → Quartz Deposits can be researched ★ |
+| 20–22 | makes Silicon, makes a Screen, speeds up every Drill at once | a cross-line recipe ★, Bulk Upgrade |
+| **23** | **makes 0.5 Screens a second** | a second Screen Assembler, or Speed → Fabrication can be researched ★ |
+| 24–25 | builds a Fabricator, makes the first Phone | saving for a big buy; the end of the demo ★ |
 
-★ = one of the big celebrations.
+Growth goals in bold. ★ = one of the big celebrations.
 
-- Through goal 7 the rewards paid so far always cover the next purchase the card asks for.
+- Through goal 8 the rewards paid so far always cover the next purchase the card asks for.
+- A growth goal counts what its makers really make and pass on, and is met at 97% of the rate. Every rate is under the demand for its material, so none is met by selling at a quarter of the price.
+- A save from the chain before the growth goals is moved to the same card, or the nearest that still stands.
 - Every card that has the player make something new also says to sell it: in its title or its why, and in its how.
 - Claiming a goal clears the undo history, so nothing that earned a reward can be taken back.
 - The Flow goal cannot stall for good: after 90 seconds on the card, all but one producer flowing is enough; after 180, all but two; then one more every 120.
@@ -296,13 +307,14 @@ One goal at a time, on a card: a title, a sentence or two, progress, and the rew
 
 No text walls: a card is a title and a sentence or two.
 
-### 9.1 While you wait, and the adviser
+### 9.1 The cards' lines, and the adviser
 
-Several goals have a wait in them: Data to save for a research, credits for a machine.
-
-- **Lines on the card.** Seven goals (11, 15, 16, 18, 19, 21, 22) carry up to three "while you wait" lines, shown one at a time ("While you wait · 1 of 2"). **Show me** acts the line's next step out on the board, and a done line is ticked. A line that was done before its goal came up is left out, and not counted. On goal 21 the line is a tune-up for the wait before the Fabricator: a level of Speed on the machine a Drill outruns, then a Refiner on a Drill that only feeds a Lab, its goods sold. Its words are its next step's own, each step is only on the card while it pays for itself before the Fabricator can be bought, and the line leaves when none does. On goal 22 the lines are the goal's own two wires and read "Next step". When the line's next step costs credits that the card's own purchase needs, the card says "Saving for this" with the price and about how long, instead of offering it.
+- **One way.** Each growth goal has one line, shown with the card's how: the next single step toward the rate, in that step's own words ("Every Oil deposit is in use: expand the board (360¢) for another."), with **Show me** to act it out on the board. It is for whoever asks: the goal can be reached any other way.
+- **While you wait.** Three lines are left for the waits there are: the Flow goal's fix (Speed on the Ore Drill the Copper Refiner waits for), the cut of the Circuit wire into the Lab once the β for Fabrication is covered, and on goal 24 a tune-up for the wait before the Fabricator: a level of Speed on the machine a Drill outruns, a Refiner on a Drill that only feeds a Lab, a Drill and a Refiner on a deposit nobody drills. Its words are its next step's own, each step is only on the card while it pays for itself before the Fabricator can be bought, and the line leaves when none does. A line that was done before its goal came up is left out, and not counted.
+- **Next step.** On goal 25 the lines are the goal's own two wires.
+- When a line's next step costs credits that are not in hand, the card says "Saving for this" with the price and about how long, instead of offering it.
 - **The adviser.** While a goal is a wait, the adviser may offer one tip. Every candidate is tried on a copy of the game against an untouched copy, with the real rules. A tip is given only if it saves at least 15 seconds of the wait, ends a wait that would never end, or (on the Flow goal) gets the producer it names flowing. It keeps quiet for 20 seconds after any change to the board, never reverses a goal card, and does not repeat the card's line (one exception, on the Flow goal, is in CONTENT.md). It runs in a Web Worker.
-- The lines carry the game; tips are rare. A scripted player who follows the cards is offered none in fifteen runs. One who ignores the lines is offered seven to ten.
+- Tips are rare, and rarer than they were: a scripted player who follows the cards is offered none in fifteen runs, because nothing on the cards' path is a wait for Data any more. The adviser speaks to the player who left that path: one who spent their α on side techs and now waits for a research, one whose order asks for something that reaches no Market, one whose Lab is crowded.
 
 ### 9.2 The ending and free play
 
@@ -335,7 +347,7 @@ Several goals have a wait in them: Data to save for a research, credits for a ma
   tools/         pacing.ts: the scripted players; bench.ts and perf.mjs: what the game's work costs, and the page's frames
   ```
 - **Undo** keeps a snapshot of the board's structure and the credits spent for each step, up to 200.
-- **Tests:** `npm test` runs 614 tests, among them the pacing targets on four order sequences. `npm run pacing` plays six scripted players and checks each run against the pacing targets.
+- **Tests:** `npm test` runs 621 tests, among them the pacing targets on four order sequences. `npm run pacing` plays six scripted players and checks each run against the pacing targets.
 - **Size and speed:** the shipped JavaScript and CSS are about 260 kB gzipped. Frame rates are in [PITCH_PLAN.md](./PITCH_PLAN.md#outcome).
 - **Outside requests:** the page loads its typefaces from Google Fonts and shows system fonts until they arrive. Nothing else leaves the page.
 - **Publishing:** `.github/workflows/deploy.yml` runs the tests and the build on every push to `main` and deploys the result to GitHub Pages.
@@ -354,7 +366,7 @@ Several goals have a wait in them: Data to save for a research, credits for a ma
 
 Settled by the build:
 
-1. **Interface progression.** Parts of the interface appear when the goals reach them: the Tech tree button with the Lab, the order chip with Orders, the Flow ring with the Flow meter, Expand at goal 14, build-bar slots as their nodes unlock. There is no third system. The first screen holds only what the first goal needs, a Drill, a Market and the card: the build bar's slots, Undo and Redo, the zoom buttons, the row of keys, the minimap, the Flows button and the plot's label each arrive with the goal that first gives them a use, and until the Lab a locked deposit is an outline with a lock (`src/ui/reveal.ts` has the list). A save that is further on shows all it has reached.
+1. **Interface progression.** Parts of the interface appear when the goals reach them: the Tech tree button with the Lab, the order chip with Orders, the Flow ring with the Flow meter, Expand at goal 13, build-bar slots as their nodes unlock. There is no third system. The first screen holds only what the first goal needs, a Drill, a Market and the card: the build bar's slots, Undo and Redo, the zoom buttons, the row of keys, the minimap, the Flows button and the plot's label each arrive with the goal that first gives them a use, and until the Lab a locked deposit is an outline with a lock (`src/ui/reveal.ts` has the list). A save that is further on shows all it has reached.
 2. **Two currencies.** Credits and Data, with Data in three kinds.
 3. **Board constraint.** Deposits, and expansions bought one strip at a time.
 4. **Platform.** Browser, with a phone layout and touch controls built.

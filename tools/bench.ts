@@ -19,6 +19,7 @@
  * grid steps, and a glide is every frame of a card coming to rest (stepSettle), for one card and for a Tidy.
  */
 import { writeFileSync } from 'node:fs';
+import { clipById } from '../src/actions';
 import { advice } from '../src/advice';
 import { FORECAST, LOOKS, lookahead, measure } from '../src/forecast';
 import { offlineGains, tick } from '../src/sim';
@@ -148,7 +149,8 @@ function routeInput(g: Game, off?: Offsets): { wires: WireIn[]; cards: CardBox[]
       id: w.id, from: w.from, to: w.to,
       a: a ? { ...e.a, x: e.a.x + a.ox, y: e.a.y + a.oy } : e.a,
       b: b ? { ...e.b, x: e.b.x + b.ox, y: e.b.y + b.oy } : e.b,
-      pins: w.pins,
+      // (The points a wire is set to run through are its clips: board.ts hands the router their places, clipPts.)
+      pins: w.clips?.length ? w.clips.map((id) => clipById(g, id)).filter((c) => !!c).map((c) => ({ x: c!.x, y: c!.y })) : undefined,
     });
   }
   const cards: CardBox[] = g.nodes.map((n) => {

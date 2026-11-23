@@ -349,7 +349,6 @@ g.wire.dim.stalled .base { stroke-opacity: 0.22; }
 html[data-input='touch'] .port { width: 22px; height: 22px; margin-top: -11px; border-width: 4px; }
 html[data-input='touch'] .port.in { left: -12px; }
 html[data-input='touch'] .port.out { right: -12px; }
-html[data-input='touch'] g.wire .pin { stroke-width: 3px; }
 /* (A landscape phone: the folded strip is one row as it is upright.) */
 @media (orientation: landscape) and (max-height: 520px) {
   #app.phone:not(.hint-open) #hud-strip, #app.phone:not(.hint-open) #hud-strip.over-tech { display: flex; flex-direction: column; }

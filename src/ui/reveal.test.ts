@@ -24,18 +24,22 @@ describe('start simple: the first screen is a Drill, a Market and one sentence',
   });
 
   it('each part arrives with the goal that first gives it a use, and stays', () => {
-    const first = (pick: (g: Game) => boolean) => GOALS.findIndex((_, i) => pick(at(i, i >= 5 ? ['P1', 'R1'] : i >= 3 ? ['P1'] : [])));
+    // (The techs a save at that goal has: Refining from goal 3's reward, the Lab from goal 7's.)
+    const first = (pick: (g: Game) => boolean) => GOALS.findIndex((_, i) => pick(at(i, i >= 7 ? ['P1', 'R1'] : i >= 3 ? ['P1'] : [])));
     const idOf = (i: number) => GOALS[i].id;
     expect(idOf(first((g) => revealOf(g).undo))).toBe('second-well');
     expect(idOf(first((g) => slotShown(g, 'well')))).toBe('second-well');
     expect(idOf(first((g) => revealOf(g).zoom))).toBe('build-refiner');
     expect(idOf(first((g) => revealOf(g).trash))).toBe('build-refiner');
-    expect(idOf(first((g) => slotShown(g, 'market')))).toBe('upgrade-well');
-    expect(idOf(first((g) => revealOf(g).depositWords))).toBe('upgrade-well'); // the Lab is goal 5's reward
+    // Upgrades come with the goal that Speed is the way to, "Make 1.2 Glass a second" (it was a card of its own).
+    expect(idOf(first((g) => slotShown(g, 'market')))).toBe('tune-shard');
+    expect(idOf(first((g) => revealOf(g).upgrades))).toBe('tune-shard');
+    expect(idOf(first((g) => revealOf(g).depositWords))).toBe('feed-lab'); // the Lab is the reward of the goal before
     expect(idOf(first((g) => revealOf(g).minimap))).toBe('make-ink');
-    expect(idOf(first((g) => revealOf(g).flows))).toBe('make-ink');
-    expect(idOf(first((g) => revealOf(g).plot))).toBe('expand');
-    expect(idOf(first((g) => revealOf(g).upgrades))).toBe('upgrade-well');
+    // The list of what is made a second comes with the first goal that is a rate; the plot with the goal whose
+    // deposits are all in use.
+    expect(idOf(first((g) => revealOf(g).flows))).toBe('grow-shard');
+    expect(idOf(first((g) => revealOf(g).plot))).toBe('grow-ink');
     // Once on show, a part is never taken away again.
     for (const key of ['undo', 'zoom', 'minimap', 'trash', 'plot', 'flows', 'upgrades'] as const) {
       let seen = false;
@@ -90,8 +94,8 @@ describe('start simple: the first screen is a Drill, a Market and one sentence',
     expect(g.nodes.length).toBe(6);
     expect(revealOf(g).wires).toBe(true);
     const few = at('second-well');
-    const [drill, market] = few.nodes;
-    few.wires.push({ id: 1, from: drill.id, port: 0, to: market.id, tier: 0, rate: 0, paid: 0, pins: [{ x: 300, y: 200 }] } as Game['wires'][number]);
+    expect(revealOf(few).wires).toBe(false);
+    few.clips.push({ id: 900, x: 300, y: 200 });
     expect(revealOf(few).wires).toBe(true);
   });
 });

@@ -47,14 +47,14 @@ import {
   act, buildNote, connect, cutNote, cutWire, expandBoard, favour, favourNote, favouredWire, freeDeposits, materialsAt, pickRecipe, placeNode,
   upgrade, upgradeAll, upgradeAllNote, upgradeNote, wireNote,
 } from './actions';
-import { DATA_NAMES, DATA_WORTH, DATA_YIELD, DataTier, MATERIALS, MAT_IDS, MatId, NODE_DEFS, NodeType, RECIPES, RULES, TECHS, Track } from './content';
+import { DATA_NAMES, DATA_WORTH, DATA_YIELD, DataTier, EXPANSION_DEPOSITS, MATERIALS, MAT_IDS, MatId, NODE_DEFS, NodeType, RECIPES, RULES, TECHS, Track } from './content';
 import {
   costText, dataYield, demandInfo, demandShown, expansionCost, flowMult, has, labRate, maxLevel, nodeCost, recipeOf, research, techAffordable,
   techAvailable, trackAvailable, upgradeCost, valueOf, wellRate,
 } from './economy';
 import { countsForFlow, isFlowing } from './flow';
 import { Forecast, LOOKS, forecast, lookahead } from './forecast';
-import { Meanwhile, TuneLabs, TuneLevel, activeGoal, depositsFrom, flowFix, goalAge, lensMaker, meanwhileAt, meanwhileOf, outrun, ownPairs, rawGlintWell, refineNext } from './goals';
+import { GROW_SLACK, Meanwhile, TuneLabs, TuneLevel, activeGoal, flowFix, goalAge, lensMaker, making, meanwhileAt, meanwhileOf, outrun, rateNoun, refineNext } from './goals';
 import { graph, isMachine, isPass } from './graph';
 import { claimOrder, orderReachesMarket, ordersWorth } from './orders';
 import { tick } from './sim';
@@ -527,6 +527,7 @@ function overDemand(g: Game): MatId | null {
 // Lab", "a Lab"), `Who` the same with a capital, `mat` a material's name, `cost` credits, `unit` α, β or γ.
 // =====================================================================================
 
+// (Plain digits, no thousands separator: a sentence has 90 characters, and a level of Speed can cost eight digits.)
 const cents = (c: number) => `${Math.round(c)}¢`;
 
 export const SAY = {
@@ -577,20 +578,19 @@ export const SAY = {
   flowFavour: (Who: string, mat: string) => `${Who} needs more ${mat}: favour its wire on the Router.`,
   flowBlank: (Who: string, port: string) => `${Who} has nothing to work on: wire ${port} to it.`,
   flowTaker: (Who: string, node: string, cost: number) => `${Who} is backed up: buy Speed on ${node} (${cents(cost)}).`,
-  // --- the steps of a goal card's "while you wait" line (lineAdvice): a Drill, its own Lab, the board ---
-  lineWell: (mat: string, cost: number) => `Place a Drill on the free ${mat} deposit (${cents(cost)}), then build a Lab from its port.`,
-  lineLab: (mat: string, cost: number) => `Build a Lab from the new ${mat} Drill's port (${cents(cost)}): a Lab of its own is 1 α a second.`,
-  lineExpand: (cost: number) => `Expand the board (${cents(cost)}): it brings new deposits for a Drill and a Lab of its own.`,
-  // --- "Make and sell Copper", second line: a Lab of its own for the Sand Drill that only sells ---
-  lineOwnLab: (port: string, cost: number) => `Build a Lab from ${port} (${cents(cost)}): Sand is 1 α each in a Lab.`,
+  // --- the steps of a growth goal's line ("Make 1 Glass a second": growNext). What it shares with the tips above it
+  // says in their words: a product that is not sold (sellUnsold), a Refiner from a Drill's port (lineRefine), a
+  // machine short of an input (flowSpeed, flowWire, flowNone, flowBlank), a level of Speed (speed). Its own: a Drill
+  // on a free deposit for the machine to come (`kind`: "Refiner") or for one that is short, the board's next plot,
+  // another machine for a part (`a`: "an Assembler"; `out`: what it makes), and a by-product's wire to the Dump.
+  // Each is one gesture: a machine is built, and its wire to the Market and its other inputs are the steps after ---
+  growWell: (mat: string, cost: number, kind: string) => `Place a Drill on the free ${mat} deposit (${cents(cost)}), then build a ${kind} from it.`,
+  growExpand: (mat: string, cost: number) => `Every ${mat} deposit is in use: expand the board (${cents(cost)}) for another.`,
+  growFeed: (Who: string, mat: string, cost: number) => `${Who} needs more ${mat}: place a Drill on the free deposit (${cents(cost)}).`,
+  growPart: (a: string, port: string, cost: number, out: string) => `Build ${a} from ${port} (${cents(cost)}) for more ${out}.`,
+  lineVoidWire: (port: string, dump: string, mat: string) => `Wire ${port} to ${dump}: it stops when its ${mat} piles up.`,
   // --- "Make your first Phone": what the Fabricator is not fed yet ---
   lineFeed: (port: string, to: string, n: string, mat: string) => `Wire ${port} to ${to}: a Phone takes ${n} ${mat}${n === 'one' ? '' : 's'}.`,
-  // --- "Make and sell Silicon", second line: Speed on a Drill with a Lab of its own, then on the Lab ---
-  linePairWell: (well: string, cost: number) => `Buy Speed on ${well} (${cents(cost)}): its Lab of its own then gets more to study.`,
-  linePairLab: (mat: string, cost: number) => `Buy Speed on the ${mat} Drill's own Lab (${cents(cost)}): the pair then gives more α.`,
-  // --- "Make and sell Silicon", third line: Lab Speed, then Deep Analysis ---
-  lineLabSpeed: (name: string, cost: string) => `Research ${name} (${cost}): Labs then study twice as fast, and Deep Analysis opens.`,
-  lineDeep: (name: string, cost: string) => `Research ${name} (${cost}): every item studied then gives half as much Data again.`,
   // --- "Hold 95% Flow": the line itself, naming the node its step acts on (flowLineWords below; its other fix, a
   // wire to the Market, reads as flowSell and flowNowhere do) ---
   lineFlowSpeed: (Who: string, mat: string, node: string) => `${Who} needs more ${mat}: buy Speed on ${node}.`,
@@ -598,9 +598,8 @@ export const SAY = {
   // that machine's kind, "Refiner"), or more than its Labs can study while Lab Speed is not researched ---
   lineTune: (Who: string, kind: string, cost: number) => `${Who} outruns its ${kind}: buy Speed on the ${kind} (${cents(cost)}).`,
   lineTuneLabs: (name: string, cost: string) => `Your Drills outrun their Labs: research ${name} (${cost}) and they flow again.`,
-  // ...then a Refiner on a Drill that only feeds a Lab, its product sold (that wire reads as sellUnsold does), and
-  // a Dump for a by-product. `lineRefineAll` is what the card reads through those steps: why, and what.
-  lineRefineAll: () => 'You have enough α: build a Refiner from a Drill that only feeds a Lab, and sell its goods.',
+  // ...then one more line of something that sells: a Drill on a free deposit (growWell), a Refiner from a Drill that
+  // feeds no machine, its product sold (that wire reads as sellUnsold does), and a Dump for a by-product.
   lineRefine: (port: string, cost: number, out: string, value: number) => `Build a Refiner from ${port} (${cents(cost)}): its ${out} sells for ${value}¢ each.`,
   lineVoid: (port: string, mat: string) => `Build a Dump from ${port}: it stops when its ${mat} piles up.`,
 };
@@ -772,8 +771,8 @@ function bulkCand(g: Game, type: NodeType, hope: number, say: (cost: number) => 
 }
 
 /**
- * Press Favour on a Router's wire. Never away from a Lab: "Route more to a Lab than to the Market" had the
- * player favour the Lab's wire, and a tip does not take back what a goal card asked for.
+ * Press Favour on a Router's wire. Never away from a Lab: a player who favoured the Lab's wire meant it (a
+ * goal card once asked for exactly that), and a tip does not take it back.
  */
 function favourCand(g: Game, router: GNode, w: Wire, hope: number, text: string): Cand | null {
   const now = favouredWire(g, router.id);
@@ -1657,7 +1656,7 @@ function stepGiven(g: Game, next: LineNext): boolean {
  */
 type LineNext = { c: Cand; need: number; line: string; pair?: boolean; earns?: { gain: number; lead: number }; kind?: TuneKind };
 /** The kinds of step the Fabricator card's tune-up has, in the order it gives them (tuneSteps). */
-type TuneKind = 'sell' | 'dump' | 'labs' | 'level' | 'well';
+type TuneKind = 'sell' | 'dump' | 'labs' | 'level' | 'well' | 'drill';
 
 /**
  * The step of a card's line that the free funds were last seen to cover, per game: which step (the goal, the line,
@@ -1840,8 +1839,20 @@ function tuneSteps(g: Game): { list: LineNext[]; more: boolean } {
         act: { t: 'build', type: 'refiner', from: r.well.id, port: 0, recipe: r.recipe.id }, cost, hope: 0, show: r.well.id, brings: 'credits',
         text: SAY.lineRefine(portName(g, p), cost, MATERIALS[r.out].name, MATERIALS[r.out].value),
       },
-      // What the Refiner's product sells for, Flow's bonus on it included; nothing is lost for it (a Lab studied the raw material).
+      // What the Refiner's product sells for, Flow's bonus on it included; nothing is lost for it (a Lab studied the raw
+      // material). For a Drill that stands wired to nothing, the Refiner is the second half of a step that was only
+      // given with both paid for: from the credits in hand (`pair`), so that no Drill is left standing alone.
       need: cost, line, kind: 'well', earns: { gain: r.gives * valueOf(g, r.out) * flowMult(g), lead: ADVICE.payLead.build },
+      ...(outs(g, r.well).length ? {} : { pair: true }),
+    });
+  } else if (r && 'deposit' in r) {
+    // A Drill on a deposit that stands free, for a Refiner whose product still sells at full price: given when the
+    // Drill and the Refiner can both be paid for, and the two pay themselves back before the Fabricator can be bought.
+    const cost = nodeCost(g, 'well');
+    const both = cost + nodeCost(g, 'refiner');
+    list.push({
+      c: { act: { t: 'build', type: 'well', deposit: r.deposit }, cost, hope: 0, brings: 'credits', text: SAY.growWell(MATERIALS[r.raw].name, cost, NODE_DEFS.refiner.name) },
+      need: both, line, kind: 'drill', earns: { gain: r.gives * valueOf(g, r.out) * flowMult(g), lead: 2 * ADVICE.payLead.build },
     });
   }
   return { list, more };
@@ -1907,17 +1918,198 @@ export function tuneState(g: Game): 'open' | 'done' | 'none' {
 }
 
 /**
- * The tune-up in the words the card shows while a step is on offer: the step's own sentence where it is about
- * something outrun or a Dump ("The Oil Drill outruns its Refiner: buy Speed on the Refiner (32¢)."), and through
- * the building of a Refiner and its wire to the Market the sentence that says why ("You have enough α: build a
- * Refiner from a Drill that only feeds a Lab, and sell its goods."). The same for mouse and touch. null when no step
- * is on offer (goalView then shows the line's own words, which are for the line once ticked).
+ * The tune-up in the words the card shows while a step is on offer: the step's own sentence ("The Oil Drill outruns
+ * its Refiner: buy Speed on the Refiner (32¢).", "Place a Drill on the free Sand deposit (27¢), then build a Refiner
+ * from it."). The same for mouse and touch. null when no step is on offer (goalView then shows the line's own
+ * words, which are for the line once ticked).
  */
 export function tuneLineWords(g: Game): { mouse: string; touch: string } | null {
   const step = tuneLook(g).step;
   if (!step) return null;
-  const text = step.kind === 'well' || step.kind === 'sell' ? SAY.lineRefineAll() : step.c.text;
-  return { mouse: text, touch: text };
+  return { mouse: step.c.text, touch: step.c.text };
+}
+
+// =====================================================================================
+// The growth goals' line: one way to the rate, a gesture at a time
+// =====================================================================================
+
+/** The recipe that makes this material as its main product, if it is unlocked. */
+const recipeFor = (g: Game, mat: MatId) => Object.values(RECIPES).find((r) => r.outputs[0][0] === mat && has(g, r.tech) && has(g, NODE_DEFS[r.machine].tech)) ?? null;
+
+/** Does the board's next plot bring a deposit of this raw material (EXPANSION_DEPOSITS, in order, round and round)? */
+const nextPlotBrings = (g: Game, raw: MatId) => EXPANSION_DEPOSITS[g.board.expansions % EXPANSION_DEPOSITS.length].includes(raw);
+
+/**
+ * The next gesture toward "Make `rate` of `mat` a second" (a growth goal's line: Meanwhile.grow), looking at the
+ * board only. One way there, the one a newcomer can follow to the letter; any other that brings the rate up counts
+ * as well. In order:
+ *  1. something a maker turns out has nowhere to go: its product to the Market, a by-product to a Dump;
+ *  2. a maker stands with an input not wired in: the port that has the most of it to spare;
+ *  3. a maker waits for an input, or is backed up: a level of Speed on the Drill or machine that feeds it flat out
+ *     (for a part: another port of that material first, then the same steps for the material itself); its product
+ *     to the Market where it is backed up;
+ *  4. all of them run flat out and it is still not enough: another maker. For a refined material, a Refiner from a
+ *     Drill that feeds no machine yet; before that a Drill on a free deposit; before that the board's next plot,
+ *     where no deposit is free and the plot brings one. For a part, another machine from the port with the most to
+ *     spare. Where none of that can be had, or the goal is about Speed (`tune`), a level of Speed on a maker.
+ * What is short is put right before anything is added, so that each step shows on the card's count. null when
+ * there is nothing this can name, and while what was built or bought last is still coming up to speed.
+ */
+function growNext(g: Game, line: string, mat: MatId, rate: number, tune = false, depth = 0): LineNext | null {
+  const recipe = recipeFor(g, mat);
+  const market = g.nodes.find((n) => n.type === 'market') ?? null;
+  if (!recipe || !market) return null;
+  const makers = g.nodes.filter((n) => n.recipe === recipe.id);
+  const kind = NODE_DEFS[recipe.machine].name;
+  const paid = (c: Cand, need = c.cost): LineNext => ({ c, need, line });
+  const free = (c: Cand): LineNext => ({ c, need: 0, line });
+  const speedOn = (n: GNode, text: (cost: number) => string, culprit?: number): LineNext | null => {
+    if (!trackAvailable(g, n, 'speed') || n.lv.speed >= maxLevel(g, 'speed')) return null;
+    const cost = upgradeCost(n, 'speed');
+    return paid({ act: { t: 'upgrade', node: n.id, track: 'speed', all: false }, cost, hope: 0, show: n.id, ...(culprit != null ? { culprit } : {}), brings: 'credits', text: text(cost) });
+  };
+
+  // 1. What a maker turns out has nowhere to go.
+  for (const n of makers) {
+    for (let port = 0; port < recipe.outputs.length; port++) {
+      if (outs(g, n, port).length) continue;
+      const out = recipe.outputs[port][0];
+      const p: Port = { n, port, mat: out };
+      if (MATERIALS[out].value >= RULES.orders.junkValue) {
+        return free({ ...wireCand(p, market, 0, SAY.sellUnsold(portName(g, p), the(g, market), MATERIALS[out].name, MATERIALS[out].value)), brings: 'credits' });
+      }
+      const dump = g.nodes.find((x) => x.type === 'void');
+      if (dump) return free(wireCand(p, dump, 0, SAY.lineVoidWire(portName(g, p), the(g, dump), MATERIALS[out].name)));
+      if (has(g, NODE_DEFS.void.tech)) {
+        const cost = nodeCost(g, 'void');
+        return paid({ act: { t: 'build', type: 'void', from: n.id, port }, cost, hope: 0, show: n.id, text: SAY.lineVoid(portName(g, p), MATERIALS[out].name) });
+      }
+    }
+  }
+
+  // 2. A maker with an input that nothing brings it (or one of its kind that stands with no recipe and no wire).
+  const idle = g.nodes.find((n) => n.type === recipe.machine && !n.recipe && !ins(g, n).length);
+  for (const n of idle ? [idle, ...makers] : makers) {
+    for (const [m] of recipe.inputs) {
+      if (ins(g, n).some((w) => materialsAt(g, w.from, w.port).includes(m))) continue;
+      const from = ports(g).filter((x) => x.mat === m && x.n !== n).sort((a, b) => spare(g, b) - spare(g, a))[0];
+      if (!from) continue;
+      const Who = cap(the(g, n));
+      return free(wireCand(from, n, 0, ins(g, n).length ? SAY.flowNone(Who, MATERIALS[m].name, portName(g, from)) : SAY.flowBlank(Who, portName(g, from))));
+    }
+  }
+
+  // 3. A maker that does not run flat out, and says why (one just built, still coming up to speed, says nothing
+  // yet and is left alone): the one furthest from it first.
+  const slow = makers.filter((n) => n.util < RULES.flow.flowing && n.grace <= 0 && (n.status === 'starved' || n.status === 'blocked')).sort((a, b) => a.util - b.util);
+  for (const n of slow) {
+    const Who = cap(the(g, n));
+    if (n.status === 'blocked' || n.blockedOn) {
+      // Backed up: what it makes is not taken as fast as it comes (a Lab that is full). Its product to the Market too.
+      const out = n.blockedOn ?? mat;
+      const port = Math.max(0, recipe.outputs.findIndex((o) => o[0] === out));
+      const p: Port = { n, port, mat: out };
+      if (MATERIALS[out].value >= RULES.orders.junkValue && !wired(g, p, market)) {
+        return free({ ...wireCand(p, market, 0, SAY.flowSell(Who, MATERIALS[out].name, portName(g, p, true), the(g, market))), culprit: n.id, brings: 'credits' });
+      }
+      continue;
+    }
+    const m = n.missing ?? [...recipe.inputs].sort((a, b) => (n.inb[a[0]] ?? 0) / a[1] - (n.inb[b[0]] ?? 0) / b[1])[0]?.[0];
+    if (!m) continue;
+    const name = MATERIALS[m].name;
+    const feeders: GNode[] = [];
+    for (const w of ins(g, n)) {
+      const x = node(g, w.from);
+      if (x && !isPass(x) && !feeders.includes(x) && materialsAt(g, w.from, w.port).includes(m)) feeders.push(x);
+    }
+    if (MATERIALS[m].tier > 0) {
+      // A part short of something refined: another port that has it to spare, wired in.
+      const from = ports(g).filter((x) => x.mat === m && x.n !== n && !wired(g, x, n) && spare(g, x) > 0.05).sort((a, b) => spare(g, b) - spare(g, a))[0];
+      if (from) return free({ ...wireCand(from, n, 0, SAY.flowWire(Who, name, portName(g, from))), culprit: n.id });
+    } else {
+      // Short of a raw material: a Drill of it that stands unwired, wired in.
+      const bare = g.nodes.find((x) => x.type === 'well' && x.material === m && !outs(g, x).length);
+      if (bare) return free({ ...wireCand({ n: bare, port: 0, mat: m }, n, 0, SAY.flowWire(Who, name, portName(g, { n: bare, port: 0, mat: m }))), culprit: n.id });
+    }
+    // What feeds it runs flat out: a level of Speed there. (The cheapest level first, where several feed it.)
+    const flat = feeders.filter((x) => x.util >= RULES.flow.flowing).sort((a, b) => upgradeCost(a, 'speed') - upgradeCost(b, 'speed'));
+    for (const f of flat) {
+      const step = speedOn(f, (cost) => SAY.flowSpeed(Who, name, supplierName(g, f, n), cost), n.id);
+      if (step) return step;
+    }
+    if (MATERIALS[m].tier > 0 && depth < 2) {
+      // The material itself is short: the same steps for it, up to what the machines that use it would take.
+      let wanted = 0;
+      for (const x of g.nodes) {
+        const r = isMachine(x) ? recipeOf(x) : null;
+        const q = r?.inputs.find((i) => i[0] === m)?.[1] ?? 0;
+        if (r && q) wanted += q / (r.time * Math.pow(0.85, x.lv.speed));
+      }
+      const more = growNext(g, line, m, wanted, false, depth + 1);
+      if (more) return more;
+    } else if (MATERIALS[m].tier === 0) {
+      // Nothing to speed up: a Drill on a free deposit (it is wired in as the next step, as one that stands unwired).
+      const d = freeDeposits(g).find((x) => x.mat === m);
+      if (d) {
+        const cost = nodeCost(g, 'well');
+        return paid({ act: { t: 'build', type: 'well', deposit: d.id }, cost, hope: 0, culprit: n.id, text: SAY.growFeed(Who, name, cost) });
+      }
+    }
+  }
+
+  // 4. The makers could not make that much flat out: another one, or a faster one. (Where they could, there is
+  // nothing to add: what was built last is still coming up to speed, and the count on the card with it.)
+  const can = makers.reduce((sum, n) => sum + recipe.outputs[0][1] / (recipe.time * Math.pow(0.85, n.lv.speed)), 0);
+  if (can >= rate * (1 - GROW_SLACK) || making(g, mat) >= rate * (1 - GROW_SLACK)) return null;
+  const speedMaker = () => {
+    const n = makers.filter((x) => trackAvailable(g, x, 'speed') && x.lv.speed < maxLevel(g, 'speed')).sort((a, b) => upgradeCost(a, 'speed') - upgradeCost(b, 'speed') || a.id - b.id)[0];
+    return n ? speedOn(n, (cost) => SAY.speed(cap(the(g, n)), cost, MATERIALS[mat].name)) : null;
+  };
+  if (tune) return speedMaker();
+  if (recipe.inputs.length === 1) {
+    const raw = recipe.inputs[0][0];
+    const lone = g.nodes.find((n) => n.type === 'well' && n.material === raw && !outs(g, n).some((w) => machineAt(g, w.to)));
+    if (lone) {
+      const cost = nodeCost(g, recipe.machine);
+      const p: Port = { n: lone, port: 0, mat: raw };
+      // (The second half of "a Drill, then a Refiner from it": from the credits in hand, as the Drill was only offered
+      // with both. Its wire to the Market is the next step: one gesture at a time.)
+      return {
+        ...paid({ act: { t: 'build', type: recipe.machine, from: lone.id, port: 0, recipe: recipe.id }, cost, hope: 0, show: lone.id, brings: 'credits', text: SAY.lineRefine(portName(g, p), cost, MATERIALS[mat].name, MATERIALS[mat].value) }),
+        pair: true,
+      };
+    }
+    const d = freeDeposits(g).find((x) => x.mat === raw);
+    if (d) {
+      const cost = nodeCost(g, 'well');
+      return paid({ act: { t: 'build', type: 'well', deposit: d.id }, cost, hope: 0, brings: 'credits', text: SAY.growWell(MATERIALS[raw].name, cost, kind) }, cost + nodeCost(g, recipe.machine));
+    }
+    if (nextPlotBrings(g, raw)) {
+      const cost = expansionCost(g);
+      return paid({ act: { t: 'expand' }, cost, hope: 0, brings: 'credits', text: SAY.growExpand(MATERIALS[raw].name, cost) });
+    }
+    return speedMaker();
+  }
+  // A part: another machine from the port of its first input that has the most to spare; the rest is wired in after.
+  const [first] = recipe.inputs;
+  const from = ports(g).filter((x) => x.mat === first[0]).sort((a, b) => spare(g, b) - spare(g, a))[0];
+  if (from && spare(g, from) > 0.05) {
+    const cost = nodeCost(g, recipe.machine);
+    return paid({ act: { t: 'build', type: recipe.machine, from: from.n.id, port: from.port, recipe: recipe.id }, cost, hope: 0, show: from.n.id, brings: 'credits', text: SAY.growPart(an(kind), portName(g, from), cost, rateNoun(mat, 0)) });
+  }
+  return speedMaker();
+}
+
+/**
+ * A growth goal's line in the words of its next step ("Build a Refiner from a Sand Drill's port (58¢) and sell its
+ * Glass: 3¢ each."), whether or not that step can be paid for yet. The same for mouse and touch: it names no
+ * gesture. null when there is no step to name (goalView then shows the line's own words).
+ */
+export function growLineWords(g: Game): { mouse: string; touch: string } | null {
+  const line = meanwhileOf(g);
+  if (!line?.grow || line.done(g)) return null;
+  const next = growNext(g, line.id, line.grow.mat, line.grow.rate, !!line.grow.tune);
+  return next ? { mouse: next.c.text, touch: next.c.text } : null;
 }
 
 /**
@@ -1926,16 +2118,10 @@ export function tuneLineWords(g: Game): { mouse: string; touch: string } | null 
  * its port, which are one step of the line (a goal must never end with the Drill standing and its Lab not built: a
  * Drill with nowhere to send what it gives is blocked, and the alert names it for minutes). 0 for a wire or a cut.
  *
- *  - ink-lab (goal 11):     the Refiner's Plastic port to the Lab (the one with the most room, if several).
- *  - glint-lab (goal 11):   a Lab from the port of the Sand Drill that only sells.
- *  - well-labs (goal 15):   a Drill that stands unwired gets a Lab from its port; else a free deposit gets a Drill.
- *  - expand-labs (goal 15): the same on the deposits of the second expansion on, and the board is expanded first
- *                           when none of those is free.
- *  - flow-fix (goal 16):    a level of Speed on what feeds the short producer, or its port wired to the Market.
- *  - speed-pairs (goal 18): a level of Speed on a Drill with a Lab of its own, then on that Lab.
- *  - deep-analysis (goal 18): Lab Speed researched, then Deep Analysis (in Data: given once it is in hand).
- *  - cut-glyph (goals 19 and 21): the first wire that still takes Circuit to a Lab is cut.
- *  - tune-up (goal 21):     a level of Speed on the machine a Drill outruns; a Refiner from a Drill that only feeds a
+ *  - a growth goal's line ("Make 1 Glass a second"): one way to its rate, a gesture at a time (growNext).
+ *  - flow-fix ("Hold 95% Flow"): a level of Speed on what feeds the short producer, or its port wired to the Market.
+ *  - cut-glyph (the Screen and the Fabricator cards): the first wire that still takes Circuit to a Lab is cut.
+ *  - tune-up (the Fabricator card): a level of Speed on the machine a Drill outruns; a Refiner from a Drill that only feeds a
  *                           Lab, its product wired to the Market, a Dump for its by-product (tuneSteps).
  *  - prism-fab, glyph-fab (goal 22): the maker's port wired to the Fabricator.
  */
@@ -1951,42 +2137,6 @@ function lineNextOf(g: Game, of: Meanwhile): LineNext | null {
   const paid = (c: Cand, need = c.cost): LineNext => ({ c, need, line });
   const free = (c: Cand | null): LineNext | null => (c ? { c, need: 0, line } : null);
   switch (line) {
-    case 'ink-lab': {
-      const p = ports(g).find((x) => x.mat === 'ink' && isMachine(x.n));
-      const room = (lab: GNode) => Math.max(0, labRate(g, lab) - lab.rate);
-      const lab = p && g.nodes.filter((n) => n.type === 'lab' && !wired(g, p, n)).sort((a, b) => room(b) - room(a))[0];
-      if (!p || !lab) return null;
-      const y = dataYield(g, p.mat);
-      return free({ ...wireCand(p, lab, 0, SAY.study(portName(g, p), the(g, lab), MATERIALS[p.mat].name, y.amount, DATA_NAMES[y.tier])), brings: 'data' });
-    }
-    case 'glint-lab': {
-      const w = rawGlintWell(g);
-      if (!w || !has(g, NODE_DEFS.lab.tech)) return null;
-      const cost = nodeCost(g, 'lab');
-      return paid({ act: { t: 'build', type: 'lab', from: w.id, port: 0 }, cost, hope: 0, show: w.id, brings: 'data', text: SAY.lineOwnLab(portName(g, { n: w, port: 0, mat: 'glint' }), cost) });
-    }
-    case 'well-labs': case 'expand-labs': {
-      // Which deposits the line is about: any (goal 15's first line), or those of the second expansion on.
-      const from = line === 'well-labs' ? null : 1;
-      const later = from == null ? null : depositsFrom(g, from);
-      const mine = (deposit: number | null | undefined) => deposit != null && (!later || later.has(deposit));
-      if (!has(g, NODE_DEFS.lab.tech)) return null;
-      const bare = g.nodes.find((n) => n.type === 'well' && !!n.material && mine(n.depositId) && !outs(g, n).length);
-      if (bare) {
-        const cost = nodeCost(g, 'lab');
-        // The second half of a pair: from the credits in hand, whatever the reserve has grown to since (lineFunds).
-        return { ...paid({ act: { t: 'build', type: 'lab', from: bare.id, port: 0 }, cost, hope: 0, show: bare.id, brings: 'data', text: SAY.lineLab(MATERIALS[bare.material!].name, cost) }), pair: true };
-      }
-      const d = freeDeposits(g).find((x) => mine(x.id));
-      if (d) {
-        const cost = nodeCost(g, 'well');
-        // The Drill and its Lab together (see above). The Lab's price does not move with a Drill placed.
-        return paid({ act: { t: 'build', type: 'well', deposit: d.id }, cost, hope: 0, brings: 'data', text: SAY.lineWell(MATERIALS[d.mat].name, cost) }, cost + nodeCost(g, 'lab'));
-      }
-      if (!later) return null;
-      const cost = expansionCost(g);
-      return paid({ act: { t: 'expand' }, cost, hope: 0, brings: 'data', text: SAY.lineExpand(cost) });
-    }
     case 'flow-fix': {
       const f = flowFix(g);
       if (!f) return null;
@@ -2002,32 +2152,6 @@ function lineNextOf(g: Game, of: Meanwhile): LineNext | null {
       const p: Port = { n: f.n, port: f.port, mat: f.mat };
       const say = outs(g, f.n, f.port).some((x) => machineAt(g, x.to)) ? SAY.flowSell : SAY.flowNowhere;
       return free({ ...wireCand(p, f.market, 0, say(Who, MATERIALS[f.mat].name, portName(g, p, true), the(g, f.market))), culprit: f.n.id });
-    }
-    case 'speed-pairs': {
-      // The first pair still at its old pace: a level on whichever side holds it back (the Drill, or the Lab when
-      // the Drill already gives it all it can study).
-      for (const p of ownPairs(g)) {
-        if (p.sped) continue;
-        const gives = p.wells.reduce((s, w) => s + wellRate(w), 0);
-        const lab = p.lab;
-        const well = [...p.wells].sort((a, b) => upgradeCost(a, 'speed') - upgradeCost(b, 'speed'))[0];
-        const n = gives <= labRate(g, lab) + 1e-6 ? well : lab;
-        if (n.lv.speed >= maxLevel(g, 'speed')) continue;
-        const cost = upgradeCost(n, 'speed');
-        const mat = well.material ? MATERIALS[well.material].name : 'raw';
-        return paid({
-          act: { t: 'upgrade', node: n.id, track: 'speed', all: false }, cost, hope: 0, show: n.id, brings: 'data',
-          text: n === well ? SAY.linePairWell(the(g, well), cost) : SAY.linePairLab(mat, cost),
-        });
-      }
-      return null;
-    }
-    case 'deep-analysis': {
-      // Lab Speed first (Deep Analysis needs it), then Deep Analysis itself.
-      const id = !has(g, 'R2') ? 'R2' : 'R3';
-      const t = TECHS[id];
-      if (!t || !techAvailable(g, t)) return null;
-      return free({ act: { t: 'research', tech: id }, cost: 0, hope: 0, brings: 'data', text: id === 'R2' ? SAY.lineLabSpeed(t.name, costText(t)) : SAY.lineDeep(t.name, costText(t)) });
     }
     case 'cut-glyph': {
       const id = of.cuts?.(g)[0];
@@ -2047,7 +2171,8 @@ function lineNextOf(g: Game, of: Meanwhile): LineNext | null {
       return free({ ...wireCand(p, fab, 0, SAY.lineFeed(portName(g, p), the(g, fab), n === 1 ? 'one' : n === 2 ? 'two' : String(n), MATERIALS[mat].name)), brings: 'credits' });
     }
     default:
-      return null;
+      // A growth goal's line: one way to its rate, worked out from the board.
+      return of.grow ? growNext(g, line, of.grow.mat, of.grow.rate, !!of.grow.tune) : null;
   }
 }
 

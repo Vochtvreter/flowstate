@@ -56,11 +56,11 @@ export interface Wire {
   weight: number;
   filter: MatId | null;
   /**
-   * Pins: points on the board the player has set this wire to run by, in order from its start (at most MAX_PINS). They
-   * are how the wire is drawn and nothing else (src/ui/wires.ts): no rule reads them, and a wire carries the same
-   * with them or without. Absent on a wire that has none.
+   * The clips this wire runs through (ids of Game.clips), in order from its start (at most MAX_CLIPS). They are how
+   * the wire is drawn and nothing else (src/ui/wires.ts): no rule reads them, and a wire carries the same with them
+   * or without. Absent on a wire that runs through none.
    */
-  pins?: { x: number; y: number }[];
+  clips?: number[];
   // --- runtime ---
   /** Items per second, smoothed. Steady and exact when the wire carries its items in regular gulps (measureWire in src/sim.ts). */
   rate: number;
@@ -95,6 +95,18 @@ export interface Deposit {
 }
 
 /**
+ * A clip: a point on the board that wires are run through, the player's own cable management. It stands on the board
+ * in its own right, whether or not a wire runs through it: several wires may share one (they are drawn side by side
+ * through it), moving it moves them all, and it stays when its wires are cut. A wire names its clips by id (Wire.clips).
+ * Clips came out of pins, which were points of one wire each: a save with pins loads with a clip for each.
+ */
+export interface Clip {
+  id: number;
+  x: number;
+  y: number;
+}
+
+/**
  * A change the player made to the board, as the adviser needs to remember it: when, and what kind of thing was
  * done to what kind of node ("upgrade:speed:Lab", "wire:Plastic Refiner>Lab", "build:well:glint", "research:R2",
  * or plain "edit" for anything no tip ever asks for).
@@ -112,6 +124,11 @@ export interface GoalReward extends Reward {
   techs?: string[];
   /** A feature switched on: Orders, the Flow meter, or the end of the demo. */
   unlock?: Unlock;
+  /**
+   * Techs this goal opens for research (Tech.locked in src/content.ts): they are not granted, they can be bought
+   * with Data from now on. A goal that has the player grow a line opens the next step of the Processing spine.
+   */
+  opens?: string[];
 }
 
 /** The one active order (see src/orders.ts): "deliver `need` of `mat`", counted from sales at any Market. */
@@ -187,12 +204,25 @@ export interface Game {
   nodes: GNode[];
   wires: Wire[];
   deposits: Deposit[];
+  /** The clips on the board (see Clip). */
+  clips: Clip[];
   board: { w: number; h: number; expansions: number };
   credits: number;
   lifetime: number;
   data: Record<DataTier, number>;
   techs: string[];
   queue: string[];
+  /**
+   * Techs a goal has opened for research (GoalReward.opens): a tech marked `locked` in src/content.ts can be bought
+   * only once it is listed here. Re-applied from the claimed goals on load (repairChain in src/goals.ts), so a save
+   * from before this field has what its place in the chain gives it.
+   */
+  opened: string[];
+  /**
+   * Which goal chain the index in `goal` counts along (CHAIN in src/goals.ts). A save without it is from the
+   * chain of 22 goals (chain 1), and its index is carried over by the goal's id the first time the chain is looked at.
+   */
+  chain: number;
   made: Partial<Record<MatId, boolean>>;
   sold: Bag;
   soldRate: Bag;
@@ -287,22 +317,52 @@ export function noteEdit(g: Game, what: string) {
 export const GRID = 20;
 export const snap = (v: number) => Math.round(v / GRID) * GRID;
 
-/** A wire can carry this many pins, and a pin stands on a grid of this many pixels (half the cards' own). */
-export const MAX_PINS = 4;
-export const PIN_GRID = 10;
+/** A wire runs through this many clips at most, a board holds this many, and a clip stands on a grid of this many pixels (half the cards' own). */
+export const MAX_CLIPS = 8;
+export const MAX_BOARD_CLIPS = 240;
+export const CLIP_GRID = 10;
 
-/** Pins as they may be kept: whole points on the pin grid inside the plot, no two in a row the same, MAX_PINS at most. Anything else in the list is dropped. */
-export function cleanPins(pins: unknown, board: { w: number; h: number }): { x: number; y: number }[] {
+/** A point as a clip may stand at it: on the clip grid, inside the plot. */
+export function clipSpot(x: number, y: number, board: { w: number; h: number }): { x: number; y: number } {
+  return {
+    x: Math.max(0, Math.min(board.w, Math.round(x / CLIP_GRID) * CLIP_GRID)),
+    y: Math.max(0, Math.min(board.h, Math.round(y / CLIP_GRID) * CLIP_GRID)),
+  };
+}
+
+/** Points as clips may stand at them: whole points on the clip grid inside the plot, no two in a row the same. Anything else in the list is dropped. */
+export function cleanPoints(points: unknown, board: { w: number; h: number }): { x: number; y: number }[] {
   const out: { x: number; y: number }[] = [];
-  if (!Array.isArray(pins)) return out;
-  for (const p of pins) {
-    if (out.length >= MAX_PINS) break;
+  if (!Array.isArray(points)) return out;
+  for (const p of points) {
     if (!p || typeof p !== 'object' || typeof p.x !== 'number' || typeof p.y !== 'number' || !isFinite(p.x) || !isFinite(p.y)) continue;
-    const x = Math.max(0, Math.min(board.w, Math.round(p.x / PIN_GRID) * PIN_GRID));
-    const y = Math.max(0, Math.min(board.h, Math.round(p.y / PIN_GRID) * PIN_GRID));
+    const at = clipSpot(p.x, p.y, board);
     const last = out[out.length - 1];
-    if (last && last.x === x && last.y === y) continue;
-    out.push({ x, y });
+    if (last && last.x === at.x && last.y === at.y) continue;
+    out.push(at);
+  }
+  return out;
+}
+
+/** A list of clip ids as a wire may keep it: ids of clips that are there, each once, MAX_CLIPS at most. */
+export function cleanClipIds(ids: unknown, known: (id: number) => boolean): number[] {
+  const out: number[] = [];
+  if (!Array.isArray(ids)) return out;
+  for (const id of ids) {
+    if (out.length >= MAX_CLIPS) break;
+    if (typeof id !== 'number' || !known(id) || out.includes(id)) continue;
+    out.push(id);
+  }
+  return out;
+}
+
+/** The points a wire runs through: where its clips stand, in order. Empty for a wire with none. */
+export function clipPoints(g: Game, w: Wire): { x: number; y: number }[] {
+  if (!w.clips?.length) return [];
+  const out: { x: number; y: number }[] = [];
+  for (const id of w.clips) {
+    const c = g.clips.find((k) => k.id === id);
+    if (c) out.push({ x: c.x, y: c.y });
   }
   return out;
 }
@@ -340,7 +400,7 @@ export const newStats = (): Stats => ({
 export function newGame(): Game {
   const g: Game = {
     v: 1, nextId: 1,
-    nodes: [], wires: [],
+    nodes: [], wires: [], clips: [],
     deposits: [
       { id: 1, x: 100, y: 120, mat: 'glint' },
       { id: 2, x: 100, y: 260, mat: 'glint' },
@@ -351,7 +411,7 @@ export function newGame(): Game {
     board: { w: 1240, h: 760, expansions: 0 },
     credits: 0, lifetime: 0,
     data: { a: 0, b: 0, g: 0 },
-    techs: [], queue: [],
+    techs: [], queue: [], opened: [], chain: 2,
     // The starting Drill is already extracting Sand, so it is not announced as a new material.
     made: { glint: true }, sold: {}, soldRate: {},
     paused: false, time: 0, savedAt: Date.now(),
@@ -553,16 +613,41 @@ function revive(raw: any): Game | null {
         filter: w.filter && MATERIALS[w.filter] ? w.filter : null, mat: w.mat && MATERIALS[w.mat] ? w.mat : null,
         mixed: !!w.mixed, budget: num(w.budget, 0), flow: num(w.flow, 0),
       };
-      // Pins are only how the wire is drawn: whatever of them makes sense is kept, and the rest dropped.
-      const pins = cleanPins(w.pins, g.board);
-      if (pins.length) out.pins = pins;
-      else delete out.pins;
       return out;
     });
+    // Clips are only how wires are drawn: whatever of them makes sense is kept (a point on the clip grid inside the
+    // plot, an id of its own, one clip to a point), and the rest dropped.
+    g.clips = [];
+    for (const c of Array.isArray(raw.clips) ? (raw.clips as Partial<Clip>[]) : []) {
+      if (g.clips.length >= MAX_BOARD_CLIPS) break;
+      if (!c || typeof c !== 'object' || typeof c.id !== 'number' || !isFinite(c.id) || seen.has(c.id)) continue;
+      if (typeof c.x !== 'number' || typeof c.y !== 'number' || !isFinite(c.x) || !isFinite(c.y)) continue;
+      const at = clipSpot(c.x, c.y, g.board);
+      if (g.clips.some((k) => k.x === at.x && k.y === at.y)) continue;
+      seen.add(c.id);
+      g.clips.push({ id: c.id, x: at.x, y: at.y });
+    }
     // Ids are handed out from nextId: never one that is already in use.
     let top = 0;
-    for (const x of [...g.nodes, ...g.wires, ...g.deposits]) top = Math.max(top, x.id);
+    for (const x of [...g.nodes, ...g.wires, ...g.deposits, ...g.clips]) top = Math.max(top, x.id);
     g.nextId = Math.max(Math.floor(num(raw.nextId, 0)), top + 1, base.nextId);
+    for (const w of g.wires) {
+      const ids = cleanClipIds(w.clips, (id) => g.clips.some((c) => c.id === id));
+      // A save from before clips has pins, points of one wire each: every pin becomes a clip (one clip where two
+      // wires had a pin on the same point), and the wire runs through them as it did.
+      const pins = (w as Wire & { pins?: unknown }).pins;
+      if (!ids.length && pins !== undefined) {
+        for (const p of cleanPoints(pins, g.board)) {
+          if (ids.length >= MAX_CLIPS) break;
+          let c = g.clips.find((k) => k.x === p.x && k.y === p.y);
+          if (!c && g.clips.length < MAX_BOARD_CLIPS) g.clips.push((c = { id: g.nextId++, x: p.x, y: p.y }));
+          if (c && !ids.includes(c.id)) ids.push(c.id);
+        }
+      }
+      delete (w as Wire & { pins?: unknown }).pins;
+      if (ids.length) w.clips = ids;
+      else delete w.clips;
+    }
     for (const w of g.wires) {
       // The rate and its bookkeeping are display only: anything odd is dropped and measured afresh.
       w.rate = pos(w.rate);
@@ -574,6 +659,10 @@ function revive(raw: any): Game | null {
     const known = (list: unknown) => [...new Set(Array.isArray(list) ? list : [])].filter((id) => typeof id === 'string' && !!TECHS[id]) as string[];
     g.techs = known(g.techs);
     g.queue = known(g.queue).filter((id) => !g.techs.includes(id));
+    g.opened = known(raw.opened);
+    // The chain the goal index counts along: a save from before the chain of growth goals has none (it is chain 1),
+    // and is carried over by src/goals.ts (migrateChain) the first time its goal is looked at.
+    g.chain = typeof raw.chain === 'number' && isFinite(raw.chain) ? raw.chain : 1;
     // Nested objects are rebuilt field by field so that later additions get defaults too.
     const stats = newStats();
     for (const k of Object.keys(stats) as (keyof Stats)[]) {
@@ -687,10 +776,12 @@ export const isLookahead = (g: Game) => lookaheads.has(g);
 
 export interface Snapshot {
   nodes: Pick<GNode, 'id' | 'type' | 'x' | 'y' | 'recipe' | 'material' | 'depositId' | 'lv' | 'paid' | 'legacyPaid' | 'mode' | 'born'>[];
-  wires: Pick<Wire, 'id' | 'from' | 'port' | 'to' | 'tier' | 'paid' | 'weight' | 'filter' | 'pins'>[];
+  wires: Pick<Wire, 'id' | 'from' | 'port' | 'to' | 'tier' | 'paid' | 'weight' | 'filter' | 'clips'>[];
   /** The board's size and its deposits: an expansion is undone with the rest (actions.ts expandBoard). */
   board?: Game['board'];
   deposits?: Deposit[];
+  /** The clips on the board: setting one up, moving it and taking it off are steps like any other. */
+  clips?: Clip[];
   /**
    * The last press of Upgrade all on Drills (Game.bulkAt), null for none: undoing the press takes back "Upgrade
    * all your Drills at once" with it, which is met by that press alone (actions.ts unready).
@@ -706,10 +797,11 @@ export function snapshot(g: Game): Snapshot {
     })),
     wires: g.wires.map((w) => ({
       id: w.id, from: w.from, port: w.port, to: w.to, tier: w.tier, paid: w.paid, weight: w.weight, filter: w.filter,
-      ...(w.pins?.length ? { pins: w.pins.map((p) => ({ x: p.x, y: p.y })) } : {}),
+      ...(w.clips?.length ? { clips: w.clips.slice() } : {}),
     })),
     board: { ...g.board },
     deposits: g.deposits.map((d) => ({ ...d })),
+    clips: g.clips.map((c) => ({ ...c })),
     bulkAt: g.bulkAt ?? null,
   };
 }
@@ -765,13 +857,14 @@ export function restore(g: Game, s: Snapshot) {
     const fresh = makeWire(g, sw.from, sw.port, sw.to);
     g.nextId--;
     const w: Wire = { ...(prev ?? fresh), ...sw };
-    // (A wire's pins are as the snapshot has them: none, where it has none.)
-    if (sw.pins?.length) w.pins = sw.pins.map((p) => ({ x: p.x, y: p.y }));
-    else delete w.pins;
+    // (A wire's clips are as the snapshot has them: none, where it has none.)
+    if (sw.clips?.length) w.clips = sw.clips.slice();
+    else delete w.clips;
     return w;
   });
   if (s.board) g.board = { ...s.board };
   if (s.deposits) g.deposits = s.deposits.map((d) => ({ ...d }));
+  if (s.clips) g.clips = s.clips.map((c) => ({ ...c }));
   if (s.bulkAt !== undefined) {
     if (s.bulkAt == null) delete g.bulkAt;
     else g.bulkAt = s.bulkAt;

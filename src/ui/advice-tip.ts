@@ -419,6 +419,12 @@ interface Line {
   done: boolean;
   /** The goal's own requirement (goal 22's wires): labelled "Next step", with no count. GoalView.meanwhile.required. */
   required: boolean;
+  /**
+   * A growth goal's line (GoalView.meanwhile.way): one way to its rate. Labelled "One way", and kept with the how: its
+   * row is on the card only while the card says how (howOpen), so that a player who is getting on is not told where
+   * to click.
+   */
+  way: boolean;
   /** Its next step is being saved for: what, and about how long (game s). Said where Show me would be. GoalView.meanwhile.held. */
   held: NonNullable<GoalView['meanwhile']>['held'] | null;
   /** Real time before which its row is not drawn: the line it takes over from is still fading out (see swapLine). */
@@ -498,6 +504,7 @@ function lineStepNow(g: Game): Advice | null {
 /** Is the line's row on the card? A line that is done stays where there is room for it; on a narrow card only while it says what it bought. */
 function lineOn(g: Game, narrow: boolean): boolean {
   if (!line) return false;
+  if (line.way && !line.done && !howOpen(g)) return false;
   return !line.done || !narrow || (line.tickedAt > 0 && g.time < line.until);
 }
 /** While this holds, a narrow card shows the line and no tip. */
@@ -526,8 +533,17 @@ function closeLine(swap = false) {
 function newLine(g: Game, mw: NonNullable<GoalView['meanwhile']>, openedAt: number): Line {
   return {
     goal: g.goal.i, obj: meanwhileOf(g), step: mw.step ?? 1, of: mw.of ?? 1, text: mw.text, done: mw.done,
-    required: !!mw.required, held: mw.held ?? null, showAt: 0, openedAt, tickedAt: 0, until: 0, popAt: 0, nextAt: 0,
+    required: !!mw.required, way: !!mw.way, held: mw.held ?? null, showAt: 0, openedAt, tickedAt: 0, until: 0, popAt: 0, nextAt: 0,
   };
+}
+
+/**
+ * Is the card saying how right now? Set by the card (hud.ts: its "How?" button, or by itself once the player has not
+ * got anywhere for a while). A growth goal's line is shown with the how and not before.
+ */
+let howOpen: (g: Game) => boolean = () => true;
+export function setHowOpen(fn: (g: Game) => boolean) {
+  howOpen = fn;
 }
 
 /** The line is ticked before the player's eyes: its box pops, and for a while it says what that bought. */
@@ -638,6 +654,7 @@ function tendLine(g: Game, v: GoalView | null, now: number, changed: boolean, sa
     line.of = mw.of ?? 1;
     line.obj = meanwhileOf(g);
     line.required = !!mw.required;
+    line.way = !!mw.way;
     line.held = mw.held ?? null;
     if (mw.done && !line.done) tick(line, g, now);
     else if (!mw.done && line.done) {
@@ -714,7 +731,7 @@ export function lineHtml(g: Game, narrow: boolean): string {
   const held = !line.done ? line.held : null;
   const title = step && !held ? ` title="${esc(sentence(step))}"` : '';
   // "While you wait · 2 of 3" where the goal has more than one line; "Next step" where it is the goal's own requirement.
-  const { label: lbl, count } = lineLabel(line.step, line.of, line.required);
+  const { label: lbl, count } = lineLabel(line.step, line.of, line.required, line.way);
   const label = `${lbl}${count ? `<span class="gc-of" data-testid="line-count">${count}</span>` : ''}`;
   // The tick, then the label over the sentence (or run in before it, where every line counts: hud.css), then the button,
   // or what its step is being saved for where there is none yet.
@@ -725,7 +742,7 @@ export function lineHtml(g: Game, narrow: boolean): string {
   // ("open" only while the row is opening: a row that is rebuilt later, when the card around it changes, does not open again.)
   const opening = line.openedAt && now - line.openedAt < TIP.row + 200;
   // (What the row keeps as it leaves: ticked, saying what it bought. Opening, the pop and a reminder are moments.)
-  const kept = `${line.done ? ' done' : ''}${bought ? ' said' : ''}${line.required ? ' req' : ''}`;
+  const kept = `${line.done ? ' done' : ''}${bought ? ' said' : ''}${line.required || line.way ? ' req' : ''}`;
   lineCls = kept;
   const cls = `${opening ? ' open' : ''}${kept}${line.done && now - line.popAt < 700 ? ' pop' : ''}${lineNag ? ` nag${lineNag % 2}` : ''}`;
   return `<div class="gc-line gc-row${cls}" data-key="line" data-done="${line.done ? 1 : 0}" data-step="${line.step}" data-of="${line.of}"${line.required ? ' data-required="1"' : ''}${held ? ' data-held="1"' : ''} data-testid="goal-line"><div class="gc-in">${lineInner}</div></div>${out}`;

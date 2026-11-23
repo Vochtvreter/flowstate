@@ -244,9 +244,16 @@ export const demandShown = (g: Game) => g.seenSurplus || g.techs.includes('C1') 
  * (Market Lens, Wider Demand and what hangs on it) until demand has shown itself.
  */
 export const techHidden = (g: Game, t: Tech) => (!!t.needsEnd && !g.ended) || (!!t.needsSurplus && !demandShown(g));
-/** Can be researched now if affordable. Goal-granted techs (`auto`) are never purchasable. */
+/**
+ * Still locked: a tech that a goal has to open first (Tech.locked), which none has yet (Game.opened). The steps of
+ * the Processing spine are like that: each opens when the player has grown what the step before gave them.
+ */
+export const techLocked = (g: Game, t: Tech) => !!t.locked && !g.techs.includes(t.id) && !(g.opened ?? []).includes(t.id);
+/** Waiting for a goal to open it, and for nothing else: it is locked and its requirements are owned. The tree shows it in full. */
+export const techGated = (g: Game, t: Tech) => techLocked(g, t) && !techHidden(g, t) && t.requires.every((r) => g.techs.includes(r));
+/** Can be researched now if affordable. Goal-granted techs (`auto`) are never purchasable, and a locked one not until a goal opens it. */
 export const techAvailable = (g: Game, t: Tech) =>
-  !g.techs.includes(t.id) && !t.auto && !techHidden(g, t) && t.requires.every((r) => g.techs.includes(r));
+  !g.techs.includes(t.id) && !t.auto && !techHidden(g, t) && !techLocked(g, t) && t.requires.every((r) => g.techs.includes(r));
 export const techAffordable = (g: Game, t: Tech) =>
   (Object.keys(t.cost) as DataTier[]).every((k) => g.data[k] >= (t.cost[k] ?? 0));
 

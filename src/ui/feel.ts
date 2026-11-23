@@ -490,7 +490,7 @@ const racerOverlay: Overlay = {
       }
       const head = u * u * (3 - 2 * u);
       const tail = Math.max(0, head - 0.3);
-      // (Along the wire as the board draws it, curved or squared, round its pins; the plain curve until it is drawn.)
+      // (Along the wire as the board draws it, curved or squared, through its clips; the plain curve until it is drawn.)
       const line = wireLine(r.wire);
       c.beginPath();
       for (let s = 0; s <= 8; s++) {

@@ -2,7 +2,7 @@
 import { describe, expect, it } from 'vitest';
 import { Pt, bezierAt, pathD } from './geom';
 import {
-  CLEAR, CORNER, COUNT, CardBox, LANE_GAP, MAX_PINS, PASS_X, PASS_Y, STUB, WireIn, ahead, around, drawCurved, drawSquared, drawWire, forgetWays, forward, inWay, routeAll,
+  CLEAR, CORNER, COUNT, CardBox, LANE_GAP, MAX_CLIPS, PASS_X, PASS_Y, STUB, WireIn, ahead, around, drawCurved, drawSquared, drawWire, forgetWays, forward, inWay, routeAll,
   spread, throughPins, wayRound,
 } from './wires';
 
@@ -127,7 +127,7 @@ describe('pins', () => {
     const past = throughPins(a, b, [pt(760, 200)]);
     expect(past.slice(-3)).toEqual([pt(700 - STUB, 200), pt(700 - STUB, 300), b]);
     expect(square(back) && square(past)).toBe(true);
-    expect(MAX_PINS).toBe(4);
+    expect(MAX_CLIPS).toBe(8);
   });
 });
 
@@ -405,6 +405,44 @@ describe('a way round cards', () => {
     expect(kept).toEqual(throughPins(a, b, buried));
   });
 
+  it('wires that share pins (one clip that holds them) run through them side by side as a bundle; a wire alone on its pins stays on them', () => {
+    const cards = [card(1, 100, 100), card(2, 100, 300), card(3, 100, 500), card(8, 900, 300), card(9, 900, 500)];
+    const pins = [pt(500, 60), pt(700, 200)];
+    const wires: WireIn[] = [
+      { id: 1, from: 1, to: 8, a: pt(272, 136), b: pt(900, 336), pins },
+      { id: 2, from: 2, to: 8, a: pt(272, 336), b: pt(900, 346), pins },
+      { id: 3, from: 3, to: 9, a: pt(272, 536), b: pt(900, 536), pins },
+      // On the same upright as the others, but through a pin of its own: it is not one of the bundle.
+      { id: 4, from: 3, to: 8, a: pt(272, 546), b: pt(900, 356), pins: [pt(500, 450)] },
+    ];
+    const drawn = routeAll(wires, cards, 'squared', N);
+    const v = wires.map((w) => cornersOf(drawn.get(w.id)!.d));
+    for (const line of v) expect(square(line)).toBe(true);
+    // The three that share the pins: where they run up the first pin's upright they stand LANE_GAP apart, about the pin.
+    const upright = (line: Pt[], near: number) => line.find((p, i) => i + 1 < line.length && Math.abs(p.x - line[i + 1].x) < 0.01 && Math.abs(p.x - near) <= 2 * LANE_GAP)!.x;
+    const first = [0, 1, 2].map((i) => upright(v[i], 500)).sort((p, q) => p - q);
+    expect(first[1] - first[0]).toBeCloseTo(LANE_GAP, 5);
+    expect(first[2] - first[1]).toBeCloseTo(LANE_GAP, 5);
+    expect(first[1]).toBeCloseTo(500, 5);
+    // ...and so along the level run between the two pins, about its height.
+    const level = [0, 1, 2].map((i) => v[i].find((p, k) => k + 1 < v[i].length && Math.abs(p.y - v[i][k + 1].y) < 0.01 && Math.abs(p.y - 60) <= 2 * LANE_GAP)!.y).sort((p, q) => p - q);
+    expect(level[2] - level[0]).toBeCloseTo(2 * LANE_GAP, 5);
+    expect((level[0] + level[2]) / 2).toBeCloseTo(60, 5);
+    // None of them doubles back on itself.
+    for (const line of v) {
+      for (let i = 0; i + 2 < line.length; i++) {
+        const d1 = pt(line[i + 1].x - line[i].x, line[i + 1].y - line[i].y), d2 = pt(line[i + 2].x - line[i + 1].x, line[i + 2].y - line[i + 1].y);
+        expect(d1.x * d2.x + d1.y * d2.y).toBeGreaterThanOrEqual(0);
+      }
+    }
+    // The wire with a pin of its own runs exactly through it, bundle or no bundle beside it.
+    expect(on(v[3], pt(500, 450))).toBe(true);
+    expect(v[3]).toEqual(throughPins(wires[3].a, wires[3].b, wires[3].pins!));
+    // Alone, a wire through the shared pins runs exactly through them too.
+    const alone = cornersOf(routeAll([wires[0]], cards, 'squared', N).get(1)!.d);
+    for (const p of pins) expect(on(alone, p)).toBe(true);
+  });
+
   it('on boards with room between the cards, no wire passes behind a card or nearer to one than CLEAR, whatever goes where', () => {
     for (let seed = 1; seed <= 12; seed++) {
       let s = seed * 7919;
@@ -481,6 +519,11 @@ describe('what is kept from one look at the board to the next never changes how 
       wired.push({ id: nextWire++, from: from.id, to: to.id, ay: rnd() < 0.5 ? 36 : 31, by: rnd() < 0.5 ? 36 : 61 });
     };
     for (let i = 0; i < 28; i++) addWire();
+    // From the start two wires run through one pin (a clip that holds both), and a third through one of its own.
+    const clip = pt(Math.round(rnd() * 120) * 10, Math.round(rnd() * 80) * 10);
+    wired[0].pins = [{ ...clip }];
+    wired[1].pins = [{ ...clip }];
+    wired[2].pins = [pt(Math.round(rnd() * 120) * 10, Math.round(rnd() * 80) * 10)];
     const shots: Shot[] = [];
     const move = (c: CardBox, dx: number, dy: number) => {
       c.x0 += dx;
@@ -554,11 +597,13 @@ describe('what is kept from one look at the board to the next never changes how 
       } else if (what < 0.7) addCard();
       else if (what < 0.78 && cards.length > 6) cards.splice(Math.floor(rnd() * cards.length), 1);
       else if (what < 0.86) addWire();
-      else if (what < 0.92 && wired.length > 8) wired = wired.filter((w) => w !== pick(wired));
-      else if (what < 0.97) {
-        // A pin is set on a wire, or the one it has is moved.
+      else if (what < 0.9 && wired.length > 8) wired = wired.filter((w) => w !== pick(wired));
+      else if (what < 0.98) {
+        // A pin is set on a wire, or the one it has is moved; or the wire is run through a pin another already has
+        // (a clip that holds several: they are set side by side about it).
         const w = pick(wired);
-        w.pins = [pt(Math.round(rnd() * 150) * 10, Math.round(rnd() * 90) * 10)];
+        const held = wired.filter((o) => o !== w && o.pins?.length);
+        w.pins = held.length && rnd() < 0.5 ? pick(held).pins!.map((q) => ({ ...q })) : [pt(Math.round(rnd() * 150) * 10, Math.round(rnd() * 90) * 10)];
       }
       // (...and sometimes nothing at all happens between two looks.)
       shoot();
@@ -569,9 +614,17 @@ describe('what is kept from one look at the board to the next never changes how 
   const lines = (shot: Shot) => [...routeAll(shot.wires, shot.cards, 'squared', N)].map(([id, line]) => ({ id, d: line.d, pts: line.pts.map((q) => [q.x, q.y]) }));
 
   it('at every step of a board\'s story it is drawn as a board that was only just loaded: cards carried, let go, tidied, built and taken away', () => {
-    let kept = 0, fresh = 0, steps = 0;
+    let kept = 0, fresh = 0, steps = 0, shared = 0;
     for (let seed = 1; seed <= 14; seed++) {
       const shots = story(seed);
+      // (How often two wires ran through one pin: the stories must have that in them.)
+      for (const shot of shots) {
+        const at = new Set<string>();
+        for (const w of shot.wires) for (const q of w.pins ?? []) {
+          if (at.has(`${q.x},${q.y}`)) shared++;
+          at.add(`${q.x},${q.y}`);
+        }
+      }
       forgetWays();
       const s0 = COUNT.searches;
       const going = shots.map((shot) => lines(shot));
@@ -585,6 +638,7 @@ describe('what is kept from one look at the board to the next never changes how 
       steps += shots.length;
     }
     expect(steps).toBeGreaterThan(600);
+    expect(shared).toBeGreaterThan(50);
     // (And it is worth keeping: far fewer ways are looked for than when every look starts from nothing.)
     expect(fresh).toBeGreaterThan(2000);
     expect(kept).toBeLessThan(fresh * 0.8);

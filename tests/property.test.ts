@@ -2,7 +2,7 @@
 //
 // A seeded generator plays a few hundred random actions per seed (place, upgrade, delete, wire, cut, splice,
 // re-tool, Router settings and the Favour preset, expand, claim, undo, redo, stale drag snapshots, asking the
-// adviser for a tip and following it) with the simulation running in between, and after every single action
+// adviser for a tip and following it, clips set up, moved and taken off, a Drill moved with its deposit) with the simulation running in between, and after every single action
 // checks the books:
 //
 //     credits + what the board would refund (its expansions included) − everything ever earned
@@ -12,9 +12,9 @@
 // On a failure the message names the seed, the step and the action, so it can be replayed.
 import { describe, expect, it } from 'vitest';
 import {
-  autoBalance, canConnect, canFavour, canRedo, canUndo, claimGoal, claimOrder, connect, cutWire, cutWires, deleteNode, expandBoard, favour,
-  favouredWire, freeDeposits, placeNode, pushUndo, raisePriority, recipesFor, redo, refundOf, setFilter, setMode, setRecipe, setWeight, splice,
-  undo, upgrade, upgradeAll, upgradeSaturatedWires, upgradeWire,
+  act, addClip, autoBalance, canConnect, canFavour, canMove, canRedo, canUndo, claimGoal, claimOrder, clipWireAt, connect, cutWire, cutWires, deleteNode, expandBoard,
+  favour, favouredWire, freeDeposits, moveClip, placeNode, pushUndo, raisePriority, recipesFor, redo, refundOf, removeClip, removeEmptyClips, seatDeposit, setFilter,
+  setMode, setRecipe, setWeight, splice, unclipWire, undo, upgrade, upgradeAll, upgradeSaturatedWires, upgradeWire,
 } from '../src/actions';
 import { advice, applyAdvice, waitInfo } from '../src/advice';
 import { HOTBAR, MAT_IDS, MatId, NodeType, RULES, TECH_IDS, Track } from '../src/content';
@@ -22,7 +22,7 @@ import { expansionCost, nodeCostAt, nodeUnlocked, research, upgradeValue } from 
 import { GOALS } from '../src/goals';
 import { orderView } from '../src/orders';
 import { outPortCount, tick } from '../src/sim';
-import { Game, RouterMode, Snapshot, cloneGame, deserialize, jsonCopy, serialize, snapshot } from '../src/state';
+import { Game, MAX_BOARD_CLIPS, MAX_CLIPS, RouterMode, Snapshot, cloneGame, deserialize, jsonCopy, serialize, snapshot } from '../src/state';
 import { fresh } from './helpers';
 
 function prng(seed: number) {
@@ -82,6 +82,28 @@ function checkBoard(g: Game, where: string) {
     seen.add(key);
     must(w.port < Math.max(1, outPortCount(byId.get(w.from)!)), () => `${where}: wire ${w.id} leaves a port that does not exist`);
     must(w.paid >= 0 && Number.isFinite(w.rate), () => `${where}: wire ${w.id} has a bad number`);
+    // Its clips: each is on the board, none twice, no more than a wire runs through, and never an empty list.
+    if (w.clips) {
+      must(w.clips.length > 0 && w.clips.length <= MAX_CLIPS, () => `${where}: wire ${w.id} runs through ${w.clips!.length} clips`);
+      must(new Set(w.clips).size === w.clips.length, () => `${where}: wire ${w.id} runs through a clip twice`);
+      must(w.clips.every((id) => g.clips.some((c) => c.id === id)), () => `${where}: wire ${w.id} runs through a clip that is not there`);
+    }
+  }
+  // Clips: an id of their own each, one to a point, inside the plot, and no more than the board holds.
+  must(g.clips.length <= MAX_BOARD_CLIPS, () => `${where}: ${g.clips.length} clips`);
+  const points = new Set<string>();
+  for (const c of g.clips) {
+    must(!ids.has(c.id) && !g.wires.some((w) => w.id === c.id), () => `${where}: clip id ${c.id} is also a node's or a wire's`);
+    must(c.x >= 0 && c.y >= 0 && c.x <= g.board.w && c.y <= g.board.h, () => `${where}: clip ${c.id} stands off the plot`);
+    must(!points.has(`${c.x},${c.y}`), () => `${where}: two clips on one point`);
+    points.add(`${c.x},${c.y}`);
+  }
+  must(new Set(g.clips.map((c) => c.id)).size === g.clips.length, () => `${where}: a clip id twice`);
+  // A Drill stands on its deposit, wherever it has been moved to.
+  for (const n of g.nodes) {
+    if (n.type !== 'well') continue;
+    const d = g.deposits.find((x) => x.id === n.depositId);
+    must(!!d && d.x === n.x && d.y === n.y, () => `${where}: Drill ${n.id} is off its deposit`);
   }
   for (const v of [g.credits, g.lifetime, g.data.a, g.data.b, g.data.g, g.flow, g.flowHold, g.flowStreak, g.creditRate, g.time]) {
     must(Number.isFinite(v), () => `${where}: a non-finite total`);
@@ -242,6 +264,30 @@ function play(seed: number, steps: number, credits: number) {
       n.x += 20 * (1 + int(5));
       return pushUndo(g, before);
     },
+    // A Drill that is moved takes its deposit along, as one step (Mobile Drills: only once that is researched).
+    moveDrill: () => {
+      const n = pick(g.nodes.filter((x) => x.type === 'well'));
+      if (!n || !canMove(g, n)) return false;
+      return act(g, () => {
+        n.x = Math.min(g.board.w, n.x + 20 * (1 + int(5)));
+        seatDeposit(g, n);
+        return 0;
+      });
+    },
+    // Clips cost nothing and no rule reads them: set up, run a wire through, moved (onto another, at times), taken off.
+    clips: () => {
+      const w = pick(g.wires);
+      const c = pick(g.clips);
+      const at = () => [20 * int(Math.floor(g.board.w / 20)), 20 * int(Math.floor(g.board.h / 20))] as const;
+      switch (int(6)) {
+        case 0: { const [x, y] = at(); const had = g.clips.length; return !!addClip(g, x, y) && g.clips.length > had; }
+        case 1: { if (!w) return false; const [x, y] = at(); return !!clipWireAt(g, w.id, x, y, int(4)); }
+        case 2: { if (!c) return false; const to = int(3) === 0 ? pick(g.clips)! : null; const [x, y] = at(); return moveClip(g, c.id, to?.x ?? x, to?.y ?? y); }
+        case 3: return !!c && removeClip(g, c.id);
+        case 4: return !!w && unclipWire(g, w.id);
+        default: return removeEmptyClips(g) > 0;
+      }
+    },
     // The same, but something else happened in between (section 7, bug 1): the old snapshot must be refused or harmless.
     staleDrag: () => { const s = pick(stale); return s ? pushUndo(g, s) : false; },
     remember: () => { stale.push(snapshot(g)); if (stale.length > 6) stale.shift(); return true; },
@@ -267,7 +313,7 @@ function play(seed: number, steps: number, credits: number) {
   add('upgradeWire', 3); add('upgradeFullWires', 1); add('retool', 2); add('router', 3); add('splice', 3); add('expand', 1);
   add('undo', 6); add('redo', 4); add('move', 2); add('staleDrag', 2); add('remember', 2); add('wait', 6); add('claimGoal', 1);
   add('claimOrder', 1); add('research', 1); add('refundQuote', 2); add('sellAndSink', 3); add('favour', 2);
-  add('advise', 2); add('followTip', 2);
+  add('advise', 2); add('followTip', 2); add('clips', 6); add('moveDrill', 1);
 
   // When each machine (in each recipe it has had) was built or re-tooled. Undo and redo may bring an old machine
   // back, but never as a younger one: Flow ignores young producers, so that would be a way to hide a weak one.
@@ -311,6 +357,8 @@ describe('credits are conserved by every sequence of edits, undo and redo', () =
     expect(total.favour ?? 0, `"favour" succeeded only ${total.favour ?? 0} times`).toBeGreaterThan(20);
     expect(total.advise ?? 0, `the adviser had a tip only ${total.advise ?? 0} times`).toBeGreaterThan(10);
     expect(total.followTip ?? 0, `a tip was followed only ${total.followTip ?? 0} times`).toBeGreaterThan(10);
+    // ...and clips: set up, run through, moved, merged and taken off between everything else.
+    expect(total.clips ?? 0, `a clip action succeeded only ${total.clips ?? 0} times`).toBeGreaterThan(200);
   });
 
   it('a player with almost no credits is never pushed below zero, and selling to pay for an expansion can all be taken back', () => {

@@ -14,17 +14,19 @@
 // factory fits the screen. Fit goes there when the factory is too big for the floor.
 import { DATA_COLORS, DATA_NAMES, DataTier, MATERIALS, MatId, NODE_DEFS, NodeType, PIPES, RECIPES, Recipe, TECHS } from '../content';
 import {
-  act, canConnect, connect, cutWires, dropPins, expandBoard, freeDeposits, materialsAt, nodeById, placeNode, recipesFor, setPins, splice,
+  act, addClip, canConnect, canMove, clipAt, clipById, clipWireAt, connect, connectThrough, cutWires, dropClips, expandBoard, freeDeposits, materialsAt, moveClip, nodeById,
+  placeNode, recipesFor, removeClip, seatDeposit, splice,
 } from '../actions';
 import {
-  expansionCost, fmt, fmtRate, labRate, matUnlocked, nodeCost, nodeUnlocked, recipeOf, recipeUnlocked,
+  expansionCost, fmt, fmtRate, labRate, matUnlocked, nodeCost, nodeUnlocked, recipeOf, recipeUnlocked, techAvailable,
 } from '../economy';
 import { bagTotal, graph, isMachine, isSink, outPortCount } from '../sim';
 import { lineFrom } from '../graph';
-import { CardBox, WireIn, drawWire, routeAll } from './wires';
+import { lossOf } from '../loss';
+import { CardBox, WireIn, drawCurved, drawSquared, drawWire, routeAll, throughPins } from './wires';
 import { lineAdvice, lineSpot } from '../advice';
 import { GOALS, activeGoal, goalDeposit, goalFocus } from '../goals';
-import { GRID, Game, GNode, MAX_PINS, PIN_GRID, Wire, cleanPins, snap } from '../state';
+import { Clip, GRID, Game, GNode, MAX_BOARD_CLIPS, MAX_CLIPS, Wire, clipSpot, snap } from '../state';
 import { anchorPt, cachedRect, el, invalidateLayout, setAttr, setClass, setHTML, setHidden, setStyle, setText, svgEl } from './dom';
 import {
   Beacon, FLOW_SEGS, Flow, floater, flowPoint, fly, frameFx, invalidateFx, makeFlow, setBeacons, setFlowPts, setFlows,
@@ -41,7 +43,7 @@ import { esc, icon, matGlyph, matShape, nodeIcon } from './icons';
 import { tidy, tidyInput } from './layout';
 import { shortNum } from './panels';
 import { env } from './phone-env';
-import { diagnose, pillFor } from './status';
+import { diagnose, pillFor, victoryQuiet } from './status';
 import { buzz } from './audio';
 import { WIRES_CARDS, revealOf, slotShown } from './reveal';
 import { traceOf } from '../flows';
@@ -65,26 +67,31 @@ let radialEl: HTMLElement;
 /** The build menu as a bottom sheet (phone layout). It lives beside the board, not in it, so its list can scroll. */
 let buildEl: HTMLElement;
 let appEl: HTMLElement | null = null;
+let clipsSvg: SVGSVGElement;
 let tempPath: SVGPathElement;
 let tempEnd: SVGCircleElement;
 let knifeLine: SVGLineElement;
 
 interface NodeRefs {
-  el: HTMLElement; ring: SVGCircleElement | null; rate: HTMLElement; sub: HTMLElement; pill: HTMLElement;
+  el: HTMLElement; ring: SVGCircleElement | null; rate: HTMLElement; loss: HTMLElement; sub: HTMLElement; pill: HTMLElement;
   outs: HTMLElement[]; open: boolean[];
   /** Everything the element's structure depends on; a different signature means rebuild. */
   sig: string;
   x: number; y: number;
   // last values written, so the slow update only touches what changed
   cRate: string; cSub: string; cRing: number; cSt: string; cPill: string;
+  /** The loss the card shows beside its rate ("−28%", with its cause), and whether one is showing (see `lossTag`). */
+  cLoss: string; lossOn: boolean;
+  /** That loss as a reading: averaged over a few seconds (a share, -1 before the first), and the whole number last shown. */
+  sLoss: number; vLoss: number;
   // rate and utilisation: smoothed for display, and as last shown (see `settle`)
   sRate: number; vRate: number; sUtil: number; vUtil: number;
 }
 interface WireRefs {
   g: SVGGElement; hit: SVGPathElement; glow: SVGPathElement; base: SVGPathElement; chip: HTMLElement; chipText: HTMLElement;
   a: Pt; b: Pt; flow: Flow;
-  /** The path it is drawn with now (see `routeWires`), and the handles of its pins, one a pin. */
-  d: string; pins: SVGCircleElement[];
+  /** The path it is drawn with now (see `routeWires`). */
+  d: string;
   chipX: number; chipY: number; chipHw: number;
   /** No place on the wire where its chip would not cover a card. */
   chipOff: boolean;
@@ -165,12 +172,14 @@ const HOLD_MS = 200;
  * moves the board: a swipe that began beside a port used to draw a wire, and made one where it happened to end.
  */
 const PORT_DRAG = 16;
-/** A finger this close to a pin on a wire means the pin (a 36 px target; it comes before the wire it is on). */
-const PIN_REACH = 22;
-/** ...and a mouse pointer on the wire, this close. */
-const PIN_MOUSE = 10;
-/** A pin set from the inspector is brought into view with this much board round it (board pixels). */
-const PIN_ROOM = 60;
+/** A finger this close to a clip means the clip (a 44 px target; it comes before the wire that runs through it). */
+const CLIP_REACH = 22;
+/** A wire being drawn out of a port that passes this close to a clip (screen px) is run through it. */
+const CLIP_CATCH = 11;
+/** A clip set on a wire this close to one that stands already (screen px) is that one: the wire joins it. */
+const CLIP_JOIN = 14;
+/** A clip set from the inspector is brought into view with this much board round it (board pixels). */
+const CLIP_ROOM = 60;
 /** A finger that just misses a card, by no more than this, still means the card (when nothing else is nearer). */
 const CARD_NEAR = 10;
 /** How far a finger may wander and still be a tap, and how far it must go before a node or a wire follows it. */
@@ -223,7 +232,11 @@ const OV_PORT_MOUSE = 12, OV_PORT_FINGER = 16;
 /** How long a rate chip stays on a wire that was just made, and how long that wire is kept from dimming. */
 const FRESH_MS = 3000;
 
-type WireDrag = { kind: 'wire'; from: number; port: number; mats: MatId[]; a: Pt; p: Pt; target: number | null; tp: Pt; blend: number; armed: boolean; sx: number; sy: number; slop: number; touch: boolean };
+type WireDrag = {
+  kind: 'wire'; from: number; port: number; mats: MatId[]; a: Pt; p: Pt; target: number | null; tp: Pt; blend: number; armed: boolean; sx: number; sy: number; slop: number; touch: boolean;
+  /** The clips the wire in hand has been run through so far, in order (see "a wire by way of clips"). */
+  via: number[];
+};
 type Drag =
   | { kind: 'pan'; sx: number; sy: number; vx: number; vy: number; moved: boolean; slop: number; place: boolean;
       /** A finger came down near (not on) this output port: if it turns out to be a tap, the port is armed. */
@@ -235,10 +248,10 @@ type Drag =
       level?: number[];
       /** The card is one of a block (see `block`): the others that move with it, and where each stood when the drag began. */
       others?: { id: number; x0: number; y0: number }[];
-      /** ...and the pins of the wires that run inside the block, which go with it, as they were then. */
-      pins0?: Map<number, Pt[]> }
-  /** A pin of a wire being moved: which one, and the wire's pins as they were when it was pressed. */
-  | { kind: 'pin'; wire: number; index: number; was: Pt[]; moved: boolean; sx: number; sy: number; slop: number }
+      /** ...and the clips that go with it (those every wire of which runs inside the block), where each stood then. */
+      clips0?: Map<number, Pt> }
+  /** A clip being moved: which one, and where it stood when it was pressed. */
+  | { kind: 'clip'; id: number; x0: number; y0: number; moved: boolean; sx: number; sy: number; slop: number }
   | WireDrag
   | { kind: 'wireIn'; to: number; mat: MatId | null; b: Pt; p: Pt; target: number | null; tp: Pt; blend: number; armed: boolean; sx: number; sy: number; slop: number }
   | { kind: 'wirePress'; wireId: number; sx: number; sy: number; slop: number; touch: boolean }
@@ -267,6 +280,8 @@ interface RadialOpt { type: NodeType; recipe?: string; label: string; sub: strin
 /** `best`: the option highlighted and preselected: the one the card asks for, or the first when it asks for none (see `suggest`). */
 interface RadialState {
   at: Pt; opts: RadialOpt[]; dir: 'consume' | 'produce'; from: number; port: number; to: number; mat: MatId | null; a: Pt; best?: number;
+  /** The clips the wire was run through before it was let go here: the wire to the card that is built runs through them. */
+  via?: number[];
   /**
    * Where the card will stand, found once when the menu opens (see `findSite`): the spot of the suggested option's
    * card, that card, and the board (its revision) and the camera it was found on.
@@ -953,7 +968,7 @@ function openView() {
   const place = goalPlace(g);
   if (place) return go(fitTarget(place, true, 1));
   const spot = lineSpot(g);
-  if ((spot && 'expand' in spot) || (activeGoal(g)?.id === 'expand' && !g.goal.ready)) {
+  if (spot && 'expand' in spot) {
     const w = EXPAND_W * 1.4, mid = g.board.w / 2;
     return go(fitTarget({ x0: mid - w, y0: g.board.h - 200, x1: mid + w, y1: g.board.h + 18 + EXPAND_H + 12 }, true, floor));
   }
@@ -1435,10 +1450,10 @@ const ex = {
 };
 
 /** The goal that first asks for the expansion: before it the button is not shown (it would compete with the first steps). */
-const EXPAND_GOAL = GOALS.findIndex((x) => x.id === 'expand');
+const EXPAND_GOAL = GOALS.findIndex((x) => x.id === 'grow-ink');
 
 /**
- * Whether the button is on the board at all: from the goal "Open up more land" on (or once the board has been
+ * Whether the button is on the board at all: from the goal "Make 1 Plastic a second" on (or once the board has been
  * expanded, in free play, or when a "while you wait" line asks for it). Before that it would only be one more
  * thing beside the first instructions, and a tap meant for an empty spot could buy a plot.
  */
@@ -1454,14 +1469,14 @@ function expandShown(g: Game): boolean {
 const expandQuiet = () => !!tapWire || !!ui.placing || !!radial || (!!drag && (drag.kind === 'wire' || drag.kind === 'wireIn'));
 
 /**
- * The goal card is asking for the expansion: the goal is "Open up more land", or the next step of the
- * goal's "while you wait" line is to expand (which the line only asks for when it can be paid for).
+ * The goal card is asking for the expansion: the next step of the goal's line is to expand (a growth goal whose
+ * deposits are all in use: "Make 1 Plastic a second"), which the line only asks for when it can be paid for.
  */
 function expandAsked(g: Game): boolean {
   const goal = activeGoal(g);
   // (A goal that is done and waiting to be claimed asks for nothing more.)
   if (!goal || g.goal.ready) return false;
-  return goal.id === 'expand' || (!!goal.meanwhile && !!lineAdvice(g)?.expand);
+  return !!goal.meanwhile && !!lineAdvice(g)?.expand;
 }
 
 /** What the button's surroundings depend on that can be read without reading layout: when it changes, they are measured again. */
@@ -1839,6 +1854,7 @@ export function initBoard(root: HTMLElement) {
       <div id="plot"><span id="plot-label"></span></div>
       <div id="deposits"></div>
       <svg id="wires" width="1" height="1"></svg>
+      <svg id="clips" width="1" height="1"></svg>
       <div id="nodes"></div>
       <div id="chips"></div>
       <svg id="overlay" width="1" height="1"><path id="temp-wire"></path><circle id="temp-end" r="5"></circle><line id="knife"></line></svg>
@@ -1853,6 +1869,7 @@ export function initBoard(root: HTMLElement) {
   plotLabel = boardEl.querySelector('#plot-label')!;
   depositsEl = boardEl.querySelector('#deposits')!;
   wiresSvg = boardEl.querySelector('#wires')!;
+  clipsSvg = boardEl.querySelector('#clips')!;
   nodesEl = boardEl.querySelector('#nodes')!;
   chipsEl = boardEl.querySelector('#chips')!;
   ghostEl = boardEl.querySelector('#ghost')!;
@@ -2156,8 +2173,8 @@ function tidyAnswer(id: number, moves: Map<number, Pt>) {
       n.x = to.x;
       n.y = to.y;
     }
-    // (The cards the pins were set round have moved: the wires start again without them. The same undo step.)
-    dropPins(g);
+    // (The cards the clips were set round have moved: the wires start again without them. The same undo step.)
+    dropClips(g);
     return 0;
   });
   for (const [nid, was] of from) {
@@ -2258,7 +2275,7 @@ function syncTidyControl() {
   syncWiresControl();
 }
 
-// ----- cable management: the wire style, and pins -----
+// ----- cable management: the wire style, and clips -----
 
 let wiresBtn: HTMLButtonElement | null = null;
 const WIRES_ICON = {
@@ -2317,23 +2334,23 @@ function alongWire(f: Flow, p: Pt): number {
 }
 
 /**
- * Put a pin on a wire: at `at` (a double click there), or with none given in the middle of its longest stretch
- * between pins (the inspector's button, a finger's way). The pin takes its place among the wire's others by how far
- * along the wire it is. One undo step; the wire is selected, so the pin can be seen and dragged. False when the
- * wire holds all the pins it can.
+ * Clip a wire: at `at` (a double click there), or with none given in the middle of its longest stretch between clips
+ * (the inspector's button, a finger's way). A clip that stands within reach of that point already is the one the wire
+ * joins; otherwise a new one is set there. It takes its place among the wire's others by how far along the wire it
+ * is. One undo step; the wire is selected. False when the wire runs through all the clips it can.
  */
-export function pinWire(id: number, at?: Pt): boolean {
+export function clipWire(id: number, at?: Pt): boolean {
   const g = ui.g;
   const w = g.wires.find((x) => x.id === id);
   const refs = wireEls.get(id);
   if (!w || !refs) return false;
-  const pins = (w.pins ?? []).map((q) => ({ x: q.x, y: q.y }));
-  if (pins.length >= MAX_PINS) {
-    toast(`A wire holds ${MAX_PINS} pins at most.`, 'info');
+  const mine = w.clips ?? [];
+  if (mine.length >= MAX_CLIPS) {
+    toast(`A wire runs through ${MAX_CLIPS} clips at most.`, 'info');
     return false;
   }
   const f = refs.flow;
-  const where = pins.map((q) => alongWire(f, q));
+  const where = clipPts(g, mine).map((q) => alongWire(f, q));
   let p = at;
   if (!p) {
     const stops = [0, ...where, f.len].sort((x, y) => x - y);
@@ -2343,18 +2360,41 @@ export function pinWire(id: number, at?: Pt): boolean {
   }
   const s = alongWire(f, p);
   let i = 0;
-  while (i < pins.length && where[i] < s) i++;
-  pins.splice(i, 0, { x: p.x, y: p.y });
-  const ok = setPins(g, id, pins);
+  while (i < where.length && where[i] < s) i++;
+  // (A point picked by the button is not moved to a clip that happens to stand near: only a point the player chose is.)
+  const near = at ? clipNear(p, CLIP_JOIN / ui.view.k, mine) : null;
+  const made = clipWireAt(g, id, near?.x ?? p.x, near?.y ?? p.y, i);
+  if (!made && g.clips.length >= MAX_BOARD_CLIPS) toast('The board holds all the clips it can. Take one off first.', 'info');
   select({ kind: 'wire', id });
-  // (Set from the inspector, the pin may be off the screen or under a phone's sheet: the camera brings it, with
+  tellClips();
+  // (Set from the inspector, the clip may be off the screen or under a phone's sheet: the camera brings it, with
   // room round it for a finger, to where it can be seen and dragged.)
-  if (ok && !at) frameBoxes([{ x0: p.x - PIN_ROOM, y0: p.y - PIN_ROOM, x1: p.x + PIN_ROOM, y1: p.y + PIN_ROOM }]);
-  return ok;
+  if (made && !at) frameBoxes([{ x0: made.x - CLIP_ROOM, y0: made.y - CLIP_ROOM, x1: made.x + CLIP_ROOM, y1: made.y + CLIP_ROOM }]);
+  return !!made;
 }
 
-/** Take a wire's pins off, all of them. One undo step. */
-export const unpinWire = (id: number): boolean => setPins(ui.g, id, []);
+let clipsTold = false;
+/** The first clip of a visit: a word on what else a clip is for. */
+function tellClips() {
+  if (clipsTold || !ui.g.clips.length) return;
+  clipsTold = true;
+  toast(isTouch()
+    ? '<span>A <b>clip</b> holds a wire where you put it. Drag it, and run more wires through it: tap a port, the clip, then where the wire goes.</span>'
+    : '<span>A <b>clip</b> holds a wire where you put it. Drag it, and run more wires through it: draw a wire across it. Double-click takes it off.</span>', 'info', 7000);
+}
+
+/** Set up a clip on the empty board (a double click there): it stands ready for wires to be run through it. */
+function clipBoard(at: Pt) {
+  const g = ui.g;
+  const had = g.clips.length;
+  const c = addClip(g, at.x, at.y);
+  if (!c) {
+    toast('The board holds all the clips it can. Take one off first.', 'info');
+    return;
+  }
+  select({ kind: 'clip', id: c.id });
+  if (g.clips.length > had) tellClips();
+}
 
 /**
  * T tidies and W changes how the wires are drawn, wherever the board's other keys work (main.ts has those): not in a
@@ -2444,7 +2484,7 @@ function buildNode(n: GNode, w: number, h: number, ins: Port[], outs: Port[], si
         ${hasRing ? `<svg viewBox="0 0 40 40" width="40" height="40"><circle cx="20" cy="20" r="17" class="trk"/><circle cx="20" cy="20" r="17" class="val" pathLength="100"/></svg>` : ''}
         <div class="glyph">${nodeGlyph(n)}</div>
       </div>
-      <div class="txt"><div class="nt">${nodeTitle(n)}</div><div class="ns">${esc(sub)}</div><div class="nr mono"></div></div>
+      <div class="txt"><div class="nt">${nodeTitle(n)}</div><div class="ns">${esc(sub)}</div><div class="nr mono"><span class="nrv"></span><i class="nl"></i></div></div>
       <span class="pill"></span>
     </div>`);
   for (const p of ins) {
@@ -2461,12 +2501,13 @@ function buildNode(n: GNode, w: number, h: number, ins: Port[], outs: Port[], si
   return {
     el: e,
     ring: e.querySelector<SVGCircleElement>('.val'),
-    rate: e.querySelector('.nr')!,
+    rate: e.querySelector('.nrv')!,
+    loss: e.querySelector('.nl')!,
     sub: e.querySelector('.ns')!,
     pill: e.querySelector('.pill')!,
     outs: outEls, open: outEls.map(() => false),
     sig, x: n.x, y: n.y,
-    cRate: '', cSub: sub, cRing: -1, cSt: '', cPill: '',
+    cRate: '', cSub: sub, cRing: -1, cSt: '', cPill: '', cLoss: '', lossOn: false, sLoss: -1, vLoss: 0,
     sRate: -1, vRate: -1, sUtil: -1, vUtil: -1,
   };
 }
@@ -2523,8 +2564,8 @@ function syncNodes(g: Game, fresh: boolean) {
 // ---------- structure: wires ----------
 
 // How every wire runs is worked out for the whole board at once (wires.ts): curved or squared as the player has
-// chosen, through the pins a wire has, and squared wires in lanes beside each other. Whatever moves a card, makes or
-// cuts a wire, moves a pin or changes the style ends here, and only a wire whose line has changed is drawn again.
+// chosen, through the clips a wire has, and squared wires in lanes beside each other. Whatever moves a card, makes or
+// cuts a wire, moves a clip or changes the style ends here, and only a wire whose line has changed is drawn again.
 
 /** The style the wires were last drawn in. */
 let drawnStyle = '';
@@ -2534,7 +2575,7 @@ function routeWires(g: Game) {
   for (const w of g.wires) {
     if (!wireEls.has(w.id)) continue;
     const ends = drawnEnds(g, w);
-    if (ends) list.push({ id: w.id, from: w.from, to: w.to, a: ends.a, b: ends.b, pins: w.pins });
+    if (ends) list.push({ id: w.id, from: w.from, to: w.to, a: ends.a, b: ends.b, pins: w.clips?.length ? clipPts(g, w.clips) : undefined });
   }
   // (Squared wires choose their way round the cards: curved ones do not look.)
   const cards: CardBox[] = [];
@@ -2548,7 +2589,7 @@ function routeWires(g: Game) {
   }
   drawnStyle = ui.wireStyle;
   const drawn = routeAll(list, cards, ui.wireStyle, FLOW_SEGS);
-  const byId = new Map(g.wires.map((w) => [w.id, w]));
+  syncClips(g);
   for (const w of list) {
     const refs = wireEls.get(w.id)!;
     const line = drawn.get(w.id);
@@ -2562,23 +2603,88 @@ function routeWires(g: Game) {
     }
     refs.a = { x: w.a.x, y: w.a.y };
     refs.b = { x: w.b.x, y: w.b.y };
-    syncPins(refs, byId.get(w.id)?.pins ?? []);
   }
 }
 
-/** A wire's pins as handles on it: as many small discs as it has pins, each where its pin is. */
-function syncPins(refs: WireRefs, pins: Pt[]) {
-  while (refs.pins.length > pins.length) refs.pins.pop()!.remove();
-  while (refs.pins.length < pins.length) {
-    const c = svgEl('circle', { class: 'pin', r: '5', 'data-pin': String(refs.pins.length) }) as SVGCircleElement;
-    refs.g.appendChild(c);
-    refs.pins.push(c);
+// ---------- structure: clips ----------
+// A clip is drawn above the wires and under the cards: a small ring where it stands, larger the more wires run through
+// it (squared, they pass it side by side), and hollow and faint while it holds none. It is a thing of its own: it is
+// pressed, dragged and selected like a card, not as part of a wire.
+
+interface ClipRefs { g: SVGGElement; dot: SVGCircleElement; x: number; y: number; n: number }
+const clipEls = new Map<number, ClipRefs>();
+let selClipId: number | null = null;
+
+/** Where clips stand, by id, in the order asked for; one that is gone is left out. */
+function clipPts(g: Game, ids: number[]): Pt[] {
+  const out: Pt[] = [];
+  for (const id of ids) {
+    const c = clipById(g, id);
+    if (c) out.push({ x: c.x, y: c.y });
   }
-  pins.forEach((q, k) => {
-    const c = refs.pins[k];
-    if (c.getAttribute('cx') !== String(q.x)) c.setAttribute('cx', String(q.x));
-    if (c.getAttribute('cy') !== String(q.y)) c.setAttribute('cy', String(q.y));
-  });
+  return out;
+}
+
+function syncClips(g: Game) {
+  if (!g.clips.length && !clipEls.size) return;
+  const held = new Map<number, number>();
+  for (const w of g.wires) for (const id of w.clips ?? []) held.set(id, (held.get(id) ?? 0) + 1);
+  for (const c of g.clips) {
+    let refs = clipEls.get(c.id);
+    if (!refs) {
+      const grp = svgEl('g', { class: 'clip', 'data-clip': String(c.id), 'data-testid': 'clip' }) as SVGGElement;
+      const hit = svgEl('circle', { class: 'chit', r: '13' });
+      const dot = svgEl('circle', { class: 'cdot', r: '5' }) as SVGCircleElement;
+      grp.append(hit, dot);
+      clipsSvg.appendChild(grp);
+      refs = { g: grp, dot, x: NaN, y: NaN, n: -1 };
+      clipEls.set(c.id, refs);
+      if (c.id === selClipId) grp.classList.add('sel');
+    }
+    if (refs.x !== c.x || refs.y !== c.y) {
+      refs.x = c.x;
+      refs.y = c.y;
+      refs.g.setAttribute('transform', `translate(${c.x} ${c.y})`);
+    }
+    const n = held.get(c.id) ?? 0;
+    if (n !== refs.n) {
+      refs.n = n;
+      // (Squared wires through one clip run LANE_GAP apart about it: the ring is as wide as the bundle.)
+      refs.dot.setAttribute('r', String(Math.min(21, 5 + 4 * Math.max(0, n - 1))));
+      refs.g.classList.toggle('empty', n === 0);
+      refs.g.dataset.wires = String(n);
+    }
+  }
+  if (clipEls.size !== g.clips.length) {
+    const here = new Set(g.clips.map((c) => c.id));
+    for (const [id, refs] of clipEls) {
+      if (here.has(id)) continue;
+      refs.g.remove();
+      clipEls.delete(id);
+    }
+  }
+  syncVia();
+}
+
+/** The clips the wire in hand runs through so far are lit. */
+function syncVia() {
+  const via = drag?.kind === 'wire' ? drag.via : tapWire?.via;
+  for (const [id, refs] of clipEls) setClass(refs.g, 'via', !!via?.includes(id));
+}
+
+/** The clip nearest a point, within `reach` (board pixels); `skip`: clips that do not count. */
+function clipNear(p: Pt, reach: number, skip?: number[]): Clip | null {
+  let best: Clip | null = null;
+  let least = reach;
+  for (const c of ui.g.clips) {
+    if (skip?.includes(c.id)) continue;
+    const d = Math.hypot(c.x - p.x, c.y - p.y);
+    if (d <= least) {
+      least = d;
+      best = c;
+    }
+  }
+  return best;
 }
 
 /** For effects that run along a wire: its line as it is drawn, as x, y pairs from start to end. null for a wire that is not on the board. */
@@ -2594,7 +2700,7 @@ function buildWire(w: Wire, a: Pt, b: Pt, fresh: boolean): WireRefs {
   // never alters the compositor's property trees.
   const chip = el(`<span class="chip stalled"><i class="mono"></i></span>`);
   const refs: WireRefs = {
-    g: grp, hit, glow, base, chip, chipText: chip.firstElementChild as HTMLElement, a, b, d: '', pins: [],
+    g: grp, hit, glow, base, chip, chipText: chip.firstElementChild as HTMLElement, a, b, d: '',
     // A wire that is there when the board loads starts full of dots; one the player just made starts empty.
     flow: makeFlow(fresh),
     chipX: NaN, chipY: NaN, chipHw: 24, chipOff: false, on: false, shown: false, dim: false,
@@ -2713,7 +2819,7 @@ function syncChips(): boolean {
   for (const w of ui.g.wires) {
     const refs = wireEls.get(w.id);
     if (!refs) continue;
-    const on = !!sel && sel.kind !== 'flows' && (sel.kind === 'wire' ? sel.id === w.id : sel.id === w.from || sel.id === w.to);
+    const on = !!sel && sel.kind !== 'flows' && (sel.kind === 'wire' ? sel.id === w.id : sel.kind === 'clip' ? !!w.clips?.includes(sel.id) : sel.id === w.from || sel.id === w.to);
     if (on !== refs.on) {
       refs.on = on;
       refs.chip.classList.toggle('on', on);
@@ -2972,6 +3078,12 @@ function syncUi() {
   const sel = ui.sel;
   const node = sel?.kind === 'node' ? sel.id : null;
   const wire = sel?.kind === 'wire' ? sel.id : null;
+  const clip = sel?.kind === 'clip' ? sel.id : null;
+  if (clip !== selClipId || (clip != null && !clipEls.get(clip)?.g.classList.contains('sel'))) {
+    if (selClipId != null) clipEls.get(selClipId)?.g.classList.remove('sel');
+    if (clip != null) clipEls.get(clip)?.g.classList.add('sel');
+    selClipId = clip;
+  }
   if (node !== selNodeId || (node != null && !nodeEls.get(node)?.el.classList.contains('sel'))) {
     if (selNodeId != null) nodeEls.get(selNodeId)?.el.classList.remove('sel');
     if (node != null) nodeEls.get(node)?.el.classList.add('sel');
@@ -3033,7 +3145,38 @@ function settle(shown: number, before: number, avg: number, tol: number, step: n
 
 let expandCost = -1;
 
+// A card says what its Drill or machine loses, beside what it makes: "0.36/s −28%". The ring already draws how much of
+// its time it works; the number is what that leaves, in the colour of its cause (waiting for an input, or its output
+// backed up: src/loss.ts), so that the machine a line is short for and the one that is short itself are told apart at
+// a glance. Only a loss worth a number is shown: from LOSS_SHOW of a hundred, until it is back under LOSS_HIDE.
+const LOSS_SHOW = 5;
+const LOSS_HIDE = 3;
+/** The weight of a new sample in the card's loss (about four seconds of smoothing at four samples a second), and how far the reading must move before the number shown is replaced. */
+const LOSS_EASE = 0.06;
+const LOSS_STEP = 2;
+
+/**
+ * What a card says of its loss: the number and its cause ("28|wait"), or '' for none to show. A machine works in
+ * bursts, and what it loses ripples by ten points about its mean from one second to the next: the card shows the
+ * mean, averaged over a few seconds more than the ring is, and replaces its number only once that has moved by
+ * LOSS_STEP (a big change, or one the player has just made, shows at once).
+ */
+function lossTag(n: GNode, refs: NodeRefs, shown: boolean): string {
+  const l = shown ? lossOf(n) : null;
+  if (!l || l.settling) {
+    refs.sLoss = -1;
+    return '';
+  }
+  refs.sLoss = lively || refs.sLoss < 0 || Math.abs(l.share - refs.sLoss) > 0.3 ? l.share : refs.sLoss + (l.share - refs.sLoss) * LOSS_EASE;
+  const now = Math.round(refs.sLoss * 100);
+  if (!refs.lossOn || Math.abs(now - refs.vLoss) >= LOSS_STEP || now === 0 || now === 100) refs.vLoss = now;
+  if (refs.vLoss < (refs.lossOn ? LOSS_HIDE : LOSS_SHOW)) return '';
+  return `${refs.vLoss}|${l.blocked > l.starved ? 'back' : 'wait'}`;
+}
+
 function updateNodes(g: Game) {
+  // (Loss is a reading for a player who can do something about it: it comes with upgrades in the inspector, reveal.ts.)
+  const lossShown = revealOf(g).upgrades && !victoryQuiet(g);
   for (const n of g.nodes) {
     const refs = nodeEls.get(n.id);
     if (!refs) continue;
@@ -3054,6 +3197,16 @@ function updateNodes(g: Game) {
       if (sub !== refs.cSub) {
         refs.cSub = sub;
         refs.sub.textContent = sub;
+      }
+      const loss = lossTag(n, refs, lossShown);
+      if (loss !== refs.cLoss) {
+        refs.cLoss = loss;
+        refs.lossOn = !!loss;
+        const [lost, why] = loss.split('|');
+        refs.loss.textContent = loss ? `\u2212${lost}%` : '';
+        refs.loss.dataset.why = why ?? '';
+        if (loss) refs.loss.title = why === 'back' ? `Loses ${lost}% of its time: its output is backed up` : `Loses ${lost}% of its time waiting for an input`;
+        else refs.loss.removeAttribute('title');
       }
     }
     if (refs.ring) {
@@ -3317,6 +3470,8 @@ export function updateBoard(dt: number) {
   if (drag) edgeScroll(dt);
   if (drag && (drag.kind === 'wire' || drag.kind === 'wireIn')) drawTemp(drag, dt);
   else if (tapWire?.hover && !radial) drawTemp(tapWire, dt);
+  // (A finger does not hover: the wire it has run through clips so far is drawn as far as the last of them.)
+  else if (tapWire?.via.length && !radial) drawVia(tapWire);
   if (!g.paused) {
     gainTimer += dt;
     if (gainTimer >= 1) {
@@ -3656,7 +3811,7 @@ function showDeposits(tapped?: number) {
 }
 
 /** The first goal that needs the inspector ("Speed up a Drill"). */
-const INSPECT_FROM = GOALS.findIndex((x) => x.id === 'upgrade-well');
+const INSPECT_FROM = GOALS.findIndex((x) => x.id === 'tune-shard');
 
 /** A stage this wide (with the inspector's room counted in) has space for the inspector beside the board. */
 const INSPECT_WIDE = 1200;
@@ -3842,7 +3997,10 @@ function drawTemp(d: Extract<Drag, { kind: 'wire' | 'wireIn' }>, dt: number) {
   const free = { x: d.p.x + (d.tp.x - d.p.x) * d.blend, y: d.p.y + (d.tp.y - d.p.y) * d.blend };
   const from = d.kind === 'wire' ? d.a : free;
   const to = d.kind === 'wire' ? free : d.b;
-  const path = drawWire(from, to, ui.wireStyle, 8).d;
+  // (By way of the clips it has taken: as the wire will run once it is made.)
+  const via = d.kind === 'wire' && d.via.length ? clipPts(ui.g, d.via) : [];
+  const path = !via.length ? drawWire(from, to, ui.wireStyle, 8).d
+    : ui.wireStyle === 'curved' ? drawCurved(from, to, via, 8 * (via.length + 1)).d : drawSquared(throughPins(from, to, via), 8).d;
   const key = path + goal;
   if (key === tempD) return;
   tempD = key;
@@ -3853,6 +4011,26 @@ function drawTemp(d: Extract<Drag, { kind: 'wire' | 'wireIn' }>, dt: number) {
   tempPath.classList.toggle('snap', d.target != null);
   tempEnd.setAttribute('cx', String(free.x));
   tempEnd.setAttribute('cy', String(free.y));
+  tempEnd.style.fill = color;
+  tempEnd.classList.add('on');
+}
+
+/** An armed port's wire as far as it has been run through clips: from the port to the last clip it took. */
+function drawVia(t: WireDrag) {
+  const pts = clipPts(ui.g, t.via);
+  const end = pts.pop();
+  if (!end) return;
+  const path = ui.wireStyle === 'curved' ? drawCurved(t.a, end, pts, 8 * (pts.length + 1)).d : drawSquared(throughPins(t.a, end, pts), 8).d;
+  const key = path + 'via';
+  if (key === tempD) return;
+  tempD = key;
+  const color = matColor(t.mats[0] ?? null);
+  tempPath.setAttribute('d', path);
+  tempPath.style.stroke = color;
+  tempPath.classList.add('on');
+  tempPath.classList.remove('snap');
+  tempEnd.setAttribute('cx', String(end.x));
+  tempEnd.setAttribute('cy', String(end.y));
   tempEnd.style.fill = color;
   tempEnd.classList.add('on');
 }
@@ -3954,7 +4132,7 @@ function refreshMarks() {
 /** Arm an output port: it waits for a tap on whatever its wire should go to. */
 function arm(d: WireDrag) {
   if (tapWire) disarm();
-  tapWire = { ...d, p: d.a, tp: d.a, target: null, blend: 0, armed: false, hover: false };
+  tapWire = { ...d, p: d.a, tp: d.a, target: null, blend: 0, armed: false, hover: false, via: [] };
   nodeEls.get(d.from)?.outs[d.port]?.classList.add('armed');
   markTargets(d.from, d.port);
   // The player is choosing a target now: on a narrow stage the inspector would sit over the board (see `makeRoom`).
@@ -4093,7 +4271,7 @@ function armPort(from: number, port: number) {
   const n = nodeById(g, from);
   const a = n && outPorts(g, n)[port];
   if (!a) return;
-  arm({ kind: 'wire', from, port, mats: materialsAt(g, from, port), a, p: a, target: null, tp: a, blend: 0, armed: false, sx: 0, sy: 0, slop: TOUCH_SLOP, touch: true });
+  arm({ kind: 'wire', from, port, mats: materialsAt(g, from, port), a, p: a, target: null, tp: a, blend: 0, armed: false, sx: 0, sy: 0, slop: TOUCH_SLOP, touch: true, via: [] });
 }
 
 function disarm() {
@@ -4103,12 +4281,35 @@ function disarm() {
   clearMarks();
   highlightTarget(null);
   if (!drag) hideTemp();
+  syncVia();
   touch();
 }
 
-/** The port that is armed for wiring by tap, if any (the phone shell shows a hint and a Cancel for it). */
-export const armedPort = (): { from: number; port: number; mat: MatId | null } | null =>
-  tapWire ? { from: tapWire.from, port: tapWire.port, mat: tapWire.mats[0] ?? null } : null;
+// ----- a wire by way of clips -----
+// A wire in hand can be run through clips on its way: drawn out of a port with the pointer down, it takes every clip
+// it is drawn across; with a port armed (a tap or a click on it), a tap on a clip takes that clip, and a second tap on
+// the clip taken last lets it go again. The clips it has taken are lit and the wire in hand is drawn through them; the
+// wire that is made at the end runs through them from the start (connectThrough in actions.ts: one undo step).
+
+/** A port is armed and the player tapped a clip: the wire in hand runs through it, or lets the last one it took go. */
+function viaClip(id: number) {
+  const t = tapWire;
+  if (!t) return;
+  if (t.via[t.via.length - 1] === id) t.via.pop();
+  else if (t.via.includes(id)) return;
+  else if (t.via.length >= MAX_CLIPS) {
+    toast(`A wire runs through ${MAX_CLIPS} clips at most.`, 'info');
+    return;
+  } else t.via.push(id);
+  tempD = '';
+  syncVia();
+  touch();
+}
+
+
+/** The port that is armed for wiring by tap, if any, and how many clips its wire has been run through so far (the phone shell shows a hint and a Cancel for it). */
+export const armedPort = (): { from: number; port: number; mat: MatId | null; via: number } | null =>
+  tapWire ? { from: tapWire.from, port: tapWire.port, mat: tapWire.mats[0] ?? null, via: tapWire.via.length } : null;
 
 /** Stop wiring by tap. Returns false when no port was armed. */
 export function cancelArmed(): boolean {
@@ -4128,14 +4329,14 @@ function inPortFor(tn: GNode, mats: MatId[], fallback: Pt): Pt {
  * A node that has no use for what the wire carries refuses it, with the reason. Returns true when the
  * wire was made.
  */
-function makeWire(from: number, port: number, target: number, tp: Pt): boolean {
+function makeWire(from: number, port: number, target: number, tp: Pt, via: number[] = []): boolean {
   const g = ui.g;
   const why = canConnect(g, from, port, target) ? noUse(g, from, port, target) : '';
   if (why) {
     toast(why, 'bad');
     return false;
   }
-  if (!connect(g, from, port, target)) return false;
+  if (!connectThrough(g, from, port, target, via)) return false;
   flashQueue.push(target);
   signal('connect', { from, to: target, at: toClient(tp) });
   // The camera moves only if the wire's far end cannot be seen whole, and then as little as it can.
@@ -4157,7 +4358,7 @@ function tapNode(id: number) {
       return;
     }
     disarm();
-    makeWire(t.from, t.port, id, inPortFor(tn, t.mats, t.a));
+    makeWire(t.from, t.port, id, inPortFor(tn, t.mats, t.a), t.via);
     return;
   }
   // Anything else cancels. A node that cannot take the wire is simply selected, as a tap would do.
@@ -4177,7 +4378,7 @@ function tapEmpty(p: Pt) {
   disarm();
   // Right beside the port there is no room to build: that tap only cancels.
   if (Math.hypot(p.x - t.a.x, p.y - t.a.y) > 36 && !nodeAt(p)) {
-    openRadial({ at: p, dir: 'consume', from: t.from, port: t.port, to: 0, mat: t.mats[0] ?? null, a: t.a, opts: consumeOptions(g, t.mats) });
+    openRadial({ at: p, dir: 'consume', from: t.from, port: t.port, to: 0, mat: t.mats[0] ?? null, a: t.a, opts: consumeOptions(g, t.mats), via: t.via });
   }
 }
 
@@ -4190,8 +4391,7 @@ type Hit =
   | { kind: 'in'; id: number; port: number; mat: MatId | null }
   | { kind: 'node'; id: number }
   | { kind: 'wire'; id: number }
-  /** A pin of a wire (`id` is the wire's). */
-  | { kind: 'pin'; id: number; index: number }
+  | { kind: 'clip'; id: number }
   | null;
 
 /**
@@ -4215,32 +4415,12 @@ function mouseHit(t: HTMLElement, p: Pt): Hit {
   }
   // (A free deposit lies above the wires that cross it, and with a port armed a click on a wire is a click on the
   // board under it, as for a finger: see `touchHit`.)
+  // (A clip lies above the wires that run through it: it is the smaller thing, and the one that can be moved.)
+  const clipEl = (t as Element).closest?.('g.clip') as SVGGElement | null;
+  if (clipEl) return { kind: 'clip', id: Number(clipEl.dataset.clip) };
   const wireEl = (t as Element).closest?.('g.wire') as SVGGElement | null;
-  const pinEl = (t as Element).closest?.('circle.pin') as SVGCircleElement | null;
-  if (wireEl && pinEl && !tapWire) return { kind: 'pin', id: Number(wireEl.dataset.id), index: Number(pinEl.dataset.pin) };
-  // (A pin is a small thing to hit: a pointer on the wire and this close to one of its pins means the pin.)
-  if (wireEl && !tapWire) {
-    const pin = pinNear(p, PIN_MOUSE / ui.view.k);
-    if (pin && pin.kind === 'pin' && pin.id === Number(wireEl.dataset.id)) return pin;
-  }
   if (wireEl && !tapWire && !depositAt(p)) return { kind: 'wire', id: Number(wireEl.dataset.id) };
   return null;
-}
-
-/** A pin within a finger's reach of a point (board pixels), the nearest. */
-function pinNear(p: Pt, reach: number): Hit {
-  let best: Hit = null;
-  let least = reach;
-  for (const w of ui.g.wires) {
-    (w.pins ?? []).forEach((q, index) => {
-      const d = Math.hypot(q.x - p.x, q.y - p.y);
-      if (d <= least) {
-        least = d;
-        best = { kind: 'pin', id: w.id, index };
-      }
-    });
-  }
-  return best;
 }
 
 /**
@@ -4290,9 +4470,15 @@ function touchHit(p: Pt): Hit {
       }
     }
   }
+  // A clip comes before the wire that runs through it: it is the smaller thing, and the one that can be moved. With a
+  // port armed it still counts: a tap on it runs the wire in hand through it. And it comes before a port's wider
+  // reach when the finger is nearer to it than to the port and not on a card: a clip set on a short wire stands
+  // within reach of the port the wire leaves, and could not be taken hold of there.
+  const clip = clipNear(p, CLIP_REACH / k);
+  const on = nodeAt(p);
+  if (clip && !on && Math.hypot(clip.x - p.x, clip.y - p.y) * k <= Math.min(dOut, dIn)) return { kind: 'clip', id: clip.id };
   if (out && dOut <= PORT_NEAR && dOut <= dIn) return { kind: 'out', ...out };
   if (inn && dIn <= PORT_IN_NEAR) return { kind: 'in', ...inn };
-  const on = nodeAt(p);
   if (on) return { kind: 'node', id: on.id };
   // A free deposit lies above the wires that cross it: a tap there is for the deposit (see `tapDeposit`).
   if (depositAt(p)) return null;
@@ -4300,9 +4486,7 @@ function touchHit(p: Pt): Hit {
   // would otherwise have nowhere left to be tapped (and so could never be cut). Right beside the
   // port, though, a tap is for the port: a long wire can be tapped further along. With a port armed a
   // wire is not something to tap at all: a tap on one is a tap on the board under it (see `tapEmpty`).
-  // (A pin on a wire comes before the wire it is on: it is the smaller thing, and the one that can be moved.)
-  const pin = tapWire ? null : pinNear(p, PIN_REACH / k);
-  if (pin) return pin;
+  if (clip) return { kind: 'clip', id: clip.id };
   const w = tapWire ? null : wireNear(p, WIRE_REACH / k);
   if (w && !(out && dOut <= PORT_EDGE && (wireEls.get(w.id)?.flow.len ?? 0) * k >= WIRE_LONG)) return { kind: 'wire', id: w.id };
   if (out && dOut <= PORT_REACH) return { kind: 'reach', ...out };
@@ -4412,7 +4596,7 @@ function startWire(from: number, port: number, cx: number, cy: number, p: Pt, to
   if (!a) return false;
   drag = {
     kind: 'wire', from, port, mats: materialsAt(g, from, port), a, p, target: null, tp: p, blend: 0, armed: false,
-    sx: cx, sy: cy, slop: touchy ? TOUCH_SLOP : 6, touch: touchy,
+    sx: cx, sy: cy, slop: touchy ? TOUCH_SLOP : 6, touch: touchy, via: [],
   };
   boardEl.classList.add('wiring');
   return true;
@@ -4575,9 +4759,9 @@ function onDown(e: PointerEvent) {
       kind: 'node', id: hit.id, ox: p.x - n.x, oy: p.y - n.y, x0: n.x, y0: n.y, moved: false,
       sx: e.clientX, sy: e.clientY, slop: touchy ? TOUCH_SLOP : MOUSE_SLOP, lifted: !touchy,
     };
-    // Under a finger the card lifts once it has been held (not a Drill, which stays on its deposit; not in the
+    // Under a finger the card lifts once it has been held (not a Drill that stays on its deposit; not in the
     // overview or while a port waits for its target, where a drag on a card moves the board whatever).
-    if (touchy && n.type !== 'well' && !over && !tapWire) {
+    if (touchy && canMove(g, n) && !over && !tapWire) {
       clearTimeout(liftTimer);
       liftTimer = window.setTimeout(() => {
         if (drag !== held || held.moved) return;
@@ -4587,17 +4771,17 @@ function onDown(e: PointerEvent) {
       }, HOLD_MS);
     }
     // One of a block: the rest go where it goes.
-    if (block.size > 1 && block.has(n.id) && n.type !== 'well') {
-      drag.others = [...block].filter((id) => id !== n.id).map((id) => nodeById(g, id)).filter((m): m is GNode => !!m && m.type !== 'well').map((m) => ({ id: m.id, x0: m.x, y0: m.y }));
+    if (block.size > 1 && block.has(n.id) && canMove(g, n)) {
+      drag.others = [...block].filter((id) => id !== n.id).map((id) => nodeById(g, id)).filter((m): m is GNode => !!m && canMove(g, m)).map((m) => ({ id: m.id, x0: m.x, y0: m.y }));
       const inside = new Set([n.id, ...drag.others.map((o) => o.id)]);
-      drag.pins0 = new Map(g.wires.filter((w) => w.pins?.length && inside.has(w.from) && inside.has(w.to)).map((w) => [w.id, w.pins!.map((q) => ({ x: q.x, y: q.y }))]));
+      drag.clips0 = blockClips(g, inside);
     }
     return;
   }
-  if (hit?.kind === 'pin') {
-    const w = g.wires.find((x) => x.id === hit.id);
-    if (!w?.pins?.[hit.index]) return;
-    drag = { kind: 'pin', wire: hit.id, index: hit.index, was: w.pins.map((q) => ({ x: q.x, y: q.y })), moved: false, sx: e.clientX, sy: e.clientY, slop: touchy ? TOUCH_SLOP : MOUSE_SLOP };
+  if (hit?.kind === 'clip') {
+    const c = clipById(g, hit.id);
+    if (!c) return;
+    drag = { kind: 'clip', id: c.id, x0: c.x, y0: c.y, moved: false, sx: e.clientX, sy: e.clientY, slop: touchy ? TOUCH_SLOP : MOUSE_SLOP };
     return;
   }
   if (hit?.kind === 'wire') {
@@ -4684,11 +4868,12 @@ function steer(cx: number, cy: number, hovering = false) {
         drag = { kind: 'pan', sx: cx, sy: cy, vx: ui.view.x, vy: ui.view.y, moved: true, slop: 0, place: false };
         break;
       }
-      if (n.type === 'well') {
-        // A Drill stays on its deposit. Under a finger the drag pans the board instead, so that a
+      if (!canMove(g, n)) {
+        // A Drill stays on its deposit (until Mobile Drills). Under a finger the drag pans the board instead, so that a
         // swipe that happens to start on a Drill still goes somewhere; so does a mouse in the overview,
         // where a drag that let go would otherwise count as a click on the Drill and take the camera in to it.
         if (drag.slop >= TOUCH_SLOP || over) drag = { kind: 'pan', sx: cx, sy: cy, vx: ui.view.x, vy: ui.view.y, moved: true, slop: 0, place: false };
+        else tellDrillStays(g);
         break;
       }
       if (!drag.moved) {
@@ -4711,18 +4896,22 @@ function steer(cx: number, cy: number, hovering = false) {
       if (pos.x !== n.x || pos.y !== n.y) carry(g, [n.id], pos.x - n.x, pos.y - n.y);
       break;
     }
-    case 'pin': {
+    case 'clip': {
       const d = drag;
       if (!d.moved && Math.hypot(cx - d.sx, cy - d.sy) < d.slop) break;
-      const pin = g.wires.find((x) => x.id === d.wire)?.pins?.[d.index];
-      if (!pin) break;
+      // (A finger that drags from a clip while a port waits for its target moves the board, as it does from a card.)
+      if (!d.moved && d.slop >= TOUCH_SLOP && tapWire) {
+        drag = { kind: 'pan', sx: cx, sy: cy, vx: ui.view.x, vy: ui.view.y, moved: true, slop: 0, place: false };
+        break;
+      }
+      const c = clipById(g, d.id);
+      if (!c) break;
       d.moved = true;
-      // A pin stands on its own grid, half the cards', inside the plot.
-      const x = Math.max(0, Math.min(g.board.w, Math.round(p.x / PIN_GRID) * PIN_GRID));
-      const y = Math.max(0, Math.min(g.board.h, Math.round(p.y / PIN_GRID) * PIN_GRID));
-      if (pin.x !== x || pin.y !== y) {
-        pin.x = x;
-        pin.y = y;
+      // A clip stands on its own grid, half the cards', inside the plot.
+      const at = clipSpot(p.x, p.y, g.board);
+      if (c.x !== at.x || c.y !== at.y) {
+        c.x = at.x;
+        c.y = at.y;
         routeWires(g);
         layoutWires();
       }
@@ -4753,6 +4942,15 @@ function steer(cx: number, cy: number, hovering = false) {
           break;
         }
         wireUnderWay(d);
+      }
+      // A wire drawn across a clip is run through it.
+      if (d.armed && !over && g.clips.length) {
+        const c = clipNear(p, CLIP_CATCH / ui.view.k, d.via);
+        if (c && d.via.length < MAX_CLIPS) {
+          d.via.push(c.id);
+          buzz('clip', 6);
+          syncVia();
+        }
       }
       const can = (n: GNode) => wireOk(g, d.from, d.port, n.id);
       const tn = !d.armed ? null : d.touch ? snapTarget(p, can) : snapExact(p, can, 'in');
@@ -4822,7 +5020,9 @@ function endDrag() {
     nodeEls.get(drag.id)?.el.classList.remove('dragging', 'lift');
     markLevel(drag, []);
   }
+  const hadVia = drag?.kind === 'wire' && drag.via.length > 0;
   drag = null;
+  if (hadVia) syncVia();
   boardEl.classList.remove('wiring');
   appEl?.classList.remove('carrying');
   highlightTarget(null);
@@ -4880,10 +5080,12 @@ function markLevel(d: Extract<Drag, { kind: 'node' }>, wires: number[]) {
 /** Give up on the gesture in progress. A node that was being moved goes back to where it started. */
 function abortDrag() {
   if (drag?.kind === 'node' && drag.moved) putBack(ui.g, drag);
-  if (drag?.kind === 'pin' && drag.moved) {
-    const d = drag;
-    const w = ui.g.wires.find((x) => x.id === d.wire);
-    if (w) w.pins = d.was.map((q) => ({ x: q.x, y: q.y }));
+  if (drag?.kind === 'clip' && drag.moved) {
+    const c = clipById(ui.g, drag.id);
+    if (c) {
+      c.x = drag.x0;
+      c.y = drag.y0;
+    }
     routeWires(ui.g);
     layoutWires();
   }
@@ -4915,15 +5117,13 @@ function carry(g: Game, ids: number[], dx: number, dy: number) {
     n.x += dx;
     n.y += dy;
   }
-  // (A wire that runs from one card of a block to another takes its pins with it.)
-  if (ids.length > 1) {
-    const inside = new Set(ids);
-    for (const w of g.wires) {
-      if (!w.pins || !inside.has(w.from) || !inside.has(w.to)) continue;
-      for (const q of w.pins) {
-        q.x += dx;
-        q.y += dy;
-      }
+  // (The clips of the wires that run from one card of a block to another go with it.)
+  if (drag?.kind === 'node' && drag.clips0) {
+    for (const id of drag.clips0.keys()) {
+      const c = clipById(g, id);
+      if (!c) continue;
+      c.x += dx;
+      c.y += dy;
     }
   }
   redraw(g, ids, true);
@@ -4939,11 +5139,37 @@ function putBack(g: Game, d: Extract<Drag, { kind: 'node' }>) {
     n.y = o.y0;
     ids.push(o.id);
   }
-  for (const [wid, was] of d.pins0 ?? []) {
-    const w = g.wires.find((x) => x.id === wid);
-    if (w) w.pins = was.map((q) => ({ x: q.x, y: q.y }));
+  for (const [id, was] of d.clips0 ?? []) {
+    const c = clipById(g, id);
+    if (c) {
+      c.x = was.x;
+      c.y = was.y;
+    }
   }
   redraw(g, ids);
+}
+
+/**
+ * The clips that go with a block of cards: those through which a wire runs, and every wire through which runs from
+ * one card of the block to another. A clip that also holds a wire to somewhere else stays where it is. Each with
+ * where it stands now.
+ */
+function blockClips(g: Game, inside: Set<number>): Map<number, Pt> {
+  const out = new Map<number, Pt>();
+  const stays = new Set<number>();
+  for (const w of g.wires) {
+    if (!w.clips?.length) continue;
+    const within = inside.has(w.from) && inside.has(w.to);
+    for (const id of w.clips) {
+      if (!within) stays.add(id);
+      else if (!out.has(id)) {
+        const c = clipById(g, id);
+        if (c) out.set(id, { x: c.x, y: c.y });
+      }
+    }
+  }
+  for (const id of stays) out.delete(id);
+  return out;
 }
 
 // ----- several cards as one block -----
@@ -4952,7 +5178,29 @@ function putBack(g: Game, d: Extract<Drag, { kind: 'node' }>) {
 // ringed, and a drag on any card of it moves them all, keeping their places among themselves: the card under the
 // pointer comes level as it does alone, the block stays inside the plot, and it is let go only where every card of it
 // is clear of the cards that are not in it; otherwise it goes back. One undo step. A click on a card or on the empty
-// board, or Escape, lets the block go. A Drill is never part of one. (With a mouse: a finger has no Shift.)
+// board, or Escape, lets the block go. A Drill is part of one only once Drills can be moved. (With a mouse: a finger has no Shift.)
+
+// ----- Drills that move -----
+// A Drill stands on the deposit it was built on, and stayed there: a line had to be laid out from wherever the plot
+// happened to put its deposits. With Mobile Drills researched (content.ts S2) a Drill is a card like the rest: it is
+// dragged, held and carried by a finger, comes level with what it is wired to and goes in a block, and its deposit
+// goes where it goes (seatDeposit in actions.ts, in the same undo step). Tidy still leaves Drills where they stand.
+
+/** " Research Mobile Drills to move it." once that research can be done, and nothing before: the tree is not yet about it. */
+function drillTechHint(g: Game): string {
+  const t = TECHS.S2;
+  return t && techAvailable(g, t) ? ` Research <b>${esc(t.name)}</b> to move it.` : '';
+}
+
+let drillTold = -Infinity;
+/** A mouse has tried to drag a Drill that stays: said once in a while, and only when there is something to do about it. */
+function tellDrillStays(g: Game) {
+  const hint = drillTechHint(g);
+  const now = performance.now();
+  if (!hint || now - drillTold < 20000) return;
+  drillTold = now;
+  toast(`<span>A Drill stays on its deposit.${hint}</span>`, 'info', 4200);
+}
 
 /** The cards that move together. */
 const block = new Set<number>();
@@ -4961,7 +5209,10 @@ let blockTold = false;
 function syncBlock() {
   if (block.size) {
     const byId = graph(ui.g).byId;
-    for (const id of block) if (byId.get(id)?.type === 'well' || !byId.has(id)) block.delete(id);
+    for (const id of block) {
+      const n = byId.get(id);
+      if (!n || !canMove(ui.g, n)) block.delete(id);
+    }
   }
   for (const [id, refs] of nodeEls) setClass(refs.el, 'blk', block.has(id));
 }
@@ -4989,12 +5240,13 @@ function toggleBlock(id: number) {
   const g = ui.g;
   const n = nodeById(g, id);
   if (!n) return;
-  if (n.type === 'well') {
-    toast('A Drill stays on its deposit: it cannot be moved with the others.', 'info');
+  if (!canMove(g, n)) {
+    toast(`<span>A Drill stays on its deposit: it cannot be moved with the others.${drillTechHint(g)}</span>`, 'info');
     return;
   }
   const ids = new Set(block);
-  if (!ids.size && ui.sel?.kind === 'node' && ui.sel.id !== id && nodeById(g, ui.sel.id)?.type !== 'well') ids.add(ui.sel.id);
+  const picked = ui.sel?.kind === 'node' && ui.sel.id !== id ? nodeById(g, ui.sel.id) : null;
+  if (!ids.size && picked && canMove(g, picked)) ids.add(picked.id);
   if (ids.has(id)) ids.delete(id);
   else ids.add(id);
   setBlock([...ids]);
@@ -5007,17 +5259,22 @@ function onDouble(e: MouseEvent) {
   const under = document.elementFromPoint(e.clientX, e.clientY) as HTMLElement | null;
   const at = toWorld(e.clientX, e.clientY);
   const hit = under ? mouseHit(under, at) : null;
-  // On a pin: that pin comes off. On a wire: a pin goes on, there.
-  if (hit?.kind === 'pin') {
-    const w = ui.g.wires.find((x) => x.id === hit.id);
-    if (w) setPins(ui.g, w.id, (w.pins ?? []).filter((_, k) => k !== hit.index));
+  // On a clip: it comes off. On a wire: the wire is clipped, there. On the empty board: a clip is set up, there.
+  if (hit?.kind === 'clip') {
+    if (ui.sel?.kind === 'clip' && ui.sel.id === hit.id) select(null);
+    removeClip(ui.g, hit.id);
     return;
   }
   if (hit?.kind === 'wire') {
-    if (revealOf(ui.g).wires) pinWire(hit.id, at);
+    if (revealOf(ui.g).wires) clipWire(hit.id, at);
     return;
   }
-  if (hit?.kind !== 'node') return;
+  if (!hit) {
+    const onBoard = !!under && boardEl.contains(under) && !under.closest('#expand, #radial, .deposit');
+    if (onBoard && revealOf(ui.g).wires && !depositAt(at) && at.x >= 0 && at.y >= 0 && at.x <= ui.g.board.w && at.y <= ui.g.board.h) clipBoard(at);
+    return;
+  }
+  if (hit.kind !== 'node') return;
   const line = lineFrom(ui.g, hit.id);
   if (line.length > 1) setBlock(line);
 }
@@ -5077,23 +5334,29 @@ function dropBlock(d: Extract<Drag, { kind: 'node' }>) {
     n.x = o.x0;
     n.y = o.y0;
   }
-  // (The pins that came along: where they are now is kept, and they too go back for the moment the step is taken.)
-  const pinsTo = new Map<number, Pt[]>();
-  for (const [wid, was] of d.pins0 ?? []) {
-    const w = g.wires.find((x) => x.id === wid);
-    if (!w) continue;
-    pinsTo.set(wid, cleanPins(w.pins, g.board));
-    w.pins = was.map((q) => ({ x: q.x, y: q.y }));
+  // (The clips that came along: where they are now is kept, and they too go back for the moment the step is taken.)
+  const clipsTo = new Map<number, Pt>();
+  for (const [id, was] of d.clips0 ?? []) {
+    const c = clipById(g, id);
+    if (!c) continue;
+    clipsTo.set(id, clipSpot(c.x, c.y, g.board));
+    c.x = was.x;
+    c.y = was.y;
   }
   act(g, () => {
     for (const [id, at] of to) {
       const n = nodeById(g, id)!;
       n.x = at.x;
       n.y = at.y;
+      seatDeposit(g, n);
     }
-    for (const [wid, pins] of pinsTo) {
-      const w = g.wires.find((x) => x.id === wid);
-      if (w && pins.length) w.pins = pins;
+    for (const [id, at] of clipsTo) {
+      const c = clipById(g, id);
+      // (Where another clip stands already it stays put: two clips are never on one point.)
+      if (c && !clipAt(g, at.x, at.y)) {
+        c.x = at.x;
+        c.y = at.y;
+      }
     }
     return 0;
   });
@@ -5133,6 +5396,7 @@ function dropNode(d: Extract<Drag, { kind: 'node' }>) {
       act(g, () => {
         n.x = spot.x;
         n.y = spot.y;
+        seatDeposit(g, n);
         if (onWire) splice(g, onWire.id, n.id);
         return 0;
       });
@@ -5149,10 +5413,31 @@ function dropNode(d: Extract<Drag, { kind: 'node' }>) {
   if (env.phone && d.moved && again) ensureVisible(d.id);
 }
 
-/** End whatever gesture is in progress: a node being moved is dropped where it is, anything else is abandoned. */
+/**
+ * Let a clip go where it has been dragged to: it goes back for a moment to where it stood, so that the move is one
+ * undo step taken now. Let go on another clip, the two become one (moveClip in actions.ts).
+ */
+function dropClip(d: Extract<Drag, { kind: 'clip' }>) {
+  const g = ui.g;
+  const c = clipById(g, d.id);
+  if (!c) return;
+  const to = { x: c.x, y: c.y };
+  c.x = d.x0;
+  c.y = d.y0;
+  const onto = clipAt(g, to.x, to.y);
+  if (!moveClip(g, d.id, to.x, to.y)) {
+    routeWires(g);
+    layoutWires();
+  } else if (onto && onto.id !== d.id) toast('Two clips are one now: their wires run through it together.', 'info', 2600);
+  const now = clipById(g, d.id) ?? onto;
+  if (now) select({ kind: 'clip', id: now.id });
+}
+
+/** End whatever gesture is in progress: a node or a clip being moved is dropped where it is, anything else is abandoned. */
 function finishDrag() {
   if (!drag) return;
   if (drag.kind === 'node') dropNode(drag);
+  else if (drag.kind === 'clip' && drag.moved) dropClip(drag);
   endDrag();
 }
 
@@ -5200,18 +5485,14 @@ function onUp(e: PointerEvent) {
       if (tapWire) disarm();
       select({ kind: 'wire', id: d.wireId });
       break;
-    case 'pin': {
-      // Let go: the wire's pins go back for a moment to what they were, so that the move is one undo step taken now.
-      const w = g.wires.find((x) => x.id === d.wire);
-      if (w && d.moved) {
-        const to = (w.pins ?? []).map((q) => ({ x: q.x, y: q.y }));
-        w.pins = d.was.map((q) => ({ x: q.x, y: q.y }));
-        if (!setPins(g, w.id, to)) {
-          routeWires(g);
-          layoutWires();
-        }
-      }
-      select({ kind: 'wire', id: d.wire });
+    case 'clip': {
+      if (d.moved) dropClip(d);
+      // A tap on a clip while a port waits for its target runs the wire in hand through it (or, on the last one it took, lets that go).
+      else if (tapWire) {
+        endDrag();
+        viaClip(d.id);
+        return;
+      } else select({ kind: 'clip', id: d.id });
       break;
     }
     case 'wire': {
@@ -5224,7 +5505,7 @@ function onUp(e: PointerEvent) {
           followArmed(e.pointerType !== 'mouse');
           return;
         }
-      } else if (d.target != null) makeWire(d.from, d.port, d.target, d.tp);
+      } else if (d.target != null) makeWire(d.from, d.port, d.target, d.tp, d.via);
       else {
         const on = nodeAt(p);
         if (on) {
@@ -5233,7 +5514,7 @@ function onUp(e: PointerEvent) {
           if (why) toast(why, 'bad');
         } else if (Math.hypot(p.x - d.a.x, p.y - d.a.y) > 36) {
           endDrag();
-          openRadial({ at: p, dir: 'consume', from: d.from, port: d.port, to: 0, mat: d.mats[0] ?? null, a: d.a, opts: consumeOptions(g, d.mats) });
+          openRadial({ at: p, dir: 'consume', from: d.from, port: d.port, to: 0, mat: d.mats[0] ?? null, a: d.a, opts: consumeOptions(g, d.mats), via: d.via });
           return;
         }
       }
@@ -5296,8 +5577,8 @@ function onUp(e: PointerEvent) {
  * The kind of node the card is asking the player to build right now, if any: the next step of the goal's
  * "while you wait" line when that is a build, or else what the goal's hint says to pick or to build
  * ("…and pick Lab", "Build a Router from…"), for as long as the goal still needs one built: while what it is
- * buying next (Goal.step) is that kind. Once the Router of "Route more to a Lab…" stands, the card is about
- * wiring it, and a menu opened from its own port must not offer a second Router first. The build menu puts it
+ * buying next (Goal.step) is that kind. Once the machine a card asked for stands, the card is about
+ * wiring it, and a menu opened from its own port must not offer a second one first. The build menu puts it
  * first and preselects it.
  */
 function wantedType(g: Game, from?: number): NodeType | null {
@@ -5878,7 +6159,7 @@ export function pickRadial(i: number) {
   act(g, () => {
     const n = placeNode(g, o.type, pos.x, pos.y, { recipe: o.recipe });
     if (!n) return false;
-    if (r.dir === 'consume') connect(g, r.from, r.port, n.id);
+    if (r.dir === 'consume') connectThrough(g, r.from, r.port, n.id, r.via ?? []);
     else {
       const rec = recipeOf(n);
       const port = rec && r.mat ? Math.max(0, rec.outputs.findIndex((x) => x[0] === r.mat)) : 0;
@@ -5901,7 +6182,7 @@ export function pickRadial(i: number) {
  */
 export function cancelGesture(): boolean {
   const d = drag;
-  const busy = !!d && (d.kind === 'wire' || d.kind === 'wireIn' || d.kind === 'knife' || ((d.kind === 'node' || d.kind === 'pin') && d.moved));
+  const busy = !!d && (d.kind === 'wire' || d.kind === 'wireIn' || d.kind === 'knife' || ((d.kind === 'node' || d.kind === 'clip') && d.moved));
   // (With nothing else under way, Escape lets a block of cards go.)
   if (!radial && !busy && !tapWire && block.size) {
     clearBlock();

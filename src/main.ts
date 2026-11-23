@@ -5,8 +5,10 @@ import './styles/advice.css';
 import './styles/feel.css';
 import './styles/phone.css';
 import './styles/clean.css';
-import { clearHistory, cutWire, deleteNode, nodeById, redo, refundOf, undo } from './actions';
+import './styles/manage.css';
+import { clearHistory, cutWire, deleteNode, nodeById, redo, refundOf, removeClip, undo } from './actions';
 import { fmt, fmtTime, has, offlineCap } from './economy';
+import { migrateChain } from './goals';
 import { offlineGains, tick } from './sim';
 import { clearSave, loadGame, newGame, saveGame } from './state';
 import {
@@ -85,6 +87,8 @@ function begin() {
 
 function boot() {
   const loaded = loadGame();
+  // (A save from the chain of 22 goals is carried over to this one before anything reads its goal: src/goals.ts.)
+  if (loaded) migrateChain(loaded);
   ui.g = loaded ?? newGame();
   resumedFrom = loaded ? loaded.savedAt : null;
   initToasts($('toasts'));
@@ -306,6 +310,7 @@ function onKey(e: KeyboardEvent) {
         if (refund > 0) toast(`Refunded <b>${fmt(refund)}¢</b>`, 'good');
       }
     } else if (ui.sel?.kind === 'wire') cutWire(g, ui.sel.id);
+    else if (ui.sel?.kind === 'clip') removeClip(g, ui.sel.id);
     select(null);
     return renderPanels();
   }

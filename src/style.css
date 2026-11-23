@@ -102,7 +102,7 @@ div.hb.locked:hover { background: transparent; border-color: #2a3550; }
 #world { position: absolute; left: 0; top: 0; transform-origin: 0 0; will-change: transform; }
 #plot { position: absolute; left: 0; top: 0; border: 1.5px dashed #243049; border-radius: 18px; pointer-events: none; }
 #plot-label { position: absolute; left: 16px; top: -9px; padding: 0 8px; background: var(--canvas); font-size: 11px; color: var(--dim); }
-#wires, #overlay { position: absolute; left: 0; top: 0; overflow: visible; pointer-events: none; }
+#wires, #clips, #overlay { position: absolute; left: 0; top: 0; overflow: visible; pointer-events: none; }
 #nodes, #chips, #deposits { position: absolute; left: 0; top: 0; }
 /* Wire dots and particles. It sits above the board and below the HUD, and never takes input. */
 #fx { position: absolute; left: 0; top: 0; pointer-events: none; }
@@ -182,13 +182,6 @@ g.wire.stalled .base { stroke: #7f8aa3; stroke-dasharray: 5 7; stroke-opacity: 0
 g.wire.stalled:not(.new) .base { stroke-width: 2px !important; }
 g.wire.stalled .glow { stroke-opacity: 0; }
 g.wire.sel .glow { stroke-opacity: 0.35; stroke: var(--sel); }
-/* A pin: a point the player set for the wire to run through (board.ts). A small ring in the wire's colour, quiet
-   until the pointer is on the wire or the wire is selected; it can be dragged. Not drawn in the overview. */
-g.wire .pin { fill: #0c1220; stroke: currentColor; stroke-width: 2px; stroke-opacity: 0.6; pointer-events: all; cursor: grab; }
-g.wire:hover .pin { stroke-opacity: 1; }
-g.wire.sel .pin { stroke: var(--sel); stroke-opacity: 1; fill: #16203a; }
-g.wire.dim .pin { stroke-opacity: 0.2; }
-#board.ov g.wire .pin { display: none; }
 g.wire:hover .base { stroke-opacity: 0.6; }
 /* A wire that has just been connected swells for a moment. */
 g.wire.new .base { animation: wire-in 0.15s ease-out; stroke-dasharray: none; }
