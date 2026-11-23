@@ -104,6 +104,13 @@ export interface NodeDef {
   blurb: string;
 }
 
+/**
+ * The nth node of a type costs base × growth^(n-1). Two of these prices carry the pacing of the chain
+ * (docs/CONTENT.md, "Nodes"): Assemblers are 1,200, 1,800, 2,700, 4,050¢, because the growth goals ask for a second
+ * Circuit Assembler and a second Screen Assembler and each has to be a sane purchase (at the old ×2.5 the fourth cost
+ * more than the Fabricator); and the Fabricator is 8,500¢, the one long save of the demo, sized to what a board with
+ * two lines of everything earns.
+ */
 export const NODE_DEFS: Record<NodeType, NodeDef> = {
   well: { type: 'well', name: 'Drill', base: 10, growth: 1.15, tracks: ['speed'], verb: 'extract', blurb: 'Brings up a raw material. Must sit on a deposit.' },
   refiner: { type: 'refiner', name: 'Refiner', base: 50, growth: 1.15, tech: 'P1', tracks: ['speed', 'eff', 'buffer'], verb: 'refine', blurb: 'Turns one material into a better one.' },
@@ -185,45 +192,40 @@ const T = (
 /**
  * Tech prices as tuned with the pacing bot (`npm run pacing`, docs/CONTENT.md). The reasoning, so that the
  * next change keeps it:
- *  - The Processing spine the goal chain asks for (P2 → P3 → P4 → P5 → P7) is priced for the newcomer who
- *    does what the goal card says, its "while you wait" lines included (Goal.meanwhile in src/goals.ts), so that
- *    the card keeps that player busy: nothing to do for at most 30% of the time to the first Phone, never for
- *    more than a minute at a stretch, never more than 75 s on one goal, and the first Phone at 17:30–21:00
- *    (the pacing rule: where a later first Phone would cost waits with nothing to do in them, the waits are
- *    kept short; `npm run pacing`, policy cardonly). The fast players are the floor (no first Phone before
- *    14:00), so the spine could not simply come down. What came
- *    down is what the card's player pays for and the fast players hardly do: the Labs of the lines (×1.1 a Lab,
- *    it was ×1.3) and the Fabricator; and "Make and sell Silicon" has a line for Lab Speed and Deep Analysis
- *    (the fast players buy Deep Analysis after Quartz Deposits, never before it). Assembly is 1,325α, Quartz
- *    Deposits 1,875α. (A player who reads only the hints and ignores the lines still needs most of an hour:
- *    the spine is not priced for that.)
- *  - Fabrication's α is the one spine price that is lower than the rest of the curve would suggest: by then
- *    the two Assemblers take the Glass, Plastic and Copper the Labs were studying, and a newcomer's α income falls
- *    by a third. At 720 α the card's last wait is for the Fabricator's credits, not for the research, for the
- *    card player who takes the adviser's tips and for the one who takes none (`npm run pacing`, policies
- *    newcomer and cardonly): that is what makes the card's line for that wait true ("cut the wire from the
- *    Circuit Assembler to the Lab", tests/meanwhile.test.ts). At 900 α the player who takes no tip had the
- *    Fabricator's price in hand before the research on every seed, and the line was worth nothing to them.
- *    The fast players wait for the Fabricator's credits whatever this costs, so it does not move their Phone.
- *  - Ore Deposits is the cheap one because a fast player has nothing else to do while it is saved for:
- *    past about 220 α their hands are idle for more than a minute. At 195α the card player's wait for it is
- *    under a minute (51–56 s); Oil Deposits at 40α keeps a player who claims at once within 30 s on goal 8.
- *  - Robot's α (2,800) keeps the fast players' first Robot after 24:00, now that their Phone comes sooner.
+ *  - The Processing spine the goal chain asks for (P2 → P3 → P4 → P5 → P7) is paced by the growth goals, not
+ *    by its prices. Each step after Oil Deposits is `locked` until the growth goal before it is claimed
+ *    (GoalReward.opens in src/goals.ts: "Make 1 Plastic a second" opens Ore Deposits, and so on), and that
+ *    claim pays about two thirds of the price (120 of 195α, 400 of 600α, 600 of 900α, 400 of 600α). A player
+ *    who kept their Data researches at the claim: no scripted card player waits for a spine research after
+ *    Oil Deposits. The prices were walls before (Assembly 1,325α, Quartz Deposits 1,875α), and the waits
+ *    behind them were filled by lines that put a Drill and a Lab of its own on every spare deposit; those
+ *    lines are gone, and spare deposits are for wider lines.
+ *  - So a spine price moves next to nothing for the player the cards plan for. What it still does is ask for
+ *    a Lab that studies something: a player who spends every α on side techs waits for the research, and the
+ *    adviser speaks to that wait. What paces the first Phone now is credits: the Refiners, land (RULES.expansion)
+ *    and Assemblers the growth goals have the player buy, and the Fabricator (NODE_DEFS).
+ *  - Oil Deposits (40α) is the one research that is waited for, briefly: it is where the tech tree is met.
+ *  - Fabrication's β (100) is what "Study Circuits for β" and the rewards of the Screen goals bring. The wait
+ *    after it is for the Fabricator's credits, not for Data, which is what makes the card's line for that wait
+ *    true ("cut the wire from the Circuit Assembler to the Lab", tests/meanwhile.test.ts).
+ *  - Laptop's and Robot's α (3,500 and 8,000) keep the fast players' first Robot after 24:00, now that the
+ *    spine is no wall of α and a board has two lines of everything behind the Phone.
  *  - Side techs are impulse buys: cheap next to the spine tech they compete with, so every kind of player
- *    picks them up along the way. α for what is useful before the first Circuit (Lab Speed, Merger, Pipes
- *    Mk II: 150 α together), β after it. Wider Demand is β for that reason: nothing sells over demand before
- *    the first Circuit, and at 200 α it cost a fast player most of a minute there.
+ *    picks them up along the way. α for what is useful before the first Circuit (Routing, Lab Speed, Merger,
+ *    Pipes Mk II: 200 α together), β after it. Routing is one of them: no goal asks for a Router. Wider Demand
+ *    is β and hidden until something sells over its demand.
  *  - Anything that only matters after the demo costs γ, which does not exist before the first Phone, and the
  *    late Processing techs need all three kinds of Data, so studying Tier 1 items never stops paying.
- * P1, R1, L1 and S1 are goal rewards (src/goals.ts) and cannot be bought. S1 (Bulk Upgrade) comes with
- * "Make your first Screen", and the next goal has the player press it once ("Upgrade all your Drills at
- * once"), just before the save for the Fabricator, so nobody has to press Upgrade a hundred times on a phone;
- * upgrades are not balanced around dozens of tiny purchases.
+ * P1, R1 and S1 are goal rewards (src/goals.ts) and cannot be bought. R1 (the Lab) comes with "Make 1.2 Glass
+ * a second": Data arrives once there is a line worth studying. S1 (Bulk Upgrade) comes with "Make your first
+ * Screen", and the next goal has the player press it once ("Speed up every Drill at once"), so nobody has to
+ * press Upgrade a hundred times on a phone; upgrades are not balanced around dozens of tiny purchases.
  *
- * The Commerce branch is about demand, and demand stays out of sight until it bites: selling over demand
- * did not happen before the first Phone in 60 scripted runs, so a price gauge handed out at minute 7 was a
- * reward for nothing. C1 (Market Lens) cannot be bought either: the game grants it the first time something
- * sells over its demand (g.seenSurplus, src/sim.ts), and until then the whole branch is hidden (`needsSurplus`).
+ * The Commerce branch is about demand, and demand stays out of sight until it bites: no scripted card player
+ * sells over demand before the first Phone (every growth goal's rate is under its material's demand), so a
+ * price gauge handed out early was a reward for nothing. C1 (Market Lens) cannot be bought either: the game
+ * grants it the first time something sells over its demand (g.seenSurplus, src/sim.ts), and until then the
+ * whole branch is hidden (`needsSurplus`).
  */
 export const TECHS: Record<string, Tech> = Object.fromEntries([
   // Processing

@@ -2,7 +2,7 @@ import { describe, expect, it } from 'vitest';
 import { claimGoal, connect, cutWire, expandBoard, favour, placeNode, redo, setMode, setWeight, undo, upgrade, upgradeAll } from '../src/actions';
 import { MATERIALS, RECIPES, RULES, TECHS } from '../src/content';
 import { has, nodeCost, research } from '../src/economy';
-import { GOALS, MAIN_GOALS, activeGoal, goalAge, goalById, goalDeposit, goalView, recipeFeeds, rewardText, routerFavoursLab } from '../src/goals';
+import { GOALS, MAIN_GOALS, activeGoal, goalAge, goalById, goalDeposit, goalView, rateNoun, recipeFeeds, rewardText, routerFavoursLab } from '../src/goals';
 import { Game, deserialize, serialize } from '../src/state';
 import { fresh, market, rich, run, take, well } from './helpers';
 
@@ -62,6 +62,17 @@ describe('goal chain: the table (2.4)', () => {
       ['grow-glyph', 'glyph', 0.6, ['P5']],
       ['grow-prism', 'prism', 0.5, ['P7']],
     ]);
+    // A growth goal's title is its rate, worded as its card's count, its celebration and the tech tree word it:
+    // what is poured has no plural ("1.2 Glass"), what is counted by the piece has ("0.6 Circuits").
+    for (const x of GOALS) {
+      const grow = x.meanwhile?.find((l) => l.grow)?.grow;
+      if (!grow) continue;
+      expect(x.title).toBe(`Make ${grow.rate} ${rateNoun(grow.mat, grow.rate)} a second`);
+      const g = fresh();
+      at(g, x.id);
+      expect(goalView(g)!.progress![2]).toBe(`${rateNoun(grow.mat, grow.rate)} a second`);
+    }
+    expect([rateNoun('shard', 1.2), rateNoun('glyph', 0.6), rateNoun('glyph', 1), rateNoun('prism', 0.5), rateNoun('glint', 2)]).toEqual(['Glass', 'Circuits', 'Circuit', 'Screens', 'Sand']);
     // Every locked tech is opened by exactly one goal, and the goal that asks for its research comes straight after.
     const locked = Object.values(TECHS).filter((t) => t.locked).map((t) => t.id);
     expect(locked).toEqual(['P3', 'P4', 'P5', 'P7']);

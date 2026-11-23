@@ -563,10 +563,10 @@ describe('lineAdvice: the next step of the card\'s line, for its "Show me"', () 
     }
     // A second Assembler from the Plastic line that feeds none, its Circuit sold, Copper wired in.
     for (const seq of report['grow-glyph']) {
-      expect(seq).toMatch(/^Build an Assembler from a Refiner's Plastic port \(N¢\) for more Circuit\.  →  Wire a Circuit Assembler's port to the Market: its Circuit is not sold \(N¢ each\)\.  →  A Circuit Assembler gets no Copper: wire a Copper Refiner's port to it\./);
+      expect(seq).toMatch(/^Build an Assembler from a Refiner's Plastic port \(N¢\) for more Circuits\.  →  Wire a Circuit Assembler's port to the Market: its Circuit is not sold \(N¢ each\)\.  →  A Circuit Assembler gets no Copper: wire a Copper Refiner's port to it\./);
     }
     for (const seq of report['grow-prism']) {
-      expect(seq).toMatch(/^Build an Assembler from a Glass Refiner's port \(N¢\) for more Screen\.  →  Wire a Screen Assembler's port to the Market: its Screen is not sold \(N¢ each\)\.  →  A Screen Assembler gets no Silicon: wire the Silicon Refiner's port to it\./);
+      expect(seq).toMatch(/^Build an Assembler from a Glass Refiner's port \(N¢\) for more Screens\.  →  Wire a Screen Assembler's port to the Market: its Screen is not sold \(N¢ each\)\.  →  A Screen Assembler gets no Silicon: wire the Silicon Refiner's port to it\./);
     }
     for (const seq of report['flow-fix'] ?? []) expect(seq).toMatch(/needs more \w+: buy Speed on (the|an?|its) \w+ (Drill|Refiner)/);
     for (const seq of report['cut-glyph']) expect(seq).toMatch(/^Cut the wire from (the|a) Circuit Assembler to (the|a) Lab: sold, each Circuit is N¢\.$/);

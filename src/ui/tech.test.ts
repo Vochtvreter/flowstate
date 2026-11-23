@@ -310,17 +310,17 @@ describe('tech tree: a step of the spine that waits for a growth goal', () => {
 });
 
 describe('tech tree: nothing priced in a kind of Data the player has not met', () => {
-  // Goal 13, "Route more to a Lab than to the Market": Routing is in, β does not exist yet.
-  const at13 = () => {
+  // Goal 15, "Hold 95% Flow": Copper is made, Routing is researched, β does not exist yet.
+  const at15 = () => {
     const g = newGame();
-    g.goal = { i: GOALS.findIndex((x) => x.id === 'route-lab'), ready: false };
+    g.goal = { i: GOALS.findIndex((x) => x.id === 'hold-flow'), ready: false };
     g.techs = ['P1', 'R1', 'P2', 'P3', 'L1'];
     g.data.a = 300;
     return g;
   };
 
   it('Priority Routing (20β) and the other β techs stay out until the player has met β', () => {
-    const g = at13();
+    const g = at15();
     for (const id of ['L4', 'R3', 'L7']) expect(byId(g, id)).toBeUndefined();
     // α techs show as before, and the tree says more is to come.
     expect(byId(g, 'L3')?.state).toBe('rdy');
@@ -384,7 +384,7 @@ describe('tech tree: the goal\'s wait', () => {
   it('the goal\'s own tech never warns about itself; a goal that saves credits warns about nothing', () => {
     expect(goalDelay(at11(300), TECHS.P3)).toBeNull();
     const g = newGame();
-    g.goal = { i: GOALS.findIndex((x) => x.id === 'route-lab'), ready: false };
+    g.goal = { i: GOALS.findIndex((x) => x.id === 'hold-flow'), ready: false };
     g.techs = ['P1', 'R1', 'P2', 'P3', 'L1'];
     g.data.a = 100;
     expect(goalSaving(g)).toBeNull();

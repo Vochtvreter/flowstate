@@ -54,7 +54,7 @@ import {
 } from './economy';
 import { countsForFlow, isFlowing } from './flow';
 import { Forecast, forecast, lookahead } from './forecast';
-import { GROW_SLACK, Meanwhile, TuneLabs, TuneLevel, activeGoal, flowFix, goalAge, lensMaker, making, meanwhileAt, meanwhileOf, outrun, refineNext } from './goals';
+import { GROW_SLACK, Meanwhile, TuneLabs, TuneLevel, activeGoal, flowFix, goalAge, lensMaker, making, meanwhileAt, meanwhileOf, outrun, rateNoun, refineNext } from './goals';
 import { graph, isMachine, isPass } from './graph';
 import { claimOrder, orderReachesMarket, ordersWorth } from './orders';
 import { tick } from './sim';
@@ -527,6 +527,7 @@ function overDemand(g: Game): MatId | null {
 // Lab", "a Lab"), `Who` the same with a capital, `mat` a material's name, `cost` credits, `unit` α, β or γ.
 // =====================================================================================
 
+// (Plain digits, no thousands separator: a sentence has 90 characters, and a level of Speed can cost eight digits.)
 const cents = (c: number) => `${Math.round(c)}¢`;
 
 export const SAY = {
@@ -770,8 +771,8 @@ function bulkCand(g: Game, type: NodeType, hope: number, say: (cost: number) => 
 }
 
 /**
- * Press Favour on a Router's wire. Never away from a Lab: "Route more to a Lab than to the Market" had the
- * player favour the Lab's wire, and a tip does not take back what a goal card asked for.
+ * Press Favour on a Router's wire. Never away from a Lab: a player who favoured the Lab's wire meant it (a
+ * goal card once asked for exactly that), and a tip does not take it back.
  */
 function favourCand(g: Game, router: GNode, w: Wire, hope: number, text: string): Cand | null {
   const now = favouredWire(g, router.id);
@@ -2091,7 +2092,7 @@ function growNext(g: Game, line: string, mat: MatId, rate: number, tune = false,
   const from = ports(g).filter((x) => x.mat === first[0]).sort((a, b) => spare(g, b) - spare(g, a))[0];
   if (from && spare(g, from) > 0.05) {
     const cost = nodeCost(g, recipe.machine);
-    return paid({ act: { t: 'build', type: recipe.machine, from: from.n.id, port: from.port, recipe: recipe.id }, cost, hope: 0, show: from.n.id, brings: 'credits', text: SAY.growPart(an(kind), portName(g, from), cost, MATERIALS[mat].name) });
+    return paid({ act: { t: 'build', type: recipe.machine, from: from.n.id, port: from.port, recipe: recipe.id }, cost, hope: 0, show: from.n.id, brings: 'credits', text: SAY.growPart(an(kind), portName(g, from), cost, rateNoun(mat, 0)) });
   }
   return speedMaker();
 }

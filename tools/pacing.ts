@@ -18,7 +18,7 @@
  *                --noTips              what-if: the newcomer never follows a tip. The policy `cardonly` is that
  *                                      player, with targets of its own
  *                --noMeanwhile         what-if: the card players ignore the cards' "while you wait" lines
- *                --skipLine=<ids>      what-if: they ignore these lines only, named by line (well-labs,speed-pairs)
+ *                --skipLine=<ids>      what-if: they ignore these lines only, named by line (flow-fix,tune-up)
  *                                      or by goal (make-glyph: all of that goal's lines). Against the plain run,
  *                                      the seconds on the goals a line stands on are what that line is worth
  *                --lineReserve=0       what-if: a line's step does not keep back the credits for the card's own
@@ -152,7 +152,10 @@ export interface Policy {
   /** Reacts to amber (blocked) rings. A player who does not still follows a goal that asks for it. */
   fixesAmber: boolean;
   upgradesLabs: boolean;
-  /** Expands the board before the goal chain has asked for it. */
+  /**
+   * Expands the board before the goal chain has asked for it. (It no longer tells the policies apart: the page has
+   * no Expand button before the goal that needs land, and from then on every policy that builds on its own may.)
+   */
   expandsUnasked: boolean;
   /** If the next new toy is this many seconds of income away (or less), save for it... */
   patience: number;
@@ -818,7 +821,7 @@ export class Bot {
     const spokenFor = (m: MatId) => Object.values(RECIPES).some((r) =>
       r.inputs.length > 1 && recipeUnlocked(g, r) && !g.nodes.some((n) => n.recipe === r.id) && r.inputs.some((i) => i[0] === m));
     if (has(g, 'R1')) {
-      const knowsRouter = has(g, 'L1') && (g.goal.i > goalIndex('route-lab') || goal?.id === 'route-lab');
+      const knowsRouter = has(g, 'L1');
       for (const tier of TIERS) {
         const needed = this.tierNeeded(tier);
         const lab = this.labFor(tier);
@@ -859,7 +862,6 @@ export class Bot {
         }
         const direct = (p: Port) => this.outs(p.n, p.port).some((w) => w.to === lab.id);
         // Only Data the player is short of right now is worth more wires, Routers or Lab upgrades.
-        const forGoal = goal?.id === 'route-lab' && !g.nodes.some((n) => n.type === 'router') && tier === 'a';
         const urgent = short.has(tier) || !this.ins(lab).length;
         const hungryLab = urgent && !this.busy(lab) && lab.util < 0.9;
         const from = feeders.find((p) => !direct(p) && !this.routerOn(p));
@@ -868,14 +870,14 @@ export class Bot {
         }
         // Every feeder is wired and the Lab still has room: route more of a stream to it (the lesson of the Router goal).
         // Only on ports that feed no machine: a Router is served like a machine and would take half of its input.
-        if (knowsRouter && ((hungryLab && !from) || forGoal)) {
+        if (knowsRouter && hungryLab && !from) {
           // Study the cheap stuff and sell the dear: the least valuable stream first, then the biggest.
           const cand = feeders.filter((p) => direct(p) && !this.routerOn(p) && !this.feedsMachine(p) && !this.noRouter.has(this.key(p)) && !spokenFor(this.portMat(p.n, p.port)!))
             .sort((a, b) => MATERIALS[this.portMat(a.n, a.port)!].value - MATERIALS[this.portMat(b.n, b.port)!].value || this.spare(b) - this.spare(a))[0];
           if (cand) {
             W.push({
               cls: 'new', kind: 'build', cost: nodeCost(g, 'router'), novel: true, settle: [lab.id],
-              label: `build Router from ${this.name(cand.n)} (${forGoal ? 'goal' : `more ${GREEK[tier]}`})`,
+              label: `build Router from ${this.name(cand.n)} (more ${GREEK[tier]})`,
               run: () => !!this.buildFrom(cand, 'router'),
             });
           }
@@ -927,12 +929,14 @@ export class Bot {
         },
       });
     }
-    const asked = goal?.id === 'expand';
-    const mayExpand = P.expandsUnasked || g.goal.i >= goalIndex('expand');
-    if (asked || (mayExpand && !free.length && g.wires.length > 0)) {
+    // The page has no Expand button before "Make 1 Plastic a second" (EXPAND_GOAL in src/ui/board.ts): nobody,
+    // however well they know the game, buys land sooner. From then on a player who builds on their own expands
+    // when no deposit is free (the card players expand by their card's line: lineStep).
+    const mayExpand = g.goal.i >= goalIndex('grow-ink') || g.board.expansions > 0;
+    if (mayExpand && !free.length && g.wires.length > 0) {
       W.push({
-        cls: 'new', kind: 'expand', cost: expansionCost(g), novel: asked,
-        label: `expand the board (#${g.board.expansions + 1}${asked ? ', goal' : ''})`, run: () => expandBoard(g),
+        cls: 'new', kind: 'expand', cost: expansionCost(g),
+        label: `expand the board (#${g.board.expansions + 1})`, run: () => expandBoard(g),
       });
     }
 
@@ -1038,10 +1042,6 @@ export class Bot {
     }
 
     // --- the goal card asks for something this policy would not do unprompted ---
-    if (goal?.id === 'upgrade-well') {
-      const n = g.nodes.find((x) => x.type === 'well');
-      if (n) W.push({ cls: 'new', kind: 'upgrade', cost: upgradeCost(n, 'speed'), novel: true, settle: [n.id], label: `upgrade ${this.name(n)} speed (goal)`, run: () => upgrade(g, n.id, 'speed') });
-    }
     if (goal?.id === 'bulk-upgrade') {
       const n = g.nodes.find((x) => x.type === 'well' && x.lv.speed < maxLevel(g, 'speed'));
       if (n) W.push({ cls: 'new', kind: 'upgrade', bulk: true, cost: upgradeCost(n, 'speed'), novel: true, label: 'upgrade ALL Drills: speed (goal)', run: () => upgradeAll(g, 'well', 'speed') > 0 });
@@ -1383,8 +1383,7 @@ export class Bot {
       const ordered = !!g.order && !g.order.ready && g.order.mat === m;
       let want: [number, number] = CFG.studyRatio;
       let why = `more ${GREEK[tier]}`;
-      if (goal?.id === 'route-lab') why = 'goal';
-      else if (!this.tierNeeded(tier)) { want = [0, 1]; why = `no ${GREEK[tier]} left to spend`; }
+      if (!this.tierNeeded(tier)) { want = [0, 1]; why = `no ${GREEK[tier]} left to spend`; }
       else if (ordered) { want = CFG.sellRatio; why = `the order wants ${MATERIALS[m].name}`; }
       else if (!this.shortTiers().has(tier)) { want = CFG.sellRatio; why = `enough ${GREEK[tier]} for now`; }
       if (r.mode === 'ratio' && toLab.weight === want[0] && toMarket.weight === want[1]) continue;

@@ -15,7 +15,7 @@
 // bow and all, stays until the summary screen opens 6.5 s after the Phone is made, and leaves with it.
 import { DATA_COLORS, MATERIALS, MatId, NODE_DEFS, NodeType, RULES, TECHS } from '../content';
 import { recipeOf } from '../economy';
-import { GOALS } from '../goals';
+import { GOALS, rateNoun } from '../goals';
 import { graph, isMachine } from '../sim';
 import { GNode, GoalReward } from '../state';
 import { boardRect, fitView, frameNodes, toClient, wireLine } from './board';
@@ -397,7 +397,7 @@ export function celebrateGoal(goalId: string, reward: GoalReward) {
       if (grow) {
         const m = MATERIALS[grow.mat];
         return start({
-          kind: 'shard', title: `${grow.rate} ${m.name}${grow.rate === 1 ? '' : m.name.endsWith('s') ? '' : m.tier >= 2 ? 's' : ''} a second`, line,
+          kind: 'shard', title: `${grow.rate} ${rateNoun(grow.mat, grow.rate)} a second`, line,
           glyph: matGlyph(grow.mat, 64), color: m.color, life: 1700, show: sparks(24, 1.5, 'hexagon'), reward, payAt: 680,
         });
       }

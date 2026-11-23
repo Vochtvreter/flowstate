@@ -23,7 +23,7 @@
 import { lineAdvice } from '../advice';
 import { BRANCHES, Branch, DATA_COLORS, DATA_NAMES, DataTier, MATERIALS, NODE_DEFS, NodeType, TECHS, Tech } from '../content';
 import { fmtInt, fmtRate, readyTechs, research, techAffordable, techAvailable, techEta, techGated, techHidden, techProgress } from '../economy';
-import { GOALS, GROW_SLACK, activeGoal, claimGoal, making } from '../goals';
+import { GOALS, GROW_SLACK, activeGoal, claimGoal, making, rateNoun } from '../goals';
 import { Game } from '../state';
 import { Panel, makePanel, setClass } from './dom';
 import { UNCOVER_DELAY, coverFor, endingShown } from './hud-screens';
@@ -91,7 +91,7 @@ export const pricedInMet = (g: Game, t: Tech) => TIERS.every((k) => k === 'a' ||
  *  - one step beyond those: a tech whose every requirement is shown in full. It is a silhouette, except
  *    that a goal reward whose requirements are all owned says which goal it comes from.
  * Everything else, and whatever techHidden() hides, is left out; so is a tech priced in a kind of Data the
- * player has not met yet (Priority Routing's β at goal 13), unless the goal on the card names it.
+ * player has not met yet (Priority Routing's β before the first Circuit), unless the goal on the card names it.
  */
 export function techTiles(g: Game): Tile[] {
   const want = goalTech(g);
@@ -344,7 +344,7 @@ function gateNow(g: Game, t: Tech): string {
   if (!grow) return '';
   const now = making(g, grow.mat);
   if (now >= grow.rate * (1 - GROW_SLACK)) return '';
-  return `You make ${Math.round(now * 100) / 100} ${MATERIALS[grow.mat].name} a second now. `;
+  return `You make ${Math.round(now * 100) / 100} ${rateNoun(grow.mat, grow.rate)} a second now. `;
 }
 
 /** "Research Oil Deposits first". A requirement that is a goal reward is earned, not researched. */

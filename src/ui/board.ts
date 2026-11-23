@@ -1453,7 +1453,7 @@ const ex = {
 const EXPAND_GOAL = GOALS.findIndex((x) => x.id === 'grow-ink');
 
 /**
- * Whether the button is on the board at all: from the goal "Open up more land" on (or once the board has been
+ * Whether the button is on the board at all: from the goal "Make 1 Plastic a second" on (or once the board has been
  * expanded, in free play, or when a "while you wait" line asks for it). Before that it would only be one more
  * thing beside the first instructions, and a tap meant for an empty spot could buy a plot.
  */
@@ -5575,8 +5575,8 @@ function onUp(e: PointerEvent) {
  * The kind of node the card is asking the player to build right now, if any: the next step of the goal's
  * "while you wait" line when that is a build, or else what the goal's hint says to pick or to build
  * ("…and pick Lab", "Build a Router from…"), for as long as the goal still needs one built: while what it is
- * buying next (Goal.step) is that kind. Once the Router of "Route more to a Lab…" stands, the card is about
- * wiring it, and a menu opened from its own port must not offer a second Router first. The build menu puts it
+ * buying next (Goal.step) is that kind. Once the machine a card asked for stands, the card is about
+ * wiring it, and a menu opened from its own port must not offer a second one first. The build menu puts it
  * first and preselects it.
  */
 function wantedType(g: Game, from?: number): NodeType | null {

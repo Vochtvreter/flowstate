@@ -334,7 +334,7 @@ describe('machines-first fan-out (2.1)', () => {
   });
 
   it('a Router to a Lab and a Market on a machine\'s port waits for the machine', () => {
-    // Goal 13 has the player build exactly this Router; the Assembler of goal 15 then lands on the same port.
+    // A player who wants Copper studied builds exactly this Router; the Circuit Assembler then lands on the same port.
     expect(RULES.fanOut.deadEndJunctionsLast).toBe(true);
     const { glyph, viaRouter, toGlyph, g } = routerOnAMachinePort();
     const [routed, fed] = throughput(g, 120, [viaRouter, toGlyph]);

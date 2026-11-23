@@ -204,9 +204,19 @@ export const GROW_SLACK = 0.03;
 export const makes = (g: Game, m: MatId, rate: number) => making(g, m) >= rate * (1 - GROW_SLACK);
 
 /** A growth goal's count: what is made a second, to two places, and the rate asked for ("0.5 / 1 Glass a second"). */
+/**
+ * A material as a rate names it: "Glass", "Circuits". What is counted by the piece (parts and products) takes an s,
+ * except for exactly one a second; what is poured (raw and refined) never does. The goal's title, its card's count,
+ * its celebration and the tech tree all say it the same way.
+ */
+export const rateNoun = (m: MatId, rate: number) => {
+  const x = MATERIALS[m];
+  return rate === 1 || x.tier < 2 || x.name.endsWith('s') ? x.name : `${x.name}s`;
+};
+
 const makingProgress = (g: Game, m: MatId, rate: number): GoalProgress => {
   const now = making(g, m);
-  return [makes(g, m, rate) ? rate : Math.min(rate, Math.floor(now * 100 + 1e-6) / 100), rate, `${MATERIALS[m].name} a second`];
+  return [makes(g, m, rate) ? rate : Math.min(rate, Math.floor(now * 100 + 1e-6) / 100), rate, `${rateNoun(m, rate)} a second`];
 };
 
 /** "Saving up": credits toward a price. */
