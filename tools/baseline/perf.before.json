@@ -1,25 +1,25 @@
 {
   "url": "http://localhost:4173/",
   "board": {
-    "cards": 59,
-    "wires": 106
+    "cards": 57,
+    "wires": 99
   },
   "runs": [
     {
       "size": "desktop",
       "scenario": "rest",
       "rate": 1,
-      "frames": 150,
+      "frames": 149,
       "median": 16.7,
-      "p95": 16.7,
-      "worst": 33.3,
+      "p95": 16.8,
+      "worst": 16.8,
       "over33": 0,
       "over50": 0,
-      "fps": 59.6,
+      "fps": 60,
       "longTasks": 0,
       "longest": 0,
-      "script": 0.4,
-      "style": 0.2,
+      "script": 0.5,
+      "style": 0.1,
       "layout": 0.1,
       "check": {},
       "errors": []
@@ -34,12 +34,12 @@
       "worst": 50,
       "over33": 1,
       "over50": 0,
-      "fps": 59.2,
-      "longTasks": 0,
-      "longest": 0,
-      "script": 1.3,
-      "style": 0.5,
-      "layout": 0.2,
+      "fps": 57.3,
+      "longTasks": 1,
+      "longest": 52,
+      "script": 1.9,
+      "style": 0.6,
+      "layout": 0.3,
       "check": {},
       "errors": []
     },
@@ -51,43 +51,58 @@
       "where": [
         {
           "name": "updateBoard",
-          "total": 0.7,
-          "self": 0
+          "total": 1.1,
+          "self": 0.1
         },
         {
           "name": "frameFx",
-          "total": 0.7,
-          "self": 0
+          "total": 1,
+          "self": 0.1
         },
         {
           "name": "frameBoard",
-          "total": 0.6,
+          "total": 0.9,
           "self": 0
         },
         {
           "name": "drawFlows",
-          "total": 0.4,
-          "self": 0.3
+          "total": 0.6,
+          "self": 0.4
         },
         {
           "name": "renderPanels",
-          "total": 0.2,
+          "total": 0.5,
           "self": 0
         },
         {
           "name": "tick$2",
+          "total": 0.3,
+          "self": 0
+        },
+        {
+          "name": "renderHot",
+          "total": 0.3,
+          "self": 0.1
+        },
+        {
+          "name": "addShape",
+          "total": 0.2,
+          "self": 0.1
+        },
+        {
+          "name": "drawParticles",
           "total": 0.2,
           "self": 0
         },
         {
-          "name": "drawParticles",
-          "total": 0.1,
+          "name": "render",
+          "total": 0.2,
           "self": 0
         },
         {
-          "name": "updateSlow",
-          "total": 0.1,
-          "self": 0
+          "name": "patchHTML",
+          "total": 0.2,
+          "self": 0.1
         },
         {
           "name": "drawOne",
@@ -100,22 +115,7 @@
           "self": 0.1
         },
         {
-          "name": "tickPanels",
-          "total": 0.1,
-          "self": 0
-        },
-        {
           "name": "update",
-          "total": 0.1,
-          "self": 0
-        },
-        {
-          "name": "renderTop",
-          "total": 0.1,
-          "self": 0
-        },
-        {
-          "name": "creditsText",
           "total": 0.1,
           "self": 0
         }
@@ -125,18 +125,18 @@
       "size": "desktop",
       "scenario": "pan",
       "rate": 1,
-      "frames": 261,
+      "frames": 264,
       "median": 16.7,
       "p95": 16.7,
-      "worst": 16.8,
-      "over33": 0,
+      "worst": 50,
+      "over33": 1,
       "over50": 0,
-      "fps": 60,
-      "longTasks": 0,
-      "longest": 0,
-      "script": 0.4,
+      "fps": 59.6,
+      "longTasks": 1,
+      "longest": 70,
+      "script": 0.7,
       "style": 0.2,
-      "layout": 0,
+      "layout": 0.1,
       "check": {},
       "errors": []
     },
@@ -144,18 +144,18 @@
       "size": "desktop",
       "scenario": "pan",
       "rate": 4,
-      "frames": 263,
+      "frames": 264,
       "median": 16.7,
       "p95": 16.8,
-      "worst": 50,
-      "over33": 1,
-      "over50": 0,
-      "fps": 59.3,
+      "worst": 99.9,
+      "over33": 4,
+      "over50": 2,
+      "fps": 56.8,
       "longTasks": 1,
-      "longest": 56,
-      "script": 1.2,
-      "style": 0.7,
-      "layout": 0.2,
+      "longest": 96,
+      "script": 2,
+      "style": 1,
+      "layout": 0.3,
       "check": {},
       "errors": []
     },
@@ -166,44 +166,54 @@
       "profiled": true,
       "where": [
         {
-          "name": "updateBoard",
-          "total": 0.3,
-          "self": 0
-        },
-        {
           "name": "renderPanels",
-          "total": 0.2,
+          "total": 0.5,
           "self": 0
         },
         {
           "name": "onMove",
-          "total": 0.2,
-          "self": 0
-        },
-        {
-          "name": "frameFx",
-          "total": 0.2,
+          "total": 0.4,
           "self": 0
         },
         {
           "name": "steer",
-          "total": 0.2,
+          "total": 0.4,
           "self": 0
         },
         {
           "name": "tick$2",
-          "total": 0.2,
-          "self": 0
+          "total": 0.4,
+          "self": 0.1
         },
         {
           "name": "applyView",
+          "total": 0.4,
+          "self": 0.1
+        },
+        {
+          "name": "updateBoard",
+          "total": 0.4,
+          "self": 0.1
+        },
+        {
+          "name": "placeExpand",
+          "total": 0.3,
+          "self": 0.1
+        },
+        {
+          "name": "frameFx",
+          "total": 0.3,
+          "self": 0
+        },
+        {
+          "name": "renderHot",
           "total": 0.2,
           "self": 0
         },
         {
-          "name": "placeExpand",
+          "name": "frameBoard",
           "total": 0.2,
-          "self": 0.1
+          "self": 0
         },
         {
           "name": "fmtInt",
@@ -211,12 +221,7 @@
           "self": 0.2
         },
         {
-          "name": "emitFrame",
-          "total": 0.1,
-          "self": 0
-        },
-        {
-          "name": "run$1",
+          "name": "transferFrom",
           "total": 0.1,
           "self": 0
         },
@@ -226,12 +231,7 @@
           "self": 0
         },
         {
-          "name": "window.addEventListener.capture",
-          "total": 0.1,
-          "self": 0
-        },
-        {
-          "name": "onGesture",
+          "name": "emitFrame",
           "total": 0.1,
           "self": 0
         }
@@ -241,16 +241,16 @@
       "size": "desktop",
       "scenario": "zoom",
       "rate": 1,
-      "frames": 339,
+      "frames": 350,
       "median": 16.7,
       "p95": 16.8,
-      "worst": 33.4,
+      "worst": 33.3,
       "over33": 0,
       "over50": 0,
-      "fps": 59.5,
+      "fps": 59.3,
       "longTasks": 0,
       "longest": 0,
-      "script": 0.3,
+      "script": 0.5,
       "style": 0.3,
       "layout": 0.1,
       "check": {},
@@ -260,18 +260,18 @@
       "size": "desktop",
       "scenario": "zoom",
       "rate": 4,
-      "frames": 320,
+      "frames": 305,
       "median": 16.7,
       "p95": 33.3,
-      "worst": 66.7,
-      "over33": 9,
-      "over50": 2,
-      "fps": 54.1,
-      "longTasks": 5,
-      "longest": 79,
-      "script": 1.6,
-      "style": 1.1,
-      "layout": 0.4,
+      "worst": 116.7,
+      "over33": 12,
+      "over50": 5,
+      "fps": 52.9,
+      "longTasks": 6,
+      "longest": 127,
+      "script": 2,
+      "style": 1.2,
+      "layout": 0.5,
       "check": {},
       "errors": []
     },
@@ -283,27 +283,27 @@
       "where": [
         {
           "name": "boardEl.addEventListener.passive",
-          "total": 0.7,
+          "total": 0.8,
           "self": 0
         },
         {
           "name": "zoomBy",
-          "total": 0.7,
+          "total": 0.8,
           "self": 0
         },
         {
           "name": "applyView",
-          "total": 0.6,
+          "total": 0.8,
           "self": 0.1
         },
         {
           "name": "updateBoard",
-          "total": 0.6,
+          "total": 0.7,
           "self": 0.1
         },
         {
           "name": "frameFx",
-          "total": 0.5,
+          "total": 0.6,
           "self": 0
         },
         {
@@ -312,9 +312,14 @@
           "self": 0
         },
         {
+          "name": "renderPanels",
+          "total": 0.5,
+          "self": 0
+        },
+        {
           "name": "placeExpand",
-          "total": 0.3,
-          "self": 0.1
+          "total": 0.4,
+          "self": 0.2
         },
         {
           "name": "placePlotLabel",
@@ -322,14 +327,19 @@
           "self": 0.3
         },
         {
-          "name": "renderPanels",
-          "total": 0.3,
-          "self": 0
-        },
-        {
           "name": "drawFlows",
           "total": 0.3,
+          "self": 0.2
+        },
+        {
+          "name": "tick$2",
+          "total": 0.3,
           "self": 0.1
+        },
+        {
+          "name": "updateSlow",
+          "total": 0.2,
+          "self": 0
         },
         {
           "name": "fmtInt",
@@ -337,17 +347,7 @@
           "self": 0.2
         },
         {
-          "name": "tick$2",
-          "total": 0.2,
-          "self": 0.1
-        },
-        {
-          "name": "tickPanels",
-          "total": 0.2,
-          "self": 0
-        },
-        {
-          "name": "creditsText",
+          "name": "renderHot",
           "total": 0.2,
           "self": 0
         }
@@ -357,18 +357,18 @@
       "size": "desktop",
       "scenario": "first",
       "rate": 1,
-      "frames": 218,
+      "frames": 211,
       "median": 16.7,
-      "p95": 33.3,
+      "p95": 16.8,
       "worst": 33.4,
-      "over33": 3,
+      "over33": 1,
       "over50": 0,
-      "fps": 56.9,
+      "fps": 58.6,
       "longTasks": 0,
       "longest": 0,
-      "script": 4.5,
+      "script": 4,
       "style": 0.3,
-      "layout": 0.1,
+      "layout": 0.2,
       "check": {
         "wires": 3,
         "carried": true
@@ -379,17 +379,17 @@
       "size": "desktop",
       "scenario": "first",
       "rate": 4,
-      "frames": 269,
+      "frames": 304,
       "median": 16.7,
-      "p95": 83.3,
+      "p95": 83.2,
       "worst": 116.7,
-      "over33": 83,
-      "over50": 55,
-      "fps": 29.3,
-      "longTasks": 74,
-      "longest": 116,
-      "script": 16.7,
-      "style": 1.2,
+      "over33": 78,
+      "over50": 35,
+      "fps": 33,
+      "longTasks": 65,
+      "longest": 110,
+      "script": 13.3,
+      "style": 1,
       "layout": 0.7,
       "check": {
         "wires": 3,
@@ -405,245 +405,123 @@
       "where": [
         {
           "name": "onMove",
-          "total": 14.2,
+          "total": 11.1,
           "self": 0
         },
         {
           "name": "steer",
-          "total": 14.1,
+          "total": 11,
           "self": 0
         },
         {
           "name": "carry",
-          "total": 14.1,
+          "total": 11,
           "self": 0
         },
         {
           "name": "redraw",
-          "total": 14.1,
+          "total": 11,
           "self": 0.1
         },
         {
           "name": "routeWires",
-          "total": 13.7,
+          "total": 10.6,
           "self": 0.2
         },
         {
           "name": "routeAll",
-          "total": 13.1,
-          "self": 0.2
+          "total": 10.1,
+          "self": 0.3
         },
         {
           "name": "wayRound",
-          "total": 10.3,
+          "total": 7.9,
           "self": 0
         },
         {
           "name": "stretch",
-          "total": 10,
+          "total": 7.6,
           "self": 0.4
         },
         {
           "name": "search",
-          "total": 7.7,
-          "self": 4.1
+          "total": 5.8,
+          "self": 2.9
         },
         {
           "name": "pop$1",
-          "total": 2.5,
-          "self": 2.5
-        },
-        {
-          "name": "sideBySide",
-          "total": 1.4,
-          "self": 0.3
+          "total": 2.1,
+          "self": 2.1
         },
         {
           "name": "updateBoard",
-          "total": 1.3,
+          "total": 1.5,
           "self": 0.1
         },
         {
-          "name": "push",
+          "name": "frameFx",
           "total": 1.2,
-          "self": 1.2
-        },
-        {
-          "name": "frameFx",
-          "total": 1.1,
           "self": 0
-        }
-      ]
-    },
-    {
-      "size": "desktop",
-      "scenario": "drag",
-      "rate": 1,
-      "frames": 216,
-      "median": 16.7,
-      "p95": 16.8,
-      "worst": 33.4,
-      "over33": 2,
-      "over50": 0,
-      "fps": 58.4,
-      "longTasks": 0,
-      "longest": 0,
-      "script": 4.1,
-      "style": 0.2,
-      "layout": 0.1,
-      "check": {
-        "wires": 3,
-        "carried": true
-      },
-      "errors": []
-    },
-    {
-      "size": "desktop",
-      "scenario": "drag",
-      "rate": 4,
-      "frames": 295,
-      "median": 16.7,
-      "p95": 66.8,
-      "worst": 83.4,
-      "over33": 76,
-      "over50": 46,
-      "fps": 33.5,
-      "longTasks": 72,
-      "longest": 94,
-      "script": 14,
-      "style": 0.9,
-      "layout": 0.6,
-      "check": {
-        "wires": 3,
-        "carried": true
-      },
-      "errors": []
-    },
-    {
-      "size": "desktop",
-      "scenario": "drag",
-      "rate": 4,
-      "profiled": true,
-      "where": [
-        {
-          "name": "onMove",
-          "total": 13.6,
-          "self": 0
-        },
-        {
-          "name": "steer",
-          "total": 13.6,
-          "self": 0
-        },
-        {
-          "name": "carry",
-          "total": 13.6,
-          "self": 0
-        },
-        {
-          "name": "redraw",
-          "total": 13.6,
-          "self": 0.1
-        },
-        {
-          "name": "routeWires",
-          "total": 13.2,
-          "self": 0.2
-        },
-        {
-          "name": "routeAll",
-          "total": 12.7,
-          "self": 0.2
-        },
-        {
-          "name": "wayRound",
-          "total": 10.2,
-          "self": 0
-        },
-        {
-          "name": "stretch",
-          "total": 9.9,
-          "self": 0.3
-        },
-        {
-          "name": "search",
-          "total": 7.7,
-          "self": 7.7
-        },
-        {
-          "name": "sideBySide",
-          "total": 1.3,
-          "self": 0.4
-        },
-        {
-          "name": "updateBoard",
-          "total": 1.1,
-          "self": 0.1
-        },
-        {
-          "name": "frameFx",
-          "total": 1,
-          "self": 0
-        },
-        {
-          "name": "lines",
-          "total": 0.9,
-          "self": 0.9
         },
         {
           "name": "frameBoard",
-          "total": 0.9,
+          "total": 1.1,
           "self": 0
+        },
+        {
+          "name": "sideBySide",
+          "total": 0.8,
+          "self": 0.2
         }
       ]
     },
     {
       "size": "desktop",
-      "scenario": "hub",
+      "scenario": "drag",
       "rate": 1,
-      "frames": 210,
+      "frames": 204,
       "median": 16.7,
-      "p95": 33.2,
+      "p95": 16.7,
       "worst": 33.4,
       "over33": 1,
       "over50": 0,
-      "fps": 57,
+      "fps": 59.7,
       "longTasks": 0,
       "longest": 0,
-      "script": 3.5,
-      "style": 0.6,
+      "script": 3.7,
+      "style": 0.2,
       "layout": 0.2,
       "check": {
-        "wires": 51,
+        "wires": 3,
         "carried": true
       },
       "errors": []
     },
     {
       "size": "desktop",
-      "scenario": "hub",
+      "scenario": "drag",
       "rate": 4,
-      "frames": 288,
-      "median": 16.8,
-      "p95": 83.3,
+      "frames": 304,
+      "median": 16.7,
+      "p95": 66.7,
       "worst": 100.1,
-      "over33": 73,
-      "over50": 42,
-      "fps": 31.3,
-      "longTasks": 58,
-      "longest": 111,
-      "script": 12.7,
-      "style": 2.1,
-      "layout": 0.8,
+      "over33": 76,
+      "over50": 44,
+      "fps": 33.4,
+      "longTasks": 68,
+      "longest": 102,
+      "script": 12.4,
+      "style": 0.8,
+      "layout": 0.9,
       "check": {
-        "wires": 51,
+        "wires": 3,
         "carried": true
       },
       "errors": []
     },
     {
       "size": "desktop",
-      "scenario": "hub",
+      "scenario": "drag",
       "rate": 4,
       "profiled": true,
       "where": [
@@ -665,57 +543,179 @@
         {
           "name": "redraw",
           "total": 10.3,
-          "self": 0.1
+          "self": 0
         },
         {
           "name": "routeWires",
-          "total": 9.9,
+          "total": 10,
           "self": 0.2
         },
         {
           "name": "routeAll",
-          "total": 9,
+          "total": 9.6,
           "self": 0.2
         },
         {
           "name": "wayRound",
-          "total": 6.8,
+          "total": 7.7,
           "self": 0
         },
         {
           "name": "stretch",
-          "total": 6.6,
+          "total": 7.4,
           "self": 0.3
         },
         {
           "name": "search",
-          "total": 5,
-          "self": 5
-        },
-        {
-          "name": "renderPanels",
-          "total": 1.3,
-          "self": 0
+          "total": 5.8,
+          "self": 5.8
         },
         {
           "name": "updateBoard",
+          "total": 1.3,
+          "self": 0.1
+        },
+        {
+          "name": "frameFx",
           "total": 1.1,
           "self": 0
         },
         {
-          "name": "frameFx",
+          "name": "frameBoard",
           "total": 1,
           "self": 0
         },
         {
           "name": "sideBySide",
-          "total": 0.9,
+          "total": 0.8,
+          "self": 0.4
+        },
+        {
+          "name": "renderPanels",
+          "total": 0.7,
+          "self": 0
+        }
+      ]
+    },
+    {
+      "size": "desktop",
+      "scenario": "hub",
+      "rate": 1,
+      "frames": 209,
+      "median": 16.7,
+      "p95": 33.3,
+      "worst": 33.4,
+      "over33": 0,
+      "over50": 0,
+      "fps": 55.7,
+      "longTasks": 0,
+      "longest": 0,
+      "script": 3.6,
+      "style": 0.5,
+      "layout": 0.2,
+      "check": {
+        "wires": 47,
+        "carried": true
+      },
+      "errors": []
+    },
+    {
+      "size": "desktop",
+      "scenario": "hub",
+      "rate": 4,
+      "frames": 290,
+      "median": 16.8,
+      "p95": 83.3,
+      "worst": 150.1,
+      "over33": 66,
+      "over50": 42,
+      "fps": 31,
+      "longTasks": 46,
+      "longest": 160,
+      "script": 12.3,
+      "style": 2,
+      "layout": 1,
+      "check": {
+        "wires": 47,
+        "carried": true
+      },
+      "errors": []
+    },
+    {
+      "size": "desktop",
+      "scenario": "hub",
+      "rate": 4,
+      "profiled": true,
+      "where": [
+        {
+          "name": "onMove",
+          "total": 9.6,
+          "self": 0
+        },
+        {
+          "name": "steer",
+          "total": 9.6,
+          "self": 0
+        },
+        {
+          "name": "carry",
+          "total": 9.5,
+          "self": 0
+        },
+        {
+          "name": "redraw",
+          "total": 9.5,
+          "self": 0.1
+        },
+        {
+          "name": "routeWires",
+          "total": 9.1,
+          "self": 0.2
+        },
+        {
+          "name": "routeAll",
+          "total": 8.2,
+          "self": 0.2
+        },
+        {
+          "name": "wayRound",
+          "total": 6.4,
+          "self": 0
+        },
+        {
+          "name": "stretch",
+          "total": 6.2,
           "self": 0.3
         },
         {
-          "name": "frameBoard",
-          "total": 0.9,
+          "name": "search",
+          "total": 4.8,
+          "self": 4.8
+        },
+        {
+          "name": "renderPanels",
+          "total": 1.7,
           "self": 0
+        },
+        {
+          "name": "updateBoard",
+          "total": 1.2,
+          "self": 0.1
+        },
+        {
+          "name": "renderInspector",
+          "total": 1.1,
+          "self": 0
+        },
+        {
+          "name": "render",
+          "total": 1.1,
+          "self": 0
+        },
+        {
+          "name": "patchHTML",
+          "total": 1.1,
+          "self": 0.4
         }
       ]
     },
@@ -723,18 +723,18 @@
       "size": "desktop",
       "scenario": "tidy",
       "rate": 1,
-      "frames": 200,
+      "frames": 199,
       "median": 16.7,
       "p95": 33.3,
-      "worst": 50.1,
-      "over33": 5,
-      "over50": 1,
-      "fps": 56.3,
-      "longTasks": 1,
-      "longest": 59,
+      "worst": 83.3,
+      "over33": 9,
+      "over50": 2,
+      "fps": 55,
+      "longTasks": 2,
+      "longest": 74,
       "script": 1.6,
-      "style": 0.5,
-      "layout": 0.1,
+      "style": 0.6,
+      "layout": 0.2,
       "check": {
         "moved": true
       },
@@ -744,18 +744,18 @@
       "size": "desktop",
       "scenario": "tidy",
       "rate": 4,
-      "frames": 200,
+      "frames": 201,
       "median": 16.7,
-      "p95": 33.4,
-      "worst": 249.9,
-      "over33": 9,
-      "over50": 5,
-      "fps": 47.6,
-      "longTasks": 6,
-      "longest": 226,
-      "script": 4.4,
-      "style": 1.4,
-      "layout": 0.5,
+      "p95": 50.1,
+      "worst": 366.6,
+      "over33": 17,
+      "over50": 11,
+      "fps": 42.2,
+      "longTasks": 10,
+      "longest": 329,
+      "script": 5.1,
+      "style": 1.9,
+      "layout": 0.7,
       "check": {
         "moved": true
       },
@@ -769,37 +769,47 @@
       "where": [
         {
           "name": "updateBoard",
-          "total": 3.5,
-          "self": 0
+          "total": 4.2,
+          "self": 0.1
         },
         {
           "name": "frameFx",
-          "total": 1.6,
+          "total": 1.8,
           "self": 0
         },
         {
           "name": "frameBoard",
-          "total": 1.6,
+          "total": 1.8,
           "self": 0
-        },
-        {
-          "name": "drawFlows",
-          "total": 1.3,
-          "self": 0.3
         },
         {
           "name": "routeWires",
-          "total": 1.3,
-          "self": 0
-        },
-        {
-          "name": "routeAll",
-          "total": 1.2,
+          "total": 1.5,
           "self": 0
         },
         {
           "name": "stepSettle",
-          "total": 1.1,
+          "total": 1.5,
+          "self": 0
+        },
+        {
+          "name": "routeAll",
+          "total": 1.4,
+          "self": 0
+        },
+        {
+          "name": "drawFlows",
+          "total": 1.4,
+          "self": 0.3
+        },
+        {
+          "name": "wayRound",
+          "total": 1,
+          "self": 0
+        },
+        {
+          "name": "stretch",
+          "total": 1,
           "self": 0
         },
         {
@@ -808,34 +818,24 @@
           "self": 0.1
         },
         {
-          "name": "wayRound",
+          "name": "updateSlow",
           "total": 0.8,
           "self": 0
         },
         {
-          "name": "stretch",
+          "name": "run$1",
           "total": 0.7,
           "self": 0
         },
         {
-          "name": "run$1",
-          "total": 0.6,
-          "self": 0
-        },
-        {
-          "name": "updateSlow",
-          "total": 0.6,
-          "self": 0
-        },
-        {
           "name": "search",
-          "total": 0.5,
-          "self": 0.2
+          "total": 0.7,
+          "self": 0.4
         },
         {
-          "name": "placePlotLabel",
-          "total": 0.4,
-          "self": 0.4
+          "name": "placeExpand",
+          "total": 0.5,
+          "self": 0
         }
       ]
     },
@@ -843,7 +843,7 @@
       "size": "desktop",
       "scenario": "place",
       "rate": 1,
-      "frames": 161,
+      "frames": 160,
       "median": 16.7,
       "p95": 16.7,
       "worst": 16.8,
@@ -852,7 +852,7 @@
       "fps": 60,
       "longTasks": 0,
       "longest": 0,
-      "script": 0.5,
+      "script": 0.7,
       "style": 0.1,
       "layout": 0.1,
       "check": {
@@ -864,18 +864,18 @@
       "size": "desktop",
       "scenario": "place",
       "rate": 4,
-      "frames": 161,
+      "frames": 160,
       "median": 16.7,
-      "p95": 16.8,
+      "p95": 33.4,
       "worst": 66.6,
-      "over33": 2,
+      "over33": 10,
       "over50": 1,
-      "fps": 58.2,
-      "longTasks": 1,
-      "longest": 57,
-      "script": 2.1,
-      "style": 0.6,
-      "layout": 0.3,
+      "fps": 51.1,
+      "longTasks": 5,
+      "longest": 62,
+      "script": 3.5,
+      "style": 0.8,
+      "layout": 0.5,
       "check": {
         "placing": true
       },
@@ -889,53 +889,58 @@
       "where": [
         {
           "name": "updateBoard",
-          "total": 0.9,
-          "self": 0
+          "total": 1.1,
+          "self": 0.1
         },
         {
           "name": "frameFx",
-          "total": 0.8,
+          "total": 1,
           "self": 0
         },
         {
           "name": "updateGhost",
-          "total": 0.8,
+          "total": 1,
+          "self": 0.1
+        },
+        {
+          "name": "frameBoard",
+          "total": 1,
           "self": 0
         },
         {
           "name": "onMove",
-          "total": 0.8,
-          "self": 0
-        },
-        {
-          "name": "frameBoard",
-          "total": 0.7,
+          "total": 0.9,
           "self": 0
         },
         {
           "name": "steer",
-          "total": 0.7,
+          "total": 0.9,
           "self": 0
         },
         {
           "name": "drawFlows",
-          "total": 0.5,
-          "self": 0.3
+          "total": 0.6,
+          "self": 0.4
         },
         {
           "name": "buildSpot",
-          "total": 0.5,
+          "total": 0.6,
           "self": 0
         },
         {
           "name": "renderPanels",
-          "total": 0.3,
+          "total": 0.5,
           "self": 0
         },
         {
           "name": "tick$2",
           "total": 0.3,
           "self": 0.1
+        },
+        {
+          "name": "updateSlow",
+          "total": 0.3,
+          "self": 0
         },
         {
           "name": "buildSite",
@@ -948,14 +953,9 @@
           "self": 0.3
         },
         {
-          "name": "updateSlow",
-          "total": 0.2,
+          "name": "renderHot",
+          "total": 0.3,
           "self": 0
-        },
-        {
-          "name": "least",
-          "total": 0.2,
-          "self": 0.1
         }
       ]
     },
@@ -988,14 +988,14 @@
       "median": 16.7,
       "p95": 16.8,
       "worst": 50,
-      "over33": 1,
+      "over33": 3,
       "over50": 0,
-      "fps": 59.2,
-      "longTasks": 1,
-      "longest": 51,
-      "script": 1.5,
-      "style": 0.6,
-      "layout": 0.2,
+      "fps": 58.1,
+      "longTasks": 0,
+      "longest": 0,
+      "script": 2,
+      "style": 0.4,
+      "layout": 0.3,
       "check": {
         "shown": 3
       },
@@ -1009,12 +1009,12 @@
       "where": [
         {
           "name": "updateBoard",
-          "total": 0.9,
+          "total": 1,
           "self": 0
         },
         {
           "name": "frameFx",
-          "total": 0.8,
+          "total": 0.9,
           "self": 0
         },
         {
@@ -1024,58 +1024,58 @@
         },
         {
           "name": "drawFlows",
-          "total": 0.5,
+          "total": 0.6,
           "self": 0.3
         },
         {
           "name": "renderPanels",
-          "total": 0.2,
-          "self": 0
-        },
-        {
-          "name": "tick$2",
-          "total": 0.2,
+          "total": 0.5,
           "self": 0
         },
         {
           "name": "run$1",
-          "total": 0.2,
+          "total": 0.4,
           "self": 0
         },
         {
+          "name": "tick$2",
+          "total": 0.3,
+          "self": 0.1
+        },
+        {
           "name": "emitBeat",
-          "total": 0.1,
+          "total": 0.3,
+          "self": 0
+        },
+        {
+          "name": "dockWide",
+          "total": 0.3,
           "self": 0
         },
         {
           "name": "dock",
-          "total": 0.1,
+          "total": 0.3,
+          "self": 0
+        },
+        {
+          "name": "renderHot",
+          "total": 0.2,
+          "self": 0
+        },
+        {
+          "name": "render",
+          "total": 0.2,
           "self": 0
         },
         {
           "name": "addShape",
-          "total": 0.1,
+          "total": 0.2,
           "self": 0.1
         },
         {
-          "name": "drawParticles",
-          "total": 0.1,
-          "self": 0
-        },
-        {
-          "name": "fmtInt",
-          "total": 0.1,
+          "name": "patchHTML",
+          "total": 0.2,
           "self": 0.1
-        },
-        {
-          "name": "dockWide",
-          "total": 0.1,
-          "self": 0
-        },
-        {
-          "name": "tickPanels",
-          "total": 0.1,
-          "self": 0
         }
       ]
     },
@@ -1085,7 +1085,7 @@
       "rate": 1,
       "frames": 149,
       "median": 16.7,
-      "p95": 16.8,
+      "p95": 16.7,
       "worst": 16.8,
       "over33": 0,
       "over50": 0,
@@ -1104,16 +1104,16 @@
       "rate": 4,
       "frames": 149,
       "median": 16.7,
-      "p95": 33.3,
+      "p95": 33.4,
       "worst": 50,
-      "over33": 2,
+      "over33": 7,
       "over50": 0,
       "fps": 55.2,
-      "longTasks": 2,
-      "longest": 63,
-      "script": 3.3,
-      "style": 1.1,
-      "layout": 0.3,
+      "longTasks": 1,
+      "longest": 54,
+      "script": 3.2,
+      "style": 1,
+      "layout": 0.4,
       "check": {},
       "errors": []
     },
@@ -1125,71 +1125,71 @@
       "where": [
         {
           "name": "updateBoard",
-          "total": 2.3,
-          "self": 0
+          "total": 1.9,
+          "self": 0.1
         },
         {
           "name": "frameFx",
-          "total": 2.3,
+          "total": 1.9,
           "self": 0
         },
         {
           "name": "frameBoard",
-          "total": 2.2,
+          "total": 1.8,
           "self": 0
         },
         {
           "name": "drawFlows",
-          "total": 1.8,
+          "total": 1.5,
           "self": 0.5
         },
         {
           "name": "addShape",
-          "total": 1.3,
-          "self": 0
+          "total": 0.9,
+          "self": 0.1
         },
         {
           "name": "updateSlow",
+          "total": 0.7,
+          "self": 0
+        },
+        {
+          "name": "renderPanels",
           "total": 0.5,
           "self": 0
         },
         {
           "name": "placePlotLabel",
+          "total": 0.4,
+          "self": 0
+        },
+        {
+          "name": "renderHot",
           "total": 0.3,
           "self": 0
         },
         {
           "name": "tick$2",
           "total": 0.3,
+          "self": 0
+        },
+        {
+          "name": "render",
+          "total": 0.2,
+          "self": 0
+        },
+        {
+          "name": "patchHTML",
+          "total": 0.2,
           "self": 0.1
         },
         {
-          "name": "renderPanels",
-          "total": 0.3,
-          "self": 0
-        },
-        {
           "name": "drawParticles",
-          "total": 0.2,
-          "self": 0
-        },
-        {
-          "name": "drawOne",
-          "total": 0.2,
-          "self": 0
-        },
-        {
-          "name": "run$1",
           "total": 0.1,
           "self": 0
         },
         {
-          "name": "renderTop",
-          "total": 0.1,
-          "self": 0
-        },
-        {
-          "name": "update",
+          "name": "transferFrom",
           "total": 0.1,
           "self": 0
         }
@@ -1199,16 +1199,16 @@
       "size": "phone",
       "scenario": "pan",
       "rate": 1,
-      "frames": 382,
+      "frames": 389,
       "median": 16.7,
-      "p95": 16.7,
+      "p95": 16.8,
       "worst": 16.8,
       "over33": 0,
       "over50": 0,
       "fps": 60,
       "longTasks": 0,
       "longest": 0,
-      "script": 0.3,
+      "script": 0.4,
       "style": 0.3,
       "layout": 0.1,
       "check": {},
@@ -1220,15 +1220,15 @@
       "rate": 4,
       "frames": 413,
       "median": 16.7,
-      "p95": 16.7,
-      "worst": 66.7,
+      "p95": 16.8,
+      "worst": 33.4,
       "over33": 2,
-      "over50": 2,
-      "fps": 59.1,
-      "longTasks": 1,
-      "longest": 61,
-      "script": 1.1,
-      "style": 1.3,
+      "over50": 0,
+      "fps": 59.7,
+      "longTasks": 0,
+      "longest": 0,
+      "script": 1.4,
+      "style": 1.2,
       "layout": 0.3,
       "check": {},
       "errors": []
@@ -1241,23 +1241,38 @@
       "where": [
         {
           "name": "placePlotLabel",
-          "total": 0.7,
+          "total": 0.9,
           "self": 0
         },
         {
           "name": "onMove",
-          "total": 0.6,
+          "total": 0.8,
           "self": 0
         },
         {
           "name": "steer",
-          "total": 0.6,
+          "total": 0.8,
           "self": 0
         },
         {
           "name": "applyView",
-          "total": 0.6,
+          "total": 0.8,
+          "self": 0.1
+        },
+        {
+          "name": "renderPanels",
+          "total": 0.4,
           "self": 0
+        },
+        {
+          "name": "updateSlow",
+          "total": 0.3,
+          "self": 0
+        },
+        {
+          "name": "tick$2",
+          "total": 0.3,
+          "self": 0.1
         },
         {
           "name": "updateBoard",
@@ -1270,44 +1285,29 @@
           "self": 0
         },
         {
-          "name": "renderPanels",
-          "total": 0.2,
-          "self": 0
-        },
-        {
-          "name": "tick$2",
+          "name": "renderHot",
           "total": 0.2,
           "self": 0
         },
         {
           "name": "frameBoard",
-          "total": 0.2,
-          "self": 0
-        },
-        {
-          "name": "updateSlow",
-          "total": 0.2,
-          "self": 0
-        },
-        {
-          "name": "drawFlows",
           "total": 0.1,
           "self": 0
         },
         {
-          "name": "shortNum",
+          "name": "placeExpand",
           "total": 0.1,
           "self": 0
-        },
-        {
-          "name": "fmtInt",
-          "total": 0.1,
-          "self": 0.1
         },
         {
           "name": "tickPanels",
           "total": 0.1,
           "self": 0
+        },
+        {
+          "name": "drawFlows",
+          "total": 0.1,
+          "self": 0.1
         }
       ]
     },
@@ -1315,7 +1315,7 @@
       "size": "phone",
       "scenario": "zoom",
       "rate": 1,
-      "frames": 277,
+      "frames": 269,
       "median": 16.7,
       "p95": 16.8,
       "worst": 16.8,
@@ -1324,8 +1324,8 @@
       "fps": 60,
       "longTasks": 0,
       "longest": 0,
-      "script": 0.4,
-      "style": 0.6,
+      "script": 0.5,
+      "style": 0.7,
       "layout": 0.1,
       "check": {},
       "errors": []
@@ -1336,16 +1336,16 @@
       "rate": 4,
       "frames": 313,
       "median": 16.7,
-      "p95": 16.8,
-      "worst": 83.3,
-      "over33": 11,
-      "over50": 4,
-      "fps": 55.2,
-      "longTasks": 8,
-      "longest": 95,
-      "script": 1.5,
-      "style": 2.4,
-      "layout": 0.3,
+      "p95": 33.3,
+      "worst": 150.1,
+      "over33": 7,
+      "over50": 3,
+      "fps": 54.4,
+      "longTasks": 5,
+      "longest": 154,
+      "script": 1.9,
+      "style": 2.7,
+      "layout": 0.4,
       "check": {},
       "errors": []
     },
@@ -1357,57 +1357,57 @@
       "where": [
         {
           "name": "onMove",
-          "total": 1.2,
+          "total": 1.3,
           "self": 0
         },
         {
           "name": "movePinch",
-          "total": 1.2,
-          "self": 0
-        },
-        {
-          "name": "clampK",
-          "total": 1,
+          "total": 1.3,
           "self": 0
         },
         {
           "name": "pinchView",
-          "total": 1,
+          "total": 1.1,
+          "self": 0
+        },
+        {
+          "name": "clampK",
+          "total": 1.1,
           "self": 0
         },
         {
           "name": "zoomMin",
-          "total": 1,
+          "total": 1.1,
           "self": 0
         },
         {
           "name": "fitTarget",
-          "total": 0.9,
+          "total": 1,
           "self": 0
         },
         {
           "name": "fabBoxes",
-          "total": 0.9,
-          "self": 0.9
+          "total": 1,
+          "self": 0
         },
         {
           "name": "updateBoard",
-          "total": 0.5,
+          "total": 0.6,
           "self": 0
         },
         {
           "name": "frameFx",
-          "total": 0.4,
+          "total": 0.5,
           "self": 0
         },
         {
           "name": "frameBoard",
-          "total": 0.3,
+          "total": 0.4,
           "self": 0
         },
         {
           "name": "renderPanels",
-          "total": 0.3,
+          "total": 0.4,
           "self": 0
         },
         {
@@ -1417,12 +1417,12 @@
         },
         {
           "name": "drawFlows",
-          "total": 0.2,
+          "total": 0.3,
           "self": 0.1
         },
         {
           "name": "applyView",
-          "total": 0.2,
+          "total": 0.3,
           "self": 0.1
         }
       ]
@@ -1433,15 +1433,15 @@
       "rate": 1,
       "frames": 342,
       "median": 16.7,
-      "p95": 16.8,
-      "worst": 100,
+      "p95": 16.7,
+      "worst": 50,
       "over33": 3,
-      "over50": 1,
-      "fps": 57,
-      "longTasks": 0,
-      "longest": 0,
-      "script": 4,
-      "style": 0.4,
+      "over50": 0,
+      "fps": 59.3,
+      "longTasks": 1,
+      "longest": 57,
+      "script": 2.1,
+      "style": 0.3,
       "layout": 0.1,
       "check": {
         "wires": 3,
@@ -1453,18 +1453,18 @@
       "size": "phone",
       "scenario": "first",
       "rate": 4,
-      "frames": 363,
+      "frames": 353,
       "median": 16.7,
-      "p95": 83.3,
-      "worst": 216.7,
-      "over33": 57,
-      "over50": 47,
-      "fps": 36.5,
-      "longTasks": 51,
-      "longest": 210,
-      "script": 11,
-      "style": 1.6,
-      "layout": 0.6,
+      "p95": 66.6,
+      "worst": 183.4,
+      "over33": 38,
+      "over50": 24,
+      "fps": 43.2,
+      "longTasks": 34,
+      "longest": 188,
+      "script": 7.1,
+      "style": 1.5,
+      "layout": 0.7,
       "check": {
         "wires": 3,
         "carried": true
@@ -1479,72 +1479,72 @@
       "where": [
         {
           "name": "steer",
-          "total": 9.9,
-          "self": 0
-        },
-        {
-          "name": "carry",
-          "total": 9.8,
-          "self": 0
-        },
-        {
-          "name": "redraw",
-          "total": 9.8,
+          "total": 5.4,
           "self": 0
         },
         {
           "name": "routeWires",
-          "total": 9.8,
-          "self": 0.2
+          "total": 5.3,
+          "self": 0.1
         },
         {
-          "name": "routeAll",
-          "total": 9.4,
-          "self": 0.2
-        },
-        {
-          "name": "updateBoard",
-          "total": 7.8,
+          "name": "carry",
+          "total": 5.3,
           "self": 0
         },
         {
+          "name": "redraw",
+          "total": 5.3,
+          "self": 0.1
+        },
+        {
+          "name": "routeAll",
+          "total": 5,
+          "self": 0.1
+        },
+        {
+          "name": "updateBoard",
+          "total": 4.7,
+          "self": 0.1
+        },
+        {
           "name": "wayRound",
-          "total": 6.8,
+          "total": 3.7,
+          "self": 0
+        },
+        {
+          "name": "edgeScroll",
+          "total": 3.7,
           "self": 0
         },
         {
           "name": "stretch",
-          "total": 6.6,
-          "self": 0.2
-        },
-        {
-          "name": "edgeScroll",
-          "total": 6.5,
-          "self": 0
+          "total": 3.5,
+          "self": 0.1
         },
         {
           "name": "search",
-          "total": 5,
-          "self": 2.6
+          "total": 2.6,
+          "self": 1.3
         },
         {
           "name": "onMove",
-          "total": 3.9,
+          "total": 2.3,
           "self": 0
         },
         {
           "name": "pop$1",
-          "total": 1.7,
-          "self": 1.7
-        },
-        {
-          "name": "sideBySide",
-          "total": 1.4,
-          "self": 0.3
-        },
-        {
-          "name": "frameFx",
           "total": 0.8,
+          "self": 0.8
+        },
+        {
+          "name": "placePlotLabel",
+          "total": 0.7,
+          "self": 0.7
+        },
+        {
+          "name": "updateSlow",
+          "total": 0.6,
           "self": 0
         }
       ]
@@ -1553,17 +1553,17 @@
       "size": "phone",
       "scenario": "drag",
       "rate": 1,
-      "frames": 272,
+      "frames": 269,
       "median": 16.7,
-      "p95": 16.7,
+      "p95": 16.8,
       "worst": 16.8,
       "over33": 0,
       "over50": 0,
       "fps": 60,
       "longTasks": 0,
       "longest": 0,
-      "script": 0.2,
-      "style": 0.2,
+      "script": 0.3,
+      "style": 0.1,
       "layout": 0.1,
       "check": {
         "wires": 3,
@@ -1575,18 +1575,18 @@
       "size": "phone",
       "scenario": "drag",
       "rate": 4,
-      "frames": 347,
+      "frames": 279,
       "median": 16.7,
-      "p95": 33.3,
-      "worst": 83.3,
-      "over33": 13,
-      "over50": 4,
-      "fps": 53.7,
-      "longTasks": 10,
-      "longest": 98,
-      "script": 3.2,
-      "style": 1,
-      "layout": 0.4,
+      "p95": 16.8,
+      "worst": 16.8,
+      "over33": 0,
+      "over50": 0,
+      "fps": 60,
+      "longTasks": 0,
+      "longest": 0,
+      "script": 1.2,
+      "style": 0.6,
+      "layout": 0.3,
       "check": {
         "wires": 3,
         "carried": true
@@ -1600,14 +1600,9 @@
       "profiled": true,
       "where": [
         {
-          "name": "renderPanels",
-          "total": 0.2,
-          "self": 0
-        },
-        {
           "name": "tick$2",
-          "total": 0.2,
-          "self": 0
+          "total": 0.3,
+          "self": 0.1
         },
         {
           "name": "onMove",
@@ -1616,6 +1611,11 @@
         },
         {
           "name": "steer",
+          "total": 0.2,
+          "self": 0
+        },
+        {
+          "name": "renderPanels",
           "total": 0.2,
           "self": 0
         },
@@ -1626,21 +1626,26 @@
         },
         {
           "name": "placePlotLabel",
-          "total": 0.2,
-          "self": 0.2
-        },
-        {
-          "name": "updateSlow",
-          "total": 0.2,
-          "self": 0
-        },
-        {
-          "name": "updateBoard",
           "total": 0.1,
           "self": 0.1
         },
         {
+          "name": "updateBoard",
+          "total": 0.1,
+          "self": 0
+        },
+        {
+          "name": "updateSlow",
+          "total": 0.1,
+          "self": 0
+        },
+        {
           "name": "renderTop",
+          "total": 0.1,
+          "self": 0
+        },
+        {
+          "name": "transferFrom",
           "total": 0.1,
           "self": 0
         },
@@ -1655,17 +1660,12 @@
           "self": 0
         },
         {
-          "name": "transferFrom",
-          "total": 0.1,
-          "self": 0
-        },
-        {
           "name": "update",
           "total": 0.1,
           "self": 0
         },
         {
-          "name": "tickPanels",
+          "name": "emitFrame",
           "total": 0.1,
           "self": 0
         }
@@ -1675,20 +1675,20 @@
       "size": "phone",
       "scenario": "hub",
       "rate": 1,
-      "frames": 368,
+      "frames": 353,
       "median": 16.7,
       "p95": 16.8,
       "worst": 33.4,
-      "over33": 0,
+      "over33": 1,
       "over50": 0,
-      "fps": 58.9,
+      "fps": 59.7,
       "longTasks": 0,
       "longest": 0,
-      "script": 1.8,
-      "style": 0.5,
+      "script": 1.6,
+      "style": 0.4,
       "layout": 0.2,
       "check": {
-        "wires": 51,
+        "wires": 47,
         "carried": true
       },
       "errors": []
@@ -1697,20 +1697,20 @@
       "size": "phone",
       "scenario": "hub",
       "rate": 4,
-      "frames": 376,
+      "frames": 378,
       "median": 16.7,
-      "p95": 66.7,
-      "worst": 116.7,
-      "over33": 48,
-      "over50": 30,
-      "fps": 40,
-      "longTasks": 37,
-      "longest": 125,
-      "script": 7.7,
-      "style": 2.1,
+      "p95": 66.6,
+      "worst": 100,
+      "over33": 51,
+      "over50": 22,
+      "fps": 41.9,
+      "longTasks": 34,
+      "longest": 99,
+      "script": 6.9,
+      "style": 1.8,
       "layout": 0.8,
       "check": {
-        "wires": 51,
+        "wires": 47,
         "carried": true
       },
       "errors": []
@@ -1723,57 +1723,57 @@
       "where": [
         {
           "name": "onMove",
-          "total": 6.3,
+          "total": 5.1,
           "self": 0
         },
         {
           "name": "steer",
-          "total": 6.3,
+          "total": 5,
+          "self": 0
+        },
+        {
+          "name": "carry",
+          "total": 5,
           "self": 0
         },
         {
           "name": "redraw",
-          "total": 6.2,
+          "total": 5,
           "self": 0.1
         },
         {
-          "name": "carry",
-          "total": 6.2,
-          "self": 0
-        },
-        {
           "name": "routeWires",
-          "total": 5.9,
+          "total": 4.7,
           "self": 0.1
         },
         {
           "name": "routeAll",
-          "total": 5.5,
+          "total": 4.2,
           "self": 0.1
         },
         {
           "name": "wayRound",
-          "total": 4.1,
+          "total": 3,
           "self": 0
         },
         {
           "name": "stretch",
-          "total": 3.9,
-          "self": 0.2
-        },
-        {
-          "name": "search",
-          "total": 3,
-          "self": 3
-        },
-        {
-          "name": "updateBoard",
-          "total": 1.4,
+          "total": 2.9,
           "self": 0.1
         },
         {
+          "name": "search",
+          "total": 2.2,
+          "self": 2.2
+        },
+        {
+          "name": "updateBoard",
+          "total": 1.3,
+          "self": 0
+        },
+        {
           "name": "renderPanels",
-          "total": 1.4,
+          "total": 1.3,
           "self": 0
         },
         {
@@ -1788,7 +1788,7 @@
         },
         {
           "name": "renderInspector",
-          "total": 1,
+          "total": 0.9,
           "self": 0
         }
       ]
@@ -1800,12 +1800,12 @@
       "frames": 199,
       "median": 16.7,
       "p95": 16.8,
-      "worst": 50,
-      "over33": 4,
-      "over50": 0,
-      "fps": 57.1,
-      "longTasks": 0,
-      "longest": 0,
+      "worst": 66.6,
+      "over33": 2,
+      "over50": 1,
+      "fps": 58,
+      "longTasks": 1,
+      "longest": 63,
       "script": 1.4,
       "style": 0.7,
       "layout": 0.1,
@@ -1818,18 +1818,18 @@
       "size": "phone",
       "scenario": "tidy",
       "rate": 4,
-      "frames": 199,
+      "frames": 200,
       "median": 16.7,
-      "p95": 16.8,
-      "worst": 183.3,
-      "over33": 8,
+      "p95": 33.3,
+      "worst": 266.6,
+      "over33": 7,
       "over50": 6,
-      "fps": 50,
-      "longTasks": 6,
-      "longest": 172,
-      "script": 3.1,
-      "style": 1.9,
-      "layout": 0.4,
+      "fps": 47.1,
+      "longTasks": 5,
+      "longest": 240,
+      "script": 4.3,
+      "style": 2.3,
+      "layout": 0.6,
       "check": {
         "moved": true
       },
@@ -1843,73 +1843,73 @@
       "where": [
         {
           "name": "updateBoard",
-          "total": 3,
-          "self": 0
+          "total": 4.2,
+          "self": 0.1
         },
         {
           "name": "routeWires",
-          "total": 1.5,
-          "self": 0
+          "total": 1.8,
+          "self": 0.1
         },
         {
           "name": "stepSettle",
-          "total": 1.5,
+          "total": 1.6,
           "self": 0
         },
         {
           "name": "routeAll",
-          "total": 1.3,
+          "total": 1.6,
           "self": 0
         },
         {
-          "name": "wayRound",
-          "total": 0.9,
+          "name": "frameFx",
+          "total": 1.2,
           "self": 0
         },
         {
           "name": "updateSlow",
-          "total": 0.8,
-          "self": 0
-        },
-        {
-          "name": "stretch",
-          "total": 0.8,
-          "self": 0
-        },
-        {
-          "name": "placeExpand",
-          "total": 0.7,
-          "self": 0
-        },
-        {
-          "name": "search",
-          "total": 0.6,
-          "self": 0.4
-        },
-        {
-          "name": "frameFx",
-          "total": 0.6,
-          "self": 0
-        },
-        {
-          "name": "stepGlide",
-          "total": 0.6,
-          "self": 0
-        },
-        {
-          "name": "applyView",
-          "total": 0.6,
+          "total": 1.2,
           "self": 0
         },
         {
           "name": "frameBoard",
-          "total": 0.5,
+          "total": 1.1,
+          "self": 0.1
+        },
+        {
+          "name": "wayRound",
+          "total": 1.1,
           "self": 0
         },
         {
-          "name": "placePlotLabel",
-          "total": 0.5,
-          "self": 0.5
+          "name": "stretch",
+          "total": 1,
+          "self": 0.1
+        },
+        {
+          "name": "placeExpand",
+          "total": 1,
+          "self": 0
+        },
+        {
+          "name": "renderPanels",
+          "total": 0.9,
+          "self": 0
+        },
+        {
+          "name": "applyView",
+          "total": 0.8,
+          "self": 0
+        },
+        {
+          "name": "stepGlide",
+          "total": 0.8,
+          "self": 0
+        },
+        {
+          "name": "drawFlows",
+          "total": 0.8,
+          "self": 0.4
         }
       ]
     },
@@ -1917,9 +1917,9 @@
       "size": "phone",
       "scenario": "toasts",
       "rate": 1,
-      "frames": 149,
+      "frames": 150,
       "median": 16.7,
-      "p95": 16.7,
+      "p95": 16.8,
       "worst": 16.8,
       "over33": 0,
       "over50": 0,
@@ -1942,13 +1942,13 @@
       "median": 16.7,
       "p95": 16.8,
       "worst": 66.6,
-      "over33": 3,
+      "over33": 4,
       "over50": 1,
-      "fps": 57,
+      "fps": 56.3,
       "longTasks": 2,
-      "longest": 62,
-      "script": 3,
-      "style": 1,
+      "longest": 64,
+      "script": 2.7,
+      "style": 0.9,
       "layout": 0.4,
       "check": {
         "shown": 2
@@ -1963,56 +1963,51 @@
       "where": [
         {
           "name": "updateBoard",
-          "total": 2.3,
+          "total": 2,
           "self": 0
         },
         {
           "name": "frameFx",
-          "total": 2.3,
+          "total": 2,
           "self": 0
         },
         {
           "name": "frameBoard",
-          "total": 2.1,
+          "total": 1.8,
           "self": 0
         },
         {
           "name": "drawFlows",
-          "total": 1.9,
-          "self": 0.6
+          "total": 1.6,
+          "self": 0.5
         },
         {
           "name": "addShape",
-          "total": 1.3,
+          "total": 0.9,
           "self": 0.1
         },
         {
           "name": "updateSlow",
-          "total": 0.4,
-          "self": 0
-        },
-        {
-          "name": "run$1",
-          "total": 0.3,
-          "self": 0
-        },
-        {
-          "name": "tick$2",
-          "total": 0.3,
+          "total": 0.6,
           "self": 0
         },
         {
           "name": "renderPanels",
-          "total": 0.3,
+          "total": 0.5,
+          "self": 0
+        },
+        {
+          "name": "run$1",
+          "total": 0.4,
+          "self": 0
+        },
+        {
+          "name": "placePlotLabel",
+          "total": 0.4,
           "self": 0
         },
         {
           "name": "emitBeat",
-          "total": 0.3,
-          "self": 0
-        },
-        {
-          "name": "dock",
           "total": 0.3,
           "self": 0
         },
@@ -2022,13 +2017,18 @@
           "self": 0
         },
         {
-          "name": "placePlotLabel",
-          "total": 0.2,
+          "name": "dock",
+          "total": 0.3,
           "self": 0
         },
         {
-          "name": "drawParticles",
-          "total": 0.2,
+          "name": "tick$2",
+          "total": 0.3,
+          "self": 0.1
+        },
+        {
+          "name": "renderHot",
+          "total": 0.3,
           "self": 0
         }
       ]
