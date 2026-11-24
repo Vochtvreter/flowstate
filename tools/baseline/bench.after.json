@@ -6,49 +6,69 @@
       "cards": 24,
       "wires": 35,
       "core": {
-        "tick": 15.675,
-        "tickBig": 21.181,
-        "clone": 0.194,
-        "stringify": 0.283,
-        "parse": 0.192,
-        "normalise": 0.137,
+        "tick": 15.787,
+        "tickBig": 21.06,
+        "clone": 0.158,
+        "stringify": 0.167,
+        "parse": 0.17,
+        "normalise": 0.235,
         "saveBytes": 43032,
-        "forecast": 3.286,
-        "away": 26.634
+        "forecast": 3.202,
+        "away": 25.044
       },
       "routing": {
-        "cold": 7.914,
-        "rest": 0.509,
-        "curved": 0.172,
-        "drag": {
-          "med": 1.006,
-          "p90": 2.233,
-          "max": 3.16,
-          "n": 60
+        "cold": 11.638,
+        "rest": 0.469,
+        "curved": 0.164,
+        "carry": {
+          "wires": 3,
+          "step": {
+            "med": 0.615,
+            "p90": 1.665,
+            "max": 3.66,
+            "n": 112
+          },
+          "searches": {
+            "med": 3,
+            "p90": 7,
+            "max": 9,
+            "n": 112
+          },
+          "drop": 0.412
         },
-        "dragSearches": {
-          "med": 5,
-          "p90": 18,
-          "max": 22,
-          "n": 60
+        "hub": {
+          "wires": 14,
+          "step": {
+            "med": 0.576,
+            "p90": 0.929,
+            "max": 1.713,
+            "n": 112
+          },
+          "searches": {
+            "med": 9,
+            "p90": 11,
+            "max": 15,
+            "n": 112
+          },
+          "drop": 0.621
         },
-        "drop": {
-          "med": 1.301,
-          "p90": 4.001,
-          "max": 6.467,
+        "glide": {
+          "med": 0.762,
+          "p90": 0.986,
+          "max": 1.546,
           "n": 11
         },
         "tidyMoved": 16,
         "tidy": {
-          "med": 1.289,
-          "p90": 4.953,
-          "max": 5.94,
+          "med": 0.941,
+          "p90": 1.757,
+          "max": 2.514,
           "n": 25
         },
         "tidySearches": {
           "med": 8,
-          "p90": 17,
-          "max": 22,
+          "p90": 14,
+          "max": 20,
           "n": 25
         },
         "dropOff": 0,
@@ -56,9 +76,9 @@
       },
       "verdicts": {
         "ms": {
-          "med": 26.305,
-          "p90": 56.451,
-          "max": 72.162,
+          "med": 25.982,
+          "p90": 56.596,
+          "max": 65.385,
           "n": 31
         },
         "copies": {
@@ -84,49 +104,69 @@
       "cards": 43,
       "wires": 92,
       "core": {
-        "tick": 36.328,
-        "tickBig": 68.661,
-        "clone": 0.404,
-        "stringify": 0.529,
-        "parse": 0.341,
-        "normalise": 0.352,
+        "tick": 33.866,
+        "tickBig": 64.033,
+        "clone": 0.682,
+        "stringify": 0.463,
+        "parse": 0.292,
+        "normalise": 0.408,
         "saveBytes": 113618,
-        "forecast": 9.046,
-        "away": 95.292
+        "forecast": 12.559,
+        "away": 51.401
       },
       "routing": {
-        "cold": 4.785,
-        "rest": 0.761,
-        "curved": 0.291,
-        "drag": {
-          "med": 3.041,
-          "p90": 5.246,
-          "max": 9.889,
-          "n": 60
+        "cold": 9.448,
+        "rest": 1.217,
+        "curved": 0.345,
+        "carry": {
+          "wires": 4,
+          "step": {
+            "med": 1.437,
+            "p90": 2.434,
+            "max": 3.692,
+            "n": 83
+          },
+          "searches": {
+            "med": 4,
+            "p90": 7,
+            "max": 19,
+            "n": 83
+          },
+          "drop": 3.763
         },
-        "dragSearches": {
-          "med": 20,
-          "p90": 45,
-          "max": 57,
-          "n": 60
+        "hub": {
+          "wires": 36,
+          "step": {
+            "med": 2.972,
+            "p90": 5.631,
+            "max": 9.135,
+            "n": 112
+          },
+          "searches": {
+            "med": 27,
+            "p90": 41,
+            "max": 62,
+            "n": 112
+          },
+          "drop": 4.267
         },
-        "drop": {
-          "med": 1.785,
-          "p90": 3.017,
-          "max": 4.312,
+        "glide": {
+          "med": 1.622,
+          "p90": 3.238,
+          "max": 3.297,
           "n": 11
         },
-        "tidyMoved": 31,
+        "tidyMoved": 30,
         "tidy": {
-          "med": 4.097,
-          "p90": 6.431,
-          "max": 9.862,
+          "med": 4.532,
+          "p90": 9.12,
+          "max": 9.507,
           "n": 25
         },
         "tidySearches": {
-          "med": 42,
-          "p90": 48,
-          "max": 56,
+          "med": 47,
+          "p90": 60,
+          "max": 66,
           "n": 25
         },
         "dropOff": 0,
@@ -143,49 +183,69 @@
       "cards": 57,
       "wires": 99,
       "core": {
-        "tick": 50.81,
-        "tickBig": 82.552,
-        "clone": 0.49,
-        "stringify": 0.556,
-        "parse": 0.375,
-        "normalise": 0.334,
+        "tick": 45.391,
+        "tickBig": 83.43,
+        "clone": 0.434,
+        "stringify": 0.545,
+        "parse": 0.367,
+        "normalise": 0.316,
         "saveBytes": 113518,
-        "forecast": 12.1,
-        "away": 122.114
+        "forecast": 9.457,
+        "away": 71.961
       },
       "routing": {
-        "cold": 5.938,
-        "rest": 0.649,
-        "curved": 0.295,
-        "drag": {
-          "med": 2.2,
-          "p90": 5.662,
-          "max": 7.835,
-          "n": 60
+        "cold": 9.756,
+        "rest": 0.794,
+        "curved": 0.229,
+        "carry": {
+          "wires": 3,
+          "step": {
+            "med": 1.733,
+            "p90": 3.072,
+            "max": 7.545,
+            "n": 112
+          },
+          "searches": {
+            "med": 4,
+            "p90": 9,
+            "max": 31,
+            "n": 112
+          },
+          "drop": 5.815
         },
-        "dragSearches": {
-          "med": 12,
-          "p90": 48,
-          "max": 61,
-          "n": 60
+        "hub": {
+          "wires": 47,
+          "step": {
+            "med": 5.55,
+            "p90": 10.528,
+            "max": 18.203,
+            "n": 112
+          },
+          "searches": {
+            "med": 36,
+            "p90": 49,
+            "max": 86,
+            "n": 112
+          },
+          "drop": 7.266
         },
-        "drop": {
-          "med": 1.707,
-          "p90": 4.261,
-          "max": 4.301,
+        "glide": {
+          "med": 0.987,
+          "p90": 6.752,
+          "max": 6.845,
           "n": 11
         },
-        "tidyMoved": 39,
+        "tidyMoved": 38,
         "tidy": {
-          "med": 5.119,
-          "p90": 6.813,
-          "max": 8.202,
+          "med": 4.921,
+          "p90": 8.584,
+          "max": 18.571,
           "n": 25
         },
         "tidySearches": {
           "med": 43,
-          "p90": 55,
-          "max": 59,
+          "p90": 60,
+          "max": 65,
           "n": 25
         },
         "dropOff": 0,
@@ -193,9 +253,9 @@
       },
       "verdicts": {
         "ms": {
-          "med": 116.309,
-          "p90": 263.241,
-          "max": 367.162,
+          "med": 95.395,
+          "p90": 212.426,
+          "max": 337.244,
           "n": 90
         },
         "copies": {

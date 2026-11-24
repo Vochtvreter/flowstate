@@ -347,7 +347,7 @@ No text walls: a card is a title and a sentence or two.
   tools/         pacing.ts: the scripted players; bench.ts and perf.mjs: what the game's work costs, and the page's frames
   ```
 - **Undo** keeps a snapshot of the board's structure and the credits spent for each step, up to 200.
-- **Tests:** `npm test` runs 621 tests, among them the pacing targets on four order sequences. `npm run pacing` plays six scripted players and checks each run against the pacing targets.
+- **Tests:** `npm test` runs 626 tests, among them the pacing targets on four order sequences. `npm run pacing` plays six scripted players and checks each run against the pacing targets.
 - **Size and speed:** the shipped JavaScript and CSS are about 260 kB gzipped. Frame rates are in [PITCH_PLAN.md](./PITCH_PLAN.md#outcome).
 - **Outside requests:** the page loads its typefaces from Google Fonts and shows system fonts until they arrive. Nothing else leaves the page.
 - **Publishing:** `.github/workflows/deploy.yml` runs the tests and the build on every push to `main` and deploys the result to GitHub Pages.
