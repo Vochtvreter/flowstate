@@ -497,7 +497,8 @@ describe('a way round cards', () => {
 // pixel before it came to rest, and moved when the page was loaded again.)
 describe('what is kept from one look at the board to the next never changes how it is drawn', () => {
   interface Wired { id: number; from: number; to: number; ay: number; by: number; pins?: Pt[] }
-  interface Shot { wires: WireIn[]; cards: CardBox[] }
+  /** The board at one look: its wires and cards, and the cards that are in the hand (or gliding to where they were let go) just then. */
+  interface Shot { wires: WireIn[]; cards: CardBox[]; carried: number[] }
   const card = (id: number, x: number, y: number, w = 172, h = 72): CardBox => ({ id, x0: x, y0: y, x1: x + w, y1: y + h });
 
   /** A board that things happen to, and how it stood after each of them. */
@@ -531,9 +532,11 @@ describe('what is kept from one look at the board to the next never changes how 
       c.y0 += dy;
       c.y1 += dy;
     };
+    let inHand: number[] = [];
     const shoot = () => {
       const at = new Map(cards.map((c) => [c.id, c]));
       shots.push({
+        carried: inHand.filter((id) => at.has(id)),
         cards: cards.map((c) => ({ ...c })),
         wires: wired.filter((w) => at.has(w.from) && at.has(w.to)).map((w) => {
           const f = at.get(w.from)!, t = at.get(w.to)!;
@@ -542,9 +545,11 @@ describe('what is kept from one look at the board to the next never changes how 
       });
     };
     /** Cards glide home from where they were let go, a frame at a time (board.ts, stepSettle), and come to rest. */
-    const glide = (from: Map<CardBox, Pt>, frames: number) => {
+    const glide = (from: Map<CardBox, Pt>, frames: number, held = false) => {
       let was = new Map<CardBox, Pt>([...from.keys()].map((c) => [c, pt(0, 0)]));
       for (let f = 1; f <= frames; f++) {
+        // (A card that was let go counts as carried until the frame it lands on: board.ts, stepSettle.)
+        inHand = held && f < frames ? [...from.keys()].map((c) => c.id) : [];
         const u = f / frames, e = 1 - (1 - u) * (1 - u) * (1 - u);
         const now = new Map<CardBox, Pt>();
         for (const [c, off] of from) {
@@ -560,21 +565,26 @@ describe('what is kept from one look at the board to the next never changes how 
     for (let step = 0; step < 14; step++) {
       const what = rnd();
       if (what < 0.3) {
-        // A card is carried a few grid steps one way, then another.
+        // A card is carried a few grid steps one way, then another: alone, or as one of a block of two or three.
         const c = pick(cards);
+        const block = [c, ...(rnd() < 0.3 ? cards.filter((o) => o !== c && rnd() < 0.15).slice(0, 2) : [])];
+        inHand = block.map((o) => o.id);
+        // (Picked up, before it has moved at all.)
+        shoot();
         for (let leg = 0; leg < 2; leg++) {
           const [dx, dy] = pick([[20, 0], [-20, 0], [0, 20], [0, -20]]);
-          for (let k = 0; k < 4; k++) {
-            move(c, dx, dy);
+          for (let k = 0; k < 5; k++) {
+            for (const o of block) move(o, dx, dy);
             shoot();
           }
         }
+        inHand = [];
       } else if (what < 0.5) {
         // Let go off the grid: it glides the rest of the way.
         const c = pick(cards);
         const off = pt(Math.round((rnd() - 0.5) * 36), Math.round((rnd() - 0.5) * 36));
         const x = c.x0, y = c.y0;
-        glide(new Map([[c, off]]), 7);
+        glide(new Map([[c, off]]), 7, true);
         expect(c.x0).toBeCloseTo(x, 9);
         expect(c.y0).toBeCloseTo(y, 9);
         // (To rest means to rest: on whole pixels, where it was let go to.)
@@ -611,12 +621,24 @@ describe('what is kept from one look at the board to the next never changes how 
     return shots;
   }
 
-  const lines = (shot: Shot) => [...routeAll(shot.wires, shot.cards, 'squared', N)].map(([id, line]) => ({ id, d: line.d, pts: line.pts.map((q) => [q.x, q.y]) }));
+  const route = (shot: Shot) => (shot.carried.length ? routeAll(shot.wires, shot.cards, 'squared', N, { carried: new Set(shot.carried) }) : routeAll(shot.wires, shot.cards, 'squared', N));
+  const lines = (shot: Shot) => [...route(shot)].map(([id, line]) => ({ id, d: line.d, pts: line.pts.map((q) => [q.x, q.y]) }));
+  const cornersOf = (d: string): Pt[] => {
+    const nums = (d.match(/-?\d+(\.\d+)?/g) ?? []).map(Number);
+    const out: Pt[] = [pt(nums[0], nums[1])];
+    for (let i = 2; i + 5 < nums.length; i += 6) out.push(pt(nums[i + 2], nums[i + 3]));
+    out.push(pt(nums[nums.length - 2], nums[nums.length - 1]));
+    return out;
+  };
 
   it('at every step of a board\'s story it is drawn as a board that was only just loaded: cards carried, let go, tidied, built and taken away', () => {
-    let kept = 0, fresh = 0, steps = 0, shared = 0;
+    let kept = 0, fresh = 0, steps = 0, shared = 0, inHand = 0, atRest = 0;
     for (let seed = 1; seed <= 14; seed++) {
       const shots = story(seed);
+      for (const shot of shots) {
+        if (shot.carried.length) inHand++;
+        else atRest++;
+      }
       // (How often two wires ran through one pin: the stories must have that in them.)
       for (const shot of shots) {
         const at = new Set<string>();
@@ -639,6 +661,10 @@ describe('what is kept from one look at the board to the next never changes how 
     }
     expect(steps).toBeGreaterThan(600);
     expect(shared).toBeGreaterThan(50);
+    // (With a card in the hand the board is drawn by another rule, and that too is the same from nothing as from
+    // what was kept; at rest, which every story comes back to, it is the board a page would load.)
+    expect(inHand).toBeGreaterThan(300);
+    expect(atRest).toBeGreaterThan(300);
     // (And it is worth keeping: far fewer ways are looked for than when every look starts from nothing.)
     expect(fresh).toBeGreaterThan(2000);
     expect(kept).toBeLessThan(fresh * 0.8);
@@ -686,5 +712,92 @@ describe('what is kept from one look at the board to the next never changes how 
     expect(moved.get(1)!.d).not.toBe(first.get(1)!.d);
     forgetWays();
     expect([...routeAll(wires, cards, 'squared', N)].map(([, x]) => x.d)).toEqual([...moved].map(([, x]) => x.d));
+  });
+
+  // A card in the hand (routeAll's `carried`) lends the other wires no line to turn at: they are routed as if it were
+  // not on the board, until it comes into the way one of them has found. Carrying a card across a late board was forty
+  // searches a step, nearly all of them for wires it was nowhere near.
+  describe('a card that is carried', () => {
+    // A wall between two level ports: the wire goes over it. And a card with no wires, to carry about.
+    const board = () => [card(1, -172, 264), card(9, 400, 264), card(2, 150, 220, 100, 180)];
+    const wires: WireIn[] = [{ id: 1, from: 1, to: 9, a: pt(0, 300), b: pt(400, 300) }];
+    const d = (cards: CardBox[], carried?: number[]) => routeAll(wires, cards, 'squared', N, carried ? { carried: new Set(carried) } : {}).get(1)!.d;
+    /** Where the loose card lends the wire a better line to cross the wall on (4 px lower than the wall's own). */
+    const lending = () => card(5, 480, 124);
+
+    it('lends no line while it is in the hand, and does when it is put down', () => {
+      forgetWays();
+      const without = d(board());
+      const down = d([...board(), lending()]);
+      expect(down).not.toBe(without);
+      expect(d([...board(), lending()], [5])).toBe(without);
+      // Carried about near the wire, never in its way: the wire is not looked for once, and does not move.
+      const before = COUNT.searches;
+      for (const [x, y] of [[480, 104], [460, 84], [440, 64], [300, 20], [120, 20], [-60, 40], [480, 124]]) expect(d([...board(), card(5, x, y)], [5]), `at ${x}, ${y}`).toBe(without);
+      expect(COUNT.searches).toBe(before);
+      // Put down where it lends its line: looked for again, and it is the board a page would load.
+      expect(d([...board(), lending()])).toBe(down);
+      expect(COUNT.searches).toBeGreaterThan(before);
+      // Picked up again from there, without moving: the wire goes back to its own way.
+      expect(d([...board(), lending()], [5])).toBe(without);
+    });
+
+    it('is stepped round by a wire it comes into the way of, for as long as it is', () => {
+      forgetWays();
+      const without = d(board());
+      // On the run the wire crosses the wall on.
+      const inWayOf = card(5, 100, 150);
+      expect(inWay(cornersOf(without), [inWayOf], 1, 9)).toBe(1);
+      const aside = d([...board(), inWayOf], [5]);
+      expect(aside).not.toBe(without);
+      expect(inWay(cornersOf(aside), [...board(), inWayOf], 1, 9, CLEAR - 0.6)).toBe(0);
+      // ...which is the way it would take with the card standing there (the card is in its way: it counts as any card).
+      forgetWays();
+      expect(d([...board(), inWayOf])).toBe(aside);
+      // Carried on, out of the way: the wire is back where it was at once.
+      expect(d([...board(), card(5, 100, 20)], [5])).toBe(without);
+    });
+
+    it('with nothing carried the board is routed as it always was, said or not', () => {
+      for (let seed = 1; seed <= 6; seed++) {
+        for (const shot of story(seed).filter((x) => !x.carried.length).filter((_, i) => i % 5 === 0)) {
+          forgetWays();
+          const plain = [...routeAll(shot.wires, shot.cards, 'squared', N)].map(([id, x]) => `${id} ${x.d}`);
+          forgetWays();
+          expect([...routeAll(shot.wires, shot.cards, 'squared', N, { carried: new Set() })].map(([id, x]) => `${id} ${x.d}`)).toEqual(plain);
+          // (...and a card named as carried that is not on the board is nobody.)
+          forgetWays();
+          expect([...routeAll(shot.wires, shot.cards, 'squared', N, { carried: new Set([-7]) })].map(([id, x]) => `${id} ${x.d}`)).toEqual(plain);
+        }
+      }
+    });
+
+    it('never brings a wire nearer to a card than it would be with that card standing there', () => {
+      // At every look of the stories with a card in the hand: no wire that is not the carried card's own comes within
+      // CLEAR of a card that it keeps clear of when the same board is routed with nothing carried. (The stories'
+      // boards are crowded, with cards on one another: there a wire may have no clear way under either rule.)
+      let looked = 0, worse = 0;
+      for (let seed = 1; seed <= 14; seed++) {
+        for (const shot of story(seed)) {
+          if (!shot.carried.length) continue;
+          const hand = new Set(shot.carried);
+          forgetWays();
+          const held = route(shot);
+          forgetWays();
+          const down = routeAll(shot.wires, shot.cards, 'squared', N);
+          for (const w of shot.wires) {
+            if (hand.has(w.from) || hand.has(w.to)) continue;
+            looked++;
+            // (Its own two cards aside: where it stands against those is a matter of the lane it was given.)
+            const others = shot.cards.filter((c) => c.id !== w.from && c.id !== w.to);
+            const near = (line: string) => others.filter((c) => inWay(cornersOf(line), [c], w.from, w.to, CLEAR - 0.6) > 0).map((c) => c.id);
+            const was = new Set(near(down.get(w.id)!.d));
+            if (near(held.get(w.id)!.d).some((id) => !was.has(id))) worse++;
+          }
+        }
+      }
+      expect(looked).toBeGreaterThan(5000);
+      expect(worse).toBe(0);
+    });
   });
 });
