@@ -33,7 +33,7 @@ import {
 } from './fx';
 import {
   Box, CARD_GAP, Card, Footprint, LEVEL_GAP, LEVEL_REACH, LevelCard, LevelEnd, LevelWire, Port, Pt, View, ZOOM, bestWindow, boxClear, boxUnion, buildSite, centreView,
-  clearPoint, dockSpot, fadeColor, fitBox, fitZoom, fitsAt, frameBox, freeSpot as nearestSpot, heldRate, inPorts, levelCards, levelY, matColor, nodeSize, outPorts,
+  clearPoint, dockSpot, fadeColor, fitBox, fitZoom, fitsAt, frameBox, glideStep, freeSpot as nearestSpot, heldRate, inPorts, levelCards, levelY, matColor, nodeSize, outPorts,
   pinchView, roomFor,
   segmentsCross, separate, siteFor, spotFree, wholeGain, wireEnds,
 } from './geom';
@@ -3615,16 +3615,15 @@ function drawnEnds(g: Game, w: Wire) {
 
 function stepSettle(dt: number) {
   const g = ui.g;
-  const step = Math.min(dt, 0.1);
   let done = false;
   for (const [id, m] of settling) {
-    m.t += step;
-    const u = Math.min(1, m.t / m.dur);
-    const e = 1 - (1 - u) * (1 - u) * (1 - u);
-    m.ox = m.fx * (1 - e);
-    m.oy = m.fy * (1 - e);
+    // (A long frame counts for no more than a short one: the card is not thrown most of the way in it. geom.ts)
+    const { t, left } = glideStep(m.t, dt, m.dur);
+    m.t = t;
+    m.ox = m.fx * left;
+    m.oy = m.fy * left;
     const refs = nodeEls.get(id);
-    if (u >= 1 || !refs) {
+    if (left <= 0 || !refs) {
       settling.delete(id);
       if (refs) refs.el.style.transform = '';
       done = true;

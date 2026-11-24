@@ -5,10 +5,14 @@
  *   npm run bench -- --digest --save=<board.json>
  *   node tools/perf.mjs --url=http://localhost:4173/ --save=<board.json> [--json=<out.json>]
  *
- *   other flags: --only=drag,tidy     only these scenarios (rest, pan, zoom, first, drag, hub, tidy, place, toasts)
+ *   other flags: --only=drag,tidy     only these scenarios (rest, pan, zoom, first, drag, hub, settle, tidy, place, toasts)
  *                --rates=1,4          the processor slow-downs to measure at (4 is the page's budget)
  *                --sizes=desktop      only this window (desktop: 1440x900 with a mouse; phone: 390x844 with fingers)
  *                --noProfile          skip the pass that says where the time goes
+ *                --glides             also say how cards glide in the scenarios that end in a glide (settle and
+ *                                     tidy): for the card that glides furthest, the most of its journey it covers
+ *                                     in one frame, in how many frames it arrives, and how long that takes. (Off
+ *                                     unless asked for: watching every card at every frame costs a little.)
  *
  * It needs Playwright with its Chromium, and takes it from wherever Node finds it (a global install with
  * NODE_PATH set will do): it is not one of the project's dependencies.
@@ -21,6 +25,7 @@
  *           let go, and glides to rest. The browser has not yet made fast code of the routing, and it shows
  *   drag    the same drag once the card has been round twice already: what carrying a card costs for the rest of a sitting
  *   hub     that, with the card that has the most wires (late in a game, a Market that half the board sells to)
+ *   settle  a card is let go on top of its nearest neighbour, and glides to the nearest free place
  *   tidy    Tidy: every card it moves glides to its new place at once
  *   place   a card picked from the build bar is carried over the board (mouse only)
  *   toasts  three toasts are up while nothing else happens
@@ -70,10 +75,20 @@ async function open(browser, size) {
   await context.addInitScript((game) => {
     localStorage.setItem('flowstate-save-v1', JSON.stringify({ ...game, savedAt: Date.now() }));
     localStorage.setItem('flowstate-hud-v1', JSON.stringify({ summaryDone: true }));
-    const perf = { on: false, frames: [], long: [] };
+    const perf = { on: false, frames: [], long: [], glides: false, cards: [] };
     window.__perf = perf;
+    // (With --glides: where every card is drawn at every frame, as its place and how far from it it still is.)
+    const num = (v) => parseFloat(v) || 0;
     const loop = (t) => {
       if (perf.on) perf.frames.push(t);
+      if (perf.on && perf.glides) {
+        const row = [];
+        for (const el of document.querySelectorAll('#nodes .node, .node[data-id]')) {
+          const m = /translate\((-?[\d.]+)px,\s*(-?[\d.]+)px\)/.exec(el.style.transform);
+          row.push(+el.dataset.id, num(el.style.left), num(el.style.top), m ? +m[1] : 0, m ? +m[2] : 0);
+        }
+        perf.cards.push(t, row);
+      }
       requestAnimationFrame(loop);
     };
     requestAnimationFrame(loop);
@@ -235,6 +250,34 @@ const SCENARIOS = {
   first: carry(false, 0),
   drag: carry(false, 2),
   hub: carry(true, 2),
+  settle: {
+    before: async (s) => {
+      const card = await cardToCarry(s.page, false);
+      // The middle of the card nearest to it on screen: let go there, it has to find a free place beside it.
+      const to = await s.page.evaluate((id) => {
+        const mid = (el) => {
+          const r = el.getBoundingClientRect();
+          return { x: r.left + r.width / 2, y: r.top + r.height / 2 };
+        };
+        const me = mid(document.querySelector(`.node[data-id="${id}"]`));
+        let best = null;
+        for (const el of document.querySelectorAll('.node[data-id]')) {
+          if (el.dataset.id === String(id)) continue;
+          const m = mid(el);
+          const d = Math.hypot(m.x - me.x, m.y - me.y);
+          if (!best || d < best.d) best = { d, x: m.x - me.x, y: m.y - me.y };
+        }
+        return best;
+      }, card.id);
+      return { card, to };
+    },
+    run: async (s, { card, to }) => {
+      const n = 12;
+      await hands(s).drag(card.at, line(n, to.x / n, to.y / n), { hold: 320 });
+      await frames(s.page, 45);
+    },
+    after: async (s, { card }) => ({ wires: card.wires }),
+  },
   tidy: {
     before: async (s) => {
       await s.page.evaluate(() => window.flowstate.view.fit());
@@ -313,15 +356,17 @@ async function measure(browser, size, name, rate, profile) {
       await s.cdp.send('Profiler.start');
     }
     const m0 = await metrics(s.cdp);
-    await s.page.evaluate(() => {
+    await s.page.evaluate((glides) => {
       window.__perf.frames = [];
       window.__perf.long = [];
+      window.__perf.cards = [];
+      window.__perf.glides = glides;
       window.__perf.on = true;
-    });
+    }, flag('glides') && !profile);
     await sc.run(s, ctx);
     const got = await s.page.evaluate(() => {
       window.__perf.on = false;
-      return { frames: window.__perf.frames, long: window.__perf.long };
+      return { frames: window.__perf.frames, long: window.__perf.long, cards: window.__perf.cards };
     });
     const m1 = await metrics(s.cdp);
     const prof = profile ? (await s.cdp.send('Profiler.stop')).profile : null;
@@ -340,10 +385,52 @@ async function measure(browser, size, name, rate, profile) {
       check, errors: s.errors,
     };
     if (prof) out.where = where(prof, n);
+    if (got.cards.length) out.glide = glideOf(got.cards);
     return out;
   } finally {
     await s.context.close();
   }
+}
+
+/**
+ * How the card that glides furthest got home: from the frames' record of where each card is drawn (`cards`: a time,
+ * then id, left, top and the offset it is still drawn at, for every card). Its journey is from where it was drawn
+ * at the last frame before the glide to its place; `most` is the largest share of that covered between two frames.
+ */
+function glideOf(cards) {
+  const seen = new Map();
+  let best = null;
+  for (let f = 0; f < cards.length; f += 2) {
+    const t = cards[f], row = cards[f + 1];
+    for (let i = 0; i < row.length; i += 5) {
+      const [id, left, top, ox, oy] = row.slice(i, i + 5);
+      const was = seen.get(id);
+      const off = Math.hypot(ox, oy);
+      if (was?.glide) {
+        const g = was.glide;
+        g.shares.push(off > 0 ? Math.max(0, 1 - off / g.journey) : 1);
+        g.gaps.push(Math.round(t - was.t));
+        if (off === 0) {
+          g.ms = Math.round(t - g.t0);
+          if (!best || g.journey > best.journey) best = g;
+          was.glide = null;
+        }
+      } else if (off > 0 && was) {
+        // (Its place has just been set to where it is going, and it is drawn `off` short of it.)
+        const journey = Math.hypot(left - was.x, top - was.y);
+        if (journey > 1) was.glide = { id, journey, t0: was.t, shares: [Math.max(0, 1 - off / journey)], gaps: [Math.round(t - was.t)], ms: 0 };
+      }
+      const now = seen.get(id) ?? {};
+      seen.set(id, { x: left + ox, y: top + oy, t, glide: was?.glide ?? now.glide ?? null });
+    }
+  }
+  if (!best) return null;
+  let most = 0, prev = 0;
+  for (const sh of best.shares) {
+    most = Math.max(most, sh - prev);
+    prev = sh;
+  }
+  return { card: best.id, px: Math.round(best.journey), frames: best.shares.length, ms: best.ms, most: Math.round(most * 100), shares: best.shares.map((x) => Math.round(x * 100)), gaps: best.gaps };
 }
 
 /** From a profile: for each of the page's functions, ms a frame spent in it and in what it called; the heaviest first. */
@@ -392,6 +479,7 @@ try {
         report.runs.push({ size: sizeName, scenario: name, rate, ...m });
         console.log(`${name.padEnd(9)} ${pad(`${rate}x`, 6)} ${pad(m.frames, 7)} ${pad(m.median, 7)} ${pad(m.p95, 6)} ${pad(m.worst, 6)} ${pad(m.over33, 6)} ${pad(m.over50, 6)} ${pad(m.fps, 6)} ${pad(`${m.longTasks} (${m.longest})`, 11)} ${pad(m.script, 8)} ${pad(m.style, 6)} ${pad(m.layout, 7)}`
           + `   ${JSON.stringify(m.check)}${m.errors.length ? `   ERRORS ${m.errors.join('; ')}` : ''}`);
+        if (m.glide) console.log(`          glide, ${rate}x: card ${m.glide.card} over ${m.glide.px} px in ${m.glide.frames} frames and ${m.glide.ms} ms, at most ${m.glide.most}% of the way in one frame; % by frame: ${m.glide.shares.join(' ')}; ms between frames: ${m.glide.gaps.join(' ')}`);
       }
       if (!flag('noProfile')) {
         const rate = Math.max(...rates);
