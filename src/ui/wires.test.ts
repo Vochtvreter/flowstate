@@ -644,6 +644,25 @@ describe('what is kept from one look at the board to the next never changes how 
     expect(kept).toBeLessThan(fresh * 0.8);
   });
 
+  it('a way taken only because every card was in reach is looked for again when a card is built further off', () => {
+    // A tall card stands between two level ports. The way over it is long, and is taken at the first, short reach
+    // only because that reach takes in every card on the board. Then a card is built beyond everything that way had
+    // to do with: a page that had just loaded would now look further, and find a line that card lends it.
+    const cards = [card(1, -172, 264), card(9, 400, 264), card(2, 150, 100, 100, 600)];
+    const wires: WireIn[] = [{ id: 1, from: 1, to: 9, a: pt(0, 300), b: pt(400, 300) }];
+    forgetWays();
+    const before = routeAll(wires, cards, 'squared', N).get(1)!.d;
+    cards.push(card(7, 610, 104));
+    const kept = routeAll(wires, cards, 'squared', N).get(1)!.d;
+    forgetWays();
+    const fresh = routeAll(wires, cards, 'squared', N).get(1)!.d;
+    expect(fresh).not.toBe(before);
+    expect(kept).toBe(fresh);
+    // ...and when it is taken away again, the first way is back.
+    cards.pop();
+    expect(routeAll(wires, cards, 'squared', N).get(1)!.d).toBe(before);
+  });
+
   it('a line that was drawn is given again while its wire has not changed, and anew when it has', () => {
     forgetWays();
     const cards = [card(1, 100, 120), card(2, 500, 120), card(9, 900, 120), card(7, 3000, 2000)];

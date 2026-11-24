@@ -477,9 +477,8 @@ function inReach(s: Pt, t: Pt, reach: number, cards: Box[]): { by: Box[]; blocks
 // Nothing is rounded: a card that has moved by a hair has moved, so a board at rest is always drawn as a board that
 // has just been loaded is, whatever came before.
 
-/** The cards as they stood at the last look (x0, y0, x1, y1 of each). */
-let stood = new Float64Array(0);
-let stoodCount = 0;
+/** The cards as they stood at the last look, by id: x0, y0, x1, y1, and the look they were last seen at. (A box with no id goes by its place in the list.) */
+const stood = new Map<number, number[]>();
 /** How often the cards have been looked at. */
 let looks = 0;
 /** The boxes that changed at a look (where a card was, and where it is now), for the last few looks at which any did. */
@@ -490,27 +489,39 @@ let forgotten = 0;
 /** routeAll looks at the cards once for all its wires; a way asked for on its own (`wayRound`) looks for itself. */
 let routing = false;
 
+/**
+ * Note which of these cards stand elsewhere than at the last look, are new, or are gone. The cards are those that
+ * count for what is kept: a card in the hand is left out (see `routeAll`), so carrying it about notes nothing, picking
+ * it up notes the place it left, and putting it down the place it has come to.
+ */
 function look(cards: Box[]) {
   looks++;
-  const n = cards.length;
   const boxes: number[] = [];
-  const both = Math.min(n, stoodCount);
-  for (let i = 0; i < both; i++) {
-    const c = cards[i], k = i * 4;
-    if (stood[k] === c.x0 && stood[k + 1] === c.y0 && stood[k + 2] === c.x1 && stood[k + 3] === c.y1) continue;
-    boxes.push(stood[k], stood[k + 1], stood[k + 2], stood[k + 3], c.x0, c.y0, c.x1, c.y1);
+  for (let i = 0; i < cards.length; i++) {
+    const c = cards[i];
+    const id = (c as Partial<CardBox>).id ?? -1 - i;
+    const was = stood.get(id);
+    if (!was) {
+      boxes.push(c.x0, c.y0, c.x1, c.y1);
+      stood.set(id, [c.x0, c.y0, c.x1, c.y1, looks]);
+      continue;
+    }
+    if (was[0] !== c.x0 || was[1] !== c.y0 || was[2] !== c.x1 || was[3] !== c.y1) {
+      boxes.push(was[0], was[1], was[2], was[3], c.x0, c.y0, c.x1, c.y1);
+      was[0] = c.x0;
+      was[1] = c.y0;
+      was[2] = c.x1;
+      was[3] = c.y1;
+    }
+    was[4] = looks;
   }
-  for (let i = both; i < stoodCount; i++) boxes.push(stood[i * 4], stood[i * 4 + 1], stood[i * 4 + 2], stood[i * 4 + 3]);
-  for (let i = both; i < n; i++) boxes.push(cards[i].x0, cards[i].y0, cards[i].x1, cards[i].y1);
-  if (stood.length < n * 4) stood = new Float64Array(Math.max(n * 4, stood.length * 2, 256));
-  for (let i = 0; i < n; i++) {
-    const c = cards[i], k = i * 4;
-    stood[k] = c.x0;
-    stood[k + 1] = c.y0;
-    stood[k + 2] = c.x1;
-    stood[k + 3] = c.y1;
+  if (stood.size > cards.length) {
+    for (const [id, was] of stood) {
+      if (was[4] === looks) continue;
+      boxes.push(was[0], was[1], was[2], was[3]);
+      stood.delete(id);
+    }
   }
-  stoodCount = n;
   if (!boxes.length) return;
   moves.push({ look: looks, boxes });
   if (moves.length > MOVES) forgotten = moves.shift()!.look;
@@ -537,6 +548,12 @@ interface Kept {
   sx: number; sy: number; tx: number; ty: number; kind: number;
   x0: number; y0: number; x1: number; y1: number;
   gx0: number; gy0: number; gx1: number; gy1: number;
+  /**
+   * How many cards there were, and how many of them each reach that was tried took in. A search stops where a reach
+   * takes in every card, whatever it found: so a card built or taken away far outside the patches can still change
+   * what would be found, by making a reach take in all of them, or no longer all (see `sameReach`).
+   */
+  n: number; took: number[];
   seen: number; way: Pt[] | null;
 }
 const kept = new Map<number, Kept>();
@@ -547,8 +564,15 @@ export function forgetWays() {
   plains.clear();
   drawn.clear();
   moves.length = 0;
-  stoodCount = 0;
+  stood.clear();
   forgotten = looks;
+}
+
+/** Would each reach that was tried still take in all the cards, or still not, now that there are `n` of them? */
+function sameReach(k: Kept, n: number): boolean {
+  if (n === k.n) return true;
+  for (const c of k.took) if ((c === k.n) !== (c === n)) return false;
+  return true;
 }
 
 /**
@@ -562,7 +586,7 @@ export function forgetWays() {
 function stretch(s: Pt, t: Pt, cards: Box[], came: number, port: boolean, key?: number): Pt[] | null {
   const kind = (came + 1) * 2 + (port ? 1 : 0);
   const old = key == null ? undefined : kept.get(key);
-  if (old && old.sx === s.x && old.sy === s.y && old.tx === t.x && old.ty === t.y && old.kind === kind
+  if (old && old.sx === s.x && old.sy === s.y && old.tx === t.x && old.ty === t.y && old.kind === kind && sameReach(old, cards.length)
     // (A card counts for the search's lines when it comes within PASS of the patch, its edge included: a pixel more is on the safe side.)
     && untouched(old.seen, old.x0, old.y0, old.x1, old.y1, PASS_X + 1, PASS_Y + 1)
     && untouched(old.seen, old.gx0, old.gy0, old.gx1, old.gy1, CLEAR, CLEAR)) {
@@ -572,9 +596,11 @@ function stretch(s: Pt, t: Pt, cards: Box[], came: number, port: boolean, key?: 
   }
   const direct = Math.abs(s.x - t.x) + Math.abs(s.y - t.y);
   let way: Pt[] | null = null, used = Infinity, by: Box[] = cards;
+  const took: number[] = [];
   for (const reach of REACH) {
     let blocks: Box[];
     ({ by, blocks } = inReach(s, t, reach, cards));
+    took.push(by.length);
     const xs = lines([s.x, t.x], by.flatMap((c) => [c.x0 - PASS_X, c.x1 + PASS_X]));
     const ys = lines([s.y, t.y], by.flatMap((c) => [c.y0 - PASS_Y, c.y1 + PASS_Y]));
     const path = search(xs, ys, blocks, xs.indexOf(s.x), ys.indexOf(s.y), xs.indexOf(t.x), ys.indexOf(t.y), came, port);
@@ -601,7 +627,7 @@ function stretch(s: Pt, t: Pt, cards: Box[], came: number, port: boolean, key?: 
       gy1 = Math.max(gy1, c.y1 + PASS_Y);
     }
     kept.set(key, {
-      sx: s.x, sy: s.y, tx: t.x, ty: t.y, kind, x0, y0, x1, y1, gx0, gy0, gx1, gy1,
+      sx: s.x, sy: s.y, tx: t.x, ty: t.y, kind, x0, y0, x1, y1, gx0, gy0, gx1, gy1, n: cards.length, took,
       seen: looks, way: way && way.map((p) => ({ x: p.x, y: p.y })),
     });
   }
