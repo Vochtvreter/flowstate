@@ -477,9 +477,8 @@ function inReach(s: Pt, t: Pt, reach: number, cards: Box[]): { by: Box[]; blocks
 // Nothing is rounded: a card that has moved by a hair has moved, so a board at rest is always drawn as a board that
 // has just been loaded is, whatever came before.
 
-/** The cards as they stood at the last look (x0, y0, x1, y1 of each). */
-let stood = new Float64Array(0);
-let stoodCount = 0;
+/** The cards as they stood at the last look, by id: x0, y0, x1, y1, and the look they were last seen at. (A box with no id goes by its place in the list.) */
+const stood = new Map<number, number[]>();
 /** How often the cards have been looked at. */
 let looks = 0;
 /** The boxes that changed at a look (where a card was, and where it is now), for the last few looks at which any did. */
@@ -490,27 +489,39 @@ let forgotten = 0;
 /** routeAll looks at the cards once for all its wires; a way asked for on its own (`wayRound`) looks for itself. */
 let routing = false;
 
+/**
+ * Note which of these cards stand elsewhere than at the last look, are new, or are gone. The cards are those that
+ * count for what is kept: a card in the hand is left out (see `routeAll`), so carrying it about notes nothing, picking
+ * it up notes the place it left, and putting it down the place it has come to.
+ */
 function look(cards: Box[]) {
   looks++;
-  const n = cards.length;
   const boxes: number[] = [];
-  const both = Math.min(n, stoodCount);
-  for (let i = 0; i < both; i++) {
-    const c = cards[i], k = i * 4;
-    if (stood[k] === c.x0 && stood[k + 1] === c.y0 && stood[k + 2] === c.x1 && stood[k + 3] === c.y1) continue;
-    boxes.push(stood[k], stood[k + 1], stood[k + 2], stood[k + 3], c.x0, c.y0, c.x1, c.y1);
+  for (let i = 0; i < cards.length; i++) {
+    const c = cards[i];
+    const id = (c as Partial<CardBox>).id ?? -1 - i;
+    const was = stood.get(id);
+    if (!was) {
+      boxes.push(c.x0, c.y0, c.x1, c.y1);
+      stood.set(id, [c.x0, c.y0, c.x1, c.y1, looks]);
+      continue;
+    }
+    if (was[0] !== c.x0 || was[1] !== c.y0 || was[2] !== c.x1 || was[3] !== c.y1) {
+      boxes.push(was[0], was[1], was[2], was[3], c.x0, c.y0, c.x1, c.y1);
+      was[0] = c.x0;
+      was[1] = c.y0;
+      was[2] = c.x1;
+      was[3] = c.y1;
+    }
+    was[4] = looks;
   }
-  for (let i = both; i < stoodCount; i++) boxes.push(stood[i * 4], stood[i * 4 + 1], stood[i * 4 + 2], stood[i * 4 + 3]);
-  for (let i = both; i < n; i++) boxes.push(cards[i].x0, cards[i].y0, cards[i].x1, cards[i].y1);
-  if (stood.length < n * 4) stood = new Float64Array(Math.max(n * 4, stood.length * 2, 256));
-  for (let i = 0; i < n; i++) {
-    const c = cards[i], k = i * 4;
-    stood[k] = c.x0;
-    stood[k + 1] = c.y0;
-    stood[k + 2] = c.x1;
-    stood[k + 3] = c.y1;
+  if (stood.size > cards.length) {
+    for (const [id, was] of stood) {
+      if (was[4] === looks) continue;
+      boxes.push(was[0], was[1], was[2], was[3]);
+      stood.delete(id);
+    }
   }
-  stoodCount = n;
   if (!boxes.length) return;
   moves.push({ look: looks, boxes });
   if (moves.length > MOVES) forgotten = moves.shift()!.look;
@@ -537,6 +548,12 @@ interface Kept {
   sx: number; sy: number; tx: number; ty: number; kind: number;
   x0: number; y0: number; x1: number; y1: number;
   gx0: number; gy0: number; gx1: number; gy1: number;
+  /**
+   * How many cards there were, and how many of them each reach that was tried took in. A search stops where a reach
+   * takes in every card, whatever it found: so a card built or taken away far outside the patches can still change
+   * what would be found, by making a reach take in all of them, or no longer all (see `sameReach`).
+   */
+  n: number; took: number[];
   seen: number; way: Pt[] | null;
 }
 const kept = new Map<number, Kept>();
@@ -547,8 +564,15 @@ export function forgetWays() {
   plains.clear();
   drawn.clear();
   moves.length = 0;
-  stoodCount = 0;
+  stood.clear();
   forgotten = looks;
+}
+
+/** Would each reach that was tried still take in all the cards, or still not, now that there are `n` of them? */
+function sameReach(k: Kept, n: number): boolean {
+  if (n === k.n) return true;
+  for (const c of k.took) if ((c === k.n) !== (c === n)) return false;
+  return true;
 }
 
 /**
@@ -562,7 +586,7 @@ export function forgetWays() {
 function stretch(s: Pt, t: Pt, cards: Box[], came: number, port: boolean, key?: number): Pt[] | null {
   const kind = (came + 1) * 2 + (port ? 1 : 0);
   const old = key == null ? undefined : kept.get(key);
-  if (old && old.sx === s.x && old.sy === s.y && old.tx === t.x && old.ty === t.y && old.kind === kind
+  if (old && old.sx === s.x && old.sy === s.y && old.tx === t.x && old.ty === t.y && old.kind === kind && sameReach(old, cards.length)
     // (A card counts for the search's lines when it comes within PASS of the patch, its edge included: a pixel more is on the safe side.)
     && untouched(old.seen, old.x0, old.y0, old.x1, old.y1, PASS_X + 1, PASS_Y + 1)
     && untouched(old.seen, old.gx0, old.gy0, old.gx1, old.gy1, CLEAR, CLEAR)) {
@@ -572,9 +596,11 @@ function stretch(s: Pt, t: Pt, cards: Box[], came: number, port: boolean, key?: 
   }
   const direct = Math.abs(s.x - t.x) + Math.abs(s.y - t.y);
   let way: Pt[] | null = null, used = Infinity, by: Box[] = cards;
+  const took: number[] = [];
   for (const reach of REACH) {
     let blocks: Box[];
     ({ by, blocks } = inReach(s, t, reach, cards));
+    took.push(by.length);
     const xs = lines([s.x, t.x], by.flatMap((c) => [c.x0 - PASS_X, c.x1 + PASS_X]));
     const ys = lines([s.y, t.y], by.flatMap((c) => [c.y0 - PASS_Y, c.y1 + PASS_Y]));
     const path = search(xs, ys, blocks, xs.indexOf(s.x), ys.indexOf(s.y), xs.indexOf(t.x), ys.indexOf(t.y), came, port);
@@ -601,7 +627,7 @@ function stretch(s: Pt, t: Pt, cards: Box[], came: number, port: boolean, key?: 
       gy1 = Math.max(gy1, c.y1 + PASS_Y);
     }
     kept.set(key, {
-      sx: s.x, sy: s.y, tx: t.x, ty: t.y, kind, x0, y0, x1, y1, gx0, gy0, gx1, gy1,
+      sx: s.x, sy: s.y, tx: t.x, ty: t.y, kind, x0, y0, x1, y1, gx0, gy0, gx1, gy1, n: cards.length, took,
       seen: looks, way: way && way.map((p) => ({ x: p.x, y: p.y })),
     });
   }
@@ -839,14 +865,24 @@ function plain(a: Pt, b: Pt): Pt[][] {
  *    (`wayRound`); only a wire with no way at all (a port walled in) still passes behind a card, the fewest it can;
  *  - then the runs that ended up on one line are set side by side, each on a track of its own (`sideBySide`): wires
  *    that turn in before the same card, or pass the same side of one, are a ribbon and not one thick line.
+ *
+ * `carried`: the cards in the hand, and those still gliding to where they were let go. A card that is only passing
+ * lends the other wires no line to turn at: a wire that is not its own finds its way as if the card were not on the
+ * board, for as long as the way it finds stays clear of the card; with the card in that way, it goes round it as any
+ * card; and a wire with no way among the other cards has none with this one either, and is not looked for. The
+ * carried card's own wires follow it as ever. So a card carried across the board is not forty searches a step, and
+ * what is kept (`stretch`, `plainWay`) has to do with the other cards only. With nothing carried, nothing differs.
  */
-export function routeAll(wires: WireIn[], cards: CardBox[], style: WireStyle, n: number): Map<number, Drawn> {
+export function routeAll(wires: WireIn[], cards: CardBox[], style: WireStyle, n: number, opts: { carried?: ReadonlySet<number> } = {}): Map<number, Drawn> {
   const out = new Map<number, Drawn>();
   if (style === 'curved') {
     for (const w of wires) out.set(w.id, drawCurved(w.a, w.b, w.pins ?? [], n));
     return out;
   }
-  look(cards);
+  const carried = opts.carried;
+  const hand = carried?.size ? cards.filter((c) => carried.has(c.id)) : [];
+  const rest = hand.length ? cards.filter((c) => !carried!.has(c.id)) : cards;
+  look(rest);
   routing = true;
   try {
     const routes = new Map<number, Pt[]>();
@@ -856,23 +892,46 @@ export function routeAll(wires: WireIn[], cards: CardBox[], style: WireStyle, n:
     const through = new Map<string, number>();
     const key = (q: Pt) => `${r1(q.x)},${r1(q.y)}`;
     for (const w of wires) for (const q of w.pins ?? []) through.set(key(q), (through.get(key(q)) ?? 0) + 1);
+    /** Is this way clear of every card in the hand? */
+    const past = (v: Pt[], w: WireIn) => inWay(v, hand, w.from, w.to) === 0;
     for (const w of wires) {
+      // A carried card's own wire has an end that moves with it: found afresh among all the cards, and not kept.
+      const own = hand.length > 0 && (carried!.has(w.from) || carried!.has(w.to));
       if (w.pins?.length) {
         // Through its pins the plain way (level to each pin's upright, up or down through the pin) where no card is
         // in the way of that; else it finds its way from pin to pin as any wire does from port to port.
         const straight = throughPins(w.a, w.b, w.pins);
-        const own = (inWay(straight, cards, w.from, w.to) === 0 ? straight : wayRound(w.a, w.b, cards, w.id, w.pins) ?? straight).map((q) => ({ x: q.x, y: q.y }));
-        routes.set(w.id, own);
-        if (w.pins.some((q) => (through.get(key(q)) ?? 0) > 1)) held.push({ net: `${w.from}:${r1(w.a.x)},${r1(w.a.y)}`, v: own });
+        let v: Pt[];
+        if (inWay(straight, cards, w.from, w.to) === 0) v = straight;
+        else if (own) v = wayRound(w.a, w.b, cards, undefined, w.pins) ?? straight;
+        else {
+          const round = wayRound(w.a, w.b, rest, w.id, w.pins);
+          v = !round ? straight : !hand.length || past(round, w) ? round : wayRound(w.a, w.b, cards, undefined, w.pins) ?? straight;
+        }
+        const mine = v.map((q) => ({ x: q.x, y: q.y }));
+        routes.set(w.id, mine);
+        if (w.pins.some((q) => (through.get(key(q)) ?? 0) > 1)) held.push({ net: `${w.from}:${r1(w.a.x)},${r1(w.a.y)}`, v: mine });
         continue;
       }
-      const p = plainWay(w, cards);
-      // No plain way is clear: round the cards; and with no way at all, the plain way behind the fewest of them.
-      const v = p.clear ?? wayRound(w.a, w.b, cards, w.id) ?? (p.least ??= leastBehind(w, cards));
+      let v: Pt[] | undefined, net: string;
+      if (own) {
+        net = netOf(w);
+        v = clearPlain(w, plain(w.a, w.b), cards)[0] ?? wayRound(w.a, w.b, cards) ?? leastBehind(w, cards);
+      } else {
+        const p = plainWay(w, rest);
+        net = p.net;
+        v = hand.length ? p.clears.find((r) => past(r, w)) : p.clears[0];
+        if (!v) {
+          // No plain way is clear: round the cards; and with no way at all, the plain way behind the fewest of them.
+          const round = wayRound(w.a, w.b, rest, w.id);
+          if (!hand.length) v = round ?? (p.least ??= leastBehind(w, cards));
+          else v = !round ? leastBehind(w, cards) : past(round, w) ? round : wayRound(w.a, w.b, cards) ?? leastBehind(w, cards);
+        }
+      }
       // (Its own copy of the corners: they are moved where they stand when wires are set side by side.)
-      const own = v.map((q) => ({ x: q.x, y: q.y }));
-      routes.set(w.id, own);
-      free.push({ net: p.net, v: own });
+      const mine = v.map((q) => ({ x: q.x, y: q.y }));
+      routes.set(w.id, mine);
+      free.push({ net, v: mine });
     }
     sideBySide(free, cards);
     // Wires through pins are the player's, and are not moved aside for the wires that find their own way, nor for
@@ -893,19 +952,30 @@ export function routeAll(wires: WireIn[], cards: CardBox[], style: WireStyle, n:
   return out;
 }
 
+/** Wires out of one port are one net: they may share a line until they part (see `sideBySide`). */
+const netOf = (w: WireIn) => `${w.from}:${r1(w.a.x)},${r1(w.a.y)}`;
+
+/** Of a wire's plain ways, those that come within CLEAR of none of these cards, in the order it would take them. */
+function clearPlain(w: WireIn, tries: Pt[][], cards: CardBox[]): Pt[][] {
+  // (The first way of a wire to a card close ahead turns in the gap between its own two cards, however narrow:
+  // those two are not in its way.)
+  const between = !ahead(w.a, w.b) && w.b.x - w.a.x >= NEAR;
+  return tries.filter((r, i) => inWay(r, between && i === 0 ? cards.filter((c) => c.id !== w.from && c.id !== w.to) : cards, w.from, w.to) === 0);
+}
+
 /**
- * What a wire with no pins was last given of its plain ways: the first that is clear of every card, or none. Kept
- * while its ends are where they were and no card has moved where those ways run (see `untouched`).
+ * What a wire with no pins was last given of its plain ways: those that are clear of every card (the first is the one
+ * it takes; with a card in the hand, the first that is clear of that too). Kept while its ends are where they were and
+ * no card has moved where those ways run (see `untouched`).
  */
 interface Plain {
   ax: number; ay: number; bx: number; by: number; from: number; to: number;
   /** All its plain ways lie in this patch. */
   x0: number; y0: number; x1: number; y1: number;
   seen: number;
-  clear: Pt[] | null;
+  clears: Pt[][];
   /** With no plain way clear and no way round either: the plain way behind the fewest cards. Worked out when it is first wanted. */
   least: Pt[] | null;
-  /** Wires out of one port are one net (see `sideBySide`). */
   net: string;
 }
 const plains = new Map<number, Plain>();
@@ -928,11 +998,7 @@ function plainWay(w: WireIn, cards: CardBox[]): Plain {
       y1 = Math.max(y1, q.y);
     }
   }
-  // (The first way of a wire to a card close ahead turns in the gap between its own two cards, however narrow:
-  // those two are not in its way.)
-  const between = !ahead(a, b) && b.x - a.x >= NEAR;
-  const clear = tries.find((r, i) => inWay(r, between && i === 0 ? cards.filter((c) => c.id !== w.from && c.id !== w.to) : cards, w.from, w.to) === 0) ?? null;
-  const p: Plain = { ax: a.x, ay: a.y, bx: b.x, by: b.y, from: w.from, to: w.to, x0, y0, x1, y1, seen: looks, clear, least: null, net: `${w.from}:${r1(a.x)},${r1(a.y)}` };
+  const p: Plain = { ax: a.x, ay: a.y, bx: b.x, by: b.y, from: w.from, to: w.to, x0, y0, x1, y1, seen: looks, clears: clearPlain(w, tries, cards), least: null, net: netOf(w) };
   plains.set(w.id, p);
   return p;
 }

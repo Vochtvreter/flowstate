@@ -9,14 +9,19 @@
  *   npm run bench -- --save=<file>       write the large board as a save, for tools/perf.mjs to load in a browser
  *                                        (--board=medium or small for one of the others)
  *   npm run bench -- --noVerdicts        skip the adviser (the slowest part to measure)
+ *   npm run bench -- --noHand            route as if no card were ever in the hand: every wire finds its way round a
+ *                                        carried card at every step, as it did before a carried card stopped
+ *                                        lending the other wires its lines (to compare the two)
  *
  * DOM-free, like tools/pacing.ts, whose players build the boards: the newcomer's finished demo (small), and the
  * fast player's board at 20 and at 30 minutes (medium and large). The times are this machine's, unthrottled: the
  * page's budget is a 4x slower processor (docs/PITCH_PLAN.md), so read them times four.
  *
  * What is measured is what the page does, without the page: `routing` is routeAll with the ends and the card
- * boxes board.ts would hand it (routeWires), a drag is the card with the most wires carried round a square in
- * grid steps, and a glide is every frame of a card coming to rest (stepSettle), for one card and for a Tidy.
+ * boxes board.ts would hand it (routeWires), on the board as the page shows it (cards the player's script left on
+ * one another are pulled apart, as they are when a board is loaded). A card is carried right, down and back in
+ * grid steps, a card with a handful of wires and then the one with the most, each in the hand as board.ts says it
+ * is; and a glide is every frame of a card coming to rest (stepSettle), for one card let go and for a Tidy.
  */
 import { writeFileSync } from 'node:fs';
 import { clipById } from '../src/actions';
@@ -25,7 +30,7 @@ import { FORECAST, LOOKS, lookahead, measure } from '../src/forecast';
 import { offlineGains, tick } from '../src/sim';
 import { GRID, Game, cloneGame, deserialize, serialize } from '../src/state';
 import { FLOW_SEGS } from '../src/ui/fx';
-import { nodeSize, wireEnds } from '../src/ui/geom';
+import { Box, Card, nodeSize, roomFor, separate, wireEnds } from '../src/ui/geom';
 import { tidy, tidyInput } from '../src/ui/layout';
 import { COUNT, CardBox, WireIn, WireStyle, forgetWays, routeAll } from '../src/ui/wires';
 import { Bot, CFG, POLICIES } from './pacing';
@@ -162,10 +167,30 @@ function routeInput(g: Game, off?: Offsets): { wires: WireIn[]; cards: CardBox[]
   return { wires, cards };
 }
 
-const route = (g: Game, style: WireStyle = 'squared', off?: Offsets) => {
+/** With --noHand a carried card is a card like any other to the wires (the rule before). */
+const NO_HAND = flag('noHand');
+
+const route = (g: Game, style: WireStyle = 'squared', off?: Offsets, carried?: number[]) => {
   const inp = routeInput(g, off);
-  return routeAll(inp.wires, inp.cards, style, FLOW_SEGS);
+  return routeAll(inp.wires, inp.cards, style, FLOW_SEGS, carried?.length && !NO_HAND ? { carried: new Set(carried) } : {});
 };
+
+/** Cards that stand on one another are pulled apart, as the page does with a board it loads (board.ts, untangle). */
+function apart(g: Game) {
+  const cards: Card[] = g.nodes.map((n) => {
+    const { w, h } = nodeSize(n);
+    return { id: n.id, x: n.x, y: n.y, w, h, room: roomFor(n.type, h), fixed: n.type === 'well' };
+  });
+  const used = new Set(g.nodes.map((n) => n.depositId));
+  const deposits: Box[] = g.deposits.filter((d) => !used.has(d.id)).map((d) => ({ x0: d.x, y0: d.y, x1: d.x + 172, y1: d.y + 72 }));
+  for (const [id, at] of separate(cards, deposits, g.board, GRID)) {
+    const n = g.nodes.find((x) => x.id === id);
+    if (n) {
+      n.x = at.x;
+      n.y = at.y;
+    }
+  }
+}
 
 /** How many wires are drawn differently in `b` than in `a`. */
 function differ(a: Map<number, { d: string }>, b: Map<number, { d: string }>): number {
@@ -174,8 +199,11 @@ function differ(a: Map<number, { d: string }>, b: Map<number, { d: string }>): n
   return n;
 }
 
-/** Every frame of cards gliding home from `from` over `ms`, as stepSettle draws them (60 a second); the last one is at rest. */
-function glide(g: Game, from: Offsets, ms: number): { frames: number[]; searches: number[] } {
+/**
+ * Every frame of cards gliding home from `from` over `ms`, as stepSettle draws them (60 a second); the last one is
+ * at rest. `held`: they are cards the hand let go of, carried to the wires until the frame they land on.
+ */
+function glide(g: Game, from: Offsets, ms: number, held = false): { frames: number[]; searches: number[] } {
   const frames: number[] = [], searches: number[] = [];
   const dur = ms / 1000;
   for (let t = 1 / 60; ; t += 1 / 60) {
@@ -185,7 +213,7 @@ function glide(g: Game, from: Offsets, ms: number): { frames: number[]; searches
     if (u < 1) for (const [id, m] of from) off.set(id, { ox: m.ox * (1 - e), oy: m.oy * (1 - e) });
     const s0 = COUNT.searches;
     const t0 = now();
-    route(g, 'squared', off);
+    route(g, 'squared', off, held && u < 1 ? [...from.keys()] : undefined);
     frames.push(now() - t0);
     searches.push(COUNT.searches - s0);
     if (u >= 1) break;
@@ -193,16 +221,20 @@ function glide(g: Game, from: Offsets, ms: number): { frames: number[]; searches
   return { frames, searches };
 }
 
+interface Carry { wires: number; step: Spread; searches: Spread; /** The one route when it is let go. */ drop: number }
+
 interface Routing {
   cold: number; rest: number; curved: number;
-  drag: Spread; dragSearches: Spread;
-  drop: Spread; tidyMoved: number; tidy: Spread; tidySearches: Spread;
+  /** A card with a handful of wires, and the one with the most, carried across the board. */
+  carry: Carry; hub: Carry;
+  glide: Spread; tidyMoved: number; tidy: Spread; tidySearches: Spread;
   /** Wires that rest on another line after the glide than a board that has just loaded draws. */
   dropOff: number; tidyOff: number;
 }
 
 function routing(src: Game): Routing {
   const g = cloneGame(src)!;
+  apart(g);
   forgetWays();
   let t0 = now();
   route(g);
@@ -210,33 +242,49 @@ function routing(src: Game): Routing {
   const rest = time(() => route(g), 30);
   const curved = time(() => route(g, 'curved'), 30);
 
-  // A drag: the card with the most wires that is not a Drill, round a square of 15 grid steps a side.
   const degree = new Map<number, number>();
   for (const w of g.wires) {
     degree.set(w.from, (degree.get(w.from) ?? 0) + 1);
     degree.set(w.to, (degree.get(w.to) ?? 0) + 1);
   }
-  const card = g.nodes.filter((n) => n.type !== 'well').sort((a, b) => (degree.get(b.id) ?? 0) - (degree.get(a.id) ?? 0) || a.id - b.id)[0];
-  const drag: number[] = [], dragSearches: number[] = [];
-  const { w, h } = nodeSize(card);
-  const x0 = card.x, y0 = card.y;
+  // (Not a Drill: those stay on their deposits. The same two cards tools/perf.mjs carries in the page.)
+  const wired = g.nodes.filter((n) => n.type !== 'well' && (degree.get(n.id) ?? 0) >= 2).sort((a, b) => (degree.get(b.id) ?? 0) - (degree.get(a.id) ?? 0) || a.id - b.id);
   const path: [number, number][] = [];
-  for (const [dx, dy] of [[1, 0], [0, 1], [-1, 0], [0, -1]]) for (let i = 0; i < 15; i++) path.push([dx * GRID, dy * GRID]);
-  for (const [dx, dy] of path) {
-    const x = Math.max(GRID, Math.min(g.board.w - w - GRID, card.x + dx)), y = Math.max(GRID, Math.min(g.board.h - h - GRID, card.y + dy));
-    if (x === card.x && y === card.y) continue;
-    card.x = x;
-    card.y = y;
-    const s0 = COUNT.searches;
-    t0 = now();
-    route(g);
-    drag.push(now() - t0);
-    dragSearches.push(COUNT.searches - s0);
-  }
+  for (const [dx, dy] of [[1, 0], [0, 1], [-1, 0], [0, -1]]) for (let i = 0; i < 28; i++) path.push([dx * GRID, dy * GRID]);
+  /** Picked up, carried right, down, back and up again in grid steps, twice round (the first time to warm up), and put down where it was. */
+  const carried = (card: Game['nodes'][number]): Carry => {
+    const { w, h } = nodeSize(card);
+    const x0 = card.x, y0 = card.y;
+    let step: number[] = [], searches: number[] = [];
+    let drop = 0;
+    for (let lap = 0; lap < 2; lap++) {
+      step = [];
+      searches = [];
+      for (const [dx, dy] of path) {
+        const x = Math.max(GRID, Math.min(g.board.w - w - GRID, card.x + dx)), y = Math.max(GRID, Math.min(g.board.h - h - GRID, card.y + dy));
+        if (x === card.x && y === card.y) continue;
+        card.x = x;
+        card.y = y;
+        const s0 = COUNT.searches;
+        t0 = now();
+        route(g, 'squared', undefined, [card.id]);
+        step.push(now() - t0);
+        searches.push(COUNT.searches - s0);
+      }
+      card.x = x0;
+      card.y = y0;
+      t0 = now();
+      route(g);
+      drop = now() - t0;
+    }
+    return { wires: degree.get(card.id) ?? 0, step: round(spread(step)), searches: round(spread(searches)), drop: r3(drop) };
+  };
+  const one = wired[Math.floor(wired.length / 2)];
+  const carry = carried(one);
+  const hub = carried(wired[0]);
+
   // Let go a little off the grid: the card glides the rest of the way (180 ms, as a dropped card does).
-  card.x = x0;
-  card.y = y0;
-  const drop = glide(g, new Map([[card.id, { ox: -14, oy: 9 }]]), 180);
+  const settle = glide(g, new Map([[one.id, { ox: -14, oy: 9 }]]), 180, true);
   const afterDrop = route(g);
   forgetWays();
   const dropOff = differ(route(g), afterDrop);
@@ -259,9 +307,8 @@ function routing(src: Game): Routing {
   const tidyOff = differ(route(g), afterTidy);
 
   return {
-    cold: r3(cold), rest: r3(rest), curved: r3(curved),
-    drag: round(spread(drag)), dragSearches: round(spread(dragSearches)),
-    drop: round(spread(drop.frames)), tidyMoved: from.size, tidy: round(spread(fly.frames)), tidySearches: round(spread(fly.searches)),
+    cold: r3(cold), rest: r3(rest), curved: r3(curved), carry, hub,
+    glide: round(spread(settle.frames)), tidyMoved: from.size, tidy: round(spread(fly.frames)), tidySearches: round(spread(fly.searches)),
     dropOff, tidyOff,
   };
 }
@@ -369,11 +416,12 @@ function main() {
     const v = b.verdicts;
     console.log(`${(b.name === 'small' ? 'newcomer' : 'mainline').padEnd(12)} ${pad(v.ms.n, 8)}   ${three(v.ms).padEnd(21)} ${`${v.copies.med} / ${v.copies.p90} / ${v.copies.max}`.padEnd(15)} ${v.ticks.med} / ${v.ticks.p90} / ${v.ticks.max}`);
   }
-  console.log('\nSQUARED WIRES (ms; median / 9 in 10 / worst of the steps or frames)');
-  console.log('board    first   at rest  curved   a drag step          searches   a drop glide frame   a Tidy glide frame (cards)   searches');
+  console.log(`\nSQUARED WIRES (ms; median / 9 in 10 / worst of the steps or frames)${NO_HAND ? ', a carried card counting as any card' : ''}`);
+  console.log('board    first   at rest  curved   carrying a card (its wires), searches a step, let go     the busiest card                                a drop glide frame   a Tidy glide frame (cards)');
+  const carryOf = (c: Carry) => `${three(c.step)} (${c.wires})  ${c.searches.med} / ${c.searches.max}  ${ms(c.drop)}`;
   for (const b of out) {
     const r = b.routing;
-    console.log(`${b.name.padEnd(8)} ${pad(ms(r.cold), 5)} ${pad(ms(r.rest), 9)} ${pad(ms(r.curved), 7)}   ${three(r.drag).padEnd(20)} ${`${r.dragSearches.med} / ${r.dragSearches.max}`.padEnd(10)} ${three(r.drop).padEnd(20)} ${`${three(r.tidy)} (${r.tidyMoved})`.padEnd(28)} ${r.tidySearches.med} / ${r.tidySearches.max}`);
+    console.log(`${b.name.padEnd(8)} ${pad(ms(r.cold), 5)} ${pad(ms(r.rest), 9)} ${pad(ms(r.curved), 7)}   ${carryOf(r.carry).padEnd(55)} ${carryOf(r.hub).padEnd(47)} ${three(r.glide).padEnd(20)} ${three(r.tidy)} (${r.tidyMoved})`);
   }
   console.log('\nWIRES AT REST after a glide that a board just loaded draws on another line');
   for (const b of out) console.log(`${b.name.padEnd(8)} after a drop: ${b.routing.dropOff} of ${b.wires}   after Tidy: ${b.routing.tidyOff} of ${b.wires}`);

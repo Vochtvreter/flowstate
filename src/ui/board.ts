@@ -2569,6 +2569,18 @@ function syncNodes(g: Game, fresh: boolean) {
 
 /** The style the wires were last drawn in. */
 let drawnStyle = '';
+/** The cards in the hand: those a drag has moved (`carry`), until it ends (`letGo`). */
+const inHand = new Set<number>();
+/**
+ * The wires were last routed with a card in the hand or gliding home. Once none is, they are routed once more, as a
+ * page that has just loaded the board would route them (`updateBoard`): however the drag ended, that is how it rests.
+ */
+let routedInHand = false;
+
+/** Nothing is in the hand any more: dropped, put back, or the gesture given up. */
+function letGo() {
+  inHand.clear();
+}
 
 function routeWires(g: Game) {
   const list: WireIn[] = [];
@@ -2588,7 +2600,13 @@ function routeWires(g: Game) {
     }
   }
   drawnStyle = ui.wireStyle;
-  const drawn = routeAll(list, cards, ui.wireStyle, FLOW_SEGS);
+  // A card in the hand, or still gliding to where it was let go, lends the other wires no line to turn at: they take
+  // no notice of it unless it is in their way (wires.ts). Tidy's cards are not carried: they are where they belong.
+  let carried: Set<number> | undefined;
+  if (inHand.size) carried = new Set(inHand);
+  for (const [id, m] of settling) if (m.held) (carried ??= new Set()).add(id);
+  routedInHand = !!carried;
+  const drawn = routeAll(list, cards, ui.wireStyle, FLOW_SEGS, carried ? { carried } : undefined);
   syncClips(g);
   for (const w of list) {
     const refs = wireEls.get(w.id)!;
@@ -3013,6 +3031,7 @@ function syncStructure() {
     flashQueue.length = 0;
     hoverNode = hoverWire = null;
     settling.clear();
+    inHand.clear();
     popping.clear();
     fitBack = fitAt = null;
     openingUntil = performance.now() + 800;
@@ -3467,6 +3486,16 @@ export function updateBoard(dt: number) {
   // either form (faint, and a press goes through it to the board): that tap is not meant for a new plot.
   setClass(expandEl, 'quiet', expandQuiet());
   if (settling.size) stepSettle(dt);
+  // The hand is empty and nothing it let go of is still gliding, but the wires were last routed round a carried
+  // card: once more, exactly (a drop that changed the board, and a landing, have done so already).
+  if (routedInHand && !inHand.size) {
+    let gliding = false;
+    for (const m of settling.values()) gliding ||= m.held;
+    if (!gliding) {
+      routeWires(ui.g);
+      layoutWires();
+    }
+  }
   if (drag) edgeScroll(dt);
   if (drag && (drag.kind === 'wire' || drag.kind === 'wireIn')) drawTemp(drag, dt);
   else if (tapWire?.hover && !radial) drawTemp(tapWire, dt);
@@ -3562,12 +3591,13 @@ const NO_ROOM = 'No room left on the board. <b>Expand it</b>, or clear a space.'
 // far from it the card is drawn, which runs down to nothing. Wires follow.
 
 /** How far from its real place each gliding card is drawn right now, and how it got there. */
-const settling = new Map<number, { ox: number; oy: number; fx: number; fy: number; t: number; dur: number }>();
+/** (`held`: a card the hand let go of, gliding the rest of the way: to the wires it is carried until it lands.) */
+const settling = new Map<number, { ox: number; oy: number; fx: number; fy: number; t: number; dur: number; held: boolean }>();
 
 /** Draw a card `fx`, `fy` away from where it now is, and let it glide home over `ms`. Not when motion is reduced. */
-function settleFrom(id: number, fx: number, fy: number, ms: number) {
+function settleFrom(id: number, fx: number, fy: number, ms: number, held = false) {
   if (env.calm || (Math.abs(fx) < 1 && Math.abs(fy) < 1)) return;
-  settling.set(id, { ox: fx, oy: fy, fx, fy, t: 0, dur: ms / 1000 });
+  settling.set(id, { ox: fx, oy: fy, fx, fy, t: 0, dur: ms / 1000, held });
 }
 
 /** The ends of a wire as drawn: where they are, plus however far the cards at each end still have to glide. */
@@ -5016,6 +5046,7 @@ function edgeScroll(dt: number) {
 
 function endDrag() {
   clearTimeout(liftTimer);
+  letGo();
   if (drag?.kind === 'node') {
     nodeEls.get(drag.id)?.el.classList.remove('dragging', 'lift');
     markLevel(drag, []);
@@ -5126,11 +5157,13 @@ function carry(g: Game, ids: number[], dx: number, dy: number) {
       c.y += dy;
     }
   }
+  for (const id of ids) inHand.add(id);
   redraw(g, ids, true);
 }
 
 /** Put the card being dragged, and the rest of its block, back where the drag found them. */
 function putBack(g: Game, d: Extract<Drag, { kind: 'node' }>) {
+  letGo();
   const ids: number[] = [];
   for (const o of [{ id: d.id, x0: d.x0, y0: d.y0 }, ...(d.others ?? [])]) {
     const n = nodeById(g, o.id);
@@ -5367,6 +5400,7 @@ function dropBlock(d: Extract<Drag, { kind: 'node' }>) {
 function dropNode(d: Extract<Drag, { kind: 'node' }>) {
   const g = ui.g;
   const n = nodeById(g, d.id);
+  letGo();
   nodeEls.get(d.id)?.el.classList.remove('dragging');
   appEl?.classList.remove('carrying');
   if (!n) return; // deleted while it was being dragged: nothing to record
@@ -5402,7 +5436,7 @@ function dropNode(d: Extract<Drag, { kind: 'node' }>) {
       });
     } else g.rev++;
     // It is eased there from where it was let go, not jumped.
-    settleFrom(n.id, let_go.x - spot.x, let_go.y - spot.y, 180);
+    settleFrom(n.id, let_go.x - spot.x, let_go.y - spot.y, 180, true);
     // Left level: the wires that run straight now say so once more as the card is let go.
     if (level) for (const id of d.level ?? []) { const refs = wireEls.get(id); if (refs) oneShot(refs.g, 'leveled', 520); }
   }
