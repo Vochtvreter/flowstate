@@ -87,7 +87,8 @@ async function open(browser, size) {
           const m = /translate\((-?[\d.]+)px,\s*(-?[\d.]+)px\)/.exec(el.style.transform);
           row.push(+el.dataset.id, num(el.style.left), num(el.style.top), m ? +m[1] : 0, m ? +m[2] : 0);
         }
-        perf.cards.push(t, row);
+        const v = window.flowstate.ui.view;
+        perf.cards.push(t, row, [v.x, v.y, v.k]);
       }
       requestAnimationFrame(loop);
     };
@@ -394,34 +395,37 @@ async function measure(browser, size, name, rate, profile) {
 
 /**
  * How the card that glides furthest got home: from the frames' record of where each card is drawn (`cards`: a time,
- * then id, left, top and the offset it is still drawn at, for every card). Its journey is from where it was drawn
- * at the last frame before the glide to its place; `most` is the largest share of that covered between two frames.
+ * then id, left, top and the offset it is still drawn at for every card, then the camera). Its journey is from where
+ * it was drawn at the last frame before the glide to its place; `most` is the largest share of that covered between
+ * two frames. And how it crossed the screen, the camera moving too: `off`, the furthest it strayed from the straight
+ * line between where it set out and where it came to rest, and `back`, the most it went back along that line.
  */
 function glideOf(cards) {
   const seen = new Map();
   let best = null;
-  for (let f = 0; f < cards.length; f += 2) {
-    const t = cards[f], row = cards[f + 1];
+  for (let f = 0; f < cards.length; f += 3) {
+    const t = cards[f], row = cards[f + 1], [vx, vy, k] = cards[f + 2];
     for (let i = 0; i < row.length; i += 5) {
       const [id, left, top, ox, oy] = row.slice(i, i + 5);
       const was = seen.get(id);
       const off = Math.hypot(ox, oy);
-      if (was?.glide) {
-        const g = was.glide;
-        g.shares.push(off > 0 ? Math.max(0, 1 - off / g.journey) : 1);
-        g.gaps.push(Math.round(t - was.t));
+      const at = { x: (left + ox) * k + vx, y: (top + oy) * k + vy };
+      let glide = was?.glide ?? null;
+      if (glide) {
+        glide.shares.push(off > 0 ? Math.max(0, 1 - off / glide.journey) : 1);
+        glide.gaps.push(Math.round(t - was.t));
+        glide.screen.push(at);
         if (off === 0) {
-          g.ms = Math.round(t - g.t0);
-          if (!best || g.journey > best.journey) best = g;
-          was.glide = null;
+          glide.ms = Math.round(t - glide.t0);
+          if (!best || glide.journey > best.journey) best = glide;
+          glide = null;
         }
       } else if (off > 0 && was) {
         // (Its place has just been set to where it is going, and it is drawn `off` short of it.)
         const journey = Math.hypot(left - was.x, top - was.y);
-        if (journey > 1) was.glide = { id, journey, t0: was.t, shares: [Math.max(0, 1 - off / journey)], gaps: [Math.round(t - was.t)], ms: 0 };
+        if (journey > 1) glide = { id, journey, t0: was.t, shares: [Math.max(0, 1 - off / journey)], gaps: [Math.round(t - was.t)], screen: [was.at, at], ms: 0 };
       }
-      const now = seen.get(id) ?? {};
-      seen.set(id, { x: left + ox, y: top + oy, t, glide: was?.glide ?? now.glide ?? null });
+      seen.set(id, { x: left + ox, y: top + oy, at, t, glide });
     }
   }
   if (!best) return null;
@@ -430,7 +434,21 @@ function glideOf(cards) {
     most = Math.max(most, sh - prev);
     prev = sh;
   }
-  return { card: best.id, px: Math.round(best.journey), frames: best.shares.length, ms: best.ms, most: Math.round(most * 100), shares: best.shares.map((x) => Math.round(x * 100)), gaps: best.gaps };
+  const a = best.screen[0], b = best.screen[best.screen.length - 1];
+  const len = Math.hypot(b.x - a.x, b.y - a.y) || 1;
+  const ux = (b.x - a.x) / len, uy = (b.y - a.y) / len;
+  let off = 0, back = 0, along = 0;
+  for (const q of best.screen) {
+    const s = (q.x - a.x) * ux + (q.y - a.y) * uy;
+    off = Math.max(off, Math.abs((q.x - a.x) * uy - (q.y - a.y) * ux));
+    back = Math.max(back, along - s);
+    along = Math.max(along, s);
+  }
+  return {
+    card: best.id, px: Math.round(best.journey), frames: best.shares.length, ms: best.ms, most: Math.round(most * 100),
+    onScreen: Math.round(len), off: Math.round(off), back: Math.round(back),
+    shares: best.shares.map((x) => Math.round(x * 100)), gaps: best.gaps,
+  };
 }
 
 /** From a profile: for each of the page's functions, ms a frame spent in it and in what it called; the heaviest first. */
@@ -479,7 +497,7 @@ try {
         report.runs.push({ size: sizeName, scenario: name, rate, ...m });
         console.log(`${name.padEnd(9)} ${pad(`${rate}x`, 6)} ${pad(m.frames, 7)} ${pad(m.median, 7)} ${pad(m.p95, 6)} ${pad(m.worst, 6)} ${pad(m.over33, 6)} ${pad(m.over50, 6)} ${pad(m.fps, 6)} ${pad(`${m.longTasks} (${m.longest})`, 11)} ${pad(m.script, 8)} ${pad(m.style, 6)} ${pad(m.layout, 7)}`
           + `   ${JSON.stringify(m.check)}${m.errors.length ? `   ERRORS ${m.errors.join('; ')}` : ''}`);
-        if (m.glide) console.log(`          glide, ${rate}x: card ${m.glide.card} over ${m.glide.px} px in ${m.glide.frames} frames and ${m.glide.ms} ms, at most ${m.glide.most}% of the way in one frame; % by frame: ${m.glide.shares.join(' ')}; ms between frames: ${m.glide.gaps.join(' ')}`);
+        if (m.glide) console.log(`          glide, ${rate}x: card ${m.glide.card} over ${m.glide.px} px in ${m.glide.frames} frames and ${m.glide.ms} ms, at most ${m.glide.most}% of the way in one frame; on screen ${m.glide.onScreen} px, ${m.glide.off} px off the straight line at most, ${m.glide.back} px back; % by frame: ${m.glide.shares.join(' ')}; ms between frames: ${m.glide.gaps.join(' ')}`);
       }
       if (!flag('noProfile')) {
         const rate = Math.max(...rates);
