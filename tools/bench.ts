@@ -33,7 +33,11 @@ import { FLOW_SEGS } from '../src/ui/fx';
 import { Box, Card, nodeSize, roomFor, separate, wireEnds } from '../src/ui/geom';
 import { tidy, tidyInput } from '../src/ui/layout';
 import { COUNT, CardBox, WireIn, WireStyle, forgetWays, routeAll } from '../src/ui/wires';
-import { Bot, CFG, POLICIES } from './pacing';
+import { Bot, CFG, POLICIES, usedAsLibrary } from './pacing';
+
+// This file is the program (nothing imports it, so main() is called at the bottom unconditionally); the pacing
+// tool it borrows its players from would otherwise print its own report once this one is done.
+usedAsLibrary();
 
 declare const process: { argv: string[]; version: string };
 
