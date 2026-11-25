@@ -14,8 +14,8 @@
 // factory fits the screen. Fit goes there when the factory is too big for the floor.
 import { DATA_COLORS, DATA_NAMES, DataTier, MATERIALS, MatId, NODE_DEFS, NodeType, PIPES, RECIPES, Recipe, TECHS } from '../content';
 import {
-  act, addClip, canConnect, canMove, clipAt, clipById, clipWireAt, connect, connectThrough, cutWires, dropClips, expandBoard, freeDeposits, materialsAt, moveClip, nodeById,
-  placeNode, recipesFor, removeClip, seatDeposit, splice,
+  act, addClip, canConnect, canMove, clipAt, clipById, clipWireAt, connect, connectThrough, cutWires, deleteNodes, dropClips, expandBoard, freeDeposits, materialsAt, moveClip,
+  nodeById, placeNode, recipesFor, refundOfAll, removeClip, seatDeposit, splice,
 } from '../actions';
 import {
   expansionCost, fmt, fmtRate, labRate, matUnlocked, nodeCost, nodeUnlocked, recipeOf, recipeUnlocked, techAvailable,
@@ -71,6 +71,7 @@ let clipsSvg: SVGSVGElement;
 let tempPath: SVGPathElement;
 let tempEnd: SVGCircleElement;
 let knifeLine: SVGLineElement;
+let selBox: SVGRectElement;
 
 interface NodeRefs {
   el: HTMLElement; ring: SVGCircleElement | null; rate: HTMLElement; loss: HTMLElement; sub: HTMLElement; pill: HTMLElement;
@@ -256,6 +257,8 @@ type Drag =
   | { kind: 'wireIn'; to: number; mat: MatId | null; b: Pt; p: Pt; target: number | null; tp: Pt; blend: number; armed: boolean; sx: number; sy: number; slop: number }
   | { kind: 'wirePress'; wireId: number; sx: number; sy: number; slop: number; touch: boolean }
   | { kind: 'knife'; a: Pt; b: Pt }
+  /** A box being drawn to take the cards inside it as a block (box-select): from `a` to `b`; `add` keeps the block there was. */
+  | { kind: 'box'; a: Pt; b: Pt; add: boolean }
   /** Two fingers: `a` and `b` are their pointer ids; the rest is how things stood when the pair formed. */
   | { kind: 'pinch'; a: number; b: number; mx: number; my: number; dist: number; vx: number; vy: number; vk: number };
 let drag: Drag | null = null;
@@ -1860,7 +1863,7 @@ export function initBoard(root: HTMLElement) {
       <svg id="clips" width="1" height="1"></svg>
       <div id="nodes"></div>
       <div id="chips"></div>
-      <svg id="overlay" width="1" height="1"><path id="temp-wire"></path><circle id="temp-end" r="5"></circle><line id="knife"></line></svg>
+      <svg id="overlay" width="1" height="1"><path id="temp-wire"></path><circle id="temp-end" r="5"></circle><line id="knife"></line><rect id="selbox"></rect></svg>
       <div id="ghost"></div>
       <div id="site"></div>
     </div>
@@ -1883,6 +1886,7 @@ export function initBoard(root: HTMLElement) {
   tempPath = boardEl.querySelector('#temp-wire')!;
   tempEnd = boardEl.querySelector('#temp-end')!;
   knifeLine = boardEl.querySelector('#knife')!;
+  selBox = boardEl.querySelector('#selbox')!;
   appEl = boardEl.closest<HTMLElement>('#app');
   toastsEl = document.getElementById('toasts');
   modalEl = document.getElementById('modal');
@@ -4753,6 +4757,13 @@ function onDown(e: PointerEvent) {
     else placeAt(p, e.shiftKey);
     return;
   }
+  if (!touchy && (e.ctrlKey || e.metaKey)) {
+    // Ctrl (Cmd) and a drag: a box, and the cards inside it are the block (with Shift as well, added to the block).
+    // In the overview too, where a whole factory is in view.
+    drag = { kind: 'box', a: p, b: p, add: e.shiftKey };
+    drawBox(drag);
+    return;
+  }
   if (e.shiftKey) {
     // Shift on a card puts it in the block of cards that move together, or takes it out; anywhere else it cuts.
     const on = touchy || over ? null : mouseHit(t, p);
@@ -4823,8 +4834,18 @@ function onDown(e: PointerEvent) {
     drag = { kind: 'wirePress', wireId: hit.id, sx: e.clientX, sy: e.clientY, slop: touchy ? TOUCH_SLOP + 2 : 6, touch: touchy };
     return;
   }
-  drag = { kind: 'pan', sx: e.clientX, sy: e.clientY, vx: ui.view.x, vy: ui.view.y, moved: false, slop: touchy ? PAN_SLOP : 0, place: false };
+  const pan = drag = { kind: 'pan', sx: e.clientX, sy: e.clientY, vx: ui.view.x, vy: ui.view.y, moved: false, slop: touchy ? PAN_SLOP : 0, place: false };
   if (hit?.kind === 'reach') drag.near = { id: hit.id, port: hit.port };
+  // A finger held still on the empty board draws a box once it moves (box-select): a swipe straight away still pans.
+  if (touchy && !hit && !tapWire) {
+    clearTimeout(liftTimer);
+    liftTimer = window.setTimeout(() => {
+      if (drag !== pan || pan.moved) return;
+      drag = { kind: 'box', a: p, b: p, add: block.size > 0 };
+      drawBox(drag);
+      buzz('lift', 8);
+    }, BOX_HOLD_MS);
+  }
 }
 
 function onMove(e: PointerEvent) {
@@ -5009,6 +5030,11 @@ function steer(cx: number, cy: number, hovering = false) {
       highlightTarget(d.target);
       break;
     }
+    case 'box': {
+      drag.b = p;
+      drawBox(drag);
+      break;
+    }
     case 'knife': {
       drag.b = p;
       knifeLine.classList.add('on');
@@ -5064,6 +5090,7 @@ function endDrag() {
   highlightTarget(null);
   hideTemp();
   knifeLine.classList.remove('on');
+  selBox.classList.remove('on');
   // Marks put up for a dragged wire come down; those of an armed port stay.
   if (markedFor && !tapWire) clearMarks();
 }
@@ -5216,7 +5243,8 @@ function blockClips(g: Game, inside: Set<number>): Map<number, Pt> {
 // ringed, and a drag on any card of it moves them all, keeping their places among themselves: the card under the
 // pointer comes level as it does alone, the block stays inside the plot, and it is let go only where every card of it
 // is clear of the cards that are not in it; otherwise it goes back. One undo step. A click on a card or on the empty
-// board, or Escape, lets the block go. A Drill is part of one only once Drills can be moved. (With a mouse: a finger has no Shift.)
+// board, or Escape, lets the block go. A Drill is part of one only once Drills can be moved. (A finger has no Shift: it
+// makes a block with a box, below.)
 
 // ----- Drills that move -----
 // A Drill stands on the deposit it was built on, and stayed there: a line had to be laid out from wherever the plot
@@ -5253,6 +5281,31 @@ function syncBlock() {
     }
   }
   for (const [id, refs] of nodeEls) setClass(refs.el, 'blk', block.has(id));
+  syncBlockBar();
+}
+
+/** The bar a block of cards brings up: how many, Delete (with what it refunds), Let go. For a finger as for a mouse. */
+let blockBar: HTMLElement | null = null;
+function syncBlockBar() {
+  if (!blockBar) {
+    const app = document.getElementById('app');
+    if (!app) return;
+    blockBar = el(`<div id="blockbar" class="blockbar" role="toolbar" aria-label="Block of cards" hidden></div>`);
+    app.appendChild(blockBar);
+    onPress(blockBar, (e) => {
+      const b = (e.target as HTMLElement).closest<HTMLElement>('[data-b]');
+      if (!b) return;
+      if (b.dataset.b === 'del') deleteBlock();
+      else clearBlock();
+    });
+  }
+  const n = block.size;
+  setHidden(blockBar, n === 0);
+  if (!n) return;
+  const refund = blockRefund(ui.g);
+  setHTML(blockBar, `<span class="bb-n"><b class="mono">${n}</b> card${n === 1 ? '' : 's'}</span>
+    <button class="bb-del" data-b="del" data-testid="block-delete">Delete${refund > 0 ? ` · <span class="mono">+${fmt(refund)}¢</span>` : ''}</button>
+    <button class="bb-go" data-b="go" data-testid="block-go">Let go</button>`);
 }
 
 function clearBlock() {
@@ -5269,8 +5322,74 @@ function setBlock(ids: number[]) {
   syncBlock();
   if (block.size > 1 && !blockTold) {
     blockTold = true;
-    toast(`<b>${block.size} cards</b> move together now: drag any one of them. <b>Esc</b> lets them go.`, 'info', 5200);
+    toast(`<span><b>${block.size} cards</b> move together now: drag any one of them, or delete them all. <b>Esc</b> lets them go.</span>`, 'info', 5200);
   }
+}
+
+// ----- box-select -----
+// A block of cards was built a card at a time. Ctrl (Cmd on a Mac) and a drag draws a box, and the cards whose middle
+// lies inside it are the block (with Shift as well, they join the block there was); a finger held still on the empty
+// board for a moment draws one too. A Drill that stays on its deposit stays out of it. The block can then be dragged as
+// ever, or deleted as one undo step with Delete, or with the block bar's button, which shows the refund: a rebuild of a
+// whole line is a box, a Delete and a few new cards. (Copy and paste were not built: a card is bought, and a copy of a
+// line would be a purchase in a gesture. docs/UI.md, "Box-select".)
+
+/** How long a finger holds still on the empty board before it draws a box. */
+const BOX_HOLD_MS = 400;
+
+function boxRect(d: { a: Pt; b: Pt }) {
+  return { x0: Math.min(d.a.x, d.b.x), y0: Math.min(d.a.y, d.b.y), x1: Math.max(d.a.x, d.b.x), y1: Math.max(d.a.y, d.b.y) };
+}
+
+function drawBox(d: { a: Pt; b: Pt }) {
+  const r = boxRect(d);
+  selBox.classList.add('on');
+  selBox.setAttribute('x', String(r.x0));
+  selBox.setAttribute('y', String(r.y0));
+  selBox.setAttribute('width', String(Math.max(0.5, r.x1 - r.x0)));
+  selBox.setAttribute('height', String(Math.max(0.5, r.y1 - r.y0)));
+}
+
+/** The box is let go: the cards whose middle is inside it become the block (or join it). */
+function takeBox(d: Extract<Drag, { kind: 'box' }>) {
+  const g = ui.g;
+  const r = boxRect(d);
+  const inside: number[] = [];
+  let stays = 0;
+  for (const n of g.nodes) {
+    const { w, h } = nodeSize(n);
+    const cx = n.x + w / 2, cy = n.y + h / 2;
+    if (cx < r.x0 || cx > r.x1 || cy < r.y0 || cy > r.y1) continue;
+    if (canMove(g, n)) inside.push(n.id);
+    else stays++;
+  }
+  const ids = d.add ? [...new Set([...block, ...inside])] : inside;
+  if (!ids.length) {
+    clearBlock();
+    if (stays) toast(`<span>A Drill stays on its deposit: it cannot go in a block.${drillTechHint(g)}</span>`, 'info');
+    return;
+  }
+  setBlock(ids);
+  if (stays) toast(`<span><b>${ids.length}</b> in the block. ${stays === 1 ? 'A Drill stays' : `${stays} Drills stay`} on ${stays === 1 ? 'its deposit' : 'their deposits'}, out of it.${drillTechHint(g)}</span>`, 'info');
+}
+
+/** The block's cards, as they stand. */
+export const blockIds = () => [...block];
+
+/** What deleting the block returns (refundOfAll: each card as Delete would refund it, one after the other). */
+const blockRefund = (g: Game) => refundOfAll(g, [...block]);
+
+/** Delete every card of the block, as one undo step, and say what came back. */
+export function deleteBlock(): boolean {
+  const g = ui.g;
+  if (!block.size) return false;
+  const ids = [...block];
+  clearBlock();
+  const { deleted, refund } = deleteNodes(g, ids);
+  if (!deleted) return false;
+  toast(`Deleted <b>${deleted}</b> card${deleted === 1 ? '' : 's'} · refunded <b>${fmt(refund)}¢</b>. <b>Ctrl Z</b> puts ${deleted === 1 ? 'it' : 'them'} back.`, 'good', 4200);
+  touch();
+  return true;
 }
 
 /** Shift and a click on a card: into the block, or out of it. The card that was selected comes along as the first. */
@@ -5583,6 +5702,10 @@ function onUp(e: PointerEvent) {
           return;
         }
       }
+      break;
+    }
+    case 'box': {
+      takeBox(d);
       break;
     }
     case 'knife': {

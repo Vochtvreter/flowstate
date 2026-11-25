@@ -368,4 +368,4 @@ Against §9:
 
 **Seen in a browser.** In headless Chromium at 1440×900 and 390×844, from saves the scripted players made: Tier 2 with a board of Foundries and the Foundry note open, a Foundry's inspector (5.86 Sand in, 3.89 Glass out), Tier 3's card at both sizes, and the end: Claim on Tier 3, "Devices delivered", the summary, Keep playing, free play's "Build your first Laptop". No page error. Nobody has played any of it by hand.
 
-**Not built.** The rebuilder that rebuilds a second time. Tiers beyond 3, and contracts that repeat. Box-select and copy and paste, which a rebuild by hand will want. Free play in the tiers is the chain's Laptop and Robot, with the chain's numbers.
+**Not built.** The rebuilder that rebuilds a second time. Tiers beyond 3, and contracts that repeat. (Box-select and a block's Delete, which a rebuild by hand wants, are built since: docs/UI.md, "Box-select". Copy and paste are left out: a card is bought.) Free play in the tiers is the chain's Laptop and Robot, with the chain's numbers.

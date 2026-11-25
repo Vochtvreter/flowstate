@@ -37,3 +37,17 @@ html[data-input='touch'] g.clip .cdot { stroke-width: 3px; }
 /* In the overview nothing so small is drawn, or pressed. */
 #board.ov #clips { display: none; }
 @media (prefers-reduced-motion: reduce) { g.clip .cdot { transition: none; } }
+
+/* ----- box-select (docs/UI.md, "Box-select"): the box being drawn, and the bar a block of cards brings up ----- */
+#selbox { display: none; fill: rgba(122, 162, 255, 0.08); stroke: #7aa2ff; stroke-width: 1.5; stroke-dasharray: 5 4; vector-effect: non-scaling-stroke; }
+#selbox.on { display: inline; }
+.blockbar { position: fixed; right: 16px; top: 64px; z-index: 40; white-space: nowrap; display: flex; align-items: center; gap: 8px; padding: 6px 6px 6px 14px; border-radius: 14px; background: var(--panel-2, #1c2230); box-shadow: var(--shadow, 0 10px 30px rgba(0, 0, 0, 0.38)); color: var(--text, #f0f3f8); font-size: 13px; }
+.blockbar[hidden] { display: none; }
+.blockbar .bb-n { color: var(--muted, #9aa3b5); margin-right: 2px; }
+.blockbar .bb-n b { color: var(--text, #f0f3f8); }
+.blockbar button { font: inherit; border: 0; cursor: pointer; min-height: 34px; padding: 0 12px; border-radius: 10px; background: var(--fill, rgba(255, 255, 255, 0.06)); color: var(--text, #f0f3f8); }
+.blockbar button:hover { background: var(--fill-2, rgba(255, 255, 255, 0.11)); }
+.blockbar .bb-del { color: #ff8f8f; }
+.blockbar .bb-del span { color: #ffc857; }
+#app.phone .blockbar { top: auto; right: auto; left: 50%; transform: translateX(-50%); bottom: 132px; }
+#app.phone .blockbar button { min-height: 44px; }

@@ -227,6 +227,44 @@ export function deleteNode(g: Game, id: number): boolean {
   return ok;
 }
 
+/**
+ * What deleting these cards one after the other refunds, without deleting them: each is refunded as deleteNode would,
+ * with the ones before it gone (a kind's buy-back price falls as its cards go).
+ */
+export function refundOfAll(g: Game, ids: number[]): number {
+  const nodes = g.nodes;
+  const wires = g.wires;
+  let sum = 0;
+  try {
+    for (const id of ids) {
+      const n = nodes.find((o) => o.id === id);
+      if (!n || !g.nodes.includes(n) || !canDelete(g, n)) continue;
+      sum += refundOf(g, n);
+      g.wires = g.wires.filter((w) => w.from !== id && w.to !== id);
+      g.nodes = g.nodes.filter((o) => o.id !== id);
+    }
+  } finally {
+    g.nodes = nodes;
+    g.wires = wires;
+  }
+  return sum;
+}
+
+/**
+ * Delete several cards as one undo step (a block of cards: box-select). Each is refunded as deleteNode would refund it,
+ * one after the other, so the whole is what deleting them one by one returns. One that cannot be deleted (the last
+ * Drill) is left. Returns how many went and the credits that came back.
+ */
+export function deleteNodes(g: Game, ids: number[]): { deleted: number; refund: number } {
+  const before = g.credits;
+  let deleted = 0;
+  act(g, () => {
+    for (const id of ids) if (deleteNode(g, id)) deleted++;
+    return deleted ? 0 : false;
+  });
+  return { deleted, refund: g.credits - before };
+}
+
 export function upgrade(g: Game, id: number, track: Track): boolean {
   const n = nodeById(g, id);
   if (!n || !trackAvailable(g, n, track) || n.lv[track] >= maxLevel(g, track)) return false;

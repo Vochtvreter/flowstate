@@ -318,3 +318,53 @@ describe('Favour: the one-press Router preset', () => {
     expect(toLab.rate).toBeGreaterThan(toMarket.rate);
   });
 });
+
+describe('box-select: deleting a block of cards', () => {
+  it('is one undo step, refunds what deleting them one by one would, and says so before', async () => {
+    const { deleteNodes, refundOfAll, undo, deleteNode: one } = await import('../src/actions');
+    const build = () => {
+      const g = rich();
+      const m = market(g);
+      const w = well(g);
+      const a = placeNode(g, 'refiner', 300, 100, { recipe: 'shard' })!;
+      const b = placeNode(g, 'refiner', 300, 260, { recipe: 'shard' })!;
+      const r = placeNode(g, 'router', 500, 200)!;
+      connect(g, w.id, 0, a.id);
+      connect(g, a.id, 0, r.id);
+      connect(g, r.id, 0, m.id);
+      upgrade(g, a.id, 'speed');
+      return { g, ids: [a.id, b.id, r.id] };
+    };
+    // One by one.
+    const x = build();
+    const before = x.g.credits;
+    for (const id of x.ids) one(x.g, id);
+    const each = x.g.credits - before;
+    // As a block.
+    const y = build();
+    const said = refundOfAll(y.g, y.ids);
+    const nodes = y.g.nodes.length;
+    const wires = y.g.wires.length;
+    const credits = y.g.credits;
+    // (Saying it changes nothing.)
+    expect(y.g.nodes.length).toBe(nodes);
+    expect(y.g.wires.length).toBe(wires);
+    const r = deleteNodes(y.g, y.ids);
+    expect(r).toEqual({ deleted: 3, refund: each });
+    expect(said).toBeCloseTo(each);
+    expect(y.g.nodes.length).toBe(nodes - 3);
+    // One undo puts all three back, wires and all, and takes the refund back.
+    expect(undo(y.g)).toBe(true);
+    expect(y.g.nodes.length).toBe(nodes);
+    expect(y.g.wires.length).toBe(wires);
+    expect(y.g.credits).toBeCloseTo(credits);
+  });
+
+  it('leaves the last Drill', async () => {
+    const { deleteNodes } = await import('../src/actions');
+    const g = rich();
+    const r = deleteNodes(g, [well(g).id, market(g).id]);
+    expect(r.deleted).toBe(1);
+    expect(g.nodes.some((n) => n.type === 'well')).toBe(true);
+  });
+});

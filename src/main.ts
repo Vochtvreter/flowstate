@@ -12,10 +12,7 @@ import { fmt, fmtTime, has, offlineCap } from './economy';
 import { migrateChain } from './goals';
 import { offlineGains, tick } from './sim';
 import { SAVE_KEY, TIERS_URL, clearSave, loadGame, newGame, saveGame } from './state';
-import {
-  cancelGesture, ensureVisible, fitView, frameNodes, initBoard, jumpTo, pickRadial, radialOpen, settleGesture, startPlacing,
-  tidyBoard, updateBoard, updateSlow, zoomBy,
-} from './ui/board';
+import { blockIds, cancelGesture, deleteBlock, ensureVisible, fitView, frameNodes, initBoard, jumpTo, pickRadial, radialOpen, settleGesture, startPlacing, tidyBoard, updateBoard, updateSlow, zoomBy } from './ui/board';
 import { invalidateLayout } from './ui/dom';
 import { fx, initFx } from './ui/fx';
 import { hotbarTypes, initPanels, renderPanels, tickPanels } from './ui/panels';
@@ -301,6 +298,11 @@ function onKey(e: KeyboardEvent) {
     e.preventDefault();
     // (The Flows list is not a thing to delete: the key leaves it open.)
     if (ui.sel?.kind === 'flows') return;
+    // A block of cards (box-select, Shift and a click): all of it, as one undo step.
+    if (blockIds().length) {
+      deleteBlock();
+      return renderPanels();
+    }
     if (ui.sel?.kind === 'node') {
       const n = nodeById(g, ui.sel.id);
       if (n) {

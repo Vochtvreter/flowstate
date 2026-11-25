@@ -75,7 +75,7 @@ Four techs cannot be bought. Refining, Lab and Bulk Upgrade are goal rewards, an
 
 The tree shows only what is owned, what can be researched now, and one step beyond that as locked outlines. A tech priced in a kind of Data the player has not had yet stays hidden. A tech can be marked "Research it for me when ready".
 
-> **Rule:** the tech tree never gates *basic editing comfort*. Dragging, cutting, undo, duplicate and fan-out wiring are available from minute one. Only tools that matter at *scale* (Bulk Upgrade, Auto-balance) are unlocks. *Multi-select, copy/paste and blueprints are not built.*
+> **Rule:** the tech tree never gates *basic editing comfort*. Dragging, cutting, undo, duplicate and fan-out wiring are available from minute one. Only tools that matter at *scale* (Bulk Upgrade, Auto-balance) are unlocks. *Box-select builds a block of cards to move or delete (docs/UI.md); copy/paste is left out on purpose, as every card is bought; blueprints are not built.*
 
 ---
 
@@ -230,7 +230,7 @@ This is the most important section. The editor *is* the game. Sizes, layouts and
 | Cables | `W` or the Wires button: squared or curved wires. Double-click a wire to clip it, or the empty board to set up a clip; drag a clip; draw a wire across clips to run it through them; double-click a clip to take it off. | Wires in the gear menu; Add a clip in a wire's sheet, then drag it; tap a port, clips, then a card to run a wire through them; a clip's sheet takes it off. |
 | Other keys | `1`–`9`, `0` build bar or menu option · `R` tech tree · `P` pause · `Esc` backs out | |
 
-*Not built:* box-select, a block of cards for a finger, named groups or frames round a line, copy/paste of a selection, a trash target, a grid toggle, right-drag cutting, a node tooltip on hover.
+*Not built:* named groups or frames round a line, copy/paste of a selection (left out: docs/UI.md, "Box-select"), a trash target, a grid toggle, right-drag cutting, a node tooltip on hover.
 
 ### 7.2 Auto-behaviors
 
@@ -358,7 +358,7 @@ No text walls: a card is a title and a sentence or two.
 
 **In:** Drill, Refiner, Assembler, Fabricator, Router (Even/Ratio/Priority/Filter), Merger, Silo, Market, Lab, Dump · 16 materials and 11 recipes, T0–T3 · the tech tree of 29 · deposits and board expansion · node upgrades · wire tiers · 22 goals and four free-play goals · orders · Flow · "while you wait" lines and the adviser · the gestures of §7.1 · saving and time away · the phone layout · sound · celebrations · the overview · Tidy · real-world materials with a why-and-how goal card · plain-word labels and the Flows panel · cards that come level · a first screen that starts with a Drill and a Market.
 
-**Not built:** prestige ("Reflow"), timed contracts, box-select and copy/paste, named groups round a line, a layout that sets cards in rows, blueprints, achievements, events/modifiers, T4+ content, export and import of saves, accounts.
+**Not built:** prestige ("Reflow"), timed contracts, copy/paste (left out on purpose), named groups round a line, a layout that sets cards in rows, blueprints, achievements, events/modifiers, T4+ content, export and import of saves, accounts.
 
 ---
 
