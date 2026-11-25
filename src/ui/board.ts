@@ -33,7 +33,7 @@ import {
 } from './fx';
 import {
   Box, CARD_GAP, Card, Footprint, LEVEL_GAP, LEVEL_REACH, LevelCard, LevelEnd, LevelWire, Port, Pt, View, ZOOM, bestWindow, boxClear, boxUnion, buildSite, centreView,
-  clearPoint, dockSpot, fadeColor, fitBox, fitZoom, fitsAt, frameBox, freeSpot as nearestSpot, heldRate, inPorts, levelCards, levelY, matColor, nodeSize, outPorts,
+  clearPoint, dockSpot, fadeColor, fitBox, fitZoom, fitsAt, frameBox, glideStep, freeSpot as nearestSpot, heldRate, inPorts, levelCards, levelY, matColor, nodeSize, outPorts,
   pinchView, roomFor,
   segmentsCross, separate, siteFor, spotFree, wholeGain, wireEnds,
 } from './geom';
@@ -468,9 +468,11 @@ function stepGlide(dt: number) {
   const step = Math.min(dt, 0.1);
   let done = false;
   if (gl.from && gl.dur) {
-    gl.t = (gl.t ?? 0) + step;
-    const u = Math.min(1, gl.t / gl.dur);
-    const e = 1 - (1 - u) * (1 - u) * (1 - u);
+    // On the clock the gliding cards are on (geom.ts, glideStep): a long frame counts for no more than a short one.
+    // Tidy moves the camera and the cards together, and on two clocks a card no longer crossed the screen in a line.
+    const { t, left } = glideStep(gl.t ?? 0, dt, gl.dur);
+    gl.t = t;
+    const e = 1 - left;
     // The zoom is eased by ratio and the middle of the stage is carried across the board in a straight
     // line, so a move that zooms does not swing sideways on the way.
     const r = rectOf();
@@ -482,7 +484,8 @@ function stepGlide(dt: number) {
     v.k = k;
     v.x = cx - (wx0 + (wx1 - wx0) * e) * k;
     v.y = cy - (wy0 + (wy1 - wy0) * e) * k;
-    done = u >= 1;
+    // (There once nothing more of the way can be seen: the last hundredths of it are frames in which nothing moves.)
+    done = left <= 0 || (Math.abs(gl.x - v.x) < 0.5 && Math.abs(gl.y - v.y) < 0.5 && Math.abs(gl.k - v.k) < 0.002);
   } else {
     const f = 1 - Math.exp(-step / 0.07);
     v.x += (gl.x - v.x) * f;
@@ -3615,16 +3618,17 @@ function drawnEnds(g: Game, w: Wire) {
 
 function stepSettle(dt: number) {
   const g = ui.g;
-  const step = Math.min(dt, 0.1);
   let done = false;
   for (const [id, m] of settling) {
-    m.t += step;
-    const u = Math.min(1, m.t / m.dur);
-    const e = 1 - (1 - u) * (1 - u) * (1 - u);
-    m.ox = m.fx * (1 - e);
-    m.oy = m.fy * (1 - e);
+    // (A long frame counts for no more than a short one: the card is not thrown most of the way in it. geom.ts)
+    const { t, left } = glideStep(m.t, dt, m.dur);
+    m.t = t;
+    m.ox = m.fx * left;
+    m.oy = m.fy * left;
     const refs = nodeEls.get(id);
-    if (u >= 1 || !refs) {
+    // (Home, too, once less than half a pixel of the way is left on the screen: the glide lands softly, and its last
+    // frames move the card by nothing that can be seen while the board waits for it.)
+    if (left <= 0 || !refs || Math.hypot(m.ox, m.oy) * ui.view.k < 0.5) {
       settling.delete(id);
       if (refs) refs.el.style.transform = '';
       done = true;

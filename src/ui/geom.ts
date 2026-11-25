@@ -770,3 +770,25 @@ export function heldRate(held: number, rate: number, by = 0.2): number {
   if (held <= 0 || rate <= 0) return Math.max(0, rate);
   return Math.abs(rate - held) > by * Math.max(rate, held) ? rate : held;
 }
+
+// ---------- a card gliding to its place ----------
+
+/**
+ * The most of a glide's time that one frame may take up (seconds). A frame that took longer is counted as this long:
+ * the glide then lasts longer, and is not skipped. The frame a glide begins in is the dearest there is (after Tidy
+ * every wire on the board is routed afresh in it), and a glide leaves fastest at the start: counted in full, that one
+ * frame took a card let go most of its way home, and on a slow processor nearly all of it.
+ */
+export const GLIDE_STEP = 1 / 30;
+
+/**
+ * A card's glide (board.ts, stepSettle) a frame on: `t`, how long it has been gliding, and `left`, how much of its
+ * way it still has to go (1 as it sets out, 0 when it is home), after a frame that took `dt` seconds, of a glide that
+ * lasts `dur`. It leaves fast and lands softly. At 30 frames a second and more it runs on the clock, as it always did.
+ */
+export function glideStep(t: number, dt: number, dur: number): { t: number; left: number } {
+  const now = t + (dt > 0 ? Math.min(dt, GLIDE_STEP) : 0);
+  const u = dur > 0 ? Math.min(1, now / dur) : 1;
+  return { t: now, left: (1 - u) * (1 - u) * (1 - u) };
+}
+

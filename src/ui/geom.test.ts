@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import {
   BUILD_AIR, BUILD_REACH, Box, CARD_GAP, Card, Footprint, MORE_REACH, PLOT_MARGIN, PORT_OUT, SiteQuery, WIRE_REACH, bestWindow, boxClear, buildSite, cardsOverlap,
-  LEVEL_REACH, LEVEL_TOL, LevelCard, LevelWire, clearPoint, dockSpot, fadeColor, fitBox, fitsAt, frameBox, freeSpot, heldRate, levelCards, levelY, pinchView, samples,
+  LEVEL_REACH, LEVEL_TOL, LevelCard, LevelWire, clearPoint, dockSpot, fadeColor, fitBox, fitsAt, frameBox, freeSpot, GLIDE_STEP, glideStep, heldRate, levelCards, levelY, pinchView, samples,
   separate, siteFor, spotFree,
   wholeGain,
 } from './geom';
@@ -872,3 +872,69 @@ describe('levelCards: after Tidy, each card comes level with the wire that feeds
     expect(moved).toBeGreaterThan(20);
   });
 });
+
+// A card let go on another, and every card Tidy moves, glides to its place (board.ts, stepSettle). The frame the
+// glide begins in is a dear one, and it used to be counted in full: on a slow processor a dropped card was drawn a
+// quarter of the way home, then at 96 hundredths of it, then home.
+describe('glideStep: a long frame does not throw a gliding card most of the way home', () => {
+  /** The share of its way a card has covered after each frame of a glide lasting `dur`, the frames taking `dts` seconds. */
+  const flight = (dur: number, dts: number[]) => {
+    let t = 0;
+    return dts.map((dt) => {
+      const s = glideStep(t, dt, dur);
+      t = s.t;
+      return 1 - s.left;
+    });
+  };
+  const steps = (shares: number[]) => shares.map((v, i) => v - (i ? shares[i - 1] : 0));
+
+  it('at 60 and at 30 frames a second it runs on the clock, as it always did', () => {
+    for (const [dur, dt] of [[0.18, 1 / 60], [0.4, 1 / 60], [0.18, 1 / 30], [0.4, 1 / 30]]) {
+      let t = 0;
+      for (let i = 0; i < 40; i++) {
+        const s = glideStep(t, dt, dur);
+        t += dt;
+        const u = Math.min(1, t / dur);
+        expect(s.t).toBeCloseTo(t, 12);
+        expect(s.left).toBeCloseTo((1 - u) ** 3, 12);
+        t = s.t;
+      }
+    }
+  });
+
+  it('however long a frame takes, it counts for a thirtieth of a second: the glide lasts longer and is not skipped', () => {
+    // A card let go (180 ms) on a processor four times slower: frames of 150 ms and more.
+    const slow = flight(0.18, [1 / 60, 0.15, 0.18, 0.17, 0.15, 0.2, 0.2]);
+    expect(Math.max(...steps(slow))).toBeLessThan(0.38);
+    expect(slow.filter((v) => v > 0.02 && v < 0.98).length).toBeGreaterThanOrEqual(4);
+    expect(slow[slow.length - 1]).toBe(1);
+    // (Counted in full, as it was, the second of those frames took it from a quarter of the way to all of it.)
+    // Tidy (400 ms): no frame takes a card more than about a fifth of its way.
+    const tidy = flight(0.4, [1 / 60, ...Array(14).fill(0.3)]);
+    expect(Math.max(...steps(tidy))).toBeLessThan(0.22);
+    expect(tidy[tidy.length - 1]).toBe(1);
+    // A whole frame of a second is still one step.
+    expect(glideStep(0, 1, 0.4).t).toBe(GLIDE_STEP);
+  });
+
+  it('never goes back, always arrives, and stands still for a frame that took no time', () => {
+    let s = 1234;
+    const rnd = () => ((s = (s * 1664525 + 1013904223) >>> 0) / 4294967296);
+    for (let round = 0; round < 50; round++) {
+      const dur = 0.05 + rnd() * 0.6;
+      let t = 0, left = 1, frames = 0;
+      while (left > 0) {
+        const step = glideStep(t, rnd() < 0.2 ? rnd() * 2 : rnd() * 0.04, dur);
+        expect(step.left).toBeLessThanOrEqual(left);
+        expect(step.left).toBeGreaterThanOrEqual(0);
+        ({ t, left } = step);
+        expect(++frames).toBeLessThan(5000);
+      }
+    }
+    expect(glideStep(0.1, 0, 0.4)).toEqual(glideStep(0.1, -1, 0.4));
+    expect(glideStep(0.1, NaN, 0.4).t).toBe(0.1);
+    // (A glide of no length is over at once.)
+    expect(glideStep(0, 1 / 60, 0).left).toBe(0);
+  });
+});
+
