@@ -365,6 +365,13 @@ export const RULES = {
      * line that is over demand makes one surplus sale per craft, seconds apart, for as long as it runs.
      */
     notice: { seconds: 3, gap: 13 },
+    /**
+     * Demand grows with the goals. Once a growth goal has come up on the card ("Make 1 Glass a second"), the Markets
+     * buy that material at full price up to this many times the goal's rate, where that is more than its own
+     * demand, from then on: there is room to grow past the goal and be paid for it (growthDemand in
+     * src/economy.ts). 0 leaves every material at its own demand.
+     */
+    goalHeadroom: 2,
   },
 
   /** 2.3 Flow. */

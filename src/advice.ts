@@ -2101,6 +2101,15 @@ function growNext(g: Game, line: string, mat: MatId, rate: number, tune = false,
 }
 
 /**
+ * For the pacing tool's player who grows past a growth goal (--scale): the next step toward `rate` of `mat` as a
+ * growth goal's line would name it, and the credits it needs. null when growNext names nothing. Not used by the game.
+ */
+export function growStep(g: Game, mat: MatId, rate: number): { advice: Advice; need: number } | null {
+  const next = growNext(g, 'scale', mat, rate);
+  return next ? { advice: shaped(next.c, next.c.brings ?? 'credits', 0), need: next.need } : null;
+}
+
+/**
  * A growth goal's line in the words of its next step ("Build a Refiner from a Sand Drill's port (58¢) and sell its
  * Glass: 3¢ each."), whether or not that step can be paid for yet. The same for mouse and touch: it names no
  * gesture. null when there is no step to name (goalView then shows the line's own words).

@@ -34,6 +34,8 @@
  *                                      the kth (the nth when left out), and let the others pass
  *                --hands=<seconds>     what-if: seconds per action of every card player (cardonly at 10 s)
  *                --minShare=<0..1>     what-if: the share of a wait a tip has to save (ADVICE.minShare)
+ *                --scale=<k>[,<s>] what-if: the card players grow each growth goal to k times its rate before claiming it, for
+ *                                      at most s seconds after Claim lights (60 otherwise); see CFG.scale
  *                --trials              with --policy=newcomer: for every wait that begins with no tip on offer,
  *                                      list what the adviser weighed and how each candidate did
  *
@@ -101,13 +103,13 @@ import {
   claimGoal, claimOrder, clearHistory, connect, cutWire, deleteNode, expandBoard, favour, freeDeposits, materialsAt, placeNode, setMode,
   setWeight, upgrade, upgradeAll, upgradeWire,
 } from '../src/actions';
-import { ADVICE, Advice, advice, adviceTrials, applyAdvice, lineAdvice, waitInfo, waitKind } from '../src/advice';
+import { ADVICE, Advice, advice, adviceTrials, applyAdvice, growStep, lineAdvice, waitInfo, waitKind } from '../src/advice';
 import {
   cycleTime, demandRate, expansionCost, flowMult, fmt, has, maxLevel, maxPipeTier, nodeCost, pipeCap, readyTechs, recipeOf, recipeUnlocked, research,
   saturation, techAffordable, techAvailable, techEta, trackAvailable, upgradeCost, upgradeCostAt, valueOf, wellRate,
 } from '../src/economy';
 import { countsForFlow, isFlowing } from '../src/flow';
-import { GOALS, MAIN_GOALS, activeGoal, meanwhileOf, rewardText, routerFavoursLab } from '../src/goals';
+import { GOALS, GROW_SLACK, MAIN_GOALS, activeGoal, making, meanwhileOf, rewardText, routerFavoursLab } from '../src/goals';
 import { graph, isMachine, tick } from '../src/sim';
 import { Game, GNode, Reward, Stats, Status, Wire, newGame } from '../src/state';
 import { PROFILES, Profile, applyOverrides } from './pacing-profiles';
@@ -267,6 +269,14 @@ export const CFG = {
    * they come. (--wayDelay; the fast players know the way and do not wait.)
    */
   wayDelay: 12,
+  /**
+   * --scale=<k>[,<seconds>]: what-if: a card player who plays with a growth goal before claiming it. Once the goal
+   * is met they go on growing the same material toward `scale` times its rate, a step of the goal's own line at a
+   * time (growStep in src/advice.ts), for at most `scaleFor` seconds after Claim lights, and claim when they get
+   * there, when the time is up, or at once if the line names nothing more. 1: claim as the card players do.
+   */
+  scale: 1,
+  scaleFor: 60,
   tipEvery: 1,
   tipFirst: 1,
   /** For tests: called when a card player is about to make the first gesture of one of a goal's "while you wait" lines, with the game as it stands. */
@@ -1266,6 +1276,38 @@ export class Bot {
     };
   }
 
+  /**
+   * --scale: on a growth goal that is ready, the next step past its rate (a Want), null to wait for one (credits, or
+   * what was built last coming up to speed), undefined when this player is done growing and claims as usual.
+   */
+  scaleStep(): Want | null | undefined {
+    const g = this.g;
+    const goal = activeGoal(g);
+    const grow = goal?.meanwhile?.find((l) => l.grow)?.grow;
+    if (CFG.scale <= 1 || !goal || !grow || !g.goal.ready) return undefined;
+    const since = this.goalReadyAt[goal.id] ?? g.time;
+    const target = grow.rate * CFG.scale;
+    if (g.time - since >= CFG.scaleFor || making(g, grow.mat) >= target * (1 - GROW_SLACK)) return undefined;
+    const s = growStep(g, grow.mat, target);
+    if (!s) {
+      // Nothing more to name: once what was built last has had time to come up to speed, they are done.
+      return g.time - (this.scaleLast ?? since) < 10 ? null : undefined;
+    }
+    if (s.need > g.credits + 1e-6) return null;
+    const a = s.advice;
+    const kind: Kind = a.expand ? 'expand' : a.research ? 'research' : a.cut ? 'cut' : a.upgrade ? 'upgrade' : a.build ? 'build' : 'wire';
+    return {
+      cls: a.build || a.expand ? 'new' : 'fix', kind, cost: a.cost ?? 0, label: `grow past the goal (${grow.mat} → ${target}/s): ${a.text.mouse}`,
+      run: () => {
+        if (!applyAdvice(g, a)) return false;
+        if (a.build) this.noteNode(a.build as NodeType, a.recipe ?? null);
+        this.scaleLast = g.time;
+        return true;
+      },
+    };
+  }
+  scaleLast: number | null = null;
+
   /** One decision of the newcomer: claim, then the card, then (in a wait) a tip that has been on offer long enough. */
   decideCard(): Want | null {
     const g = this.g;
@@ -1273,6 +1315,8 @@ export class Bot {
     this.tipOn = false;
     // Since when this goal's "while you wait" line has been on the card (for --lineDelay).
     if (this.lineSeen?.goal !== g.goal.i && CFG.meanwhile && this.P.lines !== false && meanwhileOf(g)) this.lineSeen = { goal: g.goal.i, t: g.time };
+    const grown = this.scaleStep();
+    if (grown !== undefined) return grown;
     if (g.goal.ready && g.time >= this.goalClaimAt) {
       const goal = activeGoal(g)!;
       return { cls: 'new', kind: 'claim', cost: 0, label: `claim goal ${g.goal.i + 1} "${goal.title}"`, run: () => claimGoal(g) };
@@ -2276,6 +2320,11 @@ function main() {
     else if (k === 'skipLine' && v) CFG.skipLines = v.split(',');
     else if (k === 'lineDelay' && v) CFG.lineDelay = Number(v);
     else if (k === 'wayDelay' && v) CFG.wayDelay = Number(v);
+    else if (k === 'scale' && v) {
+      const [x, secs] = v.split(',').map(Number);
+      CFG.scale = x;
+      if (secs) CFG.scaleFor = secs;
+    }
     else if (k === 'tipDelay' && v) {
       for (const pol of Object.values(POLICIES)) if (pol.card) pol.tipDelay = Number(v);
     } else if (k === 'tipEvery' && v) {
@@ -2310,7 +2359,7 @@ function main() {
   const what = [
     profileName !== 'current' ? `profile "${profileName}": ${profile.describe}` : '', ...overrides.map((o) => `--set=${o}`),
     CFG.bulk ? '' : '--noBulk', CFG.tips ? '' : '--noTips', CFG.meanwhile ? '' : '--noMeanwhile',
-    ...process.argv.slice(2).filter((a) => /^--(skipLine|lineDelay|wayDelay|tipDelay|tipEvery|hands|minShare|lineReserve|lineHold|claimDelay)=/.test(a)),
+    ...process.argv.slice(2).filter((a) => /^--(skipLine|lineDelay|wayDelay|tipDelay|tipEvery|hands|minShare|lineReserve|lineHold|claimDelay|scale)=/.test(a)),
   ].filter(Boolean).join('  ');
   const play = (p: Policy, s: number) => {
     const bot = new Bot(p, s, minutes ?? (p.card ? CFG.minutesCard : p.fast ? CFG.minutesFast : CFG.minutesSlow));

@@ -144,8 +144,28 @@ export function adoptRecipes(g: Game) {
 export const demandMult = (g: Game) => (has(g, 'C2') ? 1.5 : 1) * (has(g, 'C5') ? 2 : 1);
 /** Full price of one item, before the Flow bonus. */
 export const valueOf = (g: Game, m: MatId) => MATERIALS[m].value * (MATERIALS[m].tier >= 2 && has(g, 'C4') ? 1.25 : 1);
+/**
+ * The growth goals' rates, by the index of the goal in the chain: filled in by src/goals.ts when its chain is
+ * built (this file cannot import the chain, which imports it).
+ */
+const GROWTH_RATES: { at: number; mat: MatId; rate: number }[] = [];
+export function setGrowthRates(list: { at: number; mat: MatId; rate: number }[]) {
+  GROWTH_RATES.length = 0;
+  GROWTH_RATES.push(...list);
+}
+/**
+ * The full-price demand the goals have raised a material to (RULES.demand.goalHeadroom times the highest rate a
+ * growth goal that has come up asked of it), or 0 where none has.
+ */
+export function growthDemand(g: Game, m: MatId): number {
+  const k = RULES.demand.goalHeadroom;
+  if (!k) return 0;
+  let most = 0;
+  for (const x of GROWTH_RATES) if (x.mat === m && x.at <= g.goal.i) most = Math.max(most, x.rate);
+  return most * k;
+}
 /** Items per second the Markets buy at full price. */
-export const demandRate = (g: Game, m: MatId) => MATERIALS[m].demand * demandMult(g);
+export const demandRate = (g: Game, m: MatId) => Math.max(MATERIALS[m].demand, growthDemand(g, m)) * demandMult(g);
 /** How much unused demand a Market banks, in items, so that bursty deliveries still get full price. */
 export const demandBurst = (g: Game, m: MatId) => Math.max(RULES.demand.minBurst, demandRate(g, m) * RULES.demand.burstSeconds);
 
