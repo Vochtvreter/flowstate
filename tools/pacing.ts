@@ -2363,6 +2363,15 @@ export function playOnce(policy: string, seed: number): {
   return { lens: r.lens, checks: checks(r), tips: { offered: r.tipStats.offered, followed: r.tipStats.followed }, flowGoal: r.flowGoal?.seconds ?? null, nothing: r.nothing };
 }
 
-// From the command line (npm run pacing) this file is the program; a test or another tool (tools/bench.ts) that
-// imports it only wants the exports.
-if (!process.env.VITEST && process.argv.some((a) => /(^|[\\/])pacing\.ts$/.test(a))) main();
+// From the command line (npm run pacing, or vite-node tools/pacing.ts) this file is the program; a test or another
+// tool that imports it only wants the exports. Telling the two apart can't be done from process.argv: vite-node
+// (2.x) rewrites it to [node, vite-node, ...the arguments after --], so the script's path is not in it, and
+// nothing else it gives a module says which file it was asked to run. So the report waits one turn of the event
+// loop, by which time a tool that imported this file has run its own top level and said so with usedAsLibrary().
+// Vitest is told apart by its environment variable (its test files import this).
+let libraryUse = false;
+/** Called by a tool that imports this file (tools/bench.ts), so the pacing report isn't printed after its own. */
+export function usedAsLibrary(): void {
+  libraryUse = true;
+}
+if (!process.env.VITEST) setTimeout(() => libraryUse || main(), 0);
