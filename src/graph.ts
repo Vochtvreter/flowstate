@@ -30,7 +30,7 @@ export function graph(g: Game): Graph {
 
 export const isMachine = (n: GNode) => n.type === 'refiner' || n.type === 'assembler' || n.type === 'fabricator';
 export const isPass = (n: GNode) => n.type === 'router' || n.type === 'merger' || n.type === 'silo';
-export const isSink = (n: GNode) => n.type === 'market' || n.type === 'lab' || n.type === 'void';
+export const isSink = (n: GNode) => n.type === 'market' || n.type === 'lab' || n.type === 'void' || n.type === 'dock';
 
 /** Per graph: the Routers, Mergers and Silos from which a machine can be reached through other Routers, Mergers and Silos. */
 const feeders = new WeakMap<Graph, Set<number>>();
@@ -75,7 +75,8 @@ export function reachesUse(g: Game, n: GNode): boolean {
     set = new Set();
     const queue: number[] = [];
     for (const x of c.byId.values()) {
-      if (x.type === 'market' || x.type === 'lab') {
+      // (A Dock is a use too: what it takes fills a tier's contract.)
+      if (x.type === 'market' || x.type === 'lab' || x.type === 'dock') {
         set.add(x.id);
         queue.push(x.id);
       }

@@ -40,7 +40,7 @@ import {
 import { countsForFlow, flowUnsettled, isFlowing, nearShare } from './flow';
 import { graph, isMachine, isPass } from './graph';
 import { startOrders } from './orders';
-import { Game, GNode, GoalReward, Wire, isLookahead, nodeNoun } from './state';
+import { Bag, Game, GNode, GoalReward, Wire, isLookahead, nodeNoun } from './state';
 import { clearHistory, freeDeposits } from './actions';
 import { flowLineWords, growLineWords, lineFocus, lineHeld, tuneLineWords, tuneState, waitKind } from './advice';
 
@@ -94,10 +94,26 @@ export interface Goal {
   /** A free-play goal after the capstone. */
   free?: boolean;
   /**
+   * The goal belongs to one way of playing only (Game.tiers): 'chain', the goal chain's chapters that the tiers
+   * replace with a contract; 'tiers', a contract. Absent: both. A goal not of the game's way is passed over.
+   */
+  mode?: 'chain' | 'tiers';
+  /** A tier's contract (docs/TIERS.md): what is to be delivered at a Dock. The goal is met when all of it is. */
+  contract?: Bag;
+  /** The tools a tier hands over, each with what it is for and how to start: the contract panel lists them. */
+  tools?: ToolNote[];
+  /**
    * The goal's "while you wait" lines: things worth doing meanwhile, shown one at a time in this order (the
    * first one that applies and is not done yet; see meanwhileAt).
    */
   meanwhile?: Meanwhile[];
+}
+
+/** A tool a tier hands over, as its contract panel introduces it: open it for a sentence on why and one on how. */
+export interface ToolNote {
+  name: string;
+  why: string;
+  how: { mouse: string; touch: string };
 }
 
 /**
@@ -241,6 +257,28 @@ function savingTech(g: Game, id: string): GoalProgress | null {
 }
 
 const tech = (id: string, then = 0, thenWhat?: string): GoalStep => (then > 0 ? { tech: id, then, ...(thenWhat ? { thenWhat } : {}) } : { tech: id });
+/** The active goal's contract is delivered in full (Game.contract; set up for the goal by tickGoal). */
+function contractDone(g: Game): boolean {
+  const k = g.contract;
+  if (!k || k.goal !== activeGoal(g)?.id) return false;
+  for (const m in k.need) if ((k.got[m as MatId] ?? 0) < (k.need[m as MatId] ?? 0) - 1e-6) return false;
+  return true;
+}
+/** What the Dock has taken of the whole contract, in items (the card's bar; the contract panel shows each line). */
+function contractProgress(g: Game): GoalProgress | null {
+  const k = g.contract;
+  if (!k) return null;
+  let got = 0;
+  let need = 0;
+  for (const m in k.need) {
+    const n = k.need[m as MatId] ?? 0;
+    need += n;
+    got += Math.min(n, k.got[m as MatId] ?? 0);
+  }
+  const mats = Object.keys(k.need) as MatId[];
+  return [Math.floor(got), need, mats.length === 1 ? MATERIALS[mats[0]].name : 'items'];
+}
+
 const price = (credits: number, what?: string): GoalStep => ({ credits, ...(what ? { what } : {}) });
 const THE: Record<NodeType, string> = Object.fromEntries((Object.keys(NODE_DEFS) as NodeType[]).map((t) => [t, `the ${NODE_DEFS[t].name}`])) as Record<NodeType, string>;
 
@@ -843,7 +881,25 @@ export const GOALS: Goal[] = [
     reward: { credits: 100, techs: ['R1'] },
     big: true,
   },
+  // ---- The tiers (docs/TIERS.md): the guided start ends with a first contract, which hands over Tier 1's tools.
+  // ---- Goals 8–16 of the chain are passed over, and Tier 1's contract stands in their place.
   {
+    mode: 'tiers',
+    id: 'dock-glass', title: 'Fill your first contract',
+    why: 'A buyer wants 30 Glass in one lot. A Dock takes what a contract asks for: the more you send it, the sooner it is done.',
+    hint: hint(
+      'Drag from a Glass Refiner\'s port into empty space and pick Dock, then wire your other Glass Refiner to it too.',
+      'Tap a Glass Refiner\'s port, tap an empty spot and pick Dock, then wire your other Glass Refiner to it too.',
+    ),
+    howNow: (g) => (unfed(g, 'dock') ? hint('Drag from a Glass Refiner\'s port to the Dock.', 'Tap a Glass Refiner\'s port, then tap the Dock.') : null),
+    contract: { shard: 30 },
+    done: (g) => contractDone(g),
+    progress: (g) => contractProgress(g),
+    reward: { credits: 800, techs: ['P2', 'P3', 'L1', 'L2'], unlocks: ['orders', 'flow'] },
+    big: true,
+  },
+  {
+    mode: 'chain',
     id: 'feed-lab', title: 'Study Glass in a Lab',
     why: 'A Lab studies what it is given and turns it into Data instead of credits. Data is what new technology is bought with.',
     hint: hint(
@@ -857,6 +913,7 @@ export const GOALS: Goal[] = [
     big: true,
   },
   {
+    mode: 'chain',
     id: 'research-murk', title: 'Open up the Oil deposit',
     why: 'One of the locked deposits holds Oil. Your Data can open it: a new raw material, and new things to make from it.',
     hint: hint('Research Oil Deposits: open the Tech tree and spend your α Data on it.', 'Research Oil Deposits: tap Tech and spend your α Data on it.'),
@@ -865,6 +922,7 @@ export const GOALS: Goal[] = [
     reward: { credits: 40 },
   },
   {
+    mode: 'chain',
     id: 'make-ink', title: 'Turn Oil into Plastic',
     why: 'Oil is refined as Sand is: two Oil make one Plastic. Refining Oil also leaves Tar behind.',
     recipe: 'ink',
@@ -877,6 +935,7 @@ export const GOALS: Goal[] = [
     reward: { credits: 40 },
   },
   {
+    mode: 'chain',
     id: 'silt-exit', title: 'Give the Tar somewhere to go',
     why: 'A machine stops when anything it makes has nowhere to go. Plastic sells; Tar is waste, and a Dump takes it for nothing.',
     // The condition needs the Refiner running, and it also stops when Plastic has nowhere to go: say so.
@@ -889,6 +948,7 @@ export const GOALS: Goal[] = [
     reward: { a: 20, unlock: 'orders' },
   },
   {
+    mode: 'chain',
     id: 'first-order', title: 'Fill your first order',
     why: 'Buyers ask for things you already sell. Deliver what an order asks for and it pays extra, in credits and in Data.',
     hint: hint(
@@ -906,6 +966,7 @@ export const GOALS: Goal[] = [
     // Land comes in where it is wanted: the one Oil deposit is in use, and the board's first new plot brings another
     // (and a Sand deposit, for whoever wants a third Glass line). It was a card of its own, "Open up more land",
     // five goals after the Oil: a plot bought because the card said so. The claim opens Ore Deposits for research.
+    mode: 'chain',
     id: 'grow-ink', title: 'Make 1 Plastic a second',
     why: 'Your one Oil deposit is in use. A new plot of land brings another, and room for a second line beside the first.',
     hint: hint(
@@ -917,6 +978,7 @@ export const GOALS: Goal[] = [
     big: true,
   },
   {
+    mode: 'chain',
     id: 'make-spark', title: 'Make and sell Copper',
     why: 'Copper is refined from Ore, the next deposit to open. Plastic and Copper together are what a Circuit is made of.',
     recipe: 'spark',
@@ -933,6 +995,7 @@ export const GOALS: Goal[] = [
     big: true,
   },
   {
+    mode: 'chain',
     id: 'hold-flow', title: 'Hold 95% Flow for 10 seconds',
     why: 'Flow is the share of your Drills and machines that run flat out. The higher it is, the more every sale pays.',
     hint: hint(
@@ -965,6 +1028,7 @@ export const GOALS: Goal[] = [
     // The Copper line, doubled: a second plot (it brings an Ore deposit), a second Drill and Refiner. The new Ore
     // Drill is as slow as the first was, and this time no card names the fix: the player has done it once, on the
     // Flow card, and the Refiner says what it is short of. The claim opens Assembly.
+    mode: 'chain',
     id: 'grow-spark', title: 'Make 1 Copper a second',
     why: 'A Circuit will take a Copper each, and one Refiner makes one every two seconds. A second Ore line doubles it.',
     hint: hint(
@@ -972,6 +1036,54 @@ export const GOALS: Goal[] = [
     ),
     ...growth('grow-spark', 'spark', 1, 'More Ore, more Refiners or faster ones: any way that gets you there counts.'),
     reward: { a: 400, opens: ['P4'] },
+    big: true,
+  },
+  {
+    mode: 'tiers',
+    id: 'tier-refining', title: 'Fill the Refining contract',
+    why: 'A factory wants Glass, Plastic and Copper by the crate. More lines, faster machines and more land all fill it sooner.',
+    hint: hint('Wire Glass, Plastic and Copper into the Dock. Sell some to pay for more: every line you add makes it sooner.'),
+    contract: { shard: 400, ink: 250, spark: 150 },
+    done: (g) => contractDone(g),
+    progress: (g) => contractProgress(g),
+    tools: [
+      {
+        name: 'Oil and Plastic',
+        why: 'Two Oil make a Plastic, and leave a Tar behind. A Refiner stops when its Tar has nowhere to go.',
+        how: hint('Place a Drill on the Oil deposit, build a Refiner from its port, and a Dump from its Tar port.', 'Tap the Oil deposit twice for a Drill, build a Refiner from its port, and a Dump from its Tar port.'),
+      },
+      {
+        name: 'Ore and Copper',
+        why: 'Two Ore make a Copper. An Ore Drill brings up 0.8 a second, a little less than a Refiner wants.',
+        how: hint('Place a Drill on the Ore deposit and build a Refiner from its port.', 'Tap the Ore deposit twice for a Drill, and build a Refiner from its port.'),
+      },
+      {
+        name: 'Land',
+        why: 'Every deposit takes one Drill. A new plot brings two or three more, and room for more lines.',
+        how: hint('Press Expand at the edge of the plot.'),
+      },
+      {
+        name: 'Router',
+        why: 'Splits one stream between several wires, evenly or by ratio: so much to the Dock, so much to sell.',
+        how: hint('Build a Router from a port, then wire it to the Dock and to a Market. Its inspector sets the split.', 'Build a Router from a port, then wire it to the Dock and to a Market. Its sheet sets the split.'),
+      },
+      {
+        name: 'Merger',
+        why: 'Gathers many wires into one, so that three lines reach the Dock as one tidy stream.',
+        how: hint('Build a Merger, wire your lines into it, and wire it on.'),
+      },
+      {
+        name: 'Lab and Data',
+        why: 'A Lab turns what it is given into Data. Data buys research: faster Labs, better wires, Drills that move.',
+        how: hint('Build a Lab from any port. The Tech tree shows what Data buys.'),
+      },
+      {
+        name: 'Orders and Flow',
+        why: 'Orders pay extra for what you sell. Flow pays up to 20% more on every sale while every machine runs flat out.',
+        how: hint('An order shows beside the contract. The ring round your credits is your Flow.'),
+      },
+    ],
+    reward: { credits: 300, a: 400, opens: ['P4'] },
     big: true,
   },
   {
@@ -1158,8 +1270,31 @@ export const GOALS: Goal[] = [
   },
 ];
 
-/** Goals in the demo itself ("Goal 4 / 22"); the rest are free play. */
+/**
+ * The index of the first free-play goal: the goals before it are the demo's, in both ways of playing (each passes
+ * over the goals of the other: `mode`). How many of them a game plays is mainCount(g).
+ */
 export const MAIN_GOALS = GOALS.filter((x) => !x.free).length;
+
+/** The way a game is played: the goal chain, or the tiers (docs/TIERS.md). */
+export const goalMode = (g: Game): 'chain' | 'tiers' => (g.tiers ? 'tiers' : 'chain');
+/** The goal is one this game plays (it is not of the other way of playing). */
+export const inMode = (g: Game, goal: Goal) => !goal.mode || goal.mode === goalMode(g);
+/** The goals of one way of playing, in order. */
+export const goalsOf = (mode: 'chain' | 'tiers') => GOALS.filter((x) => !x.mode || x.mode === mode);
+/** The first goal at or after index i that this game plays (GOALS.length past the end). */
+function nextInMode(g: Game, i: number): number {
+  while (i < GOALS.length && !inMode(g, GOALS[i])) i++;
+  return i;
+}
+/** How many goals of the demo this game plays ("Goal 4 / 25"). */
+export const mainCount = (g: Game) => goalsOf(goalMode(g)).filter((x) => !x.free).length;
+/** The place of the goal at index i among the goals this game plays, counting from 1. */
+export function goalNumber(g: Game, i: number): number {
+  let n = 0;
+  for (let j = 0; j <= i && j < GOALS.length; j++) if (inMode(g, GOALS[j])) n++;
+  return n;
+}
 
 export const goalById = (id: string) => GOALS.find((x) => x.id === id) ?? null;
 
@@ -1242,8 +1377,8 @@ export function goalView(g: Game, touch = false): GoalView | null {
     ...(at ? { meanwhile: lineView(g, at, touch) } : {}),
     ...(inputs ? { inputs } : {}),
     goal,
-    number: free ? g.goal.i - MAIN_GOALS + 1 : g.goal.i + 1,
-    total: free ? GOALS.length - MAIN_GOALS : MAIN_GOALS,
+    number: free ? g.goal.i - MAIN_GOALS + 1 : goalNumber(g, g.goal.i),
+    total: free ? GOALS.length - MAIN_GOALS : mainCount(g),
     free,
     ready: g.goal.ready,
     why: goal.why,
@@ -1444,8 +1579,9 @@ function hintFocus(g: Game, id: string): number[] {
 export function rewardText(r: GoalReward): string {
   const parts: string[] = [];
   for (const id of r.techs ?? []) parts.push(TECHS[id]?.name ?? id);
-  if (r.unlock === 'orders') parts.push('Orders');
-  if (r.unlock === 'flow') parts.push('Flow meter');
+  const unlocks = [...(r.unlock ? [r.unlock] : []), ...(r.unlocks ?? [])];
+  if (unlocks.includes('orders')) parts.push('Orders');
+  if (unlocks.includes('flow')) parts.push('Flow meter');
   if (r.unlock === 'end') parts.push('Demo complete');
   for (const id of r.opens ?? []) parts.push(`opens ${TECHS[id]?.name ?? id}`);
   if (r.credits) parts.push(`${r.credits}¢`);
@@ -1465,6 +1601,7 @@ function applyUnlocks(g: Game, r: GoalReward) {
     g.opened.push(id);
     g.rev++;
   }
+  for (const u of r.unlocks ?? []) applyUnlocks(g, { unlock: u });
   if (r.unlock === 'orders' && !g.ordersOn) {
     g.ordersOn = true;
     g.events.push({ kind: 'unlock', what: 'orders', text: 'Orders unlocked.' });
@@ -1480,7 +1617,16 @@ function applyUnlocks(g: Game, r: GoalReward) {
  * the way to the Phone; this one has growth goals between its chapters, and three cards fewer: upgrades are met in
  * "Make 1.2 Glass a second", land in "Make 1 Plastic a second", and the Router is a research and no card.
  */
-export const CHAIN = 2;
+export const CHAIN = 3;
+/**
+ * The goals of chain 2, in order: chain 3 is the same with the tiers' two contracts set among them (`mode`), which
+ * a game of the chain passes over. A save of chain 2 is moved to the same goal by its id.
+ */
+const CHAIN_2 = [
+  'wire-market', 'second-well', 'wire-all-wells', 'build-refiner', 'sell-shard', 'grow-shard', 'tune-shard', 'feed-lab', 'research-murk',
+  'make-ink', 'silt-exit', 'first-order', 'grow-ink', 'make-spark', 'hold-flow', 'grow-spark', 'make-glyph', 'study-glyph', 'grow-glyph',
+  'make-mist', 'make-prism', 'bulk-upgrade', 'grow-prism', 'build-fabricator', 'make-lens', 'make-clay', 'make-coil', 'make-dynamo', 'make-paradox',
+];
 /** The goals of chain 1, in order: what the index of a save without Game.chain counts along. */
 const CHAIN_1 = [
   'wire-market', 'second-well', 'wire-all-wells', 'build-refiner', 'sell-shard', 'upgrade-well', 'feed-lab', 'research-murk', 'make-ink', 'silt-exit',
@@ -1507,8 +1653,36 @@ export function migrateChain(g: Game) {
     // A card that was ready stays ready only where it is the same card.
     g.goal = { i: at < 0 ? GOALS.length : at, ready: g.goal.ready && at >= 0 && id === old };
     g.goalAt = { i: g.goal.i, t };
+  } else if (g.chain === 2) {
+    const id = CHAIN_2[g.goal.i];
+    const at = id == null ? GOALS.length : GOALS.findIndex((x) => x.id === id);
+    const t = g.goalAt && g.goalAt.i === g.goal.i ? g.goalAt.t : g.time;
+    g.goal = { i: at < 0 ? GOALS.length : at, ready: g.goal.ready && at >= 0 };
+    g.goalAt = { i: g.goal.i, t };
   }
   g.chain = CHAIN;
+}
+
+/**
+ * The contract on the card is the active goal's (Game.contract): set up afresh when a goal with one comes up, gone
+ * once it is claimed. The first one brings the Dock (Game.dockOn).
+ */
+function repairContract(g: Game) {
+  const goal = GOALS[g.goal.i];
+  const want = g.tiers && goal && inMode(g, goal) ? goal.contract : undefined;
+  if (!want) {
+    if (g.contract) g.contract = null;
+    return;
+  }
+  if (g.contract?.goal !== goal!.id) {
+    g.contract = { goal: goal!.id, need: { ...want }, got: {}, rate: {} };
+    g.rev++;
+  }
+  if (!g.dockOn) {
+    g.dockOn = true;
+    g.rev++;
+    if (!isLookahead(g)) g.events.push({ kind: 'unlock', what: 'dock', text: 'The Dock: it takes what a contract asks for.' });
+  }
 }
 
 /** The game second at which each game's list of lines done when the goal came up (Game.goalAt.had) was last looked through. */
@@ -1526,6 +1700,9 @@ function repairChain(g: Game) {
   migrateChain(g);
   if (!Array.isArray(g.opened)) g.opened = [];
   if (g.goal.i > GOALS.length) g.goal = { i: GOALS.length, ready: false };
+  // A goal of the other way of playing is passed over (a save, or a goal set by hand).
+  if (g.goal.i < GOALS.length && !inMode(g, GOALS[g.goal.i])) g.goal = { i: nextInMode(g, g.goal.i), ready: false };
+  repairContract(g);
   // Since when this goal has been the active one: set here for a save without it, or a goal set by hand. With it,
   // which of its lines are done already (in a save from before that was kept, too: what is done when the save is
   // loaded is not ticked off on the card as if it had just been done).
@@ -1542,7 +1719,7 @@ function repairChain(g: Game) {
   }
   const from = unlocksChecked.get(g) ?? 0;
   if (from >= g.goal.i) return;
-  for (let i = from; i < g.goal.i; i++) applyUnlocks(g, GOALS[i].reward);
+  for (let i = from; i < g.goal.i; i++) if (inMode(g, GOALS[i])) applyUnlocks(g, GOALS[i].reward);
   unlocksChecked.set(g, g.goal.i);
 }
 
@@ -1583,9 +1760,10 @@ export function claimGoal(g: Game): boolean {
   g.data.a += r.a ?? 0;
   g.data.b += r.b ?? 0;
   g.data.g += r.g ?? 0;
-  g.goal = { i: index + 1, ready: false };
+  const next = nextInMode(g, index + 1);
+  g.goal = { i: next, ready: false };
   // (Which of the next goal's lines are done already is noted by tickGoal below, once this reward's unlocks are in.)
-  g.goalAt = { i: index + 1, t: g.time };
+  g.goalAt = { i: next, t: g.time };
   // Rewards are not undoable, so neither is what earned them: undo stops at the last claim. (Undoing the step
   // a goal was for kept the reward, refunded the step, and could meet the next card for nothing.)
   if (!isLookahead(g)) clearHistory();

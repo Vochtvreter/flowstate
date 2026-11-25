@@ -88,7 +88,7 @@ export const RECIPE_IDS = Object.keys(RECIPES);
 
 export type NodeType =
   | 'well' | 'refiner' | 'assembler' | 'fabricator'
-  | 'router' | 'merger' | 'silo' | 'market' | 'lab' | 'void';
+  | 'router' | 'merger' | 'silo' | 'market' | 'lab' | 'void' | 'dock';
 
 export type Track = 'speed' | 'eff' | 'buffer';
 
@@ -122,9 +122,12 @@ export const NODE_DEFS: Record<NodeType, NodeDef> = {
   market: { type: 'market', name: 'Market', base: 150, growth: 1.5, firstFree: true, tracks: [], verb: 'sell', blurb: 'Sells anything for credits. Takes any number of wires.' },
   lab: { type: 'lab', name: 'Lab', base: 100, growth: 1.1, tech: 'R1', tracks: ['speed'], verb: 'study', blurb: 'Turns items into Data for the tech tree.' },
   void: { type: 'void', name: 'Dump', base: 0, growth: 1, tech: 'P2', tracks: [], verb: 'destroy', blurb: 'Takes away whatever arrives. Free.' },
+  // The tiers' contracts are delivered here (docs/TIERS.md). It has no tech: it is there in the tiers alone, from the
+  // first contract on (Game.dockOn, nodeUnlocked in src/economy.ts).
+  dock: { type: 'dock', name: 'Dock', base: 0, growth: 1, tracks: [], verb: 'deliver', blurb: 'Takes what the contract asks for, and nothing else. Free.' },
 };
 
-export const HOTBAR: NodeType[] = ['well', 'refiner', 'assembler', 'fabricator', 'router', 'merger', 'silo', 'market', 'lab', 'void'];
+export const HOTBAR: NodeType[] = ['well', 'refiner', 'assembler', 'fabricator', 'router', 'merger', 'silo', 'market', 'lab', 'void', 'dock'];
 
 /** Wire capacity (items/s) and upgrade price per tier. */
 export const PIPES = [
@@ -365,6 +368,21 @@ export const RULES = {
      * line that is over demand makes one surplus sale per craft, seconds apart, for as long as it runs.
      */
     notice: { seconds: 3, gap: 13 },
+  },
+
+  /**
+   * The tiers (docs/TIERS.md; a game started with ?tiers, Game.tiers). Every material's demand is this many times
+   * its own there: the Dock is what a tier's contract is filled at, and the Markets only have to pay for building,
+   * so a bigger line is never sold at a quarter of the price.
+   */
+  tiers: {
+    demandMult: 4,
+    /**
+     * Each plot costs this many times the one before in the tiers (RULES.expansion.growth in the chain): a tier is
+     * about widening the line, and land is the way to more deposits, so it must stay a sane purchase several times
+     * over (docs/TIERS.md, "Measured").
+     */
+    expansionGrowth: 1.5,
   },
 
   /** 2.3 Flow. */

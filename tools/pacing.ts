@@ -109,7 +109,7 @@ import {
   saturation, techAffordable, techAvailable, techEta, trackAvailable, upgradeCost, upgradeCostAt, valueOf, wellRate,
 } from '../src/economy';
 import { countsForFlow, isFlowing } from '../src/flow';
-import { GOALS, GROW_SLACK, MAIN_GOALS, activeGoal, making, meanwhileOf, rewardText, routerFavoursLab } from '../src/goals';
+import { GOALS, GROW_SLACK, MAIN_GOALS, activeGoal, inMode, mainCount, making, meanwhileOf, rewardText, routerFavoursLab } from '../src/goals';
 import { graph, isMachine, tick } from '../src/sim';
 import { Game, GNode, Reward, Stats, Status, Wire, newGame } from '../src/state';
 import { PROFILES, Profile, applyOverrides } from './pacing-profiles';
@@ -1857,7 +1857,8 @@ function measure(bot: Bot): Result {
   const goals: GoalTime[] = [];
   let prev = 0;
   GOALS.forEach((goal, index) => {
-    if (index > g.goal.i) return;
+    // (Goals of the other way of playing are passed over: they are never on this game's card.)
+    if (index > g.goal.i || !inMode(g, goal)) return;
     const readyAt = bot.goalReadyAt[goal.id] ?? null;
     const claimedAt = bot.goalClaimedAt[goal.id] ?? null;
     goals.push({ index, id: goal.id, title: goal.title, free: !!goal.free, activeAt: prev, readyAt, claimedAt, spent: (claimedAt ?? end) - prev });
@@ -2054,7 +2055,7 @@ function report(bot: Bot, profile: Profile, profileName: string, timeline: boole
   for (const x of r.goals) {
     P(`  ${pad(x.index + 1, 2)}${x.free ? '*' : ' '} ${padR(x.title, 40)}  ${mmss(x.readyAt)}   ${mmss(x.claimedAt)}  ${pad(Math.round(x.spent), 4)}s  ${rewardText(GOALS[x.index].reward)}`);
   }
-  P(`  claimed ${Math.min(g.goal.i, MAIN_GOALS)}/${MAIN_GOALS} (+${Math.max(0, g.goal.i - MAIN_GOALS)} free play, marked *); longest on one goal of the demo: ${Math.round(r.goalMax.seconds)}s (${r.goalMax.title})`);
+  P(`  claimed ${r.goals.filter((x) => !x.free && x.claimedAt != null).length}/${mainCount(g)} (+${Math.max(0, g.goal.i - MAIN_GOALS)} free play, marked *); longest on one goal of the demo: ${Math.round(r.goalMax.seconds)}s (${r.goalMax.title})`);
 
   P();
   P('== TECHS (wait = since it could first be researched; "income" = its price in seconds of the Data income of the 3 minutes before) ==');
@@ -2257,6 +2258,7 @@ function summary(results: Result[]): string {
   P('== GOALS: when each was claimed, and the seconds spent on it, per run ==');
   P(`${padR('', 44)}${results.map((r) => pad(`${r.policy.name.replace('newcomer', 'new').slice(0, 5)}/${r.seed}`, 12)).join('')}`);
   GOALS.forEach((goal, i) => {
+    if (goal.mode === 'tiers') return; // (the pacing players play the chain)
     const cells = results.map((r) => {
       const x = r.goals.find((y) => y.index === i);
       return pad(x && x.claimedAt != null ? `${mmss(x.claimedAt)} ${pad(Math.round(x.spent), 3)}s` : '—', 12);

@@ -25,7 +25,7 @@ describe('start simple: the first screen is a Drill, a Market and one sentence',
 
   it('each part arrives with the goal that first gives it a use, and stays', () => {
     // (The techs a save at that goal has: Refining from goal 3's reward, the Lab from goal 7's.)
-    const first = (pick: (g: Game) => boolean) => GOALS.findIndex((_, i) => pick(at(i, i >= 7 ? ['P1', 'R1'] : i >= 3 ? ['P1'] : [])));
+    const first = (pick: (g: Game) => boolean) => GOALS.findIndex((x, i) => x.mode !== 'tiers' && pick(at(i, i >= 7 ? ['P1', 'R1'] : i >= 3 ? ['P1'] : [])));
     const idOf = (i: number) => GOALS[i].id;
     expect(idOf(first((g) => revealOf(g).undo))).toBe('second-well');
     expect(idOf(first((g) => slotShown(g, 'well')))).toBe('second-well');

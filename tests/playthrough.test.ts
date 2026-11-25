@@ -4,7 +4,11 @@ import { describe, expect, it } from 'vitest';
 import { claimGoal, connect, placeNode, upgrade } from '../src/actions';
 import { has, nodeCost, research, upgradeCost } from '../src/economy';
 import { RULES } from '../src/content';
-import { GOALS, MAIN_GOALS, activeGoal } from '../src/goals';
+import { activeGoal, goalsOf } from '../src/goals';
+
+/** The goals a game of the chain plays, and how many of them are the demo's. */
+const GOALS = goalsOf('chain');
+const MAIN_GOALS = GOALS.filter((x) => !x.free).length;
 import { Game, GNode } from '../src/state';
 import { CardRun, clock, playByTheCard } from './cardPlayer';
 import { fresh, market, run, well } from './helpers';

@@ -6,11 +6,12 @@ import './styles/feel.css';
 import './styles/phone.css';
 import './styles/clean.css';
 import './styles/manage.css';
+import './styles/tiers.css';
 import { clearHistory, cutWire, deleteNode, nodeById, redo, refundOf, removeClip, undo } from './actions';
 import { fmt, fmtTime, has, offlineCap } from './economy';
 import { migrateChain } from './goals';
 import { offlineGains, tick } from './sim';
-import { clearSave, loadGame, newGame, saveGame } from './state';
+import { SAVE_KEY, TIERS_URL, clearSave, loadGame, newGame, saveGame } from './state';
 import {
   cancelGesture, ensureVisible, fitView, frameNodes, initBoard, jumpTo, pickRadial, radialOpen, settleGesture, startPlacing,
   tidyBoard, updateBoard, updateSlow, zoomBy,
@@ -38,8 +39,7 @@ const $ = <T extends HTMLElement>(id: string) => document.getElementById(id) as 
 /** When the loaded save was written (ms), until the player presses Continue; null for a new game. */
 let resumedFrom: number | null = null;
 
-/** The save's key in localStorage (state.ts). */
-const SAVE_KEY = 'flowstate-save-v1';
+
 /**
  * Another tab has written the save since this page loaded: this one no longer saves, so that neither tab can
  * overwrite what the other has done. It says so (hud.ts) and a reload takes the game up where the other left it.
@@ -57,7 +57,7 @@ function resetGame() {
   // A game begun afresh here is this tab's own, even in a tab that had stepped back for another: it saves again.
   // (The other tab heard the save cleared, and steps back in its turn.)
   elsewhere = false;
-  ui.g = newGame();
+  ui.g = newGame({ tiers: TIERS_URL });
   resumedFrom = null;
   clearHistory();
   ui.menuOpen = false;
@@ -89,7 +89,7 @@ function boot() {
   const loaded = loadGame();
   // (A save from the chain of 22 goals is carried over to this one before anything reads its goal: src/goals.ts.)
   if (loaded) migrateChain(loaded);
-  ui.g = loaded ?? newGame();
+  ui.g = loaded ?? newGame({ tiers: TIERS_URL });
   resumedFrom = loaded ? loaded.savedAt : null;
   initToasts($('toasts'));
   initFx($<HTMLCanvasElement>('fx'));

@@ -34,6 +34,8 @@ export interface MatFlow {
   sold: number;
   studied: number;
   dumped: number;
+  /** Delivered at a Dock, on a tier's contract (docs/TIERS.md). */
+  docked: number;
   /** The Drills and machines that make it, and the machines that use it. */
   makers: number[];
   users: number[];
@@ -77,7 +79,7 @@ export function flows(g: Game): MatFlow[] {
   const rows = new Map<MatId, MatFlow>();
   const row = (m: MatId): MatFlow => {
     let r = rows.get(m);
-    if (!r) rows.set(m, (r = { mat: m, made: 0, can: 0, used: 0, wanted: 0, sold: 0, studied: 0, dumped: 0, makers: [], users: [], state: 'ok', at: null }));
+    if (!r) rows.set(m, (r = { mat: m, made: 0, can: 0, used: 0, wanted: 0, sold: 0, studied: 0, dumped: 0, docked: 0, makers: [], users: [], state: 'ok', at: null }));
     return r;
   };
   for (const n of g.nodes) {
@@ -114,6 +116,7 @@ export function flows(g: Game): MatFlow[] {
     if (to.type === 'market') r.sold += w.rate;
     else if (to.type === 'lab') r.studied += w.rate;
     else if (to.type === 'void') r.dumped += w.rate;
+    else if (to.type === 'dock') r.docked += w.rate;
   }
   for (const r of rows.values()) judge(g, r);
   return MAT_IDS.filter((m) => rows.has(m)).map((m) => rows.get(m)!);

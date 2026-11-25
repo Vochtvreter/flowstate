@@ -396,7 +396,7 @@ function handleEvents(events: GameEvent[]) {
         break;
       }
       case 'unlock':
-        if (!claimed) smallCelebration('unlock', anchorPt(ev.what === 'flow' ? 'flow' : 'order') ?? centre(), {}, UNLOCK);
+        if (!claimed) smallCelebration('unlock', (ev.what === 'dock' ? null : anchorPt(ev.what === 'flow' ? 'flow' : 'order')) ?? centre(), {}, UNLOCK);
         break;
       case 'goal-ready':
       case 'order-ready': {

@@ -49,6 +49,11 @@ export function room(g: Game, n: GNode, m: MatId): number {
     case 'market':
     case 'void':
       return Infinity;
+    case 'dock': {
+      // What the contract still wants of it, less what has been sent this tick already.
+      const k = g.contract;
+      return k ? Math.max(0, (k.need[m] ?? 0) - (k.got[m] ?? 0)) : 0;
+    }
   }
 }
 
@@ -238,6 +243,13 @@ function deliver(g: Game, w: Wire, dest: GNode, m: MatId, amt: number) {
     dest.gain += earned;
     dest.prog += amt;
   } else if (dest.type === 'void') {
+    dest.prog += amt;
+  } else if (dest.type === 'dock') {
+    // Delivered on the contract: taken, counted, and not paid for (docs/TIERS.md).
+    const k = g.contract;
+    if (k) k.got[m] = (k.got[m] ?? 0) + amt;
+    const acc = (g.tickAcc.docked ??= {});
+    acc[m] = (acc[m] ?? 0) + amt;
     dest.prog += amt;
   } else {
     dest.inb[m] = (dest.inb[m] ?? 0) + amt;
@@ -434,6 +446,7 @@ export function tick(g: Game, dt: number) {
   acc.credits = 0;
   acc.data.a = acc.data.b = acc.data.g = 0;
   acc.sold = {};
+  if (acc.docked) acc.docked = {};
   refillDemand(g, dt);
 
   for (const w of g.wires) {
@@ -459,7 +472,7 @@ export function tick(g: Game, dt: number) {
   for (let i = 0; i < N; i++) transferFrom(g, c, g.nodes[(i + rot) % N]);
 
   for (const n of g.nodes) {
-    if (isPass(n) || n.type === 'market' || n.type === 'void') {
+    if (isPass(n) || n.type === 'market' || n.type === 'void' || n.type === 'dock') {
       n.rate = ema(n.rate, n.prog / dt, dt, 1.5);
       const connected = (c.ins.get(n.id)?.length ?? 0) > 0;
       n.status = connected ? 'working' : 'idle';
@@ -475,6 +488,16 @@ export function tick(g: Game, dt: number) {
     const prev = g.soldRate[m] ?? 0;
     if (sold > 0 || prev > 1e-4) g.soldRate[m] = ema(prev, sold / dt, dt, 4);
     else if (prev) g.soldRate[m] = 0;
+  }
+  const k = g.contract;
+  if (k) {
+    // What the Docks take of each material the contract asks for, a second (smoothed like the sales).
+    for (const key in k.need) {
+      const m = key as MatId;
+      const took = acc.docked?.[m] ?? 0;
+      const prev = k.rate[m] ?? 0;
+      k.rate[m] = took > 0 || prev > 1e-4 ? ema(prev, took / dt, dt, 4) : 0;
+    }
   }
   g.creditRate = ema(g.creditRate, acc.credits / dt, dt, 3);
   for (const k of ['a', 'b', 'g'] as DataTier[]) g.dataRate[k] = ema(g.dataRate[k], acc.data[k] / dt, dt, 3);

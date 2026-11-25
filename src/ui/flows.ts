@@ -19,7 +19,7 @@ import { select, ui } from './ui';
  * The tints of where a material goes, the same wherever the panel draws them: one grey-blue from light (kept in the
  * line) to dark (thrown away). They were blue, gold and violet, which on the board are Plastic, Sand and Oil.
  */
-const TO = { machines: '#E4EAF6', sold: '#A3B3D2', studied: '#6E81AB', dumped: '#465372' };
+const TO = { machines: '#E4EAF6', sold: '#A3B3D2', docked: '#8FB8A8', studied: '#6E81AB', dumped: '#465372' };
 
 const TAG: Record<FlowState, string> = { ok: '', short: 'Short', stuck: 'No exit', spare: 'To spare' };
 
@@ -43,9 +43,9 @@ const share = (v: number, total: number) => `${Math.max(0, Math.min(100, (v / to
 /** One row's bar: where what is made goes, and after it, hatched, what machines wanted and did not get. */
 function barHtml(r: MatFlow): string {
   const missing = Math.max(0, r.wanted - r.used);
-  const total = Math.max(r.made, r.used + r.sold + r.studied + r.dumped + missing, 1e-6);
+  const total = Math.max(r.made, r.used + r.sold + r.docked + r.studied + r.dumped + missing, 1e-6);
   const seg = (v: number, color: string, cls = '') => (v > 0.004 ? `<i class="${cls}" style="width:${share(v, total)};background:${color}"></i>` : '');
-  return `<span class="fl-bar" aria-hidden="true">${seg(r.used, TO.machines)}${seg(r.sold, TO.sold)}${seg(r.studied, TO.studied)}${seg(r.dumped, TO.dumped)}${
+  return `<span class="fl-bar" aria-hidden="true">${seg(r.used, TO.machines)}${seg(r.sold, TO.sold)}${seg(r.docked, TO.docked)}${seg(r.studied, TO.studied)}${seg(r.dumped, TO.dumped)}${
     r.state === 'short' && missing > 0.004 ? `<i class="miss" style="width:${share(missing, total)}"></i>` : ''}</span>`;
 }
 
@@ -58,7 +58,7 @@ function noteHtml(r: MatFlow): string {
       : `Machines want <b class="mono">${fmtRate(r.wanted)}</b>/s and nothing makes ${esc(name)}.`;
   }
   if (r.state === 'stuck') return `Nothing takes it: what makes it is full and has stopped.`;
-  const parts: [number, string][] = [[r.used, 'to machines'], [r.sold, 'sold'], [r.studied, 'studied'], [r.dumped, 'dumped']];
+  const parts: [number, string][] = [[r.used, 'to machines'], [r.sold, 'sold'], [r.docked, 'to the Dock'], [r.studied, 'studied'], [r.dumped, 'dumped']];
   const said = parts.filter((p) => p[0] > 0.004).sort((a, b) => b[0] - a[0]).map(([v, what]) => `<span class="fl-part" data-to="${what.split(' ').pop()}"><b class="mono">${fmtRate(v)}</b> ${what}</span>`);
   const spare = r.state === 'spare' ? `<span class="fl-part">could make <b class="mono">${fmtRate(r.can)}</b></span>` : '';
   return said.join('<i>·</i>') + (spare ? (said.length ? '<i>·</i>' : '') + spare : '') || 'Nothing made yet.';
@@ -89,7 +89,7 @@ export function flowsHtml(g: Game): string {
       <div class="htxt"><h2>Flows</h2><p>${traced ? `Tracing ${esc(traced)}. Press it again to stop.` : 'What is made, and where it goes. Press a row to trace it on the board.'}</p></div>
       <button class="ibtn bare" data-act="close" data-testid="flows-close" aria-label="Close Flows">${icon('close', 16)}</button></div>
     <div class="scroll"><div class="fl-rows" data-testid="flows-rows">${rows.map(rowHtml).join('')}</div>
-      <div class="fl-key">${key(TO.machines, 'to machines')}${key(TO.sold, 'sold')}${key(TO.studied, 'studied')}${key(TO.dumped, 'dumped')}<span><i class="miss"></i>wanted, not there</span></div></div>`;
+      <div class="fl-key">${key(TO.machines, 'to machines')}${key(TO.sold, 'sold')}${g.contract ? key(TO.docked, 'to the Dock') : ''}${key(TO.studied, 'studied')}${key(TO.dumped, 'dumped')}<span><i class="miss"></i>wanted, not there</span></div></div>`;
 }
 
 /** A press inside the panel. `go` takes the camera to a node and selects it. True when the press was the panel's. */

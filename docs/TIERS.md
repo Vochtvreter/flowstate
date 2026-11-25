@@ -1,6 +1,6 @@
 # Tiers: a proposal
 
-Status: **a proposal, not built.** Nothing in this document is in the game yet. It describes where the game could go next and the decisions that have to be made before any of it is built. The build as it stands is in [DESIGN.md](./DESIGN.md) and [CONTENT.md](./CONTENT.md); the numbers quoted from it here were measured with the pacing tool on order seeds 0–7 or 0–14, by scripted players, not people.
+Status: **the first step is built** (§13): the Dock, the guided start's first contract and Tier 1, played with `?tiers` in the address, beside the goal chain, which is unchanged. Tiers 2 and 3 are not built: after Tier 1 a game of tiers goes on with the chain from "Make your first Circuit". The rest of this document is the proposal as it was written, with the decisions of §11 taken as recommended. The build as it stands is in [DESIGN.md](./DESIGN.md) and [CONTENT.md](./CONTENT.md); the numbers quoted from it here were measured with the pacing tool on order seeds 0–7 or 0–14, by scripted players, not people.
 
 ---
 
@@ -191,3 +191,57 @@ The pacing tool's players follow the card, and a tier has no card to follow. So 
 3. **Tier 2**, with ratios and full wires (levers B and C) and per-kind Assembler prices, and the rebuilder player.
 4. **Tier 3**, Reclamation moved into it, and lever E if decision 1 says so.
 5. **Retire the goal chain and the growth goals**, rewrite the pacing targets and their tests, move saves, and bring DESIGN.md and CONTENT.md up to date.
+
+---
+
+## 13. Built: the Dock and Tier 1
+
+Played with `?tiers` in the address (`Game.tiers`). Such a game is saved under a key of its own, so a game of the chain in the same browser is left alone. Without `?tiers` nothing has changed: the card players of the pacing tool reach the first Phone on the same second as before (18:21 on seed 0).
+
+**The decisions of §11, as taken.** The rebuild levers are left for Tiers 2 and 3. The Dock pays nothing per item. Demand is four times every material's own in a game of tiers (`RULES.tiers.demandMult`), and the demand prototype that raised it with the growth goals is taken out again. The guided start runs to the first Refiner and Speed. Box-select and copy and paste are not part of this step. The tiers are built beside the chain.
+
+**What a game of tiers is.**
+
+| | Goal | Contract | Reward |
+|---|---|---|---|
+| 1–7 | the chain's first seven goals, as they are | | |
+| 8 | Fill your first contract | 30 Glass | Oil Deposits, Ore Deposits, Routing, Merger, Orders, the Flow meter, 800¢ |
+| 9 | Fill the Refining contract (Tier 1) | 400 Glass, 250 Plastic, 150 Copper | opens Assembly, 300¢, 400α |
+| 10– | the chain from "Make your first Circuit" on | | |
+
+The two contracts are goals of the chain's list marked `mode: 'tiers'`, and the chain's goals 8–16 are marked `mode: 'chain'`; each way of playing passes over the other's (`inMode`, `goalsOf` in `src/goals.ts`). So everything that comes with a goal by its place in the list (`src/ui/reveal.ts`) is there when Tier 1 opens: the Tech tree, Flows, the minimap, Expand. A save of the chain from before this (chain 2) is moved to the same goal by its id.
+
+**The Dock** (`dock`, free, no tech: `Game.dockOn`, set when the first contract comes up). It takes from a wire only what the contract still wants of that material (`room` in `src/sim.ts`), counts it in `Game.contract.got`, and pays nothing. Where a port is wired to the Dock and a Market, the two share evenly, as any two sinks do; a Router sets another split. Once a material is delivered in full, the Dock takes no more of it, and a machine wired to nothing else backs up. A line that only feeds the Dock counts for Flow, and the Flows panel shows "to the Dock" beside "sold".
+
+**On screen.** The goal card of a contract has a line for each material: delivered and asked, a bar, and the rate with the time left at that rate ("1.6/s · 1:27 left"), or "No Copper reaches the Dock". Under it, "New in this tier": a button for each tool Tier 1 hands over (Oil and Plastic, Ore and Copper, Land, Router, Merger, Lab and Data, Orders and Flow), which opens a sentence on what it is for and one on how to start. A phone's folded card keeps one bar for the whole contract. The build menu from a port offers the Dock first while the contract wants what that port gives. The Dock's inspector shows the contract.
+
+**Land is cheaper in the tiers**: each plot costs 1.5 times the one before (360, 540, 810, 1,215¢), not 2.5 times (`RULES.tiers.expansionGrowth`). At 2.5 the players who build lines spent most of Tier 1 saving for land, and the one who built least was as quick as they were.
+
+### Measured
+
+`tools/tiers.ts` plays a new game of tiers on the real rules: the guided start by the card, then Tier 1 by one of five players (§9's four, and one who mixes). One action every 4 seconds; claims at once. Seeds 0–7 (they move only the orders):
+
+| Player | What it does in Tier 1 | Tier 1 takes | Idle |
+|---|---|---|---|
+| minimal | one line of each material, wired to the Dock alone, then waits | 11:19 | 91% |
+| wide | more lines for the material furthest from done, and land for them; each new line to the Dock and a Market | 6:40–6:43 | 66% |
+| tuner | Speed on the slowest material first, lines and land after | 7:39–7:44 | 48% |
+| sellfirst | three lines of each to the Market, then all of them to the Dock | 8:03–8:07 | 63% |
+| mixed | wide, and Speed whenever no line or plot can be paid for | 5:51–5:58 | 18% |
+
+The guided start ends at 2:26 for all of them. At one action every 6 s mixed takes 6:09–6:16 and minimal 11:19; at 10 s, 7:07–7:17 and 11:19.
+
+What it says, against §9:
+
+- **Every way works**: all five fill the contract on every seed. The minimal player takes 1.9 times as long as the quickest, inside the "about twice" of §9.
+- **More building is faster**: each player who builds more than the minimal one is quicker, and the one who never runs out of things to buy is quickest.
+- **No single best way**, with a caveat: mixed is the quickest because it does what the others do, whichever it can. Among the single-minded players, wide beats tuner. Selling first and delivering after loses to delivering half all along: with the Dock paying nothing, a line's credits buy the next line, and a line that delivers nothing does not shorten the contract.
+- **Nothing to do**: a player with only one kind of move waits for most of Tier 1 (48–91%); one who mixes waits for 18% (none at 6 s an action). Tier 1 has enough to do for a player who uses all of its tools, and little for one who does not.
+
+How the numbers were found: with the first draft (300 Glass, 200 Plastic, 200 Copper, 250¢ to start, land at 2.5×) the wide player took 9:26 and the minimal one 8:36: Copper set the pace for everyone, because Ore comes one deposit at a time. A contract weighted toward Glass, whose Sand deposits are many, makes building pay; land at 1.5× makes it affordable; 800¢ at the start lets the first lines be built at once. The first contract was 40 Glass from one Refiner and took 2:20; it is 30, and its how has both Glass Refiners wired to the Dock.
+
+`tests/tiers.test.ts` pins the rules (the Dock, the contract, the skipping, the save) and, on seed 0, that every player fills the contract, that wide, tuner and mixed beat minimal, that minimal is within twice the quickest, and that a builder's Tier 1 is six to eight minutes.
+
+**Seen in a browser.** In headless Chromium at 1440×900 and 390×844, from saves made by the mixed player: the first contract's card, the build menu offering the Dock first and building it with Enter, Tier 1's card with its lines and a tool opened, the Dock's inspector, Flows. No page error. Nobody has played it by hand from a new game, and no person has played it at all.
+
+**Not built.** Tiers 2 and 3, and the rebuild levers of §5. Per-recipe Assembler prices. The tools are introduced on the card, not on the board (no Show me). After Tier 1 a Dock takes nothing more, and the chain's cards, prices and pacing after "Make your first Circuit" are the chain's: they were not tuned for a game of tiers, whose demand is four times higher and whose land is cheaper. The tiers' scripted players claim at once and read every card; the pacing tool's targets do not judge them.

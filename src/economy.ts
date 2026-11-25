@@ -6,7 +6,7 @@ import { Game, GNode, noteEdit } from './state';
 
 export const has = (g: Game, tech: string | undefined) => !tech || g.techs.includes(tech);
 
-export const nodeUnlocked = (g: Game, type: NodeType) => has(g, NODE_DEFS[type].tech);
+export const nodeUnlocked = (g: Game, type: NodeType) => (type === 'dock' ? !!g.dockOn : has(g, NODE_DEFS[type].tech));
 export const recipeUnlocked = (g: Game, r: Recipe) => has(g, r.tech) && nodeUnlocked(g, r.machine);
 export const matUnlocked = (g: Game, m: MatId) => has(g, MATERIALS[m].tech);
 
@@ -141,7 +141,7 @@ export function adoptRecipes(g: Game) {
 
 // ---------- market ----------
 
-export const demandMult = (g: Game) => (has(g, 'C2') ? 1.5 : 1) * (has(g, 'C5') ? 2 : 1);
+export const demandMult = (g: Game) => (has(g, 'C2') ? 1.5 : 1) * (has(g, 'C5') ? 2 : 1) * (g.tiers ? RULES.tiers.demandMult : 1);
 /** Full price of one item, before the Flow bonus. */
 export const valueOf = (g: Game, m: MatId) => MATERIALS[m].value * (MATERIALS[m].tier >= 2 && has(g, 'C4') ? 1.25 : 1);
 /** Items per second the Markets buy at full price. */
@@ -228,7 +228,7 @@ export const maxPipeTier = (g: Game) => {
   return t;
 };
 
-export const expansionCost = (g: Game) => Math.round(RULES.expansion.base * Math.pow(RULES.expansion.growth, g.board.expansions));
+export const expansionCost = (g: Game) => Math.round(RULES.expansion.base * Math.pow(g.tiers ? RULES.tiers.expansionGrowth : RULES.expansion.growth, g.board.expansions));
 export const offlineCap = (g: Game) => (has(g, 'R4') ? RULES.away.capHoursLong : RULES.away.capHours) * 3600;
 
 // ---------- tech ----------

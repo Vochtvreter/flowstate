@@ -34,7 +34,7 @@ import { materialsAt, nodeById } from '../actions';
 import type { Advice } from '../advice';
 import { DATA_COLORS, DATA_NAMES, DataTier, MATERIALS, MatId, NODE_DEFS, RECIPES, Recipe, TECHS } from '../content';
 import { fmt } from '../economy';
-import { FlowGoalView, GOALS, GoalProgress, GoalView, MAIN_GOALS, claimGoal, goalFocus, goalView } from '../goals';
+import { FlowGoalView, GOALS, GoalProgress, GoalView, MAIN_GOALS, ToolNote, claimGoal, goalFocus, goalView, inMode, mainCount } from '../goals';
 import { claimOrder, orderView } from '../orders';
 import { graph } from '../sim';
 import { Game, GNode, GoalReward, Reward, nodeNoun } from '../state';
@@ -94,6 +94,10 @@ export function initHud() {
         lastOrderClaim = now;
         if (pressed) pressClaim(pressed, true);
       }
+    } else if (a === 'tool') {
+      // A tool the tier hands over: its note opens under the row, and closes again on a second press.
+      const name = GOALS[g.goal.i]?.tools?.[Number(args[0])]?.name;
+      toolOpen = name && !(toolOpen?.goal === g.goal.i && toolOpen.name === name) ? { goal: g.goal.i, name } : null;
     } else if (a === 'how') {
       // The card's "How?": the gesture in place of the why, and back again. Sent away, it does not come by itself.
       if (howGoal === g.goal.i) {
@@ -253,8 +257,9 @@ function rewardChips(r: GoalReward | Reward): string {
   const out: string[] = [];
   const gr = r as GoalReward;
   for (const id of gr.techs ?? []) out.push(`<span class="rw new">${icon('tree', 11)}${esc(TECHS[id]?.name ?? id)}</span>`);
-  if (gr.unlock === 'orders') out.push(`<span class="rw new">Orders</span>`);
-  if (gr.unlock === 'flow') out.push(`<span class="rw new">Flow meter</span>`);
+  const unlocks = [...(gr.unlock ? [gr.unlock] : []), ...(gr.unlocks ?? [])];
+  if (unlocks.includes('orders')) out.push(`<span class="rw new">Orders</span>`);
+  if (unlocks.includes('flow')) out.push(`<span class="rw new">Flow meter</span>`);
   if (gr.unlock === 'end') out.push(`<span class="rw new">Demo complete</span>`);
   // A tech the claim opens for research (not granted: it is bought with Data, and the claim pays most of it).
   for (const id of gr.opens ?? []) out.push(`<span class="rw new" data-testid="reward-opens">${icon('tree', 11)}Opens ${esc(TECHS[id]?.name ?? id)}</span>`);
@@ -306,6 +311,53 @@ function progressHtml(p: GoalProgress, name?: string): string {
   // A rate (a growth goal: "0.5 / 1 Glass a second"): to two places, not floored to a whole number.
   if (unit.endsWith(' a second')) return `${bar(share, '#7AA2FF')}<span class="gc-num" data-testid="goal-rate"><b class="mono">${rateText(cur)} / ${rateText(target)}</b> ${esc(unit)}</span>`;
   return `${bar(share, '#7AA2FF')}<span class="gc-num"><b class="mono">${fmt(Math.floor(cur))} / ${fmt(target)}</b> ${esc(unit)}</span>`;
+}
+
+// ---------- a tier's contract (docs/TIERS.md) ----------
+
+/** m:ss, for the time a contract line has left. */
+const minSec = (s: number) => `${Math.floor(s / 60)}:${String(Math.floor(s % 60)).padStart(2, '0')}`;
+
+/**
+ * The contract, a line for each material: what the Dock has taken of what is asked, a bar, and the time left at the
+ * rate it is taking it now, or why it is taking none. The time is the point: every line the player adds takes some off.
+ */
+function contractHtml(g: Game): string {
+  const k = g.contract!;
+  const hasDock = g.nodes.some((n) => n.type === 'dock');
+  const rows = (Object.keys(k.need) as MatId[]).map((m) => {
+    const need = k.need[m] ?? 0;
+    const got = Math.min(need, k.got[m] ?? 0);
+    const rate = k.rate[m] ?? 0;
+    const done = got + 1e-6 >= need;
+    const color = MATERIALS[m].color;
+    const say = done ? `${icon('check', 11)}Delivered`
+      : !hasDock ? 'No Dock yet'
+      : rate < 0.02 ? `No ${esc(MATERIALS[m].name)} reaches the Dock`
+      : `<b class="mono">${rateText(rate)}</b>/s · <b class="mono">${minSec((need - got) / rate)}</b> left`;
+    return `<div class="kc-row${done ? ' done' : ''}${!done && hasDock && rate < 0.02 ? ' none' : ''}" data-mat="${m}" data-testid="contract-${m}">
+      <span class="kc-mat">${matGlyph(m, 14)}<span>${esc(MATERIALS[m].name)}</span></span>
+      <span class="kc-count mono">${fmt(Math.floor(got))} / ${fmt(need)}</span>
+      ${bar(need > 0 ? got / need : 1, color)}
+      <span class="kc-say">${say}</span></div>`;
+  });
+  return `<div class="gc-contract" data-testid="contract">${rows.join('')}</div>`;
+}
+
+/**
+ * The tools a tier hands over (Goal.tools): each opens to what it is for and how to start, one at a time. Which one
+ * is open is kept here, not in the card: the card is drawn afresh as the game runs.
+ */
+let toolOpen: { goal: number; name: string } | null = null;
+function toolsHtml(g: Game, tools: ToolNote[], touch: boolean): string {
+  const open = toolOpen?.goal === g.goal.i ? toolOpen.name : null;
+  const items = tools.map((t, i) => {
+    const on = t.name === open;
+    return `<button class="kt${on ? ' on' : ''}" data-act="tool:${i}" data-testid="tier-tool" aria-expanded="${on}">${esc(t.name)}</button>`;
+  }).join('');
+  const shown = tools.find((t) => t.name === open);
+  const note = shown ? `<p class="kt-note" data-testid="tier-tool-note">${esc(shown.why)} <span class="kt-how">${esc(touch ? shown.how.touch : shown.how.mouse)}</span></p>` : '';
+  return `<div class="gc-tools" data-testid="tier-tools"><span class="gc-lbl">New in this tier</span>${items}${note}</div>`;
 }
 
 /** A rate as the card writes it: "1", "0.5", "1.18". */
@@ -369,6 +421,8 @@ function pipsHtml(g: Game, ending = false): string {
   const upTo = !ending && at >= MAIN_GOALS ? GOALS.length : MAIN_GOALS;
   let out = '';
   for (let i = 0; i < upTo; i++) {
+    // (A goal of the other way of playing is never on this game's card: docs/TIERS.md.)
+    if (!inMode(g, GOALS[i])) continue;
     const state = i < at ? ' done' : i === at ? ' now' : '';
     out += `${i === MAIN_GOALS ? '<i class="pip-gap"></i>' : ''}<i class="pip${GOALS[i].big ? ' big' : ''}${GOALS[i].free ? ' free' : ''}${state}${i === justClaimed && now < justUntil ? ' just' : ''}"></i>`;
   }
@@ -516,7 +570,7 @@ function goalHtml(g: Game, v: GoalView, rows: string, prog: string): string {
 function endedHtml(g: Game): string {
   const goal = GOALS[MAIN_GOALS - 1];
   const gh = ghostsHtml(performance.now());
-  return `<div class="gc-main">${pipsHtml(g, true)}<div class="gc-body${rises ? ` rise${rises % 2}` : ''}" data-key="body"><div class="gc-head"><span class="gc-step"><span class="gc-w">Goal </span>${MAIN_GOALS} / ${MAIN_GOALS}</span><span class="gc-done">${icon('check', 12)}Done</span></div>
+  return `<div class="gc-main">${pipsHtml(g, true)}<div class="gc-body${rises ? ` rise${rises % 2}` : ''}" data-key="body"><div class="gc-head"><span class="gc-step"><span class="gc-w">Goal </span>${mainCount(g)} / ${mainCount(g)}</span><span class="gc-done">${icon('check', 12)}Done</span></div>
       <h3 class="gc-title">${esc(goal.title)}</h3>
       <div class="gc-rewards"><span class="rw new">Demo complete</span></div></div>${gh.card}</div>${gh.press}`;
 }
@@ -577,9 +631,12 @@ function renderGoal(g: Game, force: boolean) {
     const inputs = (v as GoalView & { inputs?: Inputs }).inputs;
     const flowView = !!v.flow;
     const lensInputs = !!inputs?.length && !!v.progress && v.progress[0] < v.progress[1] && inputs.some((x) => !x.fed);
+    const contract = !!v.goal.contract && g.contract?.goal === v.goal.id;
     const body = flowView ? flowHtml(v.flow!, v.progress) : lensInputs ? inputsHtml(inputs!) : wait ? waitHtml(wait, g.paused) : v.progress ? progressHtml(v.progress, boughtWith(g, v)) : '';
     prog = body ? `<div class="gc-prog${flowView ? ' flow' : ''}${body.includes('gc-eta') ? ' eta' : ''}${body.includes('gc-for') ? ' named' : ''}">${body}</div>` : '';
-    rows = lineHtml(g, narrow) + tipHtml(g);
+    // A contract: its own lines in place of the one bar, and what the tier hands over beneath them.
+    if (contract) prog = `<div class="gc-prog kc">${progressHtml(v.progress ?? [0, 1, 'items'])}</div>${contractHtml(g)}`;
+    rows = (contract && v.goal.tools?.length ? toolsHtml(g, v.goal.tools, isTouch()) : '') + lineHtml(g, narrow) + tipHtml(g);
     // A wait (what the goal asks for next has to be saved up for, or Flow has to be held): what there is to do
     // meanwhile is the line or the tip, and on a phone the hint folds behind a tap once the player has pressed the
     // board (hud.css, "phone seating"). Once it can be bought, the hint is what to do, and it is shown again.

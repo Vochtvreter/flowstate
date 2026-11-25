@@ -124,11 +124,24 @@ export interface GoalReward extends Reward {
   techs?: string[];
   /** A feature switched on: Orders, the Flow meter, or the end of the demo. */
   unlock?: Unlock;
+  /** More than one feature switched on (the tiers' first contract hands over Orders and the Flow meter together). */
+  unlocks?: Unlock[];
   /**
    * Techs this goal opens for research (Tech.locked in src/content.ts): they are not granted, they can be bought
    * with Data from now on. A goal that has the player grow a line opens the next step of the Processing spine.
    */
   opens?: string[];
+}
+
+/**
+ * A tier's contract (docs/TIERS.md): `need` of each material, delivered at a Dock, which takes no more of a material
+ * than is still wanted. `rate`: what the Docks have taken of each a second, smoothed (display and forecasts only).
+ */
+export interface Contract {
+  goal: string;
+  need: Bag;
+  got: Bag;
+  rate: Bag;
 }
 
 /** The one active order (see src/orders.ts): "deliver `need` of `mat`", counted from sales at any Market. */
@@ -182,7 +195,7 @@ export type GameEvent =
   /** A goal was claimed and paid. `big` marks one of the big celebrations. */
   | { kind: 'goal-claimed'; text: string; goal: string; index: number; reward: GoalReward; big: boolean }
   /** A feature was switched on by a goal. */
-  | { kind: 'unlock'; text: string; what: 'orders' | 'flow' }
+  | { kind: 'unlock'; text: string; what: 'orders' | 'flow' | 'dock' }
   /** A new order appeared. `quiet` = it silently replaced a stale one. */
   | { kind: 'order-new'; text: string; order: Order; quiet: boolean }
   | { kind: 'order-ready'; text: string; order: Order }
@@ -259,6 +272,15 @@ export interface Game {
    */
   flowNearLate?: number;
   // --- goals and orders ---
+  /**
+   * A game of tiers (docs/TIERS.md), started with ?tiers: the guided start, then a contract for each tier, delivered
+   * at a Dock. Goals marked `mode` (src/goals.ts) belong to one way of playing or the other. Absent: the goal chain.
+   */
+  tiers?: boolean;
+  /** The Dock can be built: a game of tiers that has reached its first contract. */
+  dockOn?: boolean;
+  /** The contract of the active goal, while it has one (Goal.contract): what it asks for, and what the Dock has taken. */
+  contract?: Contract | null;
   /** Active goal: index into GOALS (GOALS.length when all are claimed) and whether it is waiting for claimGoal(). */
   goal: { i: number; ready: boolean };
   /**
@@ -295,7 +317,7 @@ export interface Game {
   // --- not saved ---
   rev: number;
   events: GameEvent[];
-  tickAcc: { credits: number; data: Record<DataTier, number>; sold: Bag };
+  tickAcc: { credits: number; data: Record<DataTier, number>; sold: Bag; docked?: Bag };
 }
 
 /** "Sand Drill", "Plastic Refiner", "Lab": what a node is called in a sentence. */
@@ -397,7 +419,7 @@ export const newStats = (): Stats => ({
   nodesBuilt: 0, wiresMade: 0, ordersFilled: 0, flowStates: 0, firstLensAt: null,
 });
 
-export function newGame(): Game {
+export function newGame(opts: { tiers?: boolean } = {}): Game {
   const g: Game = {
     v: 1, nextId: 1,
     nodes: [], wires: [], clips: [],
@@ -411,7 +433,7 @@ export function newGame(): Game {
     board: { w: 1240, h: 760, expansions: 0 },
     credits: 0, lifetime: 0,
     data: { a: 0, b: 0, g: 0 },
-    techs: [], queue: [], opened: [], chain: 2,
+    techs: [], queue: [], opened: [], chain: 3,
     // The starting Drill is already extracting Sand, so it is not announced as a new material.
     made: { glint: true }, sold: {}, soldRate: {},
     paused: false, time: 0, savedAt: Date.now(),
@@ -426,6 +448,7 @@ export function newGame(): Game {
     tickAcc: { credits: 0, data: { a: 0, b: 0, g: 0 }, sold: {} },
   };
   g.nextId = 10;
+  if (opts.tiers) g.tiers = true;
   const dep = g.deposits.find((d) => d.id === START.wellDeposit)!;
   const well = makeNode(g, 'well', dep.x, dep.y);
   well.material = dep.mat;
@@ -440,7 +463,14 @@ export function newGame(): Game {
 
 // ---------- save / load ----------
 
-const KEY = 'flowstate-save-v1';
+/**
+ * `?tiers` in the address plays the tiers (docs/TIERS.md) instead of the goal chain: a new game is one of tiers, and
+ * it is saved under a key of its own, so that a game of the chain in the same browser is left as it is.
+ */
+export const TIERS_URL = typeof location !== 'undefined' && typeof location.search === 'string' && new URLSearchParams(location.search).has('tiers');
+/** The save's key in localStorage. */
+export const SAVE_KEY = TIERS_URL ? 'flowstate-tiers-save-v1' : 'flowstate-save-v1';
+const KEY = SAVE_KEY;
 
 /** True while the page is in a background tab. Always false outside a browser. */
 const pageHidden = () => typeof document !== 'undefined' && !!document.hidden;
@@ -698,6 +728,14 @@ function revive(raw: any): Game | null {
     // A save from before the `ended` flag that already has a Phone is past the demo.
     g.ended = typeof raw.ended === 'boolean' ? raw.ended : !!g.made[RULES.capstone];
     g.seenSurplus = !!raw.seenSurplus;
+    // A game of tiers, the Dock, and the contract on the card (checked against the goal by tickGoal in src/goals.ts).
+    if (raw.tiers === true) g.tiers = true;
+    else delete g.tiers;
+    if (g.tiers && raw.dockOn === true) g.dockOn = true;
+    else delete g.dockOn;
+    const k = raw.contract;
+    if (g.tiers && k && typeof k === 'object' && typeof k.goal === 'string') g.contract = { goal: k.goal, need: loadBag(k.need), got: loadBag(k.got), rate: loadBag(k.rate) };
+    else delete g.contract;
     // Market Lens comes with the first sale over demand (src/sim.ts). A save that saw one before that rule gets it now.
     if (g.seenSurplus && !g.techs.includes('C1')) g.techs.push('C1');
     // The last press of Upgrade all: a time in the game, none from the future.

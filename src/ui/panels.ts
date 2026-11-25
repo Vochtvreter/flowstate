@@ -1049,6 +1049,18 @@ function drillNote(g: Game): string {
   return `<div class="note" data-testid="drill-stays">It stays on its deposit. <button class="link" data-act="tech:${t.id}">${esc(t.name)}</button> lets it move.</div>`;
 }
 
+/** A Dock: the contract it fills (docs/TIERS.md), what it has taken of each material, and how fast. */
+function dockSection(g: Game): string {
+  const k = g.contract;
+  if (!k) return `<div class="sec flow"><span class="lbl">Contract</span><div class="note">No contract now: the Dock takes nothing until the next one.</div></div>`;
+  const rows = (Object.keys(k.need) as MatId[]).map((m) => {
+    const need = k.need[m] ?? 0;
+    const got = Math.min(need, k.got[m] ?? 0);
+    return `<div><div class="row sm"><span>${matGlyph(m, 12)} ${MATERIALS[m].name}</span><span class="mono"><b>${fmt(Math.floor(got))}</b> / ${fmt(need)} · ${fmtRate(k.rate[m] ?? 0)}/s</span></div><div class="bar"><span style="width:${pct(need > 0 ? got / need : 1)}%;background:${MATERIALS[m].color}"></span></div></div>`;
+  });
+  return `<div class="sec flow"><span class="lbl">Contract</span>${rows.join('')}<div class="note">Takes only what the contract still wants, and pays nothing for it. Anything else on the same port goes to its other wires.</div></div>`;
+}
+
 function nodeInspector(g: Game, n: GNode): string {
   const def = NODE_DEFS[n.type];
   const title = n.type === 'well' && n.material ? `${MATERIALS[n.material].name} Drill` : def.name;
@@ -1058,6 +1070,7 @@ function nodeInspector(g: Game, n: GNode): string {
   else if (n.type === 'router') body += routerSection(g, n);
   else if (n.type === 'market') body += marketSection(g, n);
   else if (n.type === 'lab') body += labSection(g, n);
+  else if (n.type === 'dock') body += dockSection(g);
   else if (n.type === 'silo') {
     const stored = (Object.keys(n.inb) as MatId[]).filter((m) => (n.inb[m] ?? 0) >= 0.5);
     body += `<div class="sec flow"><span class="lbl">Stored</span>${stored.map((m) => `<div><div class="row sm"><span>${matGlyph(m, 12)} ${MATERIALS[m].name}</span><span class="mono"><b>${Math.round(n.inb[m] ?? 0)}</b> / ${passCap(n)}</span></div><div class="bar"><span style="width:${pct((n.inb[m] ?? 0) / passCap(n))}%;background:${MATERIALS[m].color}"></span></div></div>`).join('') || '<div class="note">Empty.</div>'}

@@ -2,11 +2,13 @@ import { describe, expect, it } from 'vitest';
 import { claimGoal, connect, cutWire, expandBoard, favour, placeNode, redo, setMode, setWeight, undo, upgrade, upgradeAll } from '../src/actions';
 import { MATERIALS, RECIPES, RULES, TECHS } from '../src/content';
 import { has, nodeCost, research } from '../src/economy';
-import { GOALS, MAIN_GOALS, activeGoal, goalAge, goalById, goalDeposit, goalView, rateNoun, recipeFeeds, rewardText, routerFavoursLab } from '../src/goals';
+import { GOALS, MAIN_GOALS, activeGoal, goalsOf, mainCount, goalAge, goalById, goalDeposit, goalView, rateNoun, recipeFeeds, rewardText, routerFavoursLab } from '../src/goals';
 import { Game, deserialize, serialize } from '../src/state';
 import { fresh, market, rich, run, take, well } from './helpers';
 
 const indexOf = (id: string) => GOALS.findIndex((x) => x.id === id);
+/** The goals a game of the chain plays (the tiers' contracts are set among them, and passed over). */
+const CHAIN_GOALS = goalsOf('chain');
 
 /** Jump straight to a goal, as if everything before it had been claimed. */
 function at(g: Game, id: string) {
@@ -15,8 +17,8 @@ function at(g: Game, id: string) {
 
 describe('goal chain: the table (2.4)', () => {
   it('has 25 goals, in order, then four free-play goals: a growth goal stands before each new chapter', () => {
-    expect(MAIN_GOALS).toBe(25);
-    expect(GOALS.map((x) => x.title).slice(0, 25)).toEqual([
+    expect(mainCount(fresh())).toBe(25);
+    expect(CHAIN_GOALS.map((x) => x.title).slice(0, 25)).toEqual([
       'Sell your Sand',
       'Dig up more Sand',
       'Sell that Sand too',
@@ -43,9 +45,28 @@ describe('goal chain: the table (2.4)', () => {
       'Build a Fabricator',
       'Make your first Phone',
     ]);
-    expect(GOALS.slice(25).map((x) => x.id)).toEqual(['make-clay', 'make-coil', 'make-dynamo', 'make-paradox']);
-    expect(GOALS.slice(0, 25).every((x) => !x.free)).toBe(true);
-    expect(GOALS.slice(25).every((x) => x.free)).toBe(true);
+    expect(CHAIN_GOALS.slice(25).map((x) => x.id)).toEqual(['make-clay', 'make-coil', 'make-dynamo', 'make-paradox']);
+    expect(CHAIN_GOALS.slice(0, 25).every((x) => !x.free)).toBe(true);
+    expect(CHAIN_GOALS.slice(25).every((x) => x.free)).toBe(true);
+    // The free-play goals begin at the same index whichever way the game is played.
+    expect(GOALS.findIndex((x) => x.free)).toBe(MAIN_GOALS);
+  });
+
+  it('the tiers: the guided start, a first contract, Tier 1\'s contract in place of the chain\'s goals 8–16, then the chain', () => {
+    const tiers = goalsOf('tiers');
+    expect(tiers.filter((x) => !x.free).map((x) => x.id)).toEqual([
+      'wire-market', 'second-well', 'wire-all-wells', 'build-refiner', 'sell-shard', 'grow-shard', 'tune-shard',
+      'dock-glass', 'tier-refining',
+      'make-glyph', 'study-glyph', 'grow-glyph', 'make-mist', 'make-prism', 'bulk-upgrade', 'grow-prism', 'build-fabricator', 'make-lens',
+    ]);
+    const g = fresh();
+    g.tiers = true;
+    expect(mainCount(g)).toBe(18);
+    // The first contract hands over Tier 1's tools; Tier 1's contract opens Assembly, as "Make 1 Copper a second" does.
+    expect(goalById('dock-glass')!.reward).toMatchObject({ techs: ['P2', 'P3', 'L1', 'L2'], unlocks: ['orders', 'flow'] });
+    expect(goalById('dock-glass')!.contract).toEqual({ shard: 30 });
+    expect(goalById('tier-refining')!.reward.opens).toEqual(['P4']);
+    expect(Object.keys(goalById('tier-refining')!.contract!)).toEqual(['shard', 'ink', 'spark']);
   });
 
   it('new things come one chapter at a time: each step of the spine is locked until the growth goal before it is claimed', () => {
@@ -77,9 +98,9 @@ describe('goal chain: the table (2.4)', () => {
     const locked = Object.values(TECHS).filter((t) => t.locked).map((t) => t.id);
     expect(locked).toEqual(['P3', 'P4', 'P5', 'P7']);
     for (const id of locked) {
-      const opens = GOALS.filter((x) => x.reward.opens?.includes(id));
+      const opens = CHAIN_GOALS.filter((x) => x.reward.opens?.includes(id));
       expect(opens.length, id).toBe(1);
-      const next = GOALS[GOALS.indexOf(opens[0]) + 1];
+      const next = CHAIN_GOALS[CHAIN_GOALS.indexOf(opens[0]) + 1];
       expect(next.hint.mouse, id).toContain(`Research ${TECHS[id].name}`);
       // ...and the claim pays at least half of what that research costs in α: a lock, then a wait for Data, would be two walls.
       expect(opens[0].reward.a ?? 0, id).toBeGreaterThanOrEqual((TECHS[id].cost.a ?? 0) / 2);
@@ -142,11 +163,11 @@ describe('goal chain: the table (2.4)', () => {
   it('flags the firsts and the growth goals that open something as big celebrations: a peak every minute or two', () => {
     // The six firsts (Glass, Data, Copper, Circuit, Screen, Phone), and the five growth goals whose claim brings the
     // next chapter: a line the player has widened is a peak of its own. (The twelfth is the first Flow State.)
-    expect(GOALS.filter((x) => x.big).map((x) => x.id)).toEqual([
+    expect(CHAIN_GOALS.filter((x) => x.big).map((x) => x.id)).toEqual([
       'sell-shard', 'tune-shard', 'feed-lab', 'grow-ink', 'make-spark', 'grow-spark', 'make-glyph', 'grow-glyph', 'make-prism', 'grow-prism', 'make-lens',
     ]);
     // None of them is a free-play goal, and the card's view says the same as the table.
-    for (const goal of GOALS) {
+    for (const goal of CHAIN_GOALS) {
       if (goal.big) expect(goal.free, goal.id).toBeFalsy();
       const g = fresh();
       g.goal = { i: GOALS.indexOf(goal), ready: false };
@@ -184,7 +205,7 @@ describe('goal chain: the table (2.4)', () => {
   it('is the only way to get Refining, Lab and Bulk Upgrade', () => {
     // (Routing was one of them, with a card that had the player build a Router. It is a research now, 50α behind
     // Oil Deposits, for whoever wants one.)
-    const granted = GOALS.flatMap((x) => x.reward.techs ?? []).sort();
+    const granted = CHAIN_GOALS.flatMap((x) => x.reward.techs ?? []).sort();
     expect(granted).toEqual(['P1', 'R1', 'S1']);
     expect(TECHS.L1).toMatchObject({ cost: { a: 50 }, requires: ['R1', 'P2'] });
     expect(TECHS.L1.auto).toBeUndefined();
@@ -195,7 +216,7 @@ describe('goal chain: the table (2.4)', () => {
     g.data = { a: 1e6, b: 1e6, g: 1e6 };
     for (const id of auto) expect(research(g, id)).toBe(false);
     // The tech tree says which goal grants each of them.
-    for (const goal of GOALS) for (const id of goal.reward.techs ?? []) expect(TECHS[id].auto).toContain(goal.title);
+    for (const goal of CHAIN_GOALS) for (const id of goal.reward.techs ?? []) expect(TECHS[id].auto).toContain(goal.title);
   });
 });
 

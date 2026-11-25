@@ -2454,6 +2454,7 @@ function nodeSub(n: GNode): string {
     case 'market': return 'sells anything';
     case 'lab': return 'items → Data';
     case 'void': return 'destroys items';
+    case 'dock': return 'fills the contract';
   }
 }
 
@@ -5672,6 +5673,9 @@ function consumeOptions(g: Game, mats: MatId[]): RadialOpt[] {
     if (nodeUnlocked(g, type)) opts.push({ type, label: NODE_DEFS[type].name, sub, cost: nodeCost(g, type), glyph: type === 'market' ? '<span class="coin big">¢</span>' : nodeIcon(type, 26) });
   };
   const junk = mats.length > 0 && mats.every((m) => MATERIALS[m].value < 1);
+  // The Dock, where the contract on the card wants what this port gives (docs/TIERS.md).
+  const k = g.contract;
+  if (k && mats.some((m) => (k.need[m] ?? 0) > (k.got[m] ?? 0))) sink('dock', 'deliver');
   if (junk) {
     sink('void', 'destroy');
     sink('market', 'sell');
