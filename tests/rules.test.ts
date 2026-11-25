@@ -2,7 +2,7 @@ import { describe, expect, it } from 'vitest';
 import { connect, cutWire, deleteNode, expandBoard, placeNode, setMode, setRecipe, upgrade, upgradeWire } from '../src/actions';
 import { MATERIALS, MAT_IDS, MatId, NODE_DEFS, NodeType, PIPES, RECIPES, RULES, TECHS } from '../src/content';
 import {
-  cycleTime, dataYield, demandBurst, demandInfo, demandRate, demandShown, expansionCost, flowMult, nodeCostAt, price, research, saturation, sellValue,
+  cycleTime, dataYield, demandBurst, demandInfo, demandShown, expansionCost, flowMult, nodeCostAt, price, research, saturation, sellValue,
   techAvailable, techHidden, upgradeCostAt, wellRate,
 } from '../src/economy';
 import { GOALS } from '../src/goals';
@@ -943,34 +943,5 @@ describe('Flow (2.3)', () => {
     run(g, 30);
     expect(g.flow).toBeLessThan(0.55);
     expect(g.flowHold).toBe(0);
-  });
-});
-
-describe('demand grows with the goals (RULES.demand.goalHeadroom)', () => {
-  const at = (id: string) => GOALS.findIndex((x) => x.id === id);
-  it('a growth goal on the card raises its material to the headroom times its rate, and keeps it there', () => {
-    const g = fresh();
-    expect(demandRate(g, 'shard')).toBe(MATERIALS.shard.demand);
-    g.goal.i = at('grow-shard');
-    expect(demandRate(g, 'shard')).toBeCloseTo(RULES.demand.goalHeadroom * 1);
-    g.goal.i = at('tune-shard');
-    expect(demandRate(g, 'shard')).toBeCloseTo(RULES.demand.goalHeadroom * 1.2);
-    g.goal.i = at('grow-prism') + 1;
-    expect(demandRate(g, 'shard')).toBeCloseTo(RULES.demand.goalHeadroom * 1.2);
-    expect(demandRate(g, 'prism')).toBeCloseTo(RULES.demand.goalHeadroom * 0.5);
-    // A material no growth goal asks for keeps its own demand.
-    expect(demandRate(g, 'mist')).toBe(MATERIALS.mist.demand);
-  });
-  it('never lowers a demand, and is off at 0', () => {
-    const g = fresh();
-    g.goal.i = at('grow-prism') + 1;
-    for (const m of MAT_IDS) expect(demandRate(g, m)).toBeGreaterThanOrEqual(MATERIALS[m].demand);
-    const was = RULES.demand.goalHeadroom;
-    try {
-      RULES.demand.goalHeadroom = 0;
-      for (const m of MAT_IDS) expect(demandRate(g, m)).toBe(MATERIALS[m].demand);
-    } finally {
-      RULES.demand.goalHeadroom = was;
-    }
   });
 });

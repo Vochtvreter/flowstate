@@ -34,8 +34,8 @@
 // (src/advice.ts), which nobody is sure to follow. docs/CONTENT.md has them ("While you wait").
 import { MATERIALS, MatId, NODE_DEFS, NodeType, RECIPES, RULES, Recipe, TECHS } from './content';
 import {
-  cycleTime, demandRate, endDemo, grantTech, has, labRate, maxLevel, nodeCost, nodeCount, nodeUnlocked, pickRecipe, recipeOf, setGrowthRates,
-  trackAvailable, upgradeCost, valueOf, wellRate,
+  cycleTime, demandRate, endDemo, grantTech, has, labRate, maxLevel, nodeCost, nodeCount, nodeUnlocked, pickRecipe, recipeOf, trackAvailable,
+  upgradeCost, valueOf, wellRate,
 } from './economy';
 import { countsForFlow, flowUnsettled, isFlowing, nearShare } from './flow';
 import { graph, isMachine, isPass } from './graph';
@@ -1157,9 +1157,6 @@ export const GOALS: Goal[] = [
     reward: { credits: 7500 },
   },
 ];
-
-// Demand grows with the growth goals (RULES.demand.goalHeadroom, growthDemand in src/economy.ts).
-setGrowthRates(GOALS.flatMap((x, at) => x.meanwhile?.filter((l) => l.grow).map((l) => ({ at, mat: l.grow!.mat, rate: l.grow!.rate })) ?? []));
 
 /** Goals in the demo itself ("Goal 4 / 22"); the rest are free play. */
 export const MAIN_GOALS = GOALS.filter((x) => !x.free).length;
