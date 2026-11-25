@@ -86,6 +86,7 @@ Box-select, a block of cards for a finger, copy/paste, named groups or frames ro
 - [Content & numbers](docs/CONTENT.md): materials, recipes, prices, the goal chain, the adviser, and where the pacing lands. Kept current with `src/content.ts` and `src/goals.ts`.
 - [UI spec](docs/UI.md): the interface as built. The [Flowstate UI canvas](https://claude.ai/artifact/HS1Kbgr7TKuNz9xPjpJ7Pg) holds early mockups from before the build, which the build has since moved past.
 - [Game design document](docs/DESIGN.md): the design of this build, system by system, and what of the design is not built.
+- [Tiers: a proposal](docs/TIERS.md): where the game could go next, from a guided chain to tiers of tools and a contract each. Not built; it lists the decisions it needs.
 - [Pitch build plan](docs/PITCH_PLAN.md): the plan this build was made to, how it came out against its criteria, and the defects that were found and left.
 
 ## Code layout
