@@ -3,7 +3,7 @@
 import { describe, expect, it } from 'vitest';
 import { claimGoal, clearHistory, connect, placeNode } from '../src/actions';
 import { RULES } from '../src/content';
-import { demandRate, expansionCost, has, nodeUnlocked } from '../src/economy';
+import { demandRate, expansionCost, has, nodeCost, nodeUnlocked } from '../src/economy';
 import { GOALS, activeGoal, goalView } from '../src/goals';
 import { Game, deserialize, newGame, serialize } from '../src/state';
 import { PLAYERS, playTiers } from '../tools/tiers';
@@ -30,9 +30,9 @@ describe('the tiers: the Dock and its contract', () => {
     expect(activeGoal(g)!.id).toBe('feed-lab');
     expect(nodeUnlocked(g, 'dock')).toBe(false);
     // A goal of the tiers set by hand is passed over on the next tick.
-    g.goal = { i: indexOf('tier-refining'), ready: false };
+    g.goal = { i: indexOf('tier-parts'), ready: false };
     run(g, 0.05);
-    expect(activeGoal(g)!.id).toBe('make-glyph');
+    expect(activeGoal(g)!.id).toBe('build-fabricator');
     expect(g.contract ?? null).toBeNull();
   });
 
@@ -45,7 +45,7 @@ describe('the tiers: the Dock and its contract', () => {
     expect(nodeUnlocked(g, 'dock')).toBe(true);
     expect(take(g, 'unlock').map((e) => e.what)).toEqual(['dock']);
     expect(g.contract).toMatchObject({ goal: 'dock-glass', need: { shard: 30 }, got: {} });
-    expect(goalView(g)).toMatchObject({ number: 8, total: 18, progress: [0, 30, 'Glass'] });
+    expect(goalView(g)).toMatchObject({ number: 8, total: 12, progress: [0, 30, 'Glass'] });
   });
 
   it('the Dock takes what the contract still wants and nothing else, and pays nothing for it', () => {
@@ -86,7 +86,7 @@ describe('the tiers: the Dock and its contract', () => {
     expect(Math.abs(a - b)).toBeLessThan(0.1);
   });
 
-  it('the first contract hands over Tier 1\'s tools; Tier 1\'s opens Assembly and leads on to the chain', () => {
+  it('the first contract hands over Tier 1\'s tools, Tier 1\'s hands over Tier 2\'s, and Tier 2\'s leads on to the chain', () => {
     const g = tiersAt('dock-glass');
     g.techs = ['P1', 'R1'];
     g.contract!.got.shard = 30;
@@ -96,18 +96,29 @@ describe('the tiers: the Dock and its contract', () => {
     for (const id of ['P2', 'P3', 'L1', 'L2']) expect(has(g, id), id).toBe(true);
     expect(g.ordersOn && g.flowOn).toBe(true);
     expect(activeGoal(g)!.id).toBe('tier-refining');
-    expect(g.contract).toMatchObject({ goal: 'tier-refining', need: { shard: 400, ink: 250, spark: 150 } });
+    expect(g.contract).toMatchObject({ goal: 'tier-refining', need: GOALS[indexOf('tier-refining')].contract });
     expect(activeGoal(g)!.tools!.length).toBeGreaterThanOrEqual(6);
-    Object.assign(g.contract!.got, { shard: 400, ink: 250, spark: 150 });
+    Object.assign(g.contract!.got, g.contract!.need);
     run(g, 0.05);
     expect(claimGoal(g)).toBe(true);
-    expect(g.opened).toContain('P4');
-    expect(activeGoal(g)!.id).toBe('make-glyph');
+    // Tier 2: Assembly and Quartz Deposits are handed over, with the routing modes, the Silo and Upgrade all.
+    for (const id of ['P4', 'P5', 'L4', 'L6', 'L5', 'S1']) expect(has(g, id), id).toBe(true);
+    expect(activeGoal(g)!.id).toBe('tier-parts');
+    expect(g.contract).toMatchObject({ goal: 'tier-parts', need: GOALS[indexOf('tier-parts')].contract, got: {} });
+    expect(activeGoal(g)!.tools!.length).toBeGreaterThanOrEqual(6);
+    Object.assign(g.contract!.got, g.contract!.need);
+    run(g, 0.05);
+    expect(claimGoal(g)).toBe(true);
+    expect(g.opened).toContain('P7');
+    expect(activeGoal(g)!.id).toBe('build-fabricator');
     expect(g.contract).toBeNull();
   });
 
-  it('demand and land are the tiers\' own: demand four times over, each plot half as dear again as the one before', () => {
+  it('demand, land and Assemblers are the tiers\' own: demand four times over, each plot and Assembler dearer by less', () => {
     const g = tiersAt('tier-refining');
+    g.nodes.push({ ...g.nodes[0], id: 9001, type: 'assembler' }, { ...g.nodes[0], id: 9002, type: 'assembler' });
+    expect(nodeCost(g, 'assembler')).toBe(Math.round(1200 * RULES.tiers.assemblerGrowth ** 2));
+    g.nodes = g.nodes.filter((n) => n.type !== 'assembler');
     expect(demandRate(g, 'shard')).toBe(1.5 * RULES.tiers.demandMult);
     g.board.expansions = 2;
     expect(expansionCost(g)).toBe(Math.round(360 * 1.5 * 1.5));
@@ -134,21 +145,29 @@ describe('the tiers: the Dock and its contract', () => {
     const loaded = deserialize(JSON.stringify({ ...old, chain: 2, goal: { i: 16, ready: false } }))!;
     run(loaded, 0.05);
     expect(activeGoal(loaded)!.id).toBe('make-glyph');
+    // Chain 3 had no Tier 2: its goal 25 was "Build a Fabricator" (a game of tiers stands there as well).
+    const tiersOld = JSON.parse(serialize(newGame({ tiers: true })));
+    const loaded3 = deserialize(JSON.stringify({ ...tiersOld, chain: 3, goal: { i: 25, ready: false } }))!;
+    run(loaded3, 0.05);
+    expect(activeGoal(loaded3)!.id).toBe('build-fabricator');
   });
 });
 
 describe('the tiers: scripted players (tools/tiers.ts)', () => {
-  it('every player fills Tier 1\'s contract; one who builds more fills it sooner, and the one who builds least within twice the time', () => {
-    const runs = PLAYERS.map((p) => playTiers(p, 0));
-    const t = Object.fromEntries(runs.map((r) => [r.player, r.seconds]));
-    for (const r of runs) expect(r.seconds, r.player).not.toBeNull();
-    expect(t.wide!).toBeLessThan(t.minimal!);
-    expect(t.mixed!).toBeLessThan(t.minimal!);
-    expect(t.tuner!).toBeLessThan(t.minimal!);
-    const fastest = Math.min(...runs.map((r) => r.seconds!));
-    expect(t.minimal!).toBeLessThanOrEqual(2 * fastest);
-    // A builder's Tier 1 is six to eight minutes (docs/TIERS.md §7).
-    expect(t.mixed!).toBeGreaterThan(5 * 60);
-    expect(t.wide!).toBeLessThan(8 * 60);
-  }, 60_000);
+  // Seed 0, every player through both tiers (docs/TIERS.md §13, "Measured").
+  const runs = PLAYERS.map((p) => playTiers(p, 0));
+  for (const tier of ['t1', 't2'] as const) {
+    it(`${tier === 't1' ? 'Tier 1' : 'Tier 2'}: every player fills the contract; one who builds more fills it sooner, and the one who builds least within twice the time`, () => {
+      const t = Object.fromEntries(runs.map((r) => [r.player, r[tier].seconds]));
+      for (const r of runs) expect(r[tier].seconds, r.player).not.toBeNull();
+      expect(t.mixed!).toBeLessThan(t.minimal!);
+      expect(t.tuner!).toBeLessThan(t.minimal!);
+      expect(t.wide!).toBeLessThan(t.minimal!);
+      const fastest = Math.min(...runs.map((r) => r[tier].seconds!));
+      expect(t.minimal!).toBeLessThanOrEqual(2 * fastest);
+      // A builder's tier is six to eight minutes (docs/TIERS.md §7).
+      expect(t.mixed!).toBeGreaterThan(5 * 60);
+      expect(t.mixed!).toBeLessThan(8 * 60);
+    });
+  }
 });

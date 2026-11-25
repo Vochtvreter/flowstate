@@ -1083,10 +1083,11 @@ export const GOALS: Goal[] = [
         how: hint('An order shows beside the contract. The ring round your credits is your Flow.'),
       },
     ],
-    reward: { credits: 300, a: 400, opens: ['P4'] },
+    reward: { credits: 1500, techs: ['P4', 'P5', 'L4', 'L6', 'L5', 'S1'] },
     big: true,
   },
   {
+    mode: 'chain',
     id: 'make-glyph', title: 'Make your first Circuit',
     why: `A Circuit is Plastic and Copper put together, and sells for ${MATERIALS.glyph.value}¢. That takes an Assembler: a machine with two inputs.`,
     recipe: 'glyph',
@@ -1101,6 +1102,7 @@ export const GOALS: Goal[] = [
     big: true,
   },
   {
+    mode: 'chain',
     id: 'study-glyph', title: 'Study Circuits for β',
     why: 'Better things teach more. An assembled part gives β Data, a new kind, and the next technology costs some.',
     hint: hint(
@@ -1115,6 +1117,7 @@ export const GOALS: Goal[] = [
     // The one growth goal with two ways that cost about the same: a second Assembler on the second Plastic line (it
     // is what the two lines of Plastic and of Copper were widened for), or four levels of Speed on the first.
     // The claim opens Quartz Deposits.
+    mode: 'chain',
     id: 'grow-glyph', title: 'Make 0.6 Circuits a second',
     why: 'A Phone will take two Circuits. A second Assembler doubles what you make; Speed on the one you have gets there too.',
     hint: hint(
@@ -1125,6 +1128,7 @@ export const GOALS: Goal[] = [
     big: true,
   },
   {
+    mode: 'chain',
     id: 'make-mist', title: 'Make and sell Silicon',
     why: 'Silicon is refined from Quartz, the last deposit to open. Silicon and Glass together make a Screen.',
     recipe: 'mist',
@@ -1135,6 +1139,7 @@ export const GOALS: Goal[] = [
     reward: { a: 50 },
   },
   {
+    mode: 'chain',
     id: 'make-prism', title: 'Make your first Screen',
     why: `A Screen is two Glass and one Silicon, and sells for ${MATERIALS.prism.value}¢: another Assembler, fed by two of your lines.`,
     recipe: 'prism',
@@ -1153,6 +1158,7 @@ export const GOALS: Goal[] = [
     // (This used to be "Fill three orders", which the orders filled on the way had always met by the time it came
     // up: it showed Claim and nothing else.) One press, on a board of a dozen Drills, and the lesson of the tool
     // that saves a phone player a hundred presses from here on.
+    mode: 'chain',
     id: 'bulk-upgrade', title: 'Speed up every Drill at once',
     why: 'A long line needs more raw material at its start. Upgrade all raises every machine of one kind at once.',
     hint: hint(
@@ -1167,6 +1173,7 @@ export const GOALS: Goal[] = [
     // The last growth goal, and the Screen line's: a second Screen Assembler, which the Glass has been there for
     // since "Make 1.2 Glass a second" and the Silicon since the press of Upgrade all (a Quartz Drill is as slow as
     // an Ore Drill, and the card before has just put that right). The claim opens Fabrication.
+    mode: 'chain',
     id: 'grow-prism', title: 'Make 0.5 Screens a second',
     why: 'One Assembler makes a Screen every four seconds, and your Glass and Silicon would do for two. A Phone will take a Screen.',
     hint: hint(
@@ -1174,6 +1181,54 @@ export const GOALS: Goal[] = [
     ),
     ...growth('grow-prism', 'prism', 0.5, 'More Assemblers or faster ones, and the Glass and Silicon to feed them: any way counts.'),
     reward: { a: 400, opens: ['P7'] },
+    big: true,
+  },
+  {
+    mode: 'tiers',
+    id: 'tier-parts', title: 'Fill the Parts contract',
+    why: 'A phone maker wants Circuits and Screens. Your Plastic, Copper and Glass are parts now: an Assembler puts two together.',
+    hint: hint('Build Assemblers from your Refiners\' ports and wire what they make into the Dock. Each wants its two inputs in its own ratio.'),
+    contract: { glyph: 200, prism: 100 },
+    done: (g) => contractDone(g),
+    progress: (g) => contractProgress(g),
+    tools: [
+      {
+        name: 'Circuits',
+        why: 'An Assembler puts two things together. A Circuit is one Plastic and one Copper, every three seconds.',
+        how: hint('Build an Assembler from a Plastic Refiner\'s port, then wire a Copper Refiner into it.', 'Build an Assembler from a Plastic Refiner\'s port, then wire a Copper Refiner into it.'),
+      },
+      {
+        name: 'Quartz and Screens',
+        why: 'Two Quartz make a Silicon. A Screen is two Glass and one Silicon, every four seconds: twice as much Glass.',
+        how: hint('Place a Drill on the Quartz deposit, build a Refiner from it, then an Assembler from that Refiner\'s port, and wire Glass in.', 'Tap the Quartz deposit twice for a Drill, build a Refiner from it, then an Assembler from its port, and wire Glass in.'),
+      },
+      {
+        name: 'Trunks',
+        why: 'Gather every line of one material into a Merger: each Assembler wired from it takes what it needs, and the rest goes on.',
+        how: hint('Wire your Glass Refiners into a Merger, then the Merger to each Screen Assembler and to a Market.'),
+      },
+      {
+        name: 'Priority and Filter',
+        why: 'A Router can fill one wire before the next, or send each material its own way down a mixed stream.',
+        how: hint('Select a Router and pick Priority or Filter in its inspector.', 'Tap a Router and pick Priority or Filter in its sheet.'),
+      },
+      {
+        name: 'Silo',
+        why: 'A big store between two machines: it keeps an Assembler fed while its supply comes and goes.',
+        how: hint('Place a Silo on a wire, or build one from a port.'),
+      },
+      {
+        name: 'Upgrade all',
+        why: 'Raises every machine of one kind by a level of Speed at once.',
+        how: hint('Select a machine and press Upgrade all beside Speed.', 'Tap a machine and tap Upgrade all beside Speed.'),
+      },
+      {
+        name: 'Wires',
+        why: 'A wire carries 4 a second. A trunk of many lines, or a fast pair, fills it: research Pipes for wires that carry more.',
+        how: hint('Research Pipes Mk II in the Tech tree, then select a full wire and upgrade it.', 'Research Pipes Mk II in the Tech tree, then tap a full wire and upgrade it.'),
+      },
+    ],
+    reward: { credits: 500, a: 400, b: 100, opens: ['P7'] },
     big: true,
   },
   {
@@ -1617,7 +1672,16 @@ function applyUnlocks(g: Game, r: GoalReward) {
  * the way to the Phone; this one has growth goals between its chapters, and three cards fewer: upgrades are met in
  * "Make 1.2 Glass a second", land in "Make 1 Plastic a second", and the Router is a research and no card.
  */
-export const CHAIN = 3;
+export const CHAIN = 4;
+/**
+ * The goals of chain 3, in order: chain 4 adds Tier 2's contract (`tier-parts`) before "Build a Fabricator". A save of
+ * chain 3 is moved to the same goal by its id.
+ */
+const CHAIN_3 = [
+  'wire-market', 'second-well', 'wire-all-wells', 'build-refiner', 'sell-shard', 'grow-shard', 'tune-shard', 'dock-glass', 'feed-lab', 'research-murk',
+  'make-ink', 'silt-exit', 'first-order', 'grow-ink', 'make-spark', 'hold-flow', 'grow-spark', 'tier-refining', 'make-glyph', 'study-glyph', 'grow-glyph',
+  'make-mist', 'make-prism', 'bulk-upgrade', 'grow-prism', 'build-fabricator', 'make-lens', 'make-clay', 'make-coil', 'make-dynamo', 'make-paradox',
+];
 /**
  * The goals of chain 2, in order: chain 3 is the same with the tiers' two contracts set among them (`mode`), which
  * a game of the chain passes over. A save of chain 2 is moved to the same goal by its id.
@@ -1653,8 +1717,8 @@ export function migrateChain(g: Game) {
     // A card that was ready stays ready only where it is the same card.
     g.goal = { i: at < 0 ? GOALS.length : at, ready: g.goal.ready && at >= 0 && id === old };
     g.goalAt = { i: g.goal.i, t };
-  } else if (g.chain === 2) {
-    const id = CHAIN_2[g.goal.i];
+  } else if (g.chain === 2 || g.chain === 3) {
+    const id = (g.chain === 2 ? CHAIN_2 : CHAIN_3)[g.goal.i];
     const at = id == null ? GOALS.length : GOALS.findIndex((x) => x.id === id);
     const t = g.goalAt && g.goalAt.i === g.goal.i ? g.goalAt.t : g.time;
     g.goal = { i: at < 0 ? GOALS.length : at, ready: g.goal.ready && at >= 0 };

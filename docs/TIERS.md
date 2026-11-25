@@ -1,6 +1,6 @@
 # Tiers: a proposal
 
-Status: **the first step is built** (§13): the Dock, the guided start's first contract and Tier 1, played with `?tiers` in the address, beside the goal chain, which is unchanged. Tiers 2 and 3 are not built: after Tier 1 a game of tiers goes on with the chain from "Make your first Circuit". The rest of this document is the proposal as it was written, with the decisions of §11 taken as recommended. The build as it stands is in [DESIGN.md](./DESIGN.md) and [CONTENT.md](./CONTENT.md); the numbers quoted from it here were measured with the pacing tool on order seeds 0–7 or 0–14, by scripted players, not people.
+Status: **Tiers 1 and 2 are built** (§13, §14): the Dock, the guided start's first contract, Tier 1 and Tier 2, played with `?tiers` in the address, beside the goal chain, which is unchanged. Tier 3 is not built: after Tier 2 a game of tiers goes on with the chain's last two goals, "Build a Fabricator" and "Make your first Phone". The rest of this document is the proposal as it was written, with the decisions of §11 taken as recommended.
 
 ---
 
@@ -245,3 +245,55 @@ How the numbers were found: with the first draft (300 Glass, 200 Plastic, 200 Co
 **Seen in a browser.** In headless Chromium at 1440×900 and 390×844, from saves made by the mixed player: the first contract's card, the build menu offering the Dock first and building it with Enter, Tier 1's card with its lines and a tool opened, the Dock's inspector, Flows. No page error. Nobody has played it by hand from a new game, and no person has played it at all.
 
 **Not built.** Tiers 2 and 3, and the rebuild levers of §5. Per-recipe Assembler prices. The tools are introduced on the card, not on the board (no Show me). After Tier 1 a Dock takes nothing more, and the chain's cards, prices and pacing after "Make your first Circuit" are the chain's: they were not tuned for a game of tiers, whose demand is four times higher and whose land is cheaper. The tiers' scripted players claim at once and read every card; the pacing tool's targets do not judge them.
+
+---
+
+## 14. Built: Tier 2
+
+**What a game of tiers is now.**
+
+| | Goal | Contract | Reward |
+|---|---|---|---|
+| 1–7 | the chain's first seven goals | | |
+| 8 | Fill your first contract | 30 Glass | Tier 1's tools, 800¢ |
+| 9 | Fill the Refining contract (Tier 1) | 400 Glass, 250 Plastic, 150 Copper | Assembly, Quartz Deposits, Priority Routing, Filter Routing, Silo, Bulk Upgrade (Upgrade all), 1,500¢ |
+| 10 | Fill the Parts contract (Tier 2) | 200 Circuits, 100 Screens | opens Fabrication, 500¢, 400α, 100β |
+| 11–12 | the chain's "Build a Fabricator" and "Make your first Phone" | | |
+
+Tier 2 stands where the chain's goals from "Make your first Circuit" to "Make 0.5 Screens a second" stand, and a game of tiers passes those over (`mode: 'chain'`). A save of chain 3 (the build of §13) is moved to the same goal by its id.
+
+**New in Tier 2, on the card**: Circuits, Quartz and Screens, Trunks (a Merger that gathers every line of one material and feeds the Assemblers wired from it, the rest going on to sell), Priority and Filter, Silo, Upgrade all, Wires (Pipes, as research).
+
+**Assemblers go up by 1.15 in the tiers** (`RULES.tiers.assemblerGrowth`; 1.5 in the chain): 1,200, 1,380, 1,587, 1,825¢. A Screen Assembler is not dearer for the Circuit Assemblers before it by more than a Refiner would be. With 1.5 a player who built a third and fourth Circuit Assembler paid 6,075¢ for the first Screen Assembler.
+
+### Measured
+
+`tools/tiers.ts` now plays through both tiers, with a sixth player:
+
+- **rebuilder**: mixed, but when Tier 2 opens it first rebuilds Tier 1's lines into trunks: a Merger for each of Glass, Plastic and Copper, every Refiner of it wired into the Merger, and the Merger wired to a Market and to every Assembler built after (a port feeds machines first, so the Assemblers take what they need and the rest is sold). New lines go into the trunk.
+
+In Tier 2 the players differ in what they add: minimal builds one Assembler of each part and waits; wide adds Assemblers of whichever part is furthest from done, and a line for an input an Assembler waits for; tuner buys Speed on the slowest part's Assemblers, or on what starves them, before adding; mixed adds and buys Speed when it cannot add. Seeds 0–7, one action every 4 seconds:
+
+| Player | Tier 1 | Tier 2 | Idle in Tier 2 |
+|---|---|---|---|
+| minimal | 11:19 | 10:12–10:16 | 82% |
+| wide | 6:40–6:43 | 8:21–9:02 | 58% |
+| tuner | 7:39–7:44 | 6:48–7:10 | 44% |
+| sellfirst | 8:03–8:07 | 7:40–8:29 | 51% |
+| mixed | 5:51–5:58 | 6:28–6:40 | 40% |
+| rebuilder | 5:51–5:58 (as mixed) | 7:56–8:11 | 28% |
+
+Against §9:
+
+- **Every way works**: all six fill both contracts on every seed. The minimal player takes 1.6 times as long as the quickest in Tier 2 (1.9 in Tier 1).
+- **More building is faster**: every player who builds beyond the minimal one is quicker. In Tier 2 Speed is worth more than width: the tuner, with three Assemblers and about thirty levels of Speed, beats the wide player, with eight Assemblers and none, by more than a minute. Assemblers that are added without the lines to feed them wait.
+- **No single best way**: mixed is quickest in both tiers, as it does what the others do. Wide is second in Tier 1 and fifth in Tier 2; tuner the other way round.
+- **Rebuilding is not worth it, yet.** The rebuilder is the slowest of the builders in Tier 2, 1½ minutes behind mixed, though it fills its Screens a minute sooner (5:29 against 6:35 on seed 0: a trunk gives a Screen Assembler its two Glass from every line at once). The rebuild costs about a dozen actions before the first Assembler, and pays back little: a port already feeds machines before Markets, so two or three Refiners wired straight into an Assembler pool their output as well as a trunk does, and no wire comes near its 4 a second (the busiest carries 2.3). Ratios (lever B) bite only where a recipe asks for two of one thing, and full wires (lever C) do not bite at all. What would make a rebuild pay is in §5: something that makes Tier 1's layout a worse way of doing Tier 2's work. That is the decision to take before Tier 3.
+
+How the numbers were found: with the first guess, 150 Circuits and 80 Screens, everyone took 5:37–7:46 and the minimal player was only 1.4 times the quickest; 250 and 130 put the builders at 7:47–10:27, longer than a tier is meant to be (§7). 200 and 100 put them at 6:28–9:02. The 1,500¢ at Tier 2's start pays for the first Assembler at once. (The rebuilder at first also cut each Refiner's old wires to the Dock and the Market; that was twice the actions and changed nothing, as the Merger is fed first.)
+
+`tests/tiers.test.ts` pins Tier 2's rules (the toolbox, the contract, the way on to the Fabricator, the Assembler's price, the move of a chain-3 save) and, on seed 0, for both tiers: every player fills the contract, mixed, tuner and wide beat minimal, minimal is within twice the quickest, and mixed takes five to eight minutes.
+
+**Seen in a browser.** In headless Chromium at 1440×900 and 390×844, from a save the mixed player made in Tier 2: the card with its two lines and the Trunks note opened, and the phone's card opened. No page error. Nobody has played Tier 2 by hand.
+
+**Not built.** Tier 3. A lever that makes rebuilding pay. The chain's "Build a Fabricator" asks for research the Tier 2 reward has opened; its card and its tune-up line were written for the chain's board, not for a game of tiers.

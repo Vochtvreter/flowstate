@@ -17,19 +17,26 @@ export function nodeCount(g: Game, type: NodeType) {
 }
 
 /** Price of a node of this type when `owned` of them are already on the board. */
-export function nodeCostAt(type: NodeType, owned: number): number {
+export function nodeCostAt(type: NodeType, owned: number, growth = NODE_DEFS[type].growth): number {
   const def = NODE_DEFS[type];
   if (def.firstFree) {
     if (owned <= 0) return 0;
     owned -= 1;
   }
-  return Math.round(def.base * Math.pow(def.growth, Math.max(0, owned)));
+  return Math.round(def.base * Math.pow(growth, Math.max(0, owned)));
 }
 
-export const nodeCost = (g: Game, type: NodeType): number => nodeCostAt(type, nodeCount(g, type));
+/**
+ * How much dearer each node of a kind is than the one before. In the tiers an Assembler goes up as a Refiner does
+ * (RULES.tiers.assemblerGrowth): Tier 2 is about building several of them, Circuit and Screen alike, and at 1.5 the
+ * Circuit Assemblers a player built made the Screen Assemblers dear (docs/TIERS.md §2).
+ */
+const growthOf = (g: Game, type: NodeType) => (g.tiers && type === 'assembler' ? RULES.tiers.assemblerGrowth : NODE_DEFS[type].growth);
+
+export const nodeCost = (g: Game, type: NodeType): number => nodeCostAt(type, nodeCount(g, type), growthOf(g, type));
 
 /** What it would cost to buy one node of this type back after deleting it: the refund for the node itself. */
-export const buyBackPrice = (g: Game, type: NodeType): number => nodeCostAt(type, nodeCount(g, type) - 1);
+export const buyBackPrice = (g: Game, type: NodeType): number => nodeCostAt(type, nodeCount(g, type) - 1, growthOf(g, type));
 
 export function trackAvailable(g: Game, n: GNode, track: Track): boolean {
   if (!NODE_DEFS[n.type].tracks.includes(track)) return false;

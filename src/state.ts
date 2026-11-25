@@ -433,7 +433,7 @@ export function newGame(opts: { tiers?: boolean } = {}): Game {
     board: { w: 1240, h: 760, expansions: 0 },
     credits: 0, lifetime: 0,
     data: { a: 0, b: 0, g: 0 },
-    techs: [], queue: [], opened: [], chain: 3,
+    techs: [], queue: [], opened: [], chain: 4,
     // The starting Drill is already extracting Sand, so it is not announced as a new material.
     made: { glint: true }, sold: {}, soldRate: {},
     paused: false, time: 0, savedAt: Date.now(),

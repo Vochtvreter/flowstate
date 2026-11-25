@@ -56,17 +56,20 @@ describe('goal chain: the table (2.4)', () => {
     const tiers = goalsOf('tiers');
     expect(tiers.filter((x) => !x.free).map((x) => x.id)).toEqual([
       'wire-market', 'second-well', 'wire-all-wells', 'build-refiner', 'sell-shard', 'grow-shard', 'tune-shard',
-      'dock-glass', 'tier-refining',
-      'make-glyph', 'study-glyph', 'grow-glyph', 'make-mist', 'make-prism', 'bulk-upgrade', 'grow-prism', 'build-fabricator', 'make-lens',
+      'dock-glass', 'tier-refining', 'tier-parts',
+      'build-fabricator', 'make-lens',
     ]);
     const g = fresh();
     g.tiers = true;
-    expect(mainCount(g)).toBe(18);
-    // The first contract hands over Tier 1's tools; Tier 1's contract opens Assembly, as "Make 1 Copper a second" does.
+    expect(mainCount(g)).toBe(12);
+    // The first contract hands over Tier 1's tools, Tier 1's hands over Tier 2's, and Tier 2's opens Fabrication, as
+    // "Make 0.5 Screens a second" does, for the chain's last two goals.
     expect(goalById('dock-glass')!.reward).toMatchObject({ techs: ['P2', 'P3', 'L1', 'L2'], unlocks: ['orders', 'flow'] });
     expect(goalById('dock-glass')!.contract).toEqual({ shard: 30 });
-    expect(goalById('tier-refining')!.reward.opens).toEqual(['P4']);
+    expect(goalById('tier-refining')!.reward.techs).toEqual(['P4', 'P5', 'L4', 'L6', 'L5', 'S1']);
     expect(Object.keys(goalById('tier-refining')!.contract!)).toEqual(['shard', 'ink', 'spark']);
+    expect(goalById('tier-parts')!.reward.opens).toEqual(['P7']);
+    expect(Object.keys(goalById('tier-parts')!.contract!)).toEqual(['glyph', 'prism']);
   });
 
   it('new things come one chapter at a time: each step of the spine is locked until the growth goal before it is claimed', () => {
@@ -311,7 +314,8 @@ describe('goal chain: ready, claim, skip ahead', () => {
     expect(indexOf('make-prism')).toBe(indexOf('bulk-upgrade') - 1);
     // (Then the Screen line is widened, "Make 0.5 Screens a second", and its claim opens Fabrication.)
     expect(indexOf('bulk-upgrade')).toBe(indexOf('grow-prism') - 1);
-    expect(indexOf('grow-prism')).toBe(indexOf('build-fabricator') - 1);
+    // (Tier 2's contract stands between these two in the list; a game of the chain passes it over.)
+    expect(CHAIN_GOALS[CHAIN_GOALS.indexOf(goalById('grow-prism')!) + 1].id).toBe('build-fabricator');
     const g = rich();
     g.techs = ['P1', 'R1', 'L1', 'C1', 'P4', 'P5'];
     g.credits = 1000;

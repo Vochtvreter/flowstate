@@ -101,9 +101,9 @@ describe('"while you wait": the lines', () => {
         expect(goalView(g)!.progress).toEqual([0, grow.rate, expect.stringMatching(/^[A-Z][a-z]+ a second$/)]);
       }
     }
-    // (The chain's 25 and four of free play; the tiers' two contracts stand among them, and carry no lines.)
-    expect(MAIN_GOALS).toBe(27);
-    expect(GOALS.length).toBe(31);
+    // (The chain's 25 and four of free play; the tiers' three contracts stand among them, and carry no lines.)
+    expect(MAIN_GOALS).toBe(28);
+    expect(GOALS.length).toBe(32);
   });
 
   it('each is one sentence of at most 90 characters; touch wording names no click, drag, hover or key, mouse wording no tap', () => {
@@ -384,9 +384,11 @@ describe('"while you wait": worth it to the pacing tool\'s card-only player', ()
   /** Seconds a run spent on the goals a line stands on: from the claim before each to its own. */
   const spent = (bot: Bot, line: string) => {
     let s = 0;
-    GOALS.forEach((goal, i) => {
+    // (Along the chain's goals: the tiers' contracts stand among them, and this player passes them over.)
+    const chain = GOALS.filter((x) => x.mode !== 'tiers');
+    chain.forEach((goal, i) => {
       if (!goal.meanwhile?.some((l) => l.id === line)) return;
-      s += bot.goalClaimedAt[goal.id] - bot.goalClaimedAt[GOALS[i - 1].id];
+      s += bot.goalClaimedAt[goal.id] - bot.goalClaimedAt[chain[i - 1].id];
     });
     return s;
   };

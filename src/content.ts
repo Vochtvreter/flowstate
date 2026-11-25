@@ -383,6 +383,8 @@ export const RULES = {
      * over (docs/TIERS.md, "Measured").
      */
     expansionGrowth: 1.5,
+    /** Each Assembler costs this many times the one before in the tiers (1.5 in the chain). */
+    assemblerGrowth: 1.15,
   },
 
   /** 2.3 Flow. */
