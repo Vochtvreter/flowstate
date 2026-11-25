@@ -28,7 +28,7 @@ export function graph(g: Game): Graph {
   return c;
 }
 
-export const isMachine = (n: GNode) => n.type === 'refiner' || n.type === 'assembler' || n.type === 'fabricator';
+export const isMachine = (n: GNode) => n.type === 'refiner' || n.type === 'assembler' || n.type === 'fabricator' || n.type === 'foundry';
 export const isPass = (n: GNode) => n.type === 'router' || n.type === 'merger' || n.type === 'silo';
 export const isSink = (n: GNode) => n.type === 'market' || n.type === 'lab' || n.type === 'void' || n.type === 'dock';
 

@@ -1,6 +1,6 @@
 # Tiers: a proposal
 
-Status: **Tiers 1 and 2 are built** (§13, §14): the Dock, the guided start's first contract, Tier 1 and Tier 2, played with `?tiers` in the address, beside the goal chain, which is unchanged. Tier 3 is not built: after Tier 2 a game of tiers goes on with the chain's last two goals, "Build a Fabricator" and "Make your first Phone". The rest of this document is the proposal as it was written, with the decisions of §11 taken as recommended.
+Status: **all three tiers are built** (§13–§16): the Dock, the guided start's first contract, Tiers 1, 2 and 3, and the Foundry, played with `?tiers` in the address, beside the goal chain, which is unchanged. In a game of tiers the demo ends with Tier 3's contract. The rest of this document is the proposal as it was written, with the decisions of §11 taken as recommended, and lever E of §5 (one better machine) taken after Tier 2.
 
 ---
 
@@ -297,3 +297,75 @@ How the numbers were found: with the first guess, 150 Circuits and 80 Screens, e
 **Seen in a browser.** In headless Chromium at 1440×900 and 390×844, from a save the mixed player made in Tier 2: the card with its two lines and the Trunks note opened, and the phone's card opened. No page error. Nobody has played Tier 2 by hand.
 
 **Not built.** Tier 3. A lever that makes rebuilding pay. The chain's "Build a Fabricator" asks for research the Tier 2 reward has opened; its card and its tune-up line were written for the chain's board, not for a game of tiers.
+
+---
+
+## 15. Built: the Foundry (lever E)
+
+§14 found that nothing in Tier 2 made Tier 1's layout a worse one: a player who rebuilt was slower than one who only added on. The decision taken was lever E of §5, one better machine.
+
+**The Foundry** (`foundry`, no tech: `Game.foundryOn`, handed over with Tier 2's tools, unlocked by Tier 1's claim). A big Refiner: **three** of a raw material make **two** (a Refiner's two make one), six of it a second at its first level, which is three or four Drills with some Speed. 300¢, each one 1.2 times the one before; Speed and Buffer upgrades. Recipes `f-shard`, `f-ink`, `f-spark`, `f-mist` (Glass, Plastic, Copper, Silicon). A Plastic Foundry leaves one Tar for every two Plastic, where a Refiner leaves one for every one.
+
+Why this machine: deposits are the scarce thing (land is the only way to more of them), so a machine that gets a third more out of each Drill makes every row of Drill–Refiner pairs a worse way to use the same deposits, and nothing in Tier 1 (Speed included) does what it does. To use it, a player wires their Drills into it and deletes the Refiners they fed, for a full refund, with their upgrades: a rebuild.
+
+It is on the card as Tier 2's first tool ("Foundry: ...wire up to four Drills of one material into it, and delete the Refiners they fed: Delete refunds them in full").
+
+**Measured.** The rebuilder now rebuilds around Foundries when Tier 2 opens (each of Sand, Oil and Ore: a Foundry, its Drills into it, the old Refiners deleted), where in §14 it built Merger trunks. Seeds 0–7:
+
+| Tier 2 | median | range | idle |
+|---|---|---|---|
+| mixed (adds on) | 6:39 | 6:34–6:52 | 40% |
+| rebuilder, Merger trunks (§14) | 8:05 | 7:56–8:11 | 28% |
+| rebuilder, Foundries | **6:31** | 6:23–6:42 | 4% |
+
+The rebuild now pays, if only just: the rebuilder is the quickest player of Tier 2, and is almost never without something to do. Most of what it gains is not the third more Glass: Tier 2 is held back by Assemblers and the credits for them (every Assembler on the rebuilder's board runs flat out, and its Foundries sell their spare Glass and Plastic). It is the refund of the old Refiners and their Speed, and what the extra refined goods sell for, spent on Assemblers.
+
+How the Foundry's numbers were found: at 500¢ (×1.3) and four Sand a second, five of them cost the rebuilder about 5,900¢ before its first Assembler, and it was 17 s to 77 s slower than mixed. At 300¢ (×1.2) and six a second, one or two of each do the work.
+
+## 16. Built: Tier 3
+
+| | Goal | Contract | Reward |
+|---|---|---|---|
+| 10 | Fill the Parts contract (Tier 2) | 200 Circuits, 100 Screens | Fabrication, Reclamation, Auto-balance, Overclock, 6,000¢ |
+| 11 | Fill the Devices contract (Tier 3) | 60 Phones, 25 Cable | the end of the demo |
+| free play | Build your first Laptop · Build your first Robot | | |
+
+Tier 3 stands where the chain's "Build a Fabricator" and "Make your first Phone" stand, and a game of tiers passes those over, and the chain's free-play goals for Rubber and Cable (a game of tiers has made both by then). A save of chain 4 is moved to the same goal by its id.
+
+**The demo ends with Tier 3's claim**, not with the first Phone (`markMade` in `src/sim.ts` ends it only in the chain): the celebration says "Devices delivered", then the summary, then free play.
+
+**New in Tier 3, on the card**: Phones (the Fabricator: a Screen and two Circuits), Rubber (three Tar make one: a Refiner on a Plastic line's Tar port, in place of its Dump), Cable (one Copper and two Rubber), Auto-balance, Overclock.
+
+**Lever D bites.** Tar was waste; now each Cable takes six of it, and the Plastic lines' Tar ports have to be rebuilt from Dumps to Rubber Refiners, while Copper is shared between Circuits and Cable. A player who rebuilt their Plastic around a Foundry in Tier 2 has half the Tar per Oil: the rebuilder fills its Cable later than mixed does (3:53 against 3:09 on seed 0), though its Phones sooner. What was the better layout in Tier 2 is a worse one for Tier 3, which is the loop §1 asks for; the scripted rebuilder does not rebuild a second time.
+
+**A Fabricator is 4,000¢ in the tiers** (`RULES.tiers.fabricatorBase`; 8,500¢ in the chain, where one is built). At 8,500¢ the wide player, who only adds machines and sells half of what they make, was slower than the minimal one by more than a minute and a half.
+
+**A line the Dock is done with backs up.** Once the 60 Phones are delivered the Dock takes no more, and a Fabricator wired to nothing else stops; behind it the Circuit Assembler stops, behind that the Plastic Refiner, and with it the Tar the Cable needs. The minimal player, whose lines go to the Dock alone, never filled its Cable that way. Now every scripted player wires a backed-up maker to a Market, as a person would at "Backed up", and the contract's line says so: "Delivered. Its makers are backed up: wire them to a Market".
+
+### Measured
+
+Seeds 0–7, one action every 4 seconds, medians (ranges in `tools/tiers.ts`' table):
+
+| Player | Tier 1 | Tier 2 | Tier 3 | Idle in Tier 3 |
+|---|---|---|---|---|
+| rebuilder | 5:56 | 6:31 | **5:22** (4:10–5:35) | 25% |
+| mixed | 5:56 | 6:39 | 5:30 (5:18–5:59) | 24% |
+| tuner | 7:40 | 7:06 | 5:24 | 21% |
+| sellfirst | 8:04 | 7:49 | 7:50 | 50% |
+| wide | 6:41 | 8:26 | 8:00 (7:25–8:11) | 55% |
+| minimal | 11:19 | 10:28 | 7:56 | 79% |
+
+All six fill all three contracts on every seed. The minimal player takes 1.5 to 1.9 times as long as the quickest. A game of tiers for the mixed player: the guided start 2:26, then about 6, 6½ and 5½ minutes, so the demo ends at about 21 minutes (the card player of the chain makes the first Phone at 18:21, and that is unchanged).
+
+Against §9:
+
+- **Every way works**, in every tier.
+- **More building is faster**, with one exception: in Tier 3 the wide player is no quicker than the minimal one. It sells half of every Phone while it saves for the next Fabricator, and a Phone sold is a Phone the contract waits for. Its fix is a tool Tier 2 hands over: a Router in Priority mode, the Dock first.
+- **No single best way**: the rebuilder is quickest in Tiers 2 and 3, mixed in Tier 1; tuner is third in all three, and beats mixed on some seeds of Tier 3.
+- **Rebuilding is worth it** from Tier 2 on, by a few seconds to a minute (§15), and what the Tier 2 rebuild did to the Tar makes Tier 3 ask for another.
+
+`tests/tiers.test.ts` pins the Foundry (three for two, its rate), Tier 3's rules (the toolbox, the contract, that a Phone does not end the demo and the claim does, free play after) and, on seed 0 for all three tiers: every player fills the contract, mixed, tuner and rebuilder beat minimal (wide too, in Tiers 1 and 2), minimal is within twice the quickest, mixed takes five to eight minutes, and from Tier 2 on the rebuilder beats mixed.
+
+**Seen in a browser.** In headless Chromium at 1440×900 and 390×844, from saves the scripted players made: Tier 2 with a board of Foundries and the Foundry note open, a Foundry's inspector (5.86 Sand in, 3.89 Glass out), Tier 3's card at both sizes, and the end: Claim on Tier 3, "Devices delivered", the summary, Keep playing, free play's "Build your first Laptop". No page error. Nobody has played any of it by hand.
+
+**Not built.** The rebuilder that rebuilds a second time. Tiers beyond 3, and contracts that repeat. Box-select and copy and paste, which a rebuild by hand will want. Free play in the tiers is the chain's Laptop and Robot, with the chain's numbers.

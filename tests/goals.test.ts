@@ -56,20 +56,21 @@ describe('goal chain: the table (2.4)', () => {
     const tiers = goalsOf('tiers');
     expect(tiers.filter((x) => !x.free).map((x) => x.id)).toEqual([
       'wire-market', 'second-well', 'wire-all-wells', 'build-refiner', 'sell-shard', 'grow-shard', 'tune-shard',
-      'dock-glass', 'tier-refining', 'tier-parts',
-      'build-fabricator', 'make-lens',
+      'dock-glass', 'tier-refining', 'tier-parts', 'tier-devices',
     ]);
+    expect(tiers.filter((x) => x.free).map((x) => x.id)).toEqual(['make-dynamo', 'make-paradox']);
     const g = fresh();
     g.tiers = true;
-    expect(mainCount(g)).toBe(12);
-    // The first contract hands over Tier 1's tools, Tier 1's hands over Tier 2's, and Tier 2's opens Fabrication, as
-    // "Make 0.5 Screens a second" does, for the chain's last two goals.
+    expect(mainCount(g)).toBe(11);
+    // Each contract hands over the next tier's tools (Tier 1's the Foundry with them), and Tier 3's ends the demo.
     expect(goalById('dock-glass')!.reward).toMatchObject({ techs: ['P2', 'P3', 'L1', 'L2'], unlocks: ['orders', 'flow'] });
     expect(goalById('dock-glass')!.contract).toEqual({ shard: 30 });
-    expect(goalById('tier-refining')!.reward.techs).toEqual(['P4', 'P5', 'L4', 'L6', 'L5', 'S1']);
+    expect(goalById('tier-refining')!.reward).toMatchObject({ techs: ['P4', 'P5', 'L4', 'L6', 'L5', 'S1'], unlocks: ['foundry'] });
     expect(Object.keys(goalById('tier-refining')!.contract!)).toEqual(['shard', 'ink', 'spark']);
-    expect(goalById('tier-parts')!.reward.opens).toEqual(['P7']);
+    expect(goalById('tier-parts')!.reward.techs).toEqual(['P7', 'P6', 'S3', 'U2']);
     expect(Object.keys(goalById('tier-parts')!.contract!)).toEqual(['glyph', 'prism']);
+    expect(goalById('tier-devices')!.reward).toEqual({ unlock: 'end' });
+    expect(Object.keys(goalById('tier-devices')!.contract!)).toEqual(['lens', 'coil']);
   });
 
   it('new things come one chapter at a time: each step of the spine is locked until the growth goal before it is claimed', () => {

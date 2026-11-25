@@ -1083,7 +1083,7 @@ export const GOALS: Goal[] = [
         how: hint('An order shows beside the contract. The ring round your credits is your Flow.'),
       },
     ],
-    reward: { credits: 1500, techs: ['P4', 'P5', 'L4', 'L6', 'L5', 'S1'] },
+    reward: { credits: 1500, techs: ['P4', 'P5', 'L4', 'L6', 'L5', 'S1'], unlocks: ['foundry'] },
     big: true,
   },
   {
@@ -1193,6 +1193,11 @@ export const GOALS: Goal[] = [
     progress: (g) => contractProgress(g),
     tools: [
       {
+        name: 'Foundry',
+        why: 'A big Refiner: three of a raw material make two, where a Refiner\'s two make one. The same Drills give a third more.',
+        how: hint('Build a Foundry, wire up to four Drills of one material into it, and delete the Refiners they fed: Delete refunds them in full.', 'Build a Foundry, wire up to four Drills of one material into it, and delete the Refiners they fed: Delete refunds them in full.'),
+      },
+      {
         name: 'Circuits',
         why: 'An Assembler puts two things together. A Circuit is one Plastic and one Copper, every three seconds.',
         how: hint('Build an Assembler from a Plastic Refiner\'s port, then wire a Copper Refiner into it.', 'Build an Assembler from a Plastic Refiner\'s port, then wire a Copper Refiner into it.'),
@@ -1228,10 +1233,11 @@ export const GOALS: Goal[] = [
         how: hint('Research Pipes Mk II in the Tech tree, then select a full wire and upgrade it.', 'Research Pipes Mk II in the Tech tree, then tap a full wire and upgrade it.'),
       },
     ],
-    reward: { credits: 500, a: 400, b: 100, opens: ['P7'] },
+    reward: { credits: 6000, techs: ['P7', 'P6', 'S3', 'U2'] },
     big: true,
   },
   {
+    mode: 'chain',
     id: 'build-fabricator', title: 'Build a Fabricator',
     why: 'A Phone is a Screen and two Circuits. Only a Fabricator puts three things together, and it is the dearest machine yet.',
     hint: hint('Research Fabrication, then save up and build a Fabricator from the Screen Assembler\'s port: orders and a high Flow get you there faster.'),
@@ -1252,6 +1258,7 @@ export const GOALS: Goal[] = [
     reward: { b: 40 },
   },
   {
+    mode: 'chain',
     id: 'make-lens', title: 'Make your first Phone',
     why: 'Sand, Oil, Ore and Quartz, all in one thing. The Fabricator needs one Screen and two Circuits for every Phone.',
     recipe: 'lens',
@@ -1288,6 +1295,45 @@ export const GOALS: Goal[] = [
   },
   // ---------- free play ----------
   {
+    mode: 'tiers',
+    id: 'tier-devices', title: 'Fill the Devices contract',
+    why: 'A shop wants Phones, and Cable to sell with them. Cable is Copper wrapped in Rubber, and Rubber is made of your Tar.',
+    hint: hint('Build a Fabricator from a Screen Assembler\'s port and wire Circuits into it. For Cable, build a Refiner from a Tar port, then an Assembler from it.'),
+    contract: { lens: 60, coil: 25 },
+    done: (g) => contractDone(g),
+    progress: (g) => contractProgress(g),
+    tools: [
+      {
+        name: 'Phones',
+        why: 'A Fabricator puts three things together: a Phone is a Screen and two Circuits, every six seconds.',
+        how: hint('Build a Fabricator from a Screen Assembler\'s port, then wire two Circuit Assemblers into it.'),
+      },
+      {
+        name: 'Rubber',
+        why: 'Three Tar make a Rubber. The Tar your Plastic lines throw away is worth something now.',
+        how: hint('Build a Refiner from a Plastic Refiner\'s Tar port, in place of its Dump.'),
+      },
+      {
+        name: 'Cable',
+        why: 'A Cable is one Copper and two Rubber, every four seconds. Your Circuits want that Copper too.',
+        how: hint('Build an Assembler from a Rubber Refiner\'s port, then wire Copper into it.'),
+      },
+      {
+        name: 'Auto-balance',
+        why: 'One press sets a Router\'s split to what each of its wires can use: no more guessing the ratio.',
+        how: hint('Select a Router and press Auto-balance in its inspector.', 'Tap a Router and tap Auto-balance in its sheet.'),
+      },
+      {
+        name: 'Overclock',
+        why: 'Speed goes to level 25 now, where it stopped at 10. A fast pair fills a wire: Pipes carry more.',
+        how: hint('Select a machine and buy Speed past level 10.', 'Tap a machine and buy Speed past level 10.'),
+      },
+    ],
+    reward: { unlock: 'end' },
+    big: true,
+  },
+  {
+    mode: 'chain',
     id: 'make-clay', title: 'Reclaim Tar into Rubber', free: true,
     why: 'Tar need not be waste: three Tar make one Rubber.',
     recipe: 'clay',
@@ -1297,6 +1343,7 @@ export const GOALS: Goal[] = [
     reward: { credits: 200 },
   },
   {
+    mode: 'chain',
     id: 'make-coil', title: 'Make your first Cable', free: true,
     why: 'A Cable is Copper wrapped in Rubber: one Copper and two Rubber.',
     recipe: 'coil',
@@ -1342,6 +1389,8 @@ function nextInMode(g: Game, i: number): number {
   while (i < GOALS.length && !inMode(g, GOALS[i])) i++;
   return i;
 }
+/** The demo's last goal for this game: "Make your first Phone", or Tier 3's contract in a game of tiers. */
+export const lastMainGoal = (g: Game): Goal => goalsOf(goalMode(g)).filter((x) => !x.free).at(-1)!;
 /** How many goals of the demo this game plays ("Goal 4 / 25"). */
 export const mainCount = (g: Game) => goalsOf(goalMode(g)).filter((x) => !x.free).length;
 /** The place of the goal at index i among the goals this game plays, counting from 1. */
@@ -1432,8 +1481,8 @@ export function goalView(g: Game, touch = false): GoalView | null {
     ...(at ? { meanwhile: lineView(g, at, touch) } : {}),
     ...(inputs ? { inputs } : {}),
     goal,
-    number: free ? g.goal.i - MAIN_GOALS + 1 : goalNumber(g, g.goal.i),
-    total: free ? GOALS.length - MAIN_GOALS : mainCount(g),
+    number: free ? goalNumber(g, g.goal.i) - mainCount(g) : goalNumber(g, g.goal.i),
+    total: free ? goalsOf(goalMode(g)).length - mainCount(g) : mainCount(g),
     free,
     ready: g.goal.ready,
     why: goal.why,
@@ -1637,6 +1686,7 @@ export function rewardText(r: GoalReward): string {
   const unlocks = [...(r.unlock ? [r.unlock] : []), ...(r.unlocks ?? [])];
   if (unlocks.includes('orders')) parts.push('Orders');
   if (unlocks.includes('flow')) parts.push('Flow meter');
+  if (unlocks.includes('foundry')) parts.push('Foundry');
   if (r.unlock === 'end') parts.push('Demo complete');
   for (const id of r.opens ?? []) parts.push(`opens ${TECHS[id]?.name ?? id}`);
   if (r.credits) parts.push(`${r.credits}¢`);
@@ -1664,6 +1714,10 @@ function applyUnlocks(g: Game, r: GoalReward) {
   } else if (r.unlock === 'flow' && !g.flowOn) {
     g.flowOn = true;
     g.events.push({ kind: 'unlock', what: 'flow', text: 'Flow meter unlocked: the more of your line runs flat out, the better your prices.' });
+  } else if (r.unlock === 'foundry' && !g.foundryOn) {
+    g.foundryOn = true;
+    g.rev++;
+    g.events.push({ kind: 'unlock', what: 'foundry', text: 'The Foundry: three of a raw material make two.' });
   } else if (r.unlock === 'end') endDemo(g);
 }
 
@@ -1672,7 +1726,17 @@ function applyUnlocks(g: Game, r: GoalReward) {
  * the way to the Phone; this one has growth goals between its chapters, and three cards fewer: upgrades are met in
  * "Make 1.2 Glass a second", land in "Make 1 Plastic a second", and the Router is a research and no card.
  */
-export const CHAIN = 4;
+export const CHAIN = 5;
+/**
+ * The goals of chain 4, in order: chain 5 adds Tier 3's contract (`tier-devices`) before the free-play goals. A save
+ * of chain 4 is moved to the same goal by its id.
+ */
+const CHAIN_4 = [
+  'wire-market', 'second-well', 'wire-all-wells', 'build-refiner', 'sell-shard', 'grow-shard', 'tune-shard', 'dock-glass', 'feed-lab', 'research-murk',
+  'make-ink', 'silt-exit', 'first-order', 'grow-ink', 'make-spark', 'hold-flow', 'grow-spark', 'tier-refining', 'make-glyph', 'study-glyph', 'grow-glyph',
+  'make-mist', 'make-prism', 'bulk-upgrade', 'grow-prism', 'tier-parts', 'build-fabricator', 'make-lens', 'make-clay', 'make-coil', 'make-dynamo',
+  'make-paradox',
+];
 /**
  * The goals of chain 3, in order: chain 4 adds Tier 2's contract (`tier-parts`) before "Build a Fabricator". A save of
  * chain 3 is moved to the same goal by its id.
@@ -1717,8 +1781,8 @@ export function migrateChain(g: Game) {
     // A card that was ready stays ready only where it is the same card.
     g.goal = { i: at < 0 ? GOALS.length : at, ready: g.goal.ready && at >= 0 && id === old };
     g.goalAt = { i: g.goal.i, t };
-  } else if (g.chain === 2 || g.chain === 3) {
-    const id = (g.chain === 2 ? CHAIN_2 : CHAIN_3)[g.goal.i];
+  } else if (g.chain === 2 || g.chain === 3 || g.chain === 4) {
+    const id = (g.chain === 2 ? CHAIN_2 : g.chain === 3 ? CHAIN_3 : CHAIN_4)[g.goal.i];
     const at = id == null ? GOALS.length : GOALS.findIndex((x) => x.id === id);
     const t = g.goalAt && g.goalAt.i === g.goal.i ? g.goalAt.t : g.time;
     g.goal = { i: at < 0 ? GOALS.length : at, ready: g.goal.ready && at >= 0 };

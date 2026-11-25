@@ -34,7 +34,7 @@ import { materialsAt, nodeById } from '../actions';
 import type { Advice } from '../advice';
 import { DATA_COLORS, DATA_NAMES, DataTier, MATERIALS, MatId, NODE_DEFS, RECIPES, Recipe, TECHS } from '../content';
 import { fmt } from '../economy';
-import { FlowGoalView, GOALS, GoalProgress, GoalView, MAIN_GOALS, ToolNote, claimGoal, goalFocus, goalView, inMode, mainCount } from '../goals';
+import { FlowGoalView, GOALS, GoalProgress, GoalView, MAIN_GOALS, ToolNote, claimGoal, goalFocus, goalView, inMode, lastMainGoal, mainCount } from '../goals';
 import { claimOrder, orderView } from '../orders';
 import { graph } from '../sim';
 import { Game, GNode, GoalReward, Reward, nodeNoun } from '../state';
@@ -260,6 +260,7 @@ function rewardChips(r: GoalReward | Reward): string {
   const unlocks = [...(gr.unlock ? [gr.unlock] : []), ...(gr.unlocks ?? [])];
   if (unlocks.includes('orders')) out.push(`<span class="rw new">Orders</span>`);
   if (unlocks.includes('flow')) out.push(`<span class="rw new">Flow meter</span>`);
+  if (unlocks.includes('foundry')) out.push(`<span class="rw new">Foundry</span>`);
   if (gr.unlock === 'end') out.push(`<span class="rw new">Demo complete</span>`);
   // A tech the claim opens for research (not granted: it is bought with Data, and the claim pays most of it).
   for (const id of gr.opens ?? []) out.push(`<span class="rw new" data-testid="reward-opens">${icon('tree', 11)}Opens ${esc(TECHS[id]?.name ?? id)}</span>`);
@@ -331,11 +332,15 @@ function contractHtml(g: Game): string {
     const rate = k.rate[m] ?? 0;
     const done = got + 1e-6 >= need;
     const color = MATERIALS[m].color;
-    const say = done ? `${icon('check', 11)}Delivered`
+    // Delivered, the Dock takes no more of it: a maker wired to nothing else backs up, and can stop the line behind it
+    // (Phones done, the Fabricator stops, then the Circuits, then the Plastic and its Tar).
+    const jammed = done && g.nodes.some((n) => n.status === 'blocked' && !!n.recipe && RECIPES[n.recipe].outputs[0][0] === m);
+    const say = jammed ? `${icon('check', 11)}Delivered. Its makers are backed up: wire them to a Market`
+      : done ? `${icon('check', 11)}Delivered`
       : !hasDock ? 'No Dock yet'
       : rate < 0.02 ? `No ${esc(MATERIALS[m].name)} reaches the Dock`
       : `<b class="mono">${rateText(rate)}</b>/s · <b class="mono">${minSec((need - got) / rate)}</b> left`;
-    return `<div class="kc-row${done ? ' done' : ''}${!done && hasDock && rate < 0.02 ? ' none' : ''}" data-mat="${m}" data-testid="contract-${m}">
+    return `<div class="kc-row${done ? ' done' : ''}${jammed || (!done && hasDock && rate < 0.02) ? ' none' : ''}" data-mat="${m}" data-testid="contract-${m}">
       <span class="kc-mat">${matGlyph(m, 14)}<span>${esc(MATERIALS[m].name)}</span></span>
       <span class="kc-count mono">${fmt(Math.floor(got))} / ${fmt(need)}</span>
       ${bar(need > 0 ? got / need : 1, color)}
@@ -568,7 +573,7 @@ function goalHtml(g: Game, v: GoalView, rows: string, prog: string): string {
  * (Keep playing). Free play does not start behind the summary.
  */
 function endedHtml(g: Game): string {
-  const goal = GOALS[MAIN_GOALS - 1];
+  const goal = lastMainGoal(g);
   const gh = ghostsHtml(performance.now());
   return `<div class="gc-main">${pipsHtml(g, true)}<div class="gc-body${rises ? ` rise${rises % 2}` : ''}" data-key="body"><div class="gc-head"><span class="gc-step"><span class="gc-w">Goal </span>${mainCount(g)} / ${mainCount(g)}</span><span class="gc-done">${icon('check', 12)}Done</span></div>
       <h3 class="gc-title">${esc(goal.title)}</h3>
@@ -605,7 +610,7 @@ function renderGoal(g: Game, force: boolean) {
   const seen = held ? null : goalView(g, isTouch());
   const v = seen?.meanwhile && lineFields ? { ...seen, meanwhile: { ...seen.meanwhile, ...lineFields } } : seen;
   const narrow = isNarrow();
-  setAttr(goalEl, 'data-goal', held ? GOALS[MAIN_GOALS - 1].id : v ? v.goal.id : 'none');
+  setAttr(goalEl, 'data-goal', held ? lastMainGoal(g).id : v ? v.goal.id : 'none');
   setAttr(goalEl, 'data-ready', v?.ready ? '1' : '0');
   setAttr(goalEl, 'data-ending', held ? '1' : null);
   setClass(goalEl, 'done', !v && !held);

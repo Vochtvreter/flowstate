@@ -32,7 +32,8 @@ export function room(g: Game, n: GNode, m: MatId): number {
       return 0;
     case 'refiner':
     case 'assembler':
-    case 'fabricator': {
+    case 'fabricator':
+    case 'foundry': {
       const r = recipeOf(n);
       if (!r) return 0;
       const need = r.inputs.find((i) => i[0] === m)?.[1] ?? 0;
@@ -84,7 +85,8 @@ function markMade(g: Game, m: MatId) {
   g.madeAt[m] = g.time;
   // Goals pay for firsts now; this only lets the UI announce a new material.
   g.events.push({ kind: 'milestone', mat: m, reward: 0 });
-  if (m === RULES.capstone) endDemo(g);
+  // (In the tiers the demo ends with Tier 3's contract, which asks for Phones: docs/TIERS.md §16.)
+  if (m === RULES.capstone && !g.tiers) endDemo(g);
 }
 
 function setStatus(n: GNode, worked: number, inst: Status, dt: number) {

@@ -570,7 +570,8 @@ const untilSummary = () => Math.max(900, endAt + SUMMARY_DELAY * 1000 + SUMMARY_
 
 function lensCard(life: number, holds = true) {
   start({
-    kind: 'lens', title: 'First Phone', line: 'Demo complete · free play is open', glyph: matGlyph('lens', 80), color: MATERIALS.lens.color,
+    // (In the tiers the demo ends with Tier 3's contract, sixty Phones on: docs/TIERS.md §16.)
+    kind: 'lens', title: ui.g.tiers ? 'Devices delivered' : 'First Phone', line: 'Demo complete · free play is open', glyph: matGlyph('lens', 80), color: MATERIALS.lens.color,
     life, holds,
     show: (at) => {
       // Three waves, each in the colours of what the factory makes on the way to a Phone.

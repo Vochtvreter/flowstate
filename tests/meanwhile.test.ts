@@ -101,9 +101,9 @@ describe('"while you wait": the lines', () => {
         expect(goalView(g)!.progress).toEqual([0, grow.rate, expect.stringMatching(/^[A-Z][a-z]+ a second$/)]);
       }
     }
-    // (The chain's 25 and four of free play; the tiers' three contracts stand among them, and carry no lines.)
-    expect(MAIN_GOALS).toBe(28);
-    expect(GOALS.length).toBe(32);
+    // (The chain's 25 and four of free play; the tiers' four contracts stand among them, and carry no lines.)
+    expect(MAIN_GOALS).toBe(29);
+    expect(GOALS.length).toBe(33);
   });
 
   it('each is one sentence of at most 90 characters; touch wording names no click, drag, hover or key, mouse wording no tap', () => {

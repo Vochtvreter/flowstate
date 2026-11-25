@@ -58,7 +58,7 @@ export const MATERIALS: Record<MatId, Material> = {
 
 export const MAT_IDS = Object.keys(MATERIALS) as MatId[];
 
-export type MachineType = 'refiner' | 'assembler' | 'fabricator';
+export type MachineType = 'refiner' | 'assembler' | 'fabricator' | 'foundry';
 
 export interface Recipe {
   id: string;
@@ -81,6 +81,12 @@ export const RECIPES: Record<string, Recipe> = {
   coil: { id: 'coil', name: 'Cable', machine: 'assembler', inputs: [['spark', 1], ['clay', 2]], outputs: [['coil', 1]], time: 4, tech: 'P6' },
   lens: { id: 'lens', name: 'Phone', machine: 'fabricator', inputs: [['prism', 1], ['glyph', 2]], outputs: [['lens', 1]], time: 6, tech: 'P7' },
   dynamo: { id: 'dynamo', name: 'Laptop', machine: 'fabricator', inputs: [['coil', 2], ['glyph', 1], ['prism', 1]], outputs: [['dynamo', 1]], time: 8, tech: 'P8' },
+  // The Foundry's (docs/TIERS.md §15): three of a raw material make two, where a Refiner's two make one, six of it a
+  // second (four Drills at a few levels of Speed). Listed after the Refiner's, so that a recipe looked for by what it makes is the Refiner's.
+  'f-shard': { id: 'f-shard', name: 'Glass', machine: 'foundry', inputs: [['glint', 3]], outputs: [['shard', 2]], time: 0.5, tech: 'P1' },
+  'f-ink': { id: 'f-ink', name: 'Plastic', machine: 'foundry', inputs: [['murk', 3]], outputs: [['ink', 2], ['silt', 1]], time: 0.5, tech: 'P2' },
+  'f-spark': { id: 'f-spark', name: 'Copper', machine: 'foundry', inputs: [['ember', 3]], outputs: [['spark', 2]], time: 0.5, tech: 'P3' },
+  'f-mist': { id: 'f-mist', name: 'Silicon', machine: 'foundry', inputs: [['breeze', 3]], outputs: [['mist', 2]], time: 0.5, tech: 'P5' },
   paradox: { id: 'paradox', name: 'Robot', machine: 'fabricator', inputs: [['lens', 1], ['dynamo', 1], ['breeze', 4]], outputs: [['paradox', 1]], time: 12, tech: 'P9' },
 };
 
@@ -88,7 +94,7 @@ export const RECIPE_IDS = Object.keys(RECIPES);
 
 export type NodeType =
   | 'well' | 'refiner' | 'assembler' | 'fabricator'
-  | 'router' | 'merger' | 'silo' | 'market' | 'lab' | 'void' | 'dock';
+  | 'router' | 'merger' | 'silo' | 'market' | 'lab' | 'void' | 'dock' | 'foundry';
 
 export type Track = 'speed' | 'eff' | 'buffer';
 
@@ -125,9 +131,11 @@ export const NODE_DEFS: Record<NodeType, NodeDef> = {
   // The tiers' contracts are delivered here (docs/TIERS.md). It has no tech: it is there in the tiers alone, from the
   // first contract on (Game.dockOn, nodeUnlocked in src/economy.ts).
   dock: { type: 'dock', name: 'Dock', base: 0, growth: 1, tracks: [], verb: 'deliver', blurb: 'Takes what the contract asks for, and nothing else. Free.' },
+  // The tiers' better machine (docs/TIERS.md §15): there from Tier 2 on (Game.foundryOn), no tech.
+  foundry: { type: 'foundry', name: 'Foundry', base: 300, growth: 1.2, tracks: ['speed', 'buffer'], verb: 'refine', blurb: 'A big Refiner: three of a raw material make two, six of it a second.' },
 };
 
-export const HOTBAR: NodeType[] = ['well', 'refiner', 'assembler', 'fabricator', 'router', 'merger', 'silo', 'market', 'lab', 'void', 'dock'];
+export const HOTBAR: NodeType[] = ['well', 'refiner', 'foundry', 'assembler', 'fabricator', 'router', 'merger', 'silo', 'market', 'lab', 'void', 'dock'];
 
 /** Wire capacity (items/s) and upgrade price per tier. */
 export const PIPES = [
@@ -385,6 +393,8 @@ export const RULES = {
     expansionGrowth: 1.5,
     /** Each Assembler costs this many times the one before in the tiers (1.5 in the chain). */
     assemblerGrowth: 1.15,
+    /** The first Fabricator's price in the tiers (8,500¢ in the chain, where one is built; Tier 3 wants several). */
+    fabricatorBase: 4000,
   },
 
   /** 2.3 Flow. */
@@ -551,9 +561,9 @@ export const RULES = {
    */
   upgrade: {
     growth: 1.6,
-    speed: { well: 50, refiner: 32, assembler: 100, fabricator: 400, lab: 50 } as Partial<Record<NodeType, number>>,
+    speed: { well: 50, refiner: 32, assembler: 100, fabricator: 400, lab: 50, foundry: 150 } as Partial<Record<NodeType, number>>,
     eff: { refiner: 75, assembler: 300, fabricator: 1200 } as Partial<Record<NodeType, number>>,
-    buffer: { refiner: 20, assembler: 80, fabricator: 320, silo: 80 } as Partial<Record<NodeType, number>>,
+    buffer: { refiner: 20, assembler: 80, fabricator: 320, silo: 80, foundry: 60 } as Partial<Record<NodeType, number>>,
     fallback: 0.5,
   },
 };

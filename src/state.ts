@@ -116,7 +116,7 @@ export interface Edit { at: number; what: string }
 /** Credits and Data paid out by a goal or an order. */
 export interface Reward { credits?: number; a?: number; b?: number; g?: number }
 
-export type Unlock = 'orders' | 'flow' | 'end';
+export type Unlock = 'orders' | 'flow' | 'end' | 'foundry';
 
 /** What a goal pays when claimed (see src/goals.ts). */
 export interface GoalReward extends Reward {
@@ -195,7 +195,7 @@ export type GameEvent =
   /** A goal was claimed and paid. `big` marks one of the big celebrations. */
   | { kind: 'goal-claimed'; text: string; goal: string; index: number; reward: GoalReward; big: boolean }
   /** A feature was switched on by a goal. */
-  | { kind: 'unlock'; text: string; what: 'orders' | 'flow' | 'dock' }
+  | { kind: 'unlock'; text: string; what: 'orders' | 'flow' | 'dock' | 'foundry' }
   /** A new order appeared. `quiet` = it silently replaced a stale one. */
   | { kind: 'order-new'; text: string; order: Order; quiet: boolean }
   | { kind: 'order-ready'; text: string; order: Order }
@@ -279,6 +279,8 @@ export interface Game {
   tiers?: boolean;
   /** The Dock can be built: a game of tiers that has reached its first contract. */
   dockOn?: boolean;
+  /** The Foundry can be built: a game of tiers that has reached Tier 2 (docs/TIERS.md §15). */
+  foundryOn?: boolean;
   /** The contract of the active goal, while it has one (Goal.contract): what it asks for, and what the Dock has taken. */
   contract?: Contract | null;
   /** Active goal: index into GOALS (GOALS.length when all are claimed) and whether it is waiting for claimGoal(). */
@@ -433,7 +435,7 @@ export function newGame(opts: { tiers?: boolean } = {}): Game {
     board: { w: 1240, h: 760, expansions: 0 },
     credits: 0, lifetime: 0,
     data: { a: 0, b: 0, g: 0 },
-    techs: [], queue: [], opened: [], chain: 4,
+    techs: [], queue: [], opened: [], chain: 5,
     // The starting Drill is already extracting Sand, so it is not announced as a new material.
     made: { glint: true }, sold: {}, soldRate: {},
     paused: false, time: 0, savedAt: Date.now(),
@@ -733,6 +735,8 @@ function revive(raw: any): Game | null {
     else delete g.tiers;
     if (g.tiers && raw.dockOn === true) g.dockOn = true;
     else delete g.dockOn;
+    if (g.tiers && raw.foundryOn === true) g.foundryOn = true;
+    else delete g.foundryOn;
     const k = raw.contract;
     if (g.tiers && k && typeof k === 'object' && typeof k.goal === 'string') g.contract = { goal: k.goal, need: loadBag(k.need), got: loadBag(k.got), rate: loadBag(k.rate) };
     else delete g.contract;

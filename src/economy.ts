@@ -6,7 +6,7 @@ import { Game, GNode, noteEdit } from './state';
 
 export const has = (g: Game, tech: string | undefined) => !tech || g.techs.includes(tech);
 
-export const nodeUnlocked = (g: Game, type: NodeType) => (type === 'dock' ? !!g.dockOn : has(g, NODE_DEFS[type].tech));
+export const nodeUnlocked = (g: Game, type: NodeType) => (type === 'dock' ? !!g.dockOn : type === 'foundry' ? !!g.foundryOn : has(g, NODE_DEFS[type].tech));
 export const recipeUnlocked = (g: Game, r: Recipe) => has(g, r.tech) && nodeUnlocked(g, r.machine);
 export const matUnlocked = (g: Game, m: MatId) => has(g, MATERIALS[m].tech);
 
@@ -17,13 +17,13 @@ export function nodeCount(g: Game, type: NodeType) {
 }
 
 /** Price of a node of this type when `owned` of them are already on the board. */
-export function nodeCostAt(type: NodeType, owned: number, growth = NODE_DEFS[type].growth): number {
+export function nodeCostAt(type: NodeType, owned: number, growth = NODE_DEFS[type].growth, base = NODE_DEFS[type].base): number {
   const def = NODE_DEFS[type];
   if (def.firstFree) {
     if (owned <= 0) return 0;
     owned -= 1;
   }
-  return Math.round(def.base * Math.pow(growth, Math.max(0, owned)));
+  return Math.round(base * Math.pow(growth, Math.max(0, owned)));
 }
 
 /**
@@ -33,10 +33,13 @@ export function nodeCostAt(type: NodeType, owned: number, growth = NODE_DEFS[typ
  */
 const growthOf = (g: Game, type: NodeType) => (g.tiers && type === 'assembler' ? RULES.tiers.assemblerGrowth : NODE_DEFS[type].growth);
 
-export const nodeCost = (g: Game, type: NodeType): number => nodeCostAt(type, nodeCount(g, type), growthOf(g, type));
+/** The first node's price: a Fabricator is cheaper in the tiers (RULES.tiers.fabricatorBase), where Tier 3 has several. */
+const baseOf = (g: Game, type: NodeType) => (g.tiers && type === 'fabricator' ? RULES.tiers.fabricatorBase : NODE_DEFS[type].base);
+
+export const nodeCost = (g: Game, type: NodeType): number => nodeCostAt(type, nodeCount(g, type), growthOf(g, type), baseOf(g, type));
 
 /** What it would cost to buy one node of this type back after deleting it: the refund for the node itself. */
-export const buyBackPrice = (g: Game, type: NodeType): number => nodeCostAt(type, nodeCount(g, type) - 1, growthOf(g, type));
+export const buyBackPrice = (g: Game, type: NodeType): number => nodeCostAt(type, nodeCount(g, type) - 1, growthOf(g, type), baseOf(g, type));
 
 export function trackAvailable(g: Game, n: GNode, track: Track): boolean {
   if (!NODE_DEFS[n.type].tracks.includes(track)) return false;

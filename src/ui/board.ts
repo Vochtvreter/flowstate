@@ -2439,7 +2439,7 @@ const SUB_CHARS = 19;
 function nodeSub(n: GNode): string {
   switch (n.type) {
     case 'well': return `Lv ${n.lv.speed} · deposit`;
-    case 'refiner': case 'assembler': case 'fabricator': {
+    case 'refiner': case 'assembler': case 'fabricator': case 'foundry': {
       const r = recipeOf(n);
       // In the larger type this line has less room, so there it only says what comes out. So does a recipe too long
       // for the line: cut short it lost its last word, which is the one that matters ("Plastic + Copper →…").
@@ -3127,7 +3127,7 @@ function syncUi() {
 function rateLine(g: Game, n: GNode, rate: number): string {
   switch (n.type) {
     case 'well': return `${fmtRate(rate)}/s`;
-    case 'refiner': case 'assembler': case 'fabricator':
+    case 'refiner': case 'assembler': case 'fabricator': case 'foundry':
       // (How hard it is working is the ring round its picture, and a number in its inspector: not said twice.)
       return n.recipe ? `${fmtRate(rate)}/s` : 'wire something in';
     case 'silo': return `${Math.round(bagTotal(n.inb))} stored`;

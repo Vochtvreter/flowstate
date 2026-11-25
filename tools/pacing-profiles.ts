@@ -13,7 +13,7 @@
  * Mutate fields in place (RULES.orders.minSeconds = 30), never replace a whole object
  * (RULES.orders = {...}): modules in src/ keep references to the originals.
  */
-import { DataTier, MATERIALS, MatId, NODE_DEFS, NodeType, RULES, TECHS } from '../src/content';
+import { DataTier, MATERIALS, MatId, NODE_DEFS, NodeType, RECIPES, RULES, TECHS } from '../src/content';
 import { GOALS, goalById } from '../src/goals';
 import { GoalReward } from '../src/state';
 
@@ -68,6 +68,7 @@ export function applyOverrides(spec: string) {
     if (kind === 'node') target = NODE_DEFS[id as NodeType] as unknown as Record<string, unknown>;
     else if (kind === 'mat') target = MATERIALS[id as MatId] as unknown as Record<string, unknown>;
     else if (kind === 'goal') target = goalById(id)?.reward as unknown as Record<string, unknown> | undefined;
+    else if (kind === 'recipe') target = RECIPES[id] as unknown as Record<string, unknown> | undefined;
     else if (kind === 'rules') {
       target = RULES as unknown as Record<string, unknown>;
       keys = [id, ...rest];

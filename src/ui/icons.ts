@@ -56,6 +56,7 @@ const NODE_PATHS: Record<NodeType, string> = {
   lab: `<path d="M9 3h6M10 3v6l-5 9a2 2 0 0 0 2 3h10a2 2 0 0 0 2-3l-5-9V3M7.5 15h9" class="ic"/>`,
   void: `<path d="M4 7.5h16l-2 12.5H6zM9.5 11v5.5M14.5 11v5.5M8 7.5l1.5-3.5h5l1.5 3.5" class="ic"/>`,
   dock: `<path d="M3 9l9-5 9 5v11H3zM7 20v-7h10v7M7 16.5h10" class="ic"/>`,
+  foundry: `<path d="M3 20V10l5 3V10l5 3V6h4v4h4v10zM7 17h2M12 17h2M17 17h2" class="ic"/>`,
 };
 
 export const nodeIcon = (t: NodeType, size = 22) => svg(size, 24, NODE_PATHS[t]);
