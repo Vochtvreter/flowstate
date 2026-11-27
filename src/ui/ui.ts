@@ -185,20 +185,30 @@ export function toast(html: string, kind: 'info' | 'good' | 'bad' = 'info', ms =
  * A mouse acts on pointerdown, so nothing that happens between press and release can swallow it.
  * Touch and pen act on click, so a finger that lands on a button while scrolling does not fire it.
  * Keyboard activation (and script-made clicks) arrive as a click with detail 0.
+ * So `fn` gets a click with detail above 0 only from a finger or a pen (see `byFinger`).
+ *
+ * What kind of pointer made a click is taken from the pointerdown that began it, not from the click: Safari on
+ * iOS (18.2 on, WebKit bug 282988) reports a finger's click as pointerType 'mouse', and every button here
+ * would then ignore a tap.
  */
 export function onPress(root: HTMLElement, fn: (ev: Event) => void) {
   let lastType = '';
+  // (Recorded on the way down, so that nothing inside that stops the pointerdown can hide it.)
+  root.addEventListener('pointerdown', (ev) => void (lastType = ev.pointerType), true);
   root.addEventListener('pointerdown', (ev) => {
-    lastType = ev.pointerType;
     if (ev.pointerType === 'touch' || ev.pointerType === 'pen') return;
     if (ev.button === 0) fn(ev);
   });
   root.addEventListener('click', (ev) => {
     const pe = ev as PointerEvent;
-    const type = pe.pointerType || (pe.detail === 0 ? '' : lastType);
-    if (pe.detail === 0 || type === 'touch' || type === 'pen') fn(ev);
+    if (pe.detail === 0) return fn(ev);
+    const type = lastType || pe.pointerType;
+    if (type === 'touch' || type === 'pen') fn(ev);
   });
 }
+
+/** The press `onPress` handed over was made by a finger or a pen (it acts on their click; a mouse acts on its pointerdown). */
+export const byFinger = (ev: Event | undefined): boolean => ev?.type === 'click' && (ev as MouseEvent).detail > 0;
 
 /** One delegated handler per container: data-act="name:arg1:arg2" on any element. */
 export function delegate(root: HTMLElement, handler: (act: string, args: string[], el: HTMLElement, ev: Event) => void) {

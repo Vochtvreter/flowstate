@@ -47,7 +47,7 @@ import { diagnose, pillFor, victoryQuiet } from './status';
 import { buzz } from './audio';
 import { WIRES_CARDS, revealOf, slotShown } from './reveal';
 import { traceOf } from '../flows';
-import { delegate, onGame, onPress, onSignal, select, setWireStyle, signal, toast, touch, ui } from './ui';
+import { byFinger, delegate, onGame, onPress, onSignal, select, setWireStyle, signal, toast, touch, ui } from './ui';
 
 let boardEl: HTMLElement;
 let worldEl: HTMLElement;
@@ -2014,7 +2014,7 @@ function expand(ev?: Event) {
   if (performance.now() < ex.restUntil || !ex.shown || expandQuiet()) return;
   // (A finger cannot see where the button is going: a tap on it while it slides is a tap meant for the board,
   // unless the finger came down where the button had already been standing: then it was aimed at it.)
-  const finger = (ev as PointerEvent | undefined)?.pointerType === 'touch' || (ev as PointerEvent | undefined)?.pointerType === 'pen';
+  const finger = byFinger(ev);
   if (finger && (ex.quietAtDown || (performance.now() - ex.movedAt < MOVE_REST && !ex.aimedAtDown))) return;
   const had = new Set(g.deposits.map((d) => d.id));
   const old = { w: g.board.w, h: g.board.h };
